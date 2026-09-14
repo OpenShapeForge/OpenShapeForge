@@ -45,10 +45,8 @@ import {
 import { readSecrets } from "../../connectors/store.js";
 import type { ConnectorContract } from "../../connectors/catalog.js";
 import type { FetchLike } from "../../connectors/executor.js";
-import {
-  refreshConnectionRowLocked,
-  selectOAuthConnectionRow,
-} from "../../mcp/generated-mcp-server.js";
+import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
+import { selectOAuthConnectionRow } from "../../mcp/generated-mcp-server.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -149,7 +147,7 @@ async function seedInstallation(
         (id, tenant_id, connector_slug, instance_key, config, enabled,
          contract_version, contract_checksum)
       values (${installationId}::uuid, ${tenantId}::uuid, ${CONTRACT.slug}, 'default',
-              ${JSON.stringify({ clientId: "client-abc" })}::jsonb, true, 1, 'checksum')
+              ${JSON.stringify({ clientId: "client-abc" })}::text::jsonb, true, 1, 'checksum')
     `.execute(conn);
   });
   return installationId;
@@ -916,11 +914,26 @@ describe("authored connection token lifecycle", () => {
           await admin.connection().execute(async (conn) => {
             await sql`
               insert into public.oauth_authored_connection_test (id, tenant_id, owner_user_id, provider_id, values)
-              values (${actorRowId}::uuid, ${tenantId}::uuid, ${session.userId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb),
-                     (${foreignId}::uuid, ${tenantId}::uuid, ${foreignUserId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb),
-                     (${tenantRowId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb)
+              values (${actorRowId}::uuid, ${tenantId}::uuid, ${session.userId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::text::jsonb),
+                     (${foreignId}::uuid, ${tenantId}::uuid, ${foreignUserId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::text::jsonb),
+                     (${tenantRowId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, ${JSON.stringify(initial)}::text::jsonb)
             `.execute(conn);
+            // The user row starts out double-encoded (what the pre-fix writer
+            // left behind); the tenant row starts out as a proper object.
+            if (scope === "user") {
+              await sql`
+                update public.oauth_authored_connection_test
+                   set values = to_jsonb(${JSON.stringify(initial)}::text)
+                 where id = ${actorRowId}::uuid
+              `.execute(conn);
+            }
           });
+          const seeded = await admin.connection().execute((conn) => sql<{ kind: string }>`
+            select jsonb_typeof(values) as kind
+              from public.oauth_authored_connection_test
+             where id = ${scope === "user" ? actorRowId : tenantRowId}::uuid
+          `.execute(conn));
+          expect(seeded.rows[0]!.kind).toBe(scope === "user" ? "string" : "object");
           const visible = await withDbSession(db, session, (trx) => sql<{
             id: string;
             owner_user_id: string | null;
@@ -959,11 +972,16 @@ describe("authored connection token lifecycle", () => {
           for (const values of results) {
             expect(decryptSecret(KEYRING, secretScope, "accessToken", values.accessToken as any)).toBe("access-2");
           }
-          const persisted = await withDbSession(db, session, (conn) => sql<{ values: any }>`
-            select values from public.oauth_authored_connection_test where id = ${selectedId}::uuid
+          const persisted = await withDbSession(db, session, (conn) => sql<{ values: any; kind: string }>`
+            select values, jsonb_typeof(values) as kind
+              from public.oauth_authored_connection_test where id = ${selectedId}::uuid
           `.execute(conn));
-          const persistedValues = typeof persisted.rows[0]!.values === "string"
-            ? JSON.parse(persisted.rows[0]!.values) : persisted.rows[0]!.values;
+          // The refreshed row must be a jsonb object: a jsonb *string* (the
+          // driver JSON-encoding an already-serialized parameter) hides every
+          // field from source selection, which then demands re-authorization.
+          expect(persisted.rows[0]!.kind).toBe("object");
+          const persistedValues = persisted.rows[0]!.values;
+          expect(typeof persistedValues).toBe("object");
           expect(decryptSecret(KEYRING, secretScope, "accessToken", persistedValues.accessToken)).toBe("access-2");
           expect(decryptSecret(KEYRING, secretScope, "refreshToken", persistedValues.refreshToken)).toBe("refresh-2");
           const audit = await withDbSession(db, session, async (conn) => {
@@ -989,7 +1007,7 @@ describe("authored connection token lifecycle", () => {
           }
           await withDbSession(db, session, (conn) => sql`
             update public.oauth_authored_connection_test
-               set values = ${JSON.stringify(initial)}::jsonb
+               set values = ${JSON.stringify(initial)}::text::jsonb
              where id = ${selectedId}::uuid
           `.execute(conn));
           const beforeFailure = await withDbSession(db, session, (conn) => sql<{ values: unknown }>`

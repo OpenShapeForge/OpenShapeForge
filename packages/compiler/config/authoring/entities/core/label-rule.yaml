@@ -12,6 +12,7 @@ labels:
   nl: Labelregel
 domains:
   - core
+rest: true
 authorization:
   roles:
     read:
@@ -220,7 +221,7 @@ fields:
           operator: isNotEmpty
     variables: template
     suggestions:
-      sourceField: entityType
+      sourceKey: entityFields
   - key: descriptionTemplate
     valueType: string
     required: false
@@ -242,7 +243,7 @@ fields:
           operator: isNotEmpty
     variables: template
     suggestions:
-      sourceField: entityType
+      sourceKey: entityFields
   - key: priority
     valueType: integer
     required: true
@@ -407,40 +408,52 @@ ui:
             nl: Weet je zeker dat je deze labelregel wilt verwijderen?
           mutation: delete
       groups:
-        - id: general
-          title:
-            en: General
-            nl: Algemeen
-          fields:
-            - name
-            - key
-            - entityType
-            - outputType
-            - label
-            - variant
-            - priority
-            - active
-        - id: validity
-          title:
-            en: Validity
-            nl: Geldigheid
-          fields:
-            - validity
-            - startDate
-            - endDate
-        - id: expression
-          title:
-            en: Expression
-            nl: Expressie
-          fields:
-            - expression
-        - id: description
-          title:
-            en: Description template
-            nl: Omschrijvingstemplate
-          fields:
-            - descriptionTemplate
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - id: general
+              title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - key
+                - entityType
+                - outputType
+                - label
+                - variant
+                - priority
+                - active
+            - id: validity
+              title:
+                en: Validity
+                nl: Geldigheid
+              fields:
+                - validity
+                - startDate
+                - endDate
+            - id: expression
+              title:
+                en: Expression
+                nl: Expressie
+              fields:
+                - expression
+            - id: description
+              title:
+                en: Description template
+                nl: Omschrijvingstemplate
+              fields:
+                - descriptionTemplate
     form:
+      variableSources:
+        - key: entityFields
+          resolver: entityFields
+          params:
+            sourceField: entityType
+        - key: chips
+          resolver: chips
       variants:
         create:
           title:

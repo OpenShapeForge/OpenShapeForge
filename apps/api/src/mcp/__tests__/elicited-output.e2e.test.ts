@@ -14,6 +14,7 @@ import { loadRuntimeModules } from "../../modules/registry.js";
 import {
   createGeneratedEntityAfterElicitation,
   createGeneratedEntity,
+  entityOperationRef,
   getGeneratedCrudTables,
   getGeneratedEntity,
   listGeneratedEntities,
@@ -84,6 +85,7 @@ function tool(
 ) {
   return {
     name: `elicited_output_test_${operation}`,
+    operationId: entityOperationRef(table, operation).id,
     operation,
     entity: "Preference",
     table: table.name,
@@ -251,8 +253,8 @@ async function callTool(
   });
   const body = JSON.parse(response.body);
   const text = body.result?.content?.[0]?.text;
-  let payload: any;
-  if (text) {
+  let payload: any = body.result?.structuredContent;
+  if (payload === undefined && text) {
     try {
       payload = JSON.parse(text);
     } catch {
@@ -346,10 +348,10 @@ async function publicReadValues(id: string): Promise<unknown[]> {
     directList.rows[0]!.value_json,
     gqlGet[graphql.singleQueryName].valueJson,
     gqlList[graphql.listQueryName].edges[0].node.valueJson,
-    restGet.body.valueJson,
-    restList.body.items[0].valueJson,
-    mcpGet.payload.valueJson,
-    mcpList.payload.items[0].valueJson,
+    restGet.body.data.valueJson,
+    restList.body.data.items[0].data.valueJson,
+    mcpGet.payload.data.valueJson,
+    mcpList.payload.data.items[0].data.valueJson,
   ];
 }
 
@@ -403,10 +405,10 @@ test.skipIf(remoteUrl)(
       directList.rows[0]!.value_json,
       gqlGet[graphql.singleQueryName].valueJson,
       gqlList[graphql.listQueryName].edges[0].node.valueJson,
-      restGet.body.valueJson,
-      restList.body.items[0].valueJson,
-      mcpGet.payload.valueJson,
-      mcpList.payload.items[0].valueJson,
+      restGet.body.data.valueJson,
+      restList.body.data.items[0].data.valueJson,
+      mcpGet.payload.data.valueJson,
+      mcpList.payload.data.items[0].data.valueJson,
     ];
     expect(new Set(safeValues.map((value) => JSON.stringify(value))).size).toBe(
       1,
@@ -444,8 +446,8 @@ test.skipIf(remoteUrl)(
     expect([
       directUpdated!.value_json,
       gqlUpdated[graphql.updateMutationName].valueJson,
-      restUpdated.body.valueJson,
-      mcpUpdated.payload.valueJson,
+      restUpdated.body.data.valueJson,
+      mcpUpdated.payload.data.valueJson,
     ]).toEqual(Array(4).fill(expectedConfiguration));
 
     const stored = (await storedValue(directId)) as Record<string, unknown>;
@@ -468,7 +470,7 @@ test.skipIf(remoteUrl)(
     track(absentId);
     expect(absent.value_json).toBeNull();
     expect(
-      (await rest(tenantA, "GET", `${restBase}/${absentId}`)).body.valueJson,
+      (await rest(tenantA, "GET", `${restBase}/${absentId}`)).body.data.valueJson,
     ).toBeNull();
 
     target.classification = "confidential";
@@ -520,7 +522,7 @@ test.skipIf(remoteUrl)(
           values: { ...values(marker, false), valueJson },
         }),
       ).rejects.toMatchObject({
-        extensions: { code: "BAD_USER_INPUT", status: 400 },
+        operationError: { code: "BAD_USER_INPUT", retryable: false },
       });
       await expect(
         updateGeneratedEntity(getRuntime().db, tenantA, {
@@ -529,7 +531,7 @@ test.skipIf(remoteUrl)(
           values: { valueJson },
         }),
       ).rejects.toMatchObject({
-        extensions: { code: "BAD_USER_INPUT", status: 400 },
+        operationError: { code: "BAD_USER_INPUT", retryable: false },
       });
 
       const graphqlCreate = await gql(

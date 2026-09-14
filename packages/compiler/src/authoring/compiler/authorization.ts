@@ -36,6 +36,7 @@ import type {
   CompiledAuthorizationRole,
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
+import { fieldSqlType, isCollectionField } from "./helpers.js";
 
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
@@ -160,6 +161,7 @@ export function buildAuthorization(
   if (authConfig.rowAccess?.enabled) {
     const owner = authConfig.rowAccess.owner;
     const group = authConfig.rowAccess.group;
+    const recordPermissions = authConfig.rowAccess.recordPermissions;
 
     // We look up against the raw authoring `Field[]` (core + profile) rather
     // than `compiledFields`, because `CompiledField` does not carry
@@ -203,17 +205,20 @@ export function buildAuthorization(
             `The ${axis} column must reference either a uuid field's 'persisted.column' or a relationship's 'foreignKey'.`,
         );
       }
-      // A persisted authoring field never has a uuid valueType (the enum has
-      // no uuid member) — uuid columns come from belongsTo foreignKeys, which
-      // take the matchingRelationship path. So a persisted-field axis column is
-      // always rejected here; report the actual authored valueType honestly.
-      // (The belongsTo FK is the only path since no field valueType is uuid.)
-      if (persistedField && persistedField.valueType !== "uuid") {
+      // Session ownership is a subject UUID, not necessarily an entity FK.
+      // Reuse the storage compiler's canonical UUID-format lowering. A plain
+      // string or a UUID collection is still rejected (text/jsonb storage).
+      // Group axes retain their relationship-only contract.
+      const scalarSessionOwner = axis === "owner" && persistedField &&
+        fieldSqlType(persistedField) === "uuid";
+      if (persistedField && !scalarSessionOwner) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +
-            `the persisted field "${col}" has valueType "${persistedField.valueType}", and no field valueType is uuid. ` +
-            `Model the ${axis} as a belongsTo relationship.`,
+            `the persisted field "${col}" has valueType "${persistedField.valueType}". ` +
+            (axis === "owner"
+              ? "A session owner may instead be a scalar string with validation.format: uuid."
+              : "Model the group as a belongsTo relationship."),
         );
       }
       // Relationship FKs are always uuid (storage compiler invariant), no type
@@ -238,7 +243,58 @@ export function buildAuthorization(
       validateAxisColumn(group.column, "group");
     }
 
-    if (owner || group) {
+    let compiledRecordPermissions:
+      | NonNullable<CompiledAuthorization["rowAccess"]>["recordPermissions"]
+      | undefined;
+    if (recordPermissions) {
+      const field = allAuthoringFields.find((candidate) =>
+        candidate.key === recordPermissions.field
+      );
+      if (!field) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions.field "${recordPermissions.field}" does not match an entity field.`,
+        );
+      }
+      if (
+        field.valueType !== "object" ||
+        isCollectionField(field) ||
+        field.required !== true ||
+        !field.persisted?.column
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions.field "${recordPermissions.field}" must be a required, persisted, single object field.`,
+        );
+      }
+      if (!/^[a-z_][a-z0-9_]*$/.test(field.persisted.column)) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field column "${field.persisted.column}" is not a valid column identifier.`,
+        );
+      }
+      if (
+        field.defaultValue !== undefined &&
+        !isValidRecordPermissionsDocument(field.defaultValue)
+      ) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.recordPermissions field "${recordPermissions.field}" has a malformed defaultValue. ` +
+            `Use an object with optional view/edit/delete members whose users/groups/roles values are arrays of non-empty strings.`,
+        );
+      }
+      compiledRecordPermissions = {
+        field: recordPermissions.field,
+        column: field.persisted.column,
+        empty: recordPermissions.empty,
+        createRequires: [...recordPermissions.createRequires],
+        ...(field.defaultValue !== undefined
+          ? { defaultValue: structuredClone(field.defaultValue) as Record<string, unknown> }
+          : {}),
+      };
+    }
+
+    if (owner || group || compiledRecordPermissions) {
       rowAccess = {
         enabled: true,
         // Honor the authored `empty` (default public when an axis is present).
@@ -257,6 +313,9 @@ export function buildAuthorization(
                   | "exact",
               },
             }
+          : {}),
+        ...(compiledRecordPermissions
+          ? { recordPermissions: compiledRecordPermissions }
           : {}),
       };
     } else {
@@ -277,6 +336,25 @@ export function buildAuthorization(
     profileAuthorizations,
     rowAccess,
   };
+}
+
+function isValidRecordPermissionsDocument(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const document = value as Record<string, unknown>;
+  if (Object.keys(document).some((key) => !["view", "edit", "delete"].includes(key))) {
+    return false;
+  }
+  return Object.values(document).every((subjects) => {
+    if (!subjects || typeof subjects !== "object" || Array.isArray(subjects)) return false;
+    const record = subjects as Record<string, unknown>;
+    if (Object.keys(record).some((key) => !["users", "groups", "roles"].includes(key))) {
+      return false;
+    }
+    return Object.values(record).every((entries) =>
+      Array.isArray(entries) &&
+      entries.every((entry) => typeof entry === "string" && entry.length > 0)
+    );
+  });
 }
 
 function collectFieldAuthorizations(

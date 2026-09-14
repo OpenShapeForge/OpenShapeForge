@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import { renderOpenApiSpec, type OpenApiSpecOptions } from "./generate-openapi.js";
+import type { CompiledStaticOperation } from "./plugins.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -30,6 +31,13 @@ export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 export type GenerateArtifactsOptions = {
   source?: string;
   openApi?: OpenApiSpecOptions;
+  /**
+   * Complete static Operation catalog, used to resolve the operation ids
+   * authored in a field's `writtenBy` into routes a caller can actually reach.
+   * Required as soon as any column carries `writtenBy`; see
+   * resolveColumnWriters.
+   */
+  operations?: readonly CompiledStaticOperation[];
 };
 
 function sqlGeneratedHeader(source: string): string {
@@ -319,6 +327,7 @@ function renderTenantRegistryPolicy(table: TableDefinition): string[] | undefine
 function renderRowScopePredicate(
   table: TableDefinition,
   workerAccess: string,
+  includeRecordPermissions = true,
 ): string | undefined {
   const scope = table.rowScope;
   if (!scope) return undefined;
@@ -369,16 +378,23 @@ function renderRowScopePredicate(
     branches.push(`${quoteIdent(nullVisibleColumn)} IS NULL`);
   }
 
-  // Tenant predicate is always required when rowScope is set.
-  const tenant = "tenant_id = app.current_tenant()";
-
-  if (branches.length === 0) {
-    // Caller declared rowScope with no group/user axes — degenerate case;
-    // behave the same as plain tenant scoping.
-    return `app.bypass_rls()${workerAccess} OR (${tenant})`;
+  let recordPermission: string | undefined;
+  if (scope.recordPermissions) {
+    if (!present.has(scope.recordPermissions.column)) {
+      throw new Error(
+        `Table ${table.schema}.${table.name} declares rowScope.recordPermissions.column "${scope.recordPermissions.column}" but the column is not defined.`,
+      );
+    }
+    recordPermission = `app.record_permission_allows(${quoteIdent(scope.recordPermissions.column)}, 'view', ${scope.recordPermissions.empty === "public" ? "true" : "false"})`;
   }
 
-  return `app.bypass_rls()${workerAccess} OR (${tenant} AND (${branches.join(" OR ")}))`;
+  // Tenant predicate is always required when rowScope is set.
+  const tenant = "tenant_id = app.current_tenant()";
+  const rowAxes = branches.length > 0 ? ` AND (${branches.join(" OR ")})` : "";
+  const acl = includeRecordPermissions && recordPermission
+    ? ` AND ${recordPermission}`
+    : "";
+  return `app.bypass_rls()${workerAccess} OR (${tenant}${rowAxes}${acl})`;
 }
 
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
@@ -446,23 +462,30 @@ function renderTableSql(table: TableDefinition): string {
   if (table.tenantScoped) {
     const rowScopePredicate = renderRowScopePredicate(table, workerAccess);
     if (rowScopePredicate) {
+      const rowScopeWritePredicate = table.rowScope?.recordPermissions
+        ? renderRowScopePredicate(table, workerAccess, false)!
+        : rowScopePredicate;
       const policyName = quoteIdent(`${table.name}_row_scope`);
+      const supersededPolicyName = quoteIdent(`${table.name}_tenant_isolation`);
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
+        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${rowScopePredicate})`,
-        `  WITH CHECK (${rowScopePredicate});`,
+        `  WITH CHECK (${rowScopeWritePredicate});`,
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);
+      const supersededPolicyName = quoteIdent(`${table.name}_row_scope`);
       const tenantExpression = `app.bypass_rls()${workerAccess} OR (tenant_id = app.current_tenant())`;
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
+        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${tenantExpression})`,
@@ -588,7 +611,95 @@ function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
   );
 }
 
-function renderManifestJson(manifest: PlatformSchemaManifest, source: string): string {
+/**
+ * How a caller reaches an operation that writes a `writtenBy` column.
+ *
+ * The authored fact is a bare operation key. That is the right thing to author
+ * — it is the one stable identifier — and the wrong thing to put in a refusal:
+ * a caller that just had `reviewedAt` rejected needs the route it can call
+ * instead, not a key it has to look up. So the compiler resolves the key here,
+ * once, and the runtime message is complete without the runtime having to know
+ * the operation catalog.
+ */
+type ManifestColumnWriter = {
+  operation: string;
+  rest: string;
+  mcp?: string;
+};
+
+function resolveColumnWriters(
+  table: TableDefinition,
+  column: { name: string; writtenBy?: string[] },
+  operations: readonly CompiledStaticOperation[] | undefined,
+): ManifestColumnWriter[] {
+  const keys = column.writtenBy ?? [];
+  if (keys.length === 0) return [];
+  if (!operations) {
+    throw new Error(
+      `Column ${table.name}.${column.name} is authored writtenBy: ` +
+        `[${keys.join(", ")}], but the compiled operations were not supplied to ` +
+        `generateArtifacts. Pass the operations so the refusal can name a route.`,
+    );
+  }
+  const byId = new Map(operations.map((operation) => [operation.id, operation]));
+  return keys.map((key) => {
+    const operation = byId.get(key);
+    if (!operation) {
+      throw new Error(
+        `Column ${table.name}.${column.name} is authored writtenBy: [${key}], but no ` +
+          `compiled operation has that key. A field nobody can write is worse than an ` +
+          `unprotected one — fix the key or drop the writtenBy entry.`,
+      );
+    }
+    if (operation.intent !== "invoke") {
+      const rest = table.source?.rest;
+      if (
+        table.source?.authoringEntityName !== operation.entityName ||
+        !rest?.operations[operation.intent]
+      ) {
+        throw new Error(
+          `Column ${table.name}.${column.name} is authored writtenBy: [${key}], but ` +
+            "that entity Operation has no REST route on this table.",
+        );
+      }
+      const collection = operation.intent === "list" || operation.intent === "create";
+      const method = operation.intent === "create"
+        ? "POST"
+        : operation.intent === "update"
+          ? "PATCH"
+          : operation.intent === "delete"
+            ? "DELETE"
+            : "GET";
+      const base = `/api/rest/v1/${rest.basePath}`;
+      const mcp = table.source?.mcp;
+      return {
+        operation: operation.id,
+        rest: `${method} ${collection ? base : `${base}/:id`}`,
+        ...(mcp?.operations[operation.intent]
+          ? {
+              mcp: mcp.tools === "generic"
+                ? `osf_${operation.intent}`
+                : `${mcp.toolPrefix}_${operation.intent}`,
+            }
+          : {}),
+      };
+    }
+    const { method, path } = operation.transports.rest;
+    return {
+      operation: operation.id,
+      rest: `${method} ${path}`,
+      ...(operation.transports.mcp.enabled === true
+        ? { mcp: operation.transports.mcp.name }
+        : {}),
+    };
+  });
+}
+
+function renderManifestJson(
+  manifest: PlatformSchemaManifest,
+  source: string,
+  operations?: readonly CompiledStaticOperation[],
+): string {
   const checksum = createHash("sha256")
     .update(JSON.stringify(manifest))
     .digest("hex");
@@ -624,6 +735,11 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       // Authored `immutable: true` — the runtime's writability rule refuses the
       // column on update on every transport (#177).
       ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
+      // Authored `writtenBy: [...]` — no transport offers the column on create
+      // or update, and the CRUD layer refuses it while naming these routes.
+      ...(column.writtenBy === undefined
+        ? {}
+        : { writtenBy: resolveColumnWriters(table, column, operations) }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted
@@ -674,6 +790,9 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         primaryKey: column.primaryKey,
         ...(column.classification === undefined ? {} : { classification: column.classification }),
         ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
+        // Already resolved on the rendered table above; republished here so the
+        // runtime's generated-entity view carries the same one fact.
+        ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));
@@ -723,7 +842,7 @@ ${renderForeignKeySql(manifest)}
     },
     {
       path: "apps/api/src/generated/db/manifest.json",
-      contents: renderManifestJson(manifest, source),
+      contents: renderManifestJson(manifest, source, options.operations),
     },
     {
       path: "apps/api/src/generated/rest/openapi.json",

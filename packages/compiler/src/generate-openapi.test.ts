@@ -23,6 +23,7 @@ function field(
 }
 
 const contract = {
+  authoringVersion: 2,
   entity: {
     name: "Relation",
     title: "Relation",
@@ -100,6 +101,41 @@ const contract = {
       create: true,
       update: true,
       delete: true,
+    },
+  },
+  entityOperations: {
+    list: { id: "Relation.list", intent: "list" },
+    get: { id: "Relation.get", intent: "get" },
+    create: { id: "Relation.create", intent: "create" },
+    update: {
+      id: "Relation.update",
+      intent: "update",
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: { confirmation: { mode: "none" } },
+    },
+    delete: {
+      id: "Relation.delete",
+      intent: "delete",
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "displayName",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
     },
   },
 } as unknown as CompiledEntityContract;
@@ -202,6 +238,8 @@ type TestParameter = {
 type TestOperation = {
   tags?: string[];
   parameters?: TestParameter[];
+  requestBody?: any;
+  responses?: Record<string, any>;
 };
 
 function spec() {
@@ -285,6 +323,7 @@ describe("rich generated REST OpenAPI", () => {
     expect(rendered.info.description).not.toContain("Pick an entity");
     expect(rendered.info.description).toContain("public or custom authentication");
     expect(rendered.info.description).toContain("session-authenticated entity or operation");
+    expect(rendered.info.description).toContain("satisfy any declared role");
     expect(rendered.info.description).not.toContain("Every operation needs a bearer token");
     expect(rendered.info.description).not.toContain("For a protected operation, the caller's roles");
     expect(rendered.info.description).toContain("Do not invent");
@@ -369,6 +408,253 @@ describe("rich generated REST OpenAPI", () => {
     );
   });
 
+  it("links each REST projection to its canonical operation contract", () => {
+    const generated = spec();
+    expect(generated.paths["/api/rest/v1/relations"]?.get)
+      .toHaveProperty("x-osf-operation-id", "Relation.list");
+    expect(generated.paths["/api/rest/v1/relations/{id}"]?.patch)
+      .toHaveProperty("x-osf-operation-id", "Relation.update");
+  });
+
+  it("documents canonical data and operation-offer envelopes", () => {
+    const generated = spec();
+    const schemas = generated.components.schemas;
+
+    expect(
+      generated.paths["/api/rest/v1/relations"]?.get?.responses?.["200"]
+        ?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationListResult" });
+    expect(schemas.RelationListResult).toMatchObject({
+      required: ["data", "operations"],
+      properties: {
+        data: { $ref: "#/components/schemas/RelationListData" },
+      },
+    });
+    expect(schemas.RelationListData).toMatchObject({
+      properties: {
+        items: {
+          items: { $ref: "#/components/schemas/RelationResult" },
+        },
+      },
+    });
+    expect(schemas.OperationError!.required).toEqual([
+      "code",
+      "message",
+      "retryable",
+    ]);
+    expect(schemas.OperationOffer!.oneOf).toHaveLength(2);
+    expect(
+      (schemas.OperationOffer!.oneOf as Array<{ properties: Record<string, unknown> }>)[0]!
+        .properties.concurrency,
+    ).toEqual({ $ref: "#/components/schemas/OperationConcurrency" });
+    expect(schemas.OperationConcurrency).toMatchObject({
+      properties: {
+        editLease: {
+          properties: { expiresAfterInactivity: { type: "string" } },
+        },
+      },
+    });
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
+    ).toHaveProperty("200");
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
+    ).not.toHaveProperty("204");
+  });
+
+  it("documents canonical v2 mutation policy failures with the shared envelope", () => {
+    const item = spec().paths["/api/rest/v1/relations/{id}"]!;
+    const patchResponses = item.patch!.responses!;
+    const deleteResponses = item.delete!.responses!;
+    const operationFailure = {
+      $ref: "#/components/schemas/OperationFailure",
+    };
+
+    expect(patchResponses["409"]?.description).toContain("VERSION_CONFLICT");
+    expect(patchResponses["422"]?.description).toContain("VALIDATION");
+    expect(patchResponses["423"]?.description).toContain("LOCKED");
+    expect(deleteResponses["400"]?.description).toContain("BAD_USER_INPUT");
+    expect(deleteResponses["409"]?.description).toContain("VERSION_CONFLICT");
+    expect(deleteResponses["422"]?.description).toContain("VALIDATION");
+    expect(deleteResponses["423"]?.description).toContain("LOCKED");
+    expect(deleteResponses["428"]?.description).toContain(
+      "CONFIRMATION_REQUIRED",
+    );
+
+    for (const response of [
+      patchResponses["409"],
+      patchResponses["422"],
+      patchResponses["423"],
+      deleteResponses["400"],
+      deleteResponses["409"],
+      deleteResponses["422"],
+      deleteResponses["423"],
+      deleteResponses["428"],
+    ]) {
+      expect(response?.content?.["application/json"]?.schema).toEqual(
+        operationFailure,
+      );
+    }
+  });
+
+  it("projects acknowledgement and update challenges as canonical controls", () => {
+    const protectedContract = structuredClone(contract);
+    protectedContract.entityOperations.create!.interaction = {
+      confirmation: { mode: "acknowledgement" },
+    };
+    protectedContract.entityOperations.update!.interaction.confirmation = {
+      mode: "challenge",
+      challenge: {
+        kind: "type-current-field",
+        field: "displayName",
+        issuedBy: "server",
+        bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+        expiresAfter: "PT5M",
+        singleUse: true,
+      },
+    };
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: protectedContract }],
+      }),
+    ) as any;
+    const create = generated.components.schemas.RelationInput;
+    const update = generated.components.schemas.RelationUpdateInput;
+
+    expect(create.required).not.toContain("confirmed");
+    expect(create.properties.confirmed).toMatchObject({ type: "boolean" });
+    expect(create.properties.confirmed).not.toHaveProperty("const");
+    expect(update.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(
+      generated.paths["/api/rest/v1/relations"].post.responses["428"].content[
+        "application/json"
+      ].schema,
+    ).toEqual({ $ref: "#/components/schemas/OperationFailure" });
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"].patch.responses["428"]
+        .content["application/json"].schema,
+    ).toEqual({ $ref: "#/components/schemas/OperationFailure" });
+  });
+
+  it("leaves acknowledged controls optional for the canonical runtime to gate", () => {
+    const acknowledgedContract = structuredClone(contract);
+    for (const intent of ["create", "update", "delete"] as const) {
+      acknowledgedContract.entityOperations[intent]!.interaction = {
+        confirmation: { mode: "acknowledgement" },
+      };
+    }
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: acknowledgedContract }],
+      }),
+    ) as any;
+
+    for (const schemaName of [
+      "RelationInput",
+      "RelationUpdateInput",
+      "RelationDeleteInput",
+    ]) {
+      const inputSchema = generated.components.schemas[schemaName];
+      expect(inputSchema.required).not.toContain("confirmed");
+      expect(inputSchema.properties.confirmed).toMatchObject({ type: "boolean" });
+      expect(inputSchema.properties.confirmed).not.toHaveProperty("const");
+      expect(inputSchema.properties.confirmed.description).toContain(
+        "Only true",
+      );
+    }
+    for (const operation of [
+      generated.paths["/api/rest/v1/relations"].post,
+      generated.paths["/api/rest/v1/relations/{id}"].patch,
+      generated.paths["/api/rest/v1/relations/{id}"].delete,
+    ]) {
+      expect(operation.responses["428"].content["application/json"].schema)
+        .toEqual({ $ref: "#/components/schemas/OperationFailure" });
+    }
+  });
+
+  it("emits an optional delete body for acknowledgement without concurrency", () => {
+    const acknowledgedContract = structuredClone(contract);
+    delete acknowledgedContract.entityOperations.delete!.concurrency;
+    acknowledgedContract.entityOperations.delete!.interaction = {
+      confirmation: { mode: "acknowledgement" },
+    };
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: acknowledgedContract }],
+      }),
+    ) as any;
+    const inputSchema = generated.components.schemas.RelationDeleteInput;
+    const deleteOperation =
+      generated.paths["/api/rest/v1/relations/{id}"].delete;
+
+    expect(inputSchema.properties.confirmed).toMatchObject({ type: "boolean" });
+    expect(inputSchema.required).toBeUndefined();
+    expect(deleteOperation.requestBody).toMatchObject({
+      required: false,
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/RelationDeleteInput" },
+        },
+      },
+    });
+    expect(deleteOperation.responses["428"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/OperationFailure" });
+  });
+
+  it("keeps schemaVersion 1 REST responses and operation metadata legacy", () => {
+    const legacyContract = {
+      ...contract,
+      authoringVersion: 1,
+    } as unknown as CompiledEntityContract;
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: legacyContract }],
+      }),
+    );
+    const collection = generated.paths["/api/rest/v1/relations"];
+    const item = generated.paths["/api/rest/v1/relations/{id}"];
+
+    expect(collection.get).not.toHaveProperty("x-osf-operation-id");
+    expect(collection.post).not.toHaveProperty("x-osf-operation-id");
+    expect(item.get).not.toHaveProperty("x-osf-operation-id");
+    expect(item.patch).not.toHaveProperty("x-osf-operation-id");
+    expect(item.delete).not.toHaveProperty("x-osf-operation-id");
+    expect(
+      collection.get.responses["200"].content["application/json"].schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationList" });
+    expect(
+      item.get.responses["200"].content["application/json"].schema,
+    ).toEqual({ $ref: "#/components/schemas/Relation" });
+    expect(item.delete.responses).toHaveProperty("204");
+    expect(item.delete.responses).not.toHaveProperty("200");
+    expect(collection.post.responses).not.toHaveProperty("428");
+    expect(
+      generated.components.schemas.RelationInput.properties.confirmed,
+    ).toBeUndefined();
+    expect(Object.keys(item.patch.responses)).toEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+    ]);
+    expect(Object.keys(item.delete.responses)).toEqual([
+      "204",
+      "401",
+      "403",
+      "404",
+    ]);
+    expect(generated.components.schemas.RelationResult).toBeUndefined();
+    expect(generated.components.schemas.RelationListResult).toBeUndefined();
+    expect(generated.components.schemas.Error.properties.error.required).toEqual([
+      "code",
+      "message",
+    ]);
+  });
+
   it("keeps response properties storage-derived while retaining entity documentation", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {
@@ -417,11 +703,304 @@ describe("rich generated REST OpenAPI", () => {
       "Identifier in the owning external system. References the ExternalSystem entity.",
     );
     expect(create.properties.iban).toEqual({ type: "string" });
-    expect(update.required).toBeUndefined();
+    expect(update.required).toEqual(["expectedVersion", "leaseToken"]);
+    expect(update.properties.expectedVersion).toMatchObject({
+      type: "string",
+      format: "date-time",
+    });
+    expect(update.properties.leaseToken).toMatchObject({
+      type: "string",
+      minLength: 1,
+    });
     expect(update.properties.externalId).toBeUndefined();
     expect(update.properties.displayName?.default).toBeUndefined();
     expect(create.properties.metadata).toBeUndefined();
     expect(update.properties.metadata).toBeUndefined();
+  });
+
+  it("projects authored JSON schemas for plugin-backed canonical CRUD", () => {
+    const pluginContract = structuredClone(contract) as CompiledEntityContract;
+    pluginContract.entityOperations.create = {
+      ...pluginContract.entityOperations.create!,
+      key: "create",
+      entityId: "relation",
+      entityName: "Relation",
+      name: "Create relation atomically",
+      description: "Validate and create the canonical relation head.",
+      implementation: {
+        type: "plugin",
+        plugin: "example",
+        handler: "createRelation",
+      },
+      target: {
+        entityId: "relation",
+        entityName: "Relation",
+        scope: "collection",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["requestKey", "definition"],
+          properties: {
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "displayName"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            displayName: { type: "string" },
+          },
+        },
+      },
+      authorization: { action: "create", roles: ["Relations.Write"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      interaction: { confirmation: { mode: "acknowledgement" } },
+      interfaces: {
+        rest: {
+          method: "POST",
+          path: "/api/example/relations",
+          response: { status: 202, kind: "json" },
+        },
+      },
+    };
+    pluginContract.entityOperations.update = {
+      ...pluginContract.entityOperations.update!,
+      key: "update",
+      entityId: "relation",
+      entityName: "Relation",
+      name: "Update relation atomically",
+      description: "Validate and update the canonical relation head.",
+      implementation: {
+        type: "plugin",
+        plugin: "example",
+        handler: "updateRelation",
+      },
+      target: {
+        entityId: "relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["relationId", "requestKey", "definition"],
+          properties: {
+            relationId: { type: "string", format: "uuid" },
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "displayName"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            displayName: { type: "string" },
+          },
+        },
+      },
+      authorization: { action: "update", roles: ["Relations.Write"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      interaction: { confirmation: { mode: "none" } },
+      interfaces: {
+        rest: {
+          method: "PUT",
+          path: "/api/example/relations/:relationId",
+          response: { kind: "json" },
+        },
+      },
+    };
+
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: pluginContract }],
+      }),
+    ) as any;
+
+    expect(generated.components.schemas.RelationInput).toMatchObject({
+      required: ["requestKey", "definition"],
+      properties: {
+        requestKey: { type: "string", format: "uuid" },
+        definition: { type: "object" },
+        confirmed: { type: "boolean" },
+      },
+    });
+    expect(generated.components.schemas.RelationInput.properties).not.toHaveProperty(
+      "relationType",
+    );
+    expect(generated.components.schemas.RelationUpdateInput).toMatchObject({
+      required: [
+        "relationId",
+        "requestKey",
+        "definition",
+        "expectedVersion",
+        "leaseToken",
+      ],
+      properties: {
+        relationId: { type: "string", format: "uuid" },
+        expectedVersion: { type: "string", format: "date-time" },
+        leaseToken: { type: "string" },
+      },
+    });
+    expect(
+      generated.paths["/api/example/relations"].post.responses["202"].content[
+        "application/json"
+      ].schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationCreateResult" });
+    expect(generated.components.schemas.RelationCreateResult.properties.data)
+      .toEqual({
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "displayName"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          displayName: { type: "string" },
+        },
+      });
+    expect(
+      generated.paths["/api/example/relations/{relationId}"].put.responses["200"].content[
+        "application/json"
+      ].schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationUpdateResult" });
+    expect(generated.paths["/api/rest/v1/relations"].post).toBeUndefined();
+    expect(generated.paths["/api/rest/v1/relations/{id}"].patch).toBeUndefined();
+    expect(
+      generated.paths["/api/example/relations/{relationId}"].parameters,
+    ).toEqual([
+      expect.objectContaining({ name: "relationId", in: "path", required: true }),
+    ]);
+  });
+
+  it("documents version-bound server confirmation controls for delete", () => {
+    const generated = spec();
+    const deletion = generated.components.schemas.RelationDeleteInput as {
+      required: string[];
+      properties: Record<string, Record<string, unknown>>;
+      dependentRequired: Record<string, string[]>;
+    };
+
+    expect(deletion.required).toEqual(["expectedVersion", "leaseToken"]);
+    expect(deletion.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(deletion.properties.expectedVersion).toMatchObject({
+      type: "string",
+      format: "date-time",
+    });
+    expect(deletion.properties.confirmationToken).toMatchObject({ minLength: 1 });
+    expect(deletion.properties.leaseToken).toMatchObject({ minLength: 1 });
+    expect(deletion.properties.confirmationAnswer?.description).toContain(
+      "displayName",
+    );
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"]?.delete?.requestBody
+        ?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationDeleteInput" });
+  });
+
+  it("documents the central edit-lease issuer instead of entity-specific lease routes", () => {
+    const generated = spec();
+    const acquireInput = generated.components.schemas.EditLeaseAcquireInput as {
+      properties: { operationId: { enum: string[] } };
+    };
+
+    expect(generated.paths["/api/operation-leases"]?.post?.requestBody
+      ?.content?.["application/json"]?.schema).toEqual({
+        $ref: "#/components/schemas/EditLeaseAcquireInput",
+      });
+    expect(acquireInput.properties.operationId.enum).toEqual([
+      "Relation.delete",
+      "Relation.update",
+    ]);
+    const acquireData = generated.components.schemas.EditLeaseAcquireData as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    const renewData = generated.components.schemas.EditLeaseRenewData as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(acquireData.required).toContain("leaseToken");
+    expect(acquireData.properties).toHaveProperty("leaseToken");
+    expect(renewData.required).not.toContain("leaseToken");
+    expect(renewData.properties).not.toHaveProperty("leaseToken");
+    expect(
+      generated.paths["/api/operation-leases"]?.post?.responses?.["201"]
+        ?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/EditLeaseAcquireResult" });
+    expect(
+      generated.paths["/api/operation-leases/renew"]?.post?.responses?.["200"]
+        ?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/EditLeaseRenewResult" });
+    expect(generated.paths["/api/operation-leases/release"]?.post).toBeDefined();
+    expect(
+      Object.keys(generated.paths).some((path) =>
+        /relations.*(?:lease|lock)|(?:lease|lock).*relations/i.test(path),
+      ),
+    ).toBe(false);
+  });
+
+  it("allowlists only strict-v2 lease operations actually projected to REST", () => {
+    const restTable = structuredClone(manifest.tables[0]!);
+    restTable.source!.rest!.operations.delete = false;
+
+    const nonRestContract = structuredClone(contract);
+    nonRestContract.entity.name = "PrivateRecord";
+    nonRestContract.entityOperations.update!.id = "PrivateRecord.update";
+    nonRestContract.entityOperations.delete!.id = "PrivateRecord.delete";
+    delete nonRestContract.rest;
+    nonRestContract.mcp = structuredClone(manifest.tables[0]!.source!.mcp!);
+    nonRestContract.interfaces = {
+      web: { operations: { update: true, delete: true } },
+    };
+
+    const nonRestTable = structuredClone(manifest.tables[0]!);
+    nonRestTable.name = "private_records";
+    nonRestTable.source!.authoringEntityName = "PrivateRecord";
+    delete nonRestTable.source!.rest;
+
+    const generated = JSON.parse(
+      renderOpenApiSpec(
+        { ...manifest, tables: [restTable, nonRestTable] },
+        "fixture",
+        { entities: [{ contract }, { contract: nonRestContract }] },
+      ),
+    ) as any;
+    expect(
+      generated.components.schemas.EditLeaseAcquireInput.properties.operationId
+        .enum,
+    ).toEqual(["Relation.update"]);
+
+    const nonRestOnly = JSON.parse(
+      renderOpenApiSpec(
+        { ...manifest, tables: [nonRestTable] },
+        "fixture",
+        { entities: [{ contract: nonRestContract }] },
+      ),
+    ) as any;
+    expect(nonRestOnly.paths["/api/operation-leases"]).toBeUndefined();
+    expect(
+      nonRestOnly.components.schemas.EditLeaseAcquireInput,
+    ).toBeUndefined();
   });
 
   it("bundles the recursive FieldDefinition contract in generated request schemas", () => {
@@ -475,6 +1054,10 @@ describe("rich generated REST OpenAPI", () => {
   it("tags operations with the compiled entity description", () => {
     const generated = spec();
     expect(generated.tags).toEqual([
+      {
+        name: "Edit leases",
+        description: "Central leases for long-running record write modes.",
+      },
       { name: "Relation", description: "Canonical relation aggregate." },
     ]);
     expect(generated.paths["/api/rest/v1/relations"]?.post?.tags).toEqual([

@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
+  realmFromIssuer,
   resolveSessionContext,
+  selectOrganizationMembership,
   SessionAuthenticationUnavailableError,
 } from "./identity.js";
 
@@ -23,6 +25,7 @@ const EMPTY = {
   userId: null,
   roles: [] as string[],
   groups: [] as string[],
+  relationGroupIds: [] as string[],
   scope: "self" as const,
   credential: "none" as const,
 };
@@ -203,27 +206,74 @@ describe("resolveSessionContext bearer fail-closed", () => {
 
 describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("merges realm roles with every resource_access client's roles, deduplicated and sorted", () => {
-    // Mirrors a dev-realm token: `directie` is the realm composite; Keycloak
-    // expands it into entity client roles under resource_access.
+    // Mirrors a dev-realm token: an audience client composite is expanded by
+    // Keycloak into entity client roles under resource_access.
     expect(
       mergeIdentityRoles({
-        roles: ["directie", "default-roles-openshapeforge"],
+        roles: ["default-roles-openshapeforge"],
         clientRoles: {
-          "erp-provider": ["Relations.All.ReadWrite", "Relations.All.Read"],
+          "erp-provider": ["Test.Admin", "Relations.All.ReadWrite", "Relations.All.Read"],
           account: ["manage-account", "Relations.All.Read"],
         },
       }),
     ).toEqual([
       "Relations.All.Read",
       "Relations.All.ReadWrite",
+      "Test.Admin",
       "default-roles-openshapeforge",
-      "directie",
       "manage-account",
     ]);
   });
 
   test("returns realm roles unchanged when the token carries no client roles", () => {
-    expect(mergeIdentityRoles({ roles: ["directie"] })).toEqual(["directie"]);
+    expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
+  });
+});
+
+describe("tenant from Keycloak Organization membership", () => {
+  test("realmFromIssuer reads the realm off a Keycloak issuer URL and nothing else", () => {
+    expect(realmFromIssuer("http://localhost:8181/realms/openshapeforge")).toBe("openshapeforge");
+    expect(realmFromIssuer("https://id.example.com/auth/realms/acme-prod/")).toBe("acme-prod");
+    expect(realmFromIssuer("https://id.example.com/realms/acme/protocol/openid-connect")).toBeUndefined();
+    expect(realmFromIssuer("https://accounts.example.com")).toBeUndefined();
+    expect(realmFromIssuer(undefined)).toBeUndefined();
+  });
+
+  test("selects the single membership that carries an organization id", () => {
+    expect(
+      selectOrganizationMembership({
+        organizations: { "zerocopter-dev": { id: "org-1" } },
+      }),
+    ).toEqual({ alias: "zerocopter-dev", id: "org-1" });
+  });
+
+  test("fails closed without an id, and on several memberships with no organization:<alias> scope", () => {
+    expect(
+      selectOrganizationMembership({
+        organizations: { acme: { id: null } },
+      }),
+    ).toBeNull();
+    const two = {
+      acme: { id: "org-1", groups: [], roles: [], clientRoles: {} },
+      beta: { id: "org-2", groups: [], roles: [], clientRoles: {} },
+    };
+    expect(selectOrganizationMembership({ organizations: two })).toBeNull();
+    expect(selectOrganizationMembership({ organizations: two, scopes: ["organization:*"] })).toBeNull();
+    expect(selectOrganizationMembership({ organizations: {} })).toBeNull();
+  });
+
+  test("honours the organization:<alias> scope Keycloak echoes for a selected organization", () => {
+    const two = {
+      acme: { id: "org-1", groups: [], roles: [], clientRoles: {} },
+      beta: { id: "org-2", groups: [], roles: [], clientRoles: {} },
+    };
+    expect(
+      selectOrganizationMembership({ organizations: two, scopes: ["email", "organization:beta"] }),
+    ).toEqual({ alias: "beta", id: "org-2" });
+    // A scope naming an organization the token is not a member of selects nothing.
+    expect(
+      selectOrganizationMembership({ organizations: two, scopes: ["organization:gamma"] }),
+    ).toBeNull();
   });
 });

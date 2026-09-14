@@ -40,6 +40,7 @@ const config: ControlPlaneConfig = {
     jwksUri: `${ISSUER}/protocol/openid-connect/certs`,
     clientId: "openshapeforge-admin-gateway",
   },
+  mcpResource: { origins: ["http://127.0.0.1:3001"], clients: ["codex"] },
 };
 
 /** A verifier stub, so no JWKS is fetched and no key material is needed. */

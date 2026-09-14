@@ -87,14 +87,20 @@ describe("createGraphqlContext threads resolved.scope (F5)", () => {
       resolvedSession: {
         tenantId: randomUUID(),
         userId: randomUUID(),
+        loginSessionBinding: "lsb1.verified-browser-session",
         roles: ["workflow-admin"],
         oauthScopes: ["workflow:write"],
         groups: [],
+        relationGroupIds: ["22222222-2222-4222-8222-222222222222"],
         scope: "tenant",
         credential: "bearer",
       },
     });
     expect(context.session.oauthScopes).toEqual(["workflow:write"]);
+    expect(context.session.loginSessionBinding).toBe("lsb1.verified-browser-session");
+    expect(context.session.relationGroupIds).toEqual([
+      "22222222-2222-4222-8222-222222222222",
+    ]);
   });
 });
 

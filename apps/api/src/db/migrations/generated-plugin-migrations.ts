@@ -14,6 +14,7 @@ import { ensureSchemaMigrationsTable } from "./schema-migrations-table.js";
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
+  phase?: "beforeGenerated" | "afterGenerated";
   checksum: string;
   sql: string;
 };
@@ -41,6 +42,16 @@ const registryPath = resolve(
 const pluginNamePattern = /^[a-z][a-z0-9-]*$/;
 const migrationVersionPattern = /^\d{4}_[a-z0-9][a-z0-9-]*$/;
 
+function migrationChecksum(migration: GeneratedPluginMigration): string {
+  return createHash("sha256")
+    .update(
+      migration.phase === "beforeGenerated"
+        ? `beforeGenerated\0${migration.sql}`
+        : migration.sql,
+    )
+    .digest("hex");
+}
+
 export function pluginMigrationLedgerVersion(
   migration: Pick<GeneratedPluginMigration, "plugin" | "version">,
 ): string {
@@ -59,6 +70,9 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       !migration ||
       !pluginNamePattern.test(migration.plugin) ||
       !migrationVersionPattern.test(migration.version) ||
+      (migration.phase !== undefined &&
+        migration.phase !== "beforeGenerated" &&
+        migration.phase !== "afterGenerated") ||
       typeof migration.sql !== "string" ||
       migration.sql.trim().length === 0 ||
       typeof migration.checksum !== "string"
@@ -77,7 +91,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
         `Generated plugin migration registry is not strictly ordered at ${identity}.`,
       );
     }
-    const actual = createHash("sha256").update(migration.sql).digest("hex");
+    const actual = migrationChecksum(migration);
     if (migration.checksum !== actual) {
       throw new Error(
         `Generated plugin migration ${identity} has checksum ${migration.checksum}, but its SQL hashes to ${actual}. Regenerate artifacts.`,

@@ -26,6 +26,7 @@ import type {
 import type { LoadedArtifacts } from "../loader.js";
 import { fieldGraphqlBaseType, capitalize, uncapitalize, pluralize } from "./helpers.js";
 import { resolveFieldOptions, resolveRender } from "./model.js";
+import { isCoreEntityV2, v2GraphqlOperationActions } from "../entity-v2.js";
 
 export function buildGraphQL(
   coreEntity: LoadedArtifacts["coreEntity"],
@@ -128,6 +129,9 @@ export function buildGraphQL(
       update: { name: `update${typeName}`, input: `Update${typeName}Input!` },
       delete: { name: `delete${typeName}`, args: [{ name: "id", type: "ID!" }] },
     },
+    ...(isCoreEntityV2(coreEntity)
+      ? { operations: v2GraphqlOperationActions(coreEntity) }
+      : {}),
   };
 }
 

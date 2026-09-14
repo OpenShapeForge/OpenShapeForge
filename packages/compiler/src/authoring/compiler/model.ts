@@ -32,11 +32,17 @@ export function resolveModelFields(
 ): CompiledField[] {
   return coreFields.map((field) => {
     const semType = field.semanticType ? semanticTypes?.[field.semanticType] : undefined;
+    const authoredCardinality = field.cardinality ?? semType?.cardinality;
+    const cardinality = fieldCardinality({ cardinality: authoredCardinality });
 
     const compiled: CompiledField = {
       key: field.key,
       valueType: field.valueType,
-      cardinality: fieldCardinality(field),
+      cardinality,
+      ...(authoredCardinality && typeof authoredCardinality === "object" &&
+        cardinality === "collection"
+        ? { cardinalityBounds: { ...authoredCardinality } }
+        : {}),
       required: field.required ?? false,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
@@ -44,6 +50,7 @@ export function resolveModelFields(
     };
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
+    if (field.writtenBy && field.writtenBy.length > 0) compiled.writtenBy = [...field.writtenBy];
     if (field.description) compiled.description = field.description;
     if (field.help) compiled.help = field.help;
     // Validation: field-level overrides semantic type defaults

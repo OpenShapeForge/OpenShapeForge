@@ -2,10 +2,10 @@
 #
 # How this plugin gets into the sidebar.
 #
-# `kind: appShellPatch` strategically merges into the base `appShell.yaml`
+# `kind: appShellPatch` strategically merges into the base `menu.yaml`
 # (packages/compiler/config/authoring). `sidebarItems` is a keyed array, so this
 # appends one entry and restates nothing the base or another plugin declared.
-# Shipping a plain `appShell.yaml` instead would collide, which is why the patch
+# Shipping a plain `menu.yaml` instead would collide, which is why the patch
 # kind exists: without it a plugin can emit a route file and have nothing in the
 # app link to it.
 #

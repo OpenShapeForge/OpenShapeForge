@@ -151,7 +151,7 @@ describe("elicited-value shared CRUD output", () => {
             ...input,
           }).catch((caught: unknown) => caught);
           expect(error).toMatchObject({
-            extensions: { code: "FORBIDDEN", status: 403 },
+            operationError: { code: "FORBIDDEN", retryable: false },
           });
           expect((error as Error).message).not.toContain(
             storedSecret.ciphertext,
@@ -163,7 +163,7 @@ describe("elicited-value shared CRUD output", () => {
           filter: { valueJson: { apiToken: storedSecret } },
         }),
       ).rejects.toMatchObject({
-        extensions: { code: "FORBIDDEN", status: 403 },
+        operationError: { code: "FORBIDDEN", retryable: false },
       });
     });
   });
@@ -181,7 +181,7 @@ describe("elicited-value shared CRUD output", () => {
           values: { valueJson: supplied },
         }).catch((caught: unknown) => caught);
         expect(createError).toMatchObject({
-          extensions: { code: "BAD_USER_INPUT", status: 400 },
+          operationError: { code: "BAD_USER_INPUT", retryable: false },
         });
         expect((createError as Error).message).not.toContain(
           JSON.stringify(supplied),
@@ -193,7 +193,7 @@ describe("elicited-value shared CRUD output", () => {
           values: { valueJson: supplied },
         }).catch((caught: unknown) => caught);
         expect(updateError).toMatchObject({
-          extensions: { code: "BAD_USER_INPUT", status: 400 },
+          operationError: { code: "BAD_USER_INPUT", retryable: false },
         });
         expect((updateError as Error).message).not.toContain(
           JSON.stringify(supplied),

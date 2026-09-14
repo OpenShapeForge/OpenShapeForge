@@ -86,6 +86,8 @@ describe("the schema registry", () => {
     expect(validator.schemaFiles).toContain("connector.schema.json");
     expect(validator.schemaFiles).toContain("field-definition.schema.json");
     expect(validator.schemaFiles).toContain("field-v2.schema.json");
+    expect(validator.schemaFiles).toContain("settings-definition.schema.json");
+    expect(validator.schemaFiles).toContain("settings-provider.schema.json");
   });
 
   it("maps every kind to a schema or to a documented reason for having none", () => {
@@ -178,6 +180,76 @@ describe("the schema registry", () => {
 
   it("refuses a document with no kind", () => {
     expect(() => validator.validate({ title: "x" }, "test.yaml")).toThrow(/no `kind`/);
+  });
+
+  it("validates the closed typed settings and provider authoring shapes", () => {
+    expect(
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsDefinition",
+          namespace: "storage.artifacts",
+          settings: [
+            { key: "enabled", type: "boolean", default: false },
+            {
+              key: "maximumBytes",
+              type: "integer",
+              default: 1_000,
+              minimum: 1,
+              maximum: 10_000,
+            },
+            {
+              key: "allowedMediaTypes",
+              type: "stringSet",
+              default: ["application/pdf"],
+              allowed: ["application/pdf", "image/png"],
+            },
+            {
+              key: "provider",
+              type: "provider",
+              capability: "artifact-storage",
+              allowedProviders: ["filesystem"],
+              enabledBy: "enabled",
+            },
+          ],
+        },
+        "settings/artifacts.yaml",
+      ),
+    ).toBe("settings-definition.schema.json");
+    expect(
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsProvider",
+          provider: "filesystem",
+          capabilities: ["artifact-storage"],
+        },
+        "settings/filesystem.yaml",
+      ),
+    ).toBe("settings-provider.schema.json");
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsDefinition",
+          namespace: "storage.artifacts",
+          settings: [{ key: "token", type: "secret", default: "not-allowed" }],
+        },
+        "settings/secret.yaml",
+      ),
+    ).toThrow(/settings\/0/);
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsProvider",
+          provider: "filesystem",
+          capabilities: ["artifact-storage"],
+          endpoint: "https://dynamic.example.test",
+        },
+        "settings/provider.yaml",
+      ),
+    ).toThrow(/additional properties/);
   });
 
   it("reports a schema directory whose refs do not resolve", () => {
@@ -387,6 +459,432 @@ describe("coreEntity properties the compiler implements", () => {
       ...overrides,
     };
   }
+
+  const v2Operation = (action: string) => ({
+    name: `${action} billing runs`,
+    description: `${action} billing runs`,
+    implementation: { type: "entity", action },
+    effects: { data: action === "list" || action === "get" ? "read" : "write", external: "none" },
+    reliability: { idempotency: { mode: action === "list" || action === "get" ? "natural" : "none" } },
+    confirmation: { mode: "none" },
+  });
+
+  it("accepts strict v2 operation and interface authoring", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list"), get: v2Operation("get") },
+      interfaces: {
+        rest: {},
+        graphql: {},
+        mcp: { tools: "generic" },
+        web: {
+          views: {
+            collection: {
+              renderer: "billing-run.collection",
+              route: "/billing-runs",
+              columns: [{ key: "idempotencyKey" }],
+            },
+            record: {
+              renderer: "billing-run.record",
+              routes: { read: "/billing-runs/:id" },
+              title: "{{idempotencyKey}}",
+              layout: { tabs: [{ id: "main", fields: ["idempotencyKey"] }] },
+            },
+          },
+        },
+      },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts plugin-backed CRUD without a second authorization policy", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      authorization: {
+        roles: {
+          read: ["BillingRuns.Read"],
+          create: ["BillingRuns.Write"],
+          update: ["BillingRuns.Write"],
+          delete: ["BillingRuns.Delete"],
+        },
+      },
+      operations: {
+        create: {
+          name: "Create a billing run",
+          description: "Validates the definition and creates its canonical head.",
+          implementation: {
+            type: "plugin",
+            plugin: "example",
+            handler: "createBillingRun",
+            action: "create",
+          },
+          target: { scope: "collection" },
+          input: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["idempotencyKey"],
+              properties: { idempotencyKey: { type: "string", format: "uuid" } },
+            },
+          },
+          output: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id"],
+              properties: { id: { type: "string", format: "uuid" } },
+            },
+          },
+          errors: [],
+          effects: { data: "write", external: "none" },
+          reliability: {
+            idempotency: { mode: "keyed", inputField: "idempotencyKey" },
+          },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+    const create = (document.operations as Record<string, any>).create;
+    create.auth = { mode: "session", roles: ["BillingRuns.Write"] };
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /must NOT be valid/,
+    );
+  });
+
+  it("accepts plugin-backed delete only with its canonical destructive contract", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      authorization: {
+        roles: {
+          read: ["BillingRuns.Read", "BillingRuns.Delete"],
+          create: ["BillingRuns.Write"],
+          update: ["BillingRuns.Write"],
+          delete: ["BillingRuns.Delete"],
+        },
+      },
+      operations: {
+        remove: {
+          name: "Delete billing run",
+          description: "Deletes a billing run through its owning module.",
+          implementation: {
+            type: "plugin",
+            plugin: "example",
+            handler: "deleteBillingRun",
+            action: "delete",
+          },
+          target: { scope: "record", inputField: "billingRunId" },
+          input: {
+            schema: {
+              type: "object",
+              properties: { billingRunId: { type: "string", format: "uuid" } },
+              required: ["billingRunId"],
+              additionalProperties: false,
+            },
+          },
+          output: {
+            schema: {
+              type: "object",
+              properties: { deleted: { type: "boolean" } },
+              required: ["deleted"],
+              additionalProperties: false,
+            },
+          },
+          errors: [],
+          effects: { data: "delete", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "acknowledgement" },
+        },
+      },
+      interfaces: {
+        rest: {
+          operations: {
+            remove: { method: "DELETE", path: "/api/example/billing-runs/:billingRunId" },
+          },
+        },
+        graphql: { operations: { remove: {} } },
+        mcp: { operations: { remove: {} } },
+        web: {
+          operations: { remove: {} },
+          views: {
+            collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+          },
+        },
+      },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts action-specific record ACL authoring and plugin enforcement", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [{
+        key: "authorization",
+        valueType: "object",
+        required: true,
+        defaultValue: {},
+        persisted: { column: "authorization", storageClass: "core" },
+      }],
+      authorization: {
+        roles: {
+          read: ["Records.All.Read"],
+          create: ["Records.All.Manage"],
+          update: ["Records.All.Manage"],
+          delete: ["Records.All.Delete"],
+        },
+        rowAccess: {
+          enabled: true,
+          recordPermissions: {
+            field: "authorization",
+            empty: "public",
+            createRequires: ["view", "edit"],
+          },
+        },
+      },
+      operations: {
+        archive: {
+          name: "Archive record",
+          description: "Archives one record.",
+          implementation: { type: "plugin", plugin: "example", handler: "archive" },
+          target: { scope: "record", inputField: "id" },
+          input: {
+            schema: {
+              type: "object",
+              properties: { id: { type: "string", format: "uuid" } },
+              required: ["id"],
+              additionalProperties: false,
+            },
+          },
+          output: { schema: { type: "object", additionalProperties: true } },
+          errors: [],
+          auth: {
+            mode: "session",
+            roles: ["Records.All.Manage"],
+            recordPermission: "delete",
+          },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: { operations: { archive: {} } } },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+
+    const sessionAuth = (document.operations as Record<string, any>).archive.auth;
+    delete sessionAuth.roles;
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    sessionAuth.roles = [];
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("rejects malformed strict v2 Web renderer registry keys", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list") },
+      interfaces: {
+        web: {
+          views: {
+            collection: {
+              renderer: "Billing Run/Collection",
+              route: "/billing-runs",
+              columns: [{ key: "idempotencyKey" }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/renderer/);
+  });
+
+  it("accepts false as an explicit interface Operation exclusion", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list"), get: v2Operation("get") },
+      interfaces: {
+        rest: { operations: { get: false } },
+        graphql: { operations: { list: false } },
+        mcp: { operations: { get: false } },
+      },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts transport-neutral secure input on a v2 create Operation", () => {
+    const create = {
+      ...v2Operation("create"),
+      interaction: {
+        type: "secureInput",
+        sourceField: "adapterId",
+        sourceEntity: "Adapter",
+        definitionsField: "configurationFields",
+        into: "configurationValues",
+        message: "Enter the connection values securely.",
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [
+        { key: "adapterId", valueType: "string" },
+        { key: "configurationValues", valueType: "object" },
+      ],
+      operations: { create },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+
+    expect(validator.validate(document, "connection.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+    create.interaction.type = "mcpElicitation";
+    expect(() => validator.validate(document, "connection.yaml")).toThrow(
+      /interaction/,
+    );
+  });
+
+  it("accepts login-session prerequisites only on a v2 entity create Operation", () => {
+    const create = {
+      ...v2Operation("create"),
+      prerequisites: [{
+        operation: "osf-integration.provider.setup-guide",
+        receipt: { binding: "loginSession" },
+      }],
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { create },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+
+    expect(validator.validate(document, "adapter.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    create.implementation.action = "update";
+    expect(() => validator.validate(document, "adapter.yaml")).toThrow(
+      /prerequisites|implementation/,
+    );
+  });
+
+  it("rejects an unknown strict v2 MCP tool projection", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list") },
+      interfaces: {
+        mcp: { tools: "per-tenant", operations: { list: {} } },
+      },
+    });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/tools/);
+  });
+
+  it("accepts only the canonical server-issued, version-bound challenge shape", () => {
+    const challenged = {
+      ...v2Operation("delete"),
+      confirmation: {
+        mode: "challenge",
+        challenge: {
+          kind: "type-current-field",
+          field: "idempotencyKey",
+          issuedBy: "server",
+          bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+          expiresAfter: "PT5M",
+          singleUse: true,
+        },
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { remove: challenged },
+      interfaces: { rest: { operations: { remove: {} } } },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+
+    challenged.confirmation.challenge.issuedBy = "client" as never;
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/issuedBy/);
+  });
+
+  it("uses acknowledgement instead of the ambiguous explicit confirmation mode", () => {
+    const create = {
+      ...v2Operation("create"),
+      confirmation: { mode: "acknowledgement" },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { create },
+      interfaces: { rest: { operations: { create: {} } } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    create.confirmation.mode = "explicit";
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /confirmation/,
+    );
+  });
+
+  it("accepts strict version and edit-lease concurrency authoring", () => {
+    const update = {
+      ...v2Operation("update"),
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [
+        { key: "updatedAt", valueType: "datetime", readOnly: true },
+        { key: "idempotencyKey", valueType: "string" },
+      ],
+      operations: { update },
+      interfaces: { rest: { operations: { update: {} } } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    update.concurrency.editLease.expiresAfterInactivity = "15 minutes";
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /expiresAfterInactivity/,
+    );
+  });
+
+  it("keeps v1 and v2 closed instead of accepting mixed contracts", () => {
+    const v1WithOperations = coreEntity({
+      operations: { list: v2Operation("list") },
+      interfaces: { rest: { operations: { list: {} } } },
+    });
+    expect(() => validator.validate(v1WithOperations, "billing-run.yaml")).toThrow();
+
+    const v2WithLegacyRest = coreEntity({
+      schemaVersion: 2,
+      rest: true,
+      operations: { list: v2Operation("list") },
+      interfaces: { rest: { operations: { list: {} } } },
+    });
+    expect(() => validator.validate(v2WithLegacyRest, "billing-run.yaml")).toThrow();
+  });
+
+  it("rejects operation field projections until the compiler implements them", () => {
+    const operation = { ...v2Operation("get"), output: { fields: ["idempotencyKey"] } };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { get: operation },
+      interfaces: { rest: { operations: { get: {} } } },
+    });
+
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/output/);
+  });
 
   it("accepts entity-level indexes", () => {
     // backend-manifest.ts resolves these field keys to columns and emits

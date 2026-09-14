@@ -31,6 +31,14 @@ import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
 import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
+import { buildBlueprint } from "./blueprint.js";
+import { buildEntityOperations } from "./entity-operations.js";
+import {
+  isCoreEntityV2,
+  v2PluginOperations,
+  v2WebOperationActions,
+  v2WebUi,
+} from "../entity-v2.js";
 
 function visitGroups(
   groups: readonly CompiledViewGroup[] | undefined,
@@ -93,11 +101,30 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
-  const views = buildViews(coreEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
+  const viewEntity = isCoreEntityV2(coreEntity)
+    ? { ...coreEntity, ui: v2WebUi(coreEntity) }
+    : coreEntity;
+  const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
   const compiledProfiles = buildProfiles(profiles, mappings);
   const authorization = buildAuthorization(coreEntity, profiles, modelFields);
+  const entity = {
+    id: `${coreEntity.module}.${coreEntity.entity}`,
+    name: coreEntity.entity,
+  };
+  const blueprint = buildBlueprint(coreEntity, modelFields, columns);
+  const entityOperations = buildEntityOperations({
+    entity,
+    coreEntity,
+    crud,
+    authorization,
+  });
+  if (blueprint && (coreEntity.schemaVersion !== 2 ||
+      entityOperations.create?.implementation.type !== "entity" ||
+      entityOperations.update?.implementation.type !== "entity")) {
+    throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
+  }
   const tableName = deriveTableName(coreEntity.entity);
   const canonical = buildCanonicalCompilerKernel({
     model: { fields: modelFields, relationships },
@@ -106,11 +133,11 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   });
 
   return {
+    authoringVersion: coreEntity.schemaVersion === 2 ? 2 : 1,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
-      id: `${coreEntity.module}.${coreEntity.entity}`,
-      name: coreEntity.entity,
+      ...entity,
       module: coreEntity.module,
       title: coreEntity.title,
       description: coreEntity.description,
@@ -123,8 +150,50 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         : {}),
     },
     storage: { table: tableName, columns },
+    ...(blueprint ? { blueprint } : {}),
+    ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
     model: { fields: modelFields, relationships },
     crud,
+    entityOperations,
+    ...(isCoreEntityV2(coreEntity)
+      ? { pluginOperations: v2PluginOperations(coreEntity) }
+      : {}),
+    ...(isCoreEntityV2(coreEntity)
+      ? {
+          interfaces: {
+            ...(coreEntity.interfaces?.web
+              ? {
+                  web: {
+                    operations: v2WebOperationActions(coreEntity)!,
+                    ...(coreEntity.interfaces.web.views.record?.layout.context
+                      ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
+                      : {}),
+                    ...(coreEntity.interfaces.web.views.collection.actions?.length
+                      ? {
+                          collectionActions: [
+                            ...coreEntity.interfaces.web.views.collection.actions,
+                          ],
+                        }
+                      : {}),
+                    ...(coreEntity.interfaces.web.views.collection.renderer ||
+                      coreEntity.interfaces.web.views.record?.renderer
+                      ? {
+                          renderers: {
+                            ...(coreEntity.interfaces.web.views.collection.renderer
+                              ? { collection: coreEntity.interfaces.web.views.collection.renderer }
+                              : {}),
+                            ...(coreEntity.interfaces.web.views.record?.renderer
+                              ? { record: coreEntity.interfaces.web.views.record.renderer }
+                              : {}),
+                          },
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
     graphql,
     ...(rest ? { rest } : {}),
     ...(mcp ? { mcp } : {}),
@@ -136,7 +205,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
             : {}),
         }
       : undefined,
-    hooks: coreEntity.hooks,
+    hooks: isCoreEntityV2(coreEntity) ? undefined : coreEntity.hooks,
     permissions: coreEntity.permissions,
     authorization,
     views,

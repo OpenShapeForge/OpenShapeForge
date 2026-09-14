@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
+import { collectBlueprintOperations } from "./blueprint-operations.js";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
 import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
@@ -13,8 +15,9 @@ import {
   resolveActiveAuthoringDir,
 } from "./active-manifest.js";
 import {
+  buildCoreReferentiedataSnapshot,
   generateCoreReferentiedataArtifacts,
-  loadCoreReferentiedataSnapshot,
+  loadCoreReferentiedataCatalog,
   type CoreReferentiedataSnapshot,
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
@@ -28,9 +31,14 @@ import {
 import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
+import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  buildStaticOperationCatalog,
+  collectAuthoredEntityPluginOperations,
+  collectAuthoredModulePluginOperations,
+  collectEntityOperations,
   collectPluginOperations,
   renderOperationCatalog,
 } from "./generate-operations.js";
@@ -38,6 +46,25 @@ import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
+import { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+import {
+  loadFieldAuthoringProfiles,
+  loadFieldCompilationCatalogs,
+} from "./authoring/loader.js";
+import {
+  createFieldSchemaCompiler,
+  renderRuntimeFieldSchemaRegistry,
+} from "./field-json-schema.js";
+import {
+  buildFieldAuthoringRegistry,
+  FIELD_AUTHORING_REGISTRY_PATH,
+  renderFieldAuthoringRegistry,
+} from "./field-authoring-registry.js";
+import {
+  loadSettingsPolicy,
+  renderSettingsPolicy,
+  SETTINGS_POLICY_PATH,
+} from "./settings.js";
 
 export type {
   FieldDefinition,
@@ -53,11 +80,106 @@ export type {
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
   FieldV2,
+  CompiledField,
+  CompiledEntityOperation,
+  ComponentCatalog,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
+  SemanticTypeDefinition,
 } from "./authoring/types.js";
+export type {
+  CompilerPlugin,
+  CompiledEntityInfo,
+  CompiledPluginOperation,
+  CompiledStaticEntityOperation,
+  CompiledStaticOperation,
+  EntityOperationCatalog,
+  JsonSchema,
+  JsonValue,
+  PluginBaseContext,
+  PluginGenerateContext,
+  PluginExecutionCompatibility,
+  PluginOperationAuth,
+  PluginOperationContract,
+  PluginOperationError,
+  PluginSchemaMigration,
+  StaticOperationCatalog,
+} from "./plugins.js";
+export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
+export { resolveModelFields } from "./authoring/compiler/model.js";
+export {
+  entityOperationControlSchema,
+  entityOperationJsonSchemas,
+  entityRecordOutputSchema,
+  entityRelationshipColumn,
+  entityRelationshipKeys,
+  withEntityRelationshipKeys,
+  writableEntityFields,
+} from "./entity-operation-json-schema.js";
+export type {
+  EntityRelationshipKey,
+  EntityRelationshipTarget,
+} from "./entity-operation-json-schema.js";
+export {
+  compiledFieldSchema,
+  compiledObjectSchema,
+  createFieldSchemaCompiler,
+  renderRuntimeFieldSchemaRegistry,
+  runtimeFieldSchemaRegistry,
+} from "./field-json-schema.js";
+export {
+  buildFieldAuthoringRegistry,
+  FIELD_AUTHORING_REGISTRY_PATH,
+  renderFieldAuthoringRegistry,
+} from "./field-authoring-registry.js";
+export type { FieldAuthoringRegistry } from "./field-authoring-registry.js";
+export type { FieldAuthoringProfile } from "./authoring/loader.js";
+export {
+  compileSettingsPolicy,
+  loadSettingsPolicy,
+  renderSettingsPolicy,
+  SETTINGS_POLICY_PATH,
+} from "./settings.js";
+export type {
+  AuthoringConfig,
+  AuthoringSettingValue,
+} from "./authoring/layers.js";
+export type {
+  BooleanSettingDefinition,
+  ChoiceSettingDefinition,
+  EffectiveSetting,
+  EffectiveSettingsPolicy,
+  IntegerSettingDefinition,
+  OwnedSettingsSource,
+  ProviderSettingDefinition,
+  SettingDefinition,
+  SettingsDefinitionSource,
+  SettingsOwner,
+  SettingsProviderSource,
+  StringSetSettingDefinition,
+} from "./settings.js";
+export type {
+  CompiledFieldSchemaOptions,
+  FieldSchemaCompiler,
+} from "./field-json-schema.js";
+export type {
+  WebCollectionView,
+  WebEntityView,
+  WebEntityInterface,
+  WebFieldGroup,
+  WebFieldProjection,
+  WebManifestOptions,
+  WebManifestV1,
+  WebOperationIntent,
+  WebOperationRef,
+  WebRecordTab,
+  WebRecordView,
+  WebRelationshipProjection,
+  WebViewMode,
+} from "./authoring/web-manifest.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 
@@ -69,6 +191,7 @@ export type ArtifactCollection = {
     connectors: GeneratedArtifact[];
     modules: GeneratedArtifact[];
     pluginMigrations: GeneratedArtifact[];
+    settings: GeneratedArtifact[];
     operations: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
@@ -189,33 +312,89 @@ export async function collectAllArtifacts(
   const authoringConfig = loadAuthoringConfig(repoRoot);
   const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
+  const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
   // data-layer + API repo skips them entirely; adding apps/web back
   // re-enables generation without compiler changes.
   const webPresent = existsSync(join(repoRoot, "apps/web"));
+  const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
   // Built once, as a value, and shared by everything that needs it. Reading the
   // emitted snapshot back off disk would see the PREVIOUS run's file, since
   // artifacts are written only after every generator has produced its contents.
-  const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
+  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertReferentieGroepsResolve(entities, referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     repoRoot,
     authoringDir,
     webPresent,
   });
-  const operations = collectPluginOperations(plugins, {
+  const operationContext = {
     repoRoot,
     authoringDir,
     webPresent,
-  });
+  };
+  const moduleOperationCatalogs = loadOperationCatalogs(authoringDir)
+    .map(({ document }) => document);
+  const operations = [
+    ...collectBlueprintOperations(entities),
+    ...collectPluginOperations(plugins, operationContext),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext),
+    ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
+  ].sort((left, right) => left.key.localeCompare(right.key));
+  for (let index = 1; index < operations.length; index += 1) {
+    if (operations[index - 1]!.key === operations[index]!.key) {
+      throw new Error(
+        `Duplicate canonical Operation key "${operations[index]!.key}". ` +
+          "Keep its metadata in exactly one YAML or compiler contribution.",
+      );
+    }
+  }
+  const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
-  assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
-  auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
+  assertOperationRuntimeModules(operations, ["osf-blueprints", ...moduleRegistry.modules.map((module) => module.name)]);
+  const operationToolProjection = auditOperationSurfaceCollisions(
+    operations,
+    manifest,
+    connectors,
+    MAX_DEDICATED_TOOLS,
+  );
+  const operationCatalog = buildStaticOperationCatalog(
+    operations,
+    entityOperations,
+    entities,
+    referentiedata,
+  );
+  const fieldCompilationCatalogs = loadFieldCompilationCatalogs(authoringDir);
+  const fieldAuthoringProfiles = loadFieldAuthoringProfiles(authoringDir);
+  const fieldSchemas = createFieldSchemaCompiler({
+    ...fieldCompilationCatalogs,
+    referentiedata,
+  });
+  const context = {
+    repoRoot,
+    authoringDir,
+    webPresent,
+    manifest,
+    entities,
+    operationCatalog,
+    fieldSchemas,
+    settingsPolicy,
+  };
+  const executionCompatibility = plugins.flatMap((plugin) => {
+    const authored = typeof plugin.executionCompatibility === "function"
+      ? plugin.executionCompatibility(context)
+      : plugin.executionCompatibility;
+    return authored ? [{ plugin: plugin.name, contribution: authored }] : [];
+  });
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
+      // Resolves the operation keys authored in `writtenBy` into routes, and
+      // fails the build on a key no operation answers to.
+      operations: operationCatalog.operations,
       openApi: {
         entities,
         referentiedata,
@@ -243,13 +422,38 @@ export async function collectAllArtifacts(
           activeManifestSource,
           referentiedata,
           operations,
+          executionCompatibility,
+          operationToolProjection,
         ),
       },
     ],
     operations: [
       {
         path: "apps/api/src/generated/operations/catalog.json",
-        contents: renderOperationCatalog(operations),
+        contents: renderOperationCatalog(operationCatalog),
+      },
+      {
+        path: "apps/api/src/generated/operations/field-schema-registry.json",
+        contents: renderRuntimeFieldSchemaRegistry({
+          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          referentiedata,
+        }),
+      },
+      {
+        path: FIELD_AUTHORING_REGISTRY_PATH,
+        contents: renderFieldAuthoringRegistry(buildFieldAuthoringRegistry({
+          fieldAuthoringProfiles,
+          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          referentiedataCatalog,
+        })),
+      },
+      {
+        path: "apps/api/src/generated/compiler/canonical-condition.ts",
+        contents: await readFile(join(import.meta.dir, "authoring/canonical/canonical-condition.ts"), "utf8"),
+      },
+      {
+        path: "apps/api/src/generated/compiler/expression-evaluator.ts",
+        contents: await readFile(join(import.meta.dir, "authoring/canonical/expression-evaluator.ts"), "utf8"),
       },
     ],
     connectors: [
@@ -278,18 +482,32 @@ export async function collectAllArtifacts(
               contents: renderPluginMigrationRegistry(pluginMigrationRegistry),
             },
           ],
+    settings: [
+      {
+        path: SETTINGS_POLICY_PATH,
+        contents: renderSettingsPolicy(settingsPolicy),
+      },
+    ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     // Headless hosts get the API's empty persisted-operation manifest from the
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
-    ui: webPresent
-      ? await generateAuthoringUiArtifacts(authoringDir, repoRoot)
-      : [],
+    ui: [
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : []),
+      ...(productWebPresent
+        ? [{
+            path: "apps/product-web/src/generated/web-manifest.json",
+            contents: renderWebManifest(buildWebManifest(
+              entities,
+              { locale: "nl", routeLocale: "en" },
+            )),
+          }]
+        : []),
+    ],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
     plugins: [],
   };
 
-  const context = { repoRoot, authoringDir, webPresent, manifest, entities };
   for (const plugin of plugins) {
     if (plugin.generate) {
       groups.plugins.push({ name: plugin.name, artifacts: await plugin.generate(context) });
@@ -304,6 +522,7 @@ export async function collectAllArtifacts(
     ...groups.connectors,
     ...groups.modules,
     ...groups.pluginMigrations,
+    ...groups.settings,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,
@@ -342,6 +561,7 @@ export async function runCompiler(options: RunCompilerOptions = {}) {
     await writeFile(target, artifact.contents, "utf8");
   }
 
+  await pruneGeneratedUiShards(repoRoot, new Set(all.map((artifact) => artifact.path)));
   return all.map((artifact) => artifact.path);
 }
 

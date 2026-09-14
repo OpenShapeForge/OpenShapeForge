@@ -173,10 +173,10 @@ jobs:
               found=$((found + 1))
             fi
           done <<'PAIRS'
-          openshapeforge-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
-          openshapeforge-realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
-          openshapeforge-realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
-          openshapeforge-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
+          openshapeforge-realm-user-tenant-a-admin|E2E_USER_PASSWORD_TENANT_A_ADMIN
+          openshapeforge-realm-user-tenant-a-no-access|E2E_USER_PASSWORD_TENANT_A_NO_ACCESS
+          openshapeforge-realm-user-tenant-a-user|E2E_USER_PASSWORD_TENANT_A_USER
+          openshapeforge-realm-user-tenant-b-user|E2E_USER_PASSWORD_TENANT_B_USER
           openshapeforge-realm-client-openshapeforge-gateway|E2E_KEYCLOAK_CLIENT_SECRET
           PAIRS
           echo "realm user passwords found in Secret Manager: $found (0 = development realm, committed defaults apply)"

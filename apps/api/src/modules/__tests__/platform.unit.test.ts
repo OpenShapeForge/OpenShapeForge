@@ -13,6 +13,9 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import type { McpInvocationContext, RuntimeModule } from "../contract.js";
 import { authorizeMcpRequest } from "../mcp-hooks.js";
+import { getEntityOperationContracts } from "../../operations/entity/index.js";
+import { operationContractFingerprint } from "../../operations/contract-fingerprint.js";
+import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
 import {
   __assertSecretFreeModuleEventForTests,
@@ -64,6 +67,216 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("keeps RelationGroup memberships request-fresh without exposing mutable authority", () => {
+    const source = claims();
+    source.relationGroupIds = ["11111111-1111-4111-8111-111111111111"];
+    const capability = createModuleSessionCapability(source);
+    expect(capability.relationGroupIds).toEqual(source.relationGroupIds);
+    expect(Object.isFrozen(capability.relationGroupIds)).toBe(true);
+
+    source.relationGroupIds = [];
+    expect(capability.relationGroupIds).toEqual([]);
+    expect(() => {
+      (capability.relationGroupIds as string[]).push("forged");
+    }).toThrow();
+  });
+
+  it("exposes only canonical, safely classified database refusals", () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const authored = Object.assign(
+      new Error("STATE_TRANSITION_REFUSED: This transition is not available."),
+      {
+        name: "PostgresError",
+        code: "P0001",
+        routine: "exec_stmt_raise",
+        detail: "Return the record to draft first.",
+      },
+    );
+    expect(runtime.services.errors.classifyDatabase(authored)).toEqual({
+      code: "STATE_TRANSITION_REFUSED",
+      message: "This transition is not available.",
+      detail: "Return the record to draft first.",
+      retryable: false,
+    });
+
+    const unsafe = Object.assign(new Error("password=must-not-leak"), {
+      name: "PostgresError",
+      code: "22P02",
+      detail: "secret database detail",
+    });
+    expect(runtime.services.errors.classifyDatabase(unsafe)).toBeUndefined();
+  });
+
+  it("includes static plugin Operations in the canonical registry and executor", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const definition = {
+      id: "example.static.run",
+      key: "example.static.run",
+      intent: "invoke",
+      name: "Run static Operation",
+      description: "Runs a compiler-contributed Operation.",
+      input: { kind: "json-schema", schema: { type: "object" } },
+      output: { kind: "json-schema", schema: {} },
+      effects: { data: "read" as const, external: "none" as const },
+      reliability: { idempotency: { mode: "natural" as const } },
+    };
+    runtime.registerStaticOperations([{
+      definition,
+      available: (session) => session.roles.includes("reader"),
+      execute: async (_session, request) => ({
+        data: { operation: request.operation.id },
+        operations: [],
+      }),
+    }]);
+
+    await runtime.withActiveOperationSession(operationClaims(), async (session) => {
+      await expect(runtime.services.operations.list(session))
+        .resolves.toContainEqual(definition);
+      await expect(runtime.services.operations.get(session, definition.id))
+        .resolves.toEqual(definition);
+      await expect(runtime.services.operations.execute(session, {
+        operation: { id: definition.id, intent: "invoke" },
+        expectedContractFingerprint: operationContractFingerprint(definition),
+      })).resolves.toEqual({
+        data: { operation: definition.id },
+        operations: [],
+      });
+      await expect(runtime.services.operations.execute(session, {
+        operation: { id: definition.id, intent: "invoke" },
+        expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+      })).resolves.toMatchObject({
+        error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+      });
+    });
+  });
+
+  it("checks generated entity Operation preconditions before database effects", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const definition = getEntityOperationContracts()[0];
+    expect(definition).toBeDefined();
+    try {
+      await runtime.withActiveOperationSession(operationClaims(), async (session) => {
+        await expect(runtime.services.operations.execute(session, {
+          operation: { id: definition!.id, intent: definition!.intent },
+          expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+        })).resolves.toMatchObject({
+          error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+        });
+      });
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it("resolves and executes record-derived Operations only for a live capability", async () => {
+    const db = testDatabase();
+    // DummyDriver does not persist receipt rows. This test exercises provider
+    // dispatch and session lifetime; receipt persistence has its own DB tests.
+    __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
+      options.execute(() => {}));
+    const runtime = new ModulePlatformRuntime(db);
+    const definition = {
+      id: "example.record.invoke:one@1",
+      intent: "invoke",
+      name: "Invoke record",
+      description: "Invokes one published record.",
+      input: { kind: "json-schema", schema: { type: "object" } },
+      output: { kind: "json-schema", schema: {} },
+      effects: { data: "read" as const, external: "write" as const },
+      reliability: { idempotency: { mode: "keyed" as const } },
+    };
+    let declarativeSession: TrustedSessionContext | undefined;
+    let providerExecutions = 0;
+    runtime.registerDeclarativeServiceExecutor(async (session, request, options) => {
+      options?.signal?.throwIfAborted();
+      declarativeSession = session;
+      return {
+        data: {
+          definition: request.definition.id,
+          idempotencyKey: request.idempotencyKey,
+        },
+        operations: [],
+      };
+    });
+    runtime.registerOperationProviders([{
+      name: "example",
+      operationProviders: [{
+        id: "example.records",
+        list: async () => [definition],
+        get: async (_session, operationId) =>
+          operationId === definition.id ? definition : undefined,
+        execute: async (context, request) => {
+          providerExecutions += 1;
+          return context.invokeDeclarativeService({
+            definition: {
+              entity: "Service",
+              id: "service-one",
+              key: "service-one",
+              version: 1,
+            },
+            ...(request.input ? { input: request.input } : {}),
+            ...(request.idempotencyKey
+              ? { idempotencyKey: request.idempotencyKey }
+              : {}),
+          });
+        },
+      }],
+    }]);
+    let retained!: TrustedSessionContext;
+    try {
+      await runtime.withActiveOperationSession(operationClaims(), async (active) => {
+        retained = active;
+        await expect(runtime.services.operations.get(active, definition.id))
+          .resolves.toEqual(definition);
+        await expect(runtime.services.operations.list(active))
+          .resolves.toContainEqual(definition);
+        await expect(runtime.services.operations.execute(active, {
+          operation: { id: definition.id, intent: definition.intent },
+          input: { value: "one" },
+          idempotencyKey: "attempt-1",
+          expectedContractFingerprint: operationContractFingerprint(definition),
+        })).resolves.toEqual({
+          data: {
+            definition: "service-one",
+            idempotencyKey: "attempt-1",
+          },
+          operations: [],
+        });
+        expect(providerExecutions).toBe(1);
+        await expect(runtime.services.operations.execute(active, {
+          operation: { id: definition.id, intent: definition.intent },
+          expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+        })).resolves.toMatchObject({
+          error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+        });
+        expect(providerExecutions).toBe(1);
+        expect(declarativeSession).toBe(active);
+      });
+      await expect(runtime.services.operations.get(retained, definition.id))
+        .rejects.toThrow(/live verified session/);
+    } finally {
+      __setOperationExecutionReceiptExecutorForTests(db, undefined);
+      await db.destroy();
+    }
+  });
+
+  it("refuses duplicate runtime Operation provider ids", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const provider = {
+      id: "duplicate",
+      list: async () => [],
+      get: async () => undefined,
+      execute: async () => ({
+        error: { code: "NOOP", message: "No operation.", retryable: false },
+      }),
+    };
+    expect(() => runtime.registerOperationProviders([
+      { name: "one", operationProviders: [provider] },
+      { name: "two", operationProviders: [provider] },
+    ])).toThrow(/empty or duplicated/);
+  });
+
   it("authorizes a module-owned resource handle only for its exact live session", async () => {
     const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
     const active = createModuleSessionCapability(claims());

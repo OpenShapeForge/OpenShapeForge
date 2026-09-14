@@ -18,31 +18,54 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
 
+/**
+ * Where the suite REACHES Keycloak: the plain-http listener of the compose
+ * stack, which needs no CA trust. That is not necessarily the issuer the realm
+ * mints — a deployment that pins `KC_HOSTNAME` to a public https name (the
+ * host repo does: `https://auth.hubble.localhost`) reports that name in every
+ * token's `iss` no matter which port a caller used. Verifying against a URL
+ * that was only ever the way in would then reject every token, so the issuer
+ * is read from the realm's own discovery document instead of assumed.
+ */
 const KEYCLOAK_URL = process.env.E2E_KEYCLOAK_URL ?? "http://localhost:8181";
 const REALM = process.env.E2E_KEYCLOAK_REALM ?? "openshapeforge";
-const ISSUER = `${KEYCLOAK_URL}/realms/${REALM}`;
+const REALM_URL = `${KEYCLOAK_URL}/realms/${REALM}`;
+const ISSUER = process.env.E2E_KEYCLOAK_ISSUER ?? (await discoverIssuer()) ?? REALM_URL;
+
+async function discoverIssuer(): Promise<string | null> {
+  try {
+    const response = await fetch(`${REALM_URL}/.well-known/openid-configuration`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return null;
+    const issuer = ((await response.json()) as { issuer?: unknown }).issuer;
+    return typeof issuer === "string" && issuer.length > 0 ? issuer : null;
+  } catch {
+    return null;
+  }
+}
 const DATABASE_URL =
   process.env.DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
 
 const ROLE_CLIENT = "erp-provider";
 const MANAGE_ROLE = "Platform.ApiKeys.Manage";
-/** Read-only entity role. `directie` ships with ReadWrite only, so the suite
- *  grants this one to prove per-OPERATION enforcement flows through a key. */
+/** Read-only entity role. The suite grants this one to prove per-operation
+ *  enforcement flows through a key. */
 const READ_ROLE = "Relations.All.Read";
 const WRITE_ROLE = "Relations.All.ReadWrite";
-/** Held by `directie`, but no generated entity is gated by it — a key granted
- *  only this must reach no entity at all. */
+/** Held by the test admin, but no generated entity is gated by it — a key
+ *  granted only this must reach no entity at all. */
 const OTHER_DOMAIN_ROLE = "RealEstate.All.ReadWrite";
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET =
   process.env.E2E_KEYCLOAK_ADMIN_SECRET ?? "openshapeforge-apikey-provisioner-secret";
-const TENANT_ACME = "11111111-1111-4111-8111-111111111111";
-
 // Set BEFORE the app modules read them. identity.ts caches the verifier lazily
 // and exposes a reset, so ordering only has to hold at first use.
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
-process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = `${ISSUER}/protocol/openid-connect/certs`;
+// Keys over the reachable listener, issuer as minted: the same split the host
+// runtime makes, so neither needs the https name to be trusted locally.
+process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = `${REALM_URL}/protocol/openid-connect/certs`;
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = ROLE_CLIENT;
 process.env.OPENSHAPEFORGE_API_KEY_SECRET_KEYS = `e2e:${randomBytes(32).toString("base64")}`;
 process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL = KEYCLOAK_URL;
@@ -168,11 +191,11 @@ async function reachable(url: string): Promise<boolean> {
   }
 }
 
-const keycloakUp = await reachable(`${ISSUER}/.well-known/openid-configuration`);
+const keycloakUp = await reachable(`${REALM_URL}/.well-known/openid-configuration`);
 
 /** Bearer token for a seeded realm user, via the dev gateway client. */
 async function userToken(username: string, password = "test"): Promise<string | null> {
-  const response = await fetch(`${ISSUER}/protocol/openid-connect/token`, {
+  const response = await fetch(`${REALM_URL}/protocol/openid-connect/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -219,7 +242,7 @@ async function ensureUserRoles(
     }
   }
 
-  const users = (await raw.json("GET", `/users?username=acme-directie&exact=true`)) as Array<{
+  const users = (await raw.json("GET", `/users?username=tenant-a-admin&exact=true`)) as Array<{
     id: string;
   }>;
   const userId = users[0]?.id;
@@ -265,7 +288,7 @@ const ready = await (async () => {
     return false;
   }
   // Fetched AFTER the grant so the token actually carries the role.
-  adminToken = await userToken("acme-directie");
+  adminToken = await userToken("tenant-a-admin");
   if (!adminToken) return false;
   // The grant only takes effect in a token minted after it, and the suite
   // asserts against roles it named itself rather than guessing from claims.
@@ -636,12 +659,12 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("a user without the management role cannot provision at all", async () => {
     // A real seeded identity, broadly privileged on business data and holding
     // no Platform.* role — the shape an ordinary employee has.
-    const consultant = await userToken("acme-verhuurconsulent");
-    expect(consultant).not.toBeNull();
+    const ordinaryUser = await userToken("tenant-a-user");
+    expect(ordinaryUser).not.toBeNull();
 
     const refused = await createKey(
       { displayName: "unauthorized", roles: [] },
-      consultant,
+      ordinaryUser,
     );
     expect(refused.status).toBe(403);
     expect(refused.body.error.message).toContain("Not authorized to manage API keys");
@@ -738,7 +761,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("the privilege ceiling refuses a role the caller does not hold", async () => {
     const refused = await createKey({
       displayName: "e2e escalation attempt",
-      // acme-directie is broadly privileged but holds no such role — a
+      // The neutral test admin is broadly privileged but holds no such role — a
       // fabricated name is the cleanest proof the check is by membership and
       // not by a denylist.
       roles: ["Platform.SystemBypass", "Totally.Made.Up"],

@@ -31,6 +31,8 @@
 export type KeycloakServiceAccountConfig = {
   /** Keycloak origin, no trailing slash. */
   baseUrl: string;
+  /** Optional TLS ingress used for routing while preserving baseUrl's TLS identity. */
+  connectUrl?: string;
   /** The realm holding tenant Organizations and the SPI. */
   tenantRealm: string;
   clientId: string;
@@ -96,11 +98,59 @@ export type ServiceAccountTokenProvider = {
   invalidate(): void;
 };
 
+/**
+ * Route Keycloak calls through a separate TLS ingress without weakening TLS.
+ * The public origin remains the HTTP Host and certificate server name; only
+ * the socket destination changes.
+ */
+export function createKeycloakFetch(
+  config: KeycloakServiceAccountConfig,
+  fetchImplementation: typeof globalThis.fetch = globalThis.fetch,
+): typeof globalThis.fetch {
+  if (!config.connectUrl) return fetchImplementation;
+  const publicOrigin = new URL(config.baseUrl);
+  const connectOrigin = new URL(config.connectUrl);
+
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const request =
+      input instanceof Request
+        ? new Request(input, init)
+        : new Request(input instanceof URL ? input.href : input, init);
+    const requested = new URL(request.url);
+    if (requested.origin !== publicOrigin.origin) {
+      throw new TypeError("The Keycloak connect route only accepts its configured public origin.");
+    }
+    const routed = new URL(requested);
+    routed.protocol = connectOrigin.protocol;
+    routed.host = connectOrigin.host;
+    const headers = new Headers(request.headers);
+    headers.set("host", publicOrigin.host);
+    const routedRequest = new Request(routed.href, {
+      cache: request.cache,
+      credentials: request.credentials,
+      headers,
+      integrity: request.integrity,
+      keepalive: request.keepalive,
+      method: request.method,
+      mode: request.mode,
+      redirect: "error",
+      referrer: request.referrer,
+      referrerPolicy: request.referrerPolicy,
+      signal: request.signal,
+      ...(request.body ? { body: request.body } : {}),
+    });
+    return fetchImplementation(routedRequest, {
+      headers,
+      tls: { serverName: publicOrigin.hostname },
+    } as RequestInit);
+  }) as typeof globalThis.fetch;
+}
+
 export function createServiceAccountTokenProvider(
   config: KeycloakServiceAccountConfig,
   options: ServiceAccountTokenOptions,
 ): ServiceAccountTokenProvider {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const now = options.now ?? (() => Date.now());
   const tokenUrl = `${config.baseUrl}/realms/${encodeURIComponent(config.tenantRealm)}/protocol/openid-connect/token`;
 

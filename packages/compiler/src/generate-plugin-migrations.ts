@@ -17,6 +17,7 @@ export const PLUGIN_MIGRATION_REGISTRY_PATH =
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
+  phase?: "beforeGenerated" | "afterGenerated";
   checksum: string;
   sql: string;
 };
@@ -37,6 +38,18 @@ function quoteIdent(value: string): string {
 
 function checksum(sql: string): string {
   return createHash("sha256").update(sql).digest("hex");
+}
+
+function migrationChecksum(
+  sql: string,
+  phase: PluginSchemaMigration["phase"],
+): string {
+  // Keep historical after-generated checksums byte-for-byte stable. A pre
+  // migration binds its phase into the immutable checksum so it cannot later
+  // move across the generated drift gate without being detected.
+  return phase === "beforeGenerated"
+    ? checksum(`beforeGenerated\0${sql}`)
+    : checksum(sql);
 }
 
 function nonEmptySql(sql: string, label: string): string {
@@ -322,7 +335,13 @@ function migrationEntry(
     migration.sql,
     `Plugin "${plugin}" schema migration "${migration.version}"`,
   );
-  return { plugin, version: migration.version, checksum: checksum(sql), sql };
+  return {
+    plugin,
+    version: migration.version,
+    ...(migration.phase === "beforeGenerated" ? { phase: migration.phase } : {}),
+    checksum: migrationChecksum(sql, migration.phase),
+    sql,
+  };
 }
 
 /**

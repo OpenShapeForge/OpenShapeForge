@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/operation-catalog.schema.json",
+  "title": "Operation Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "plugin", "operations", "interfaces"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "operationCatalog" },
+    "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "operations": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "allOf": [
+          { "$ref": "core-entity.schema.json#/$defs/entityOperationV2" },
+          {
+            "properties": {
+              "implementation": {
+                "properties": { "type": { "const": "plugin" } },
+                "required": ["type"]
+              }
+            },
+            "allOf": [
+              { "not": { "required": ["target"] } },
+              {
+                "not": {
+                  "properties": {
+                    "implementation": { "required": ["action"] }
+                  },
+                  "required": ["implementation"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "interfaces": {
+      "allOf": [
+        { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2" },
+        { "not": { "required": ["web"] } }
+      ]
+    }
+  }
+}

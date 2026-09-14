@@ -4,6 +4,7 @@ import {
   readTrustedContext,
   type ReadTrustedContextOptions,
 } from "@openshapeforge/auth";
+import type { IdentityLinkState } from "./identity-link.js";
 
 export type SessionScope = "tenant" | "group" | "self";
 
@@ -23,6 +24,10 @@ export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Opaque core binding to the verified bearer login session, when available. */
+  loginSessionBinding?: string;
+  /** Verified tenant-local Relation label; display only, never authorization. */
+  userDisplayName?: string | null;
   roles: string[];
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
@@ -33,6 +38,12 @@ export type TrustedSessionContext = {
    */
   groups: string[];
   /**
+   * Active RelationGroup memberships derived by the server from the linked
+   * Relation. This is deliberately separate from Keycloak group paths and
+   * platform org-unit scopes; inbound claims never populate it.
+   */
+  relationGroupIds?: readonly string[];
+  /**
    * Effective access scope used by the DB session layer to set `app.scope`.
    * Defaults to "self" — the most restrictive option — until upstream
    * resolution determines otherwise.
@@ -40,6 +51,14 @@ export type TrustedSessionContext = {
   scope: SessionScope;
   /** Which credential authenticated this session. */
   credential: SessionCredential;
+  // ---- identity ↔ Relation link (auth/identity-link.ts) ----
+  /**
+   * The party this login acts as in the tenant: the link state resolved on
+   * the bearer path. Read it through `sessionRelation(session)`; absent on
+   * trusted-context and API key sessions, which carry no person.
+   */
+  relation?: IdentityLinkState | null;
+  // ---- end identity ↔ Relation link ----
 };
 
 type AppOptions = {
@@ -67,6 +86,7 @@ export function readTrustedSessionContext(
     userId: base.userId,
     roles: base.roles,
     groups: base.groups ?? [],
+    relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",
   };

@@ -58,6 +58,7 @@ import {
   rootOrganizationIdentifiers,
   subOrganizationIdentifiers,
 } from "./organization-naming.js";
+import { ensureOrganizationScope } from "./organization-scopes.js";
 import {
   DEFAULT_TENANT_STATUS,
   loadTenantBySlug,
@@ -78,9 +79,20 @@ export type ProvisionTenantInput = {
   name: string;
 };
 
+/**
+ * The per-organization MCP audience scope as provisioning left it. `changed`
+ * is false on a replay of a converged scope, in the same spirit as `created`.
+ */
+export type ProvisionedOrganizationScope = {
+  name: string;
+  audiences: string[];
+  changed: boolean;
+};
+
 export type ProvisionTenantResult = {
   tenant: TenantRecord;
   organization: { id: string; alias: string; path: string };
+  organizationScope: ProvisionedOrganizationScope;
   /** False on a replay — the row was already there and the link already correct. */
   created: boolean;
 };
@@ -102,6 +114,7 @@ export type ProvisionSubOrganizationResult = {
     parentOrganizationId: string;
     rootOrganizationId: string;
   };
+  organizationScope: ProvisionedOrganizationScope;
   created: boolean;
 };
 
@@ -186,6 +199,15 @@ export async function provisionTenant(
   // Organization, so this is one GET that writes nothing.
   await reconcileOrganizationEnabled(deps, organization.id, row.status);
 
+  // ── 5. the MCP audience scope ────────────────────────────────────────────
+  // The Organization exists and is linked, so the scope that lets a token be
+  // minted for its MCP resource is provisioned now, by the same call. Last,
+  // because it is the one step that is NOT needed for the registry to be
+  // consistent: a failure here leaves a fully linked tenant whose MCP resource
+  // refuses every token, which the drift report names
+  // (ORGANIZATION_SCOPE_MISSING) and a replay or re-apply closes.
+  const organizationScope = await provisionOrganizationScope(deps, organization.alias);
+
   return {
     tenant: toTenantRecord(linked ?? { ...row, keycloak_organization_id: organization.id }),
     organization: {
@@ -193,8 +215,17 @@ export async function provisionTenant(
       alias: organization.alias,
       path: identifiers.organizationPath,
     },
+    organizationScope,
     created: row.inserted === true,
   };
+}
+
+async function provisionOrganizationScope(
+  deps: ProvisioningDeps,
+  alias: string,
+): Promise<ProvisionedOrganizationScope> {
+  const state = await ensureOrganizationScope(deps.organizationScopes, alias, deps.mcpResource);
+  return { name: state.scope, audiences: state.audiences, changed: state.actions.length > 0 };
 }
 
 async function linkTenantOrganization(
@@ -367,6 +398,11 @@ export async function provisionSubOrganization(
     },
   );
 
+  // ── 4. the MCP audience scope ────────────────────────────────────────────
+  // A sub-organisation is an Organization with its own alias and therefore its
+  // own MCP resource; same step, same reasoning as the tenant's.
+  const organizationScope = await provisionOrganizationScope(deps, organization.alias);
+
   return {
     orgUnit: toOrgUnitRecord(
       linked ?? { ...resolved.orgUnit, keycloak_organization_id: organization.id },
@@ -378,6 +414,7 @@ export async function provisionSubOrganization(
       parentOrganizationId: resolved.parentOrganizationId,
       rootOrganizationId: resolved.rootOrganizationId,
     },
+    organizationScope,
     created: resolved.orgUnit.inserted === true,
   };
 }

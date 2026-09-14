@@ -3,6 +3,7 @@ export type {
   AuthIdentity,
   AuthProfile,
   HeadersLike,
+  OrganizationAccess,
   ReadonlyHeadersLike,
   TrustedContextHeaderNames,
 } from "./types.js";
@@ -11,6 +12,7 @@ export {
   parseAuthIdentity,
   parseClientRoles,
   parseGroups,
+  parseOrganizations,
   parseRoles,
   parseScopes,
   parseTenantContext,
@@ -18,6 +20,13 @@ export {
   parseUserProfile,
   readJwtClaims,
 } from "./claims.js";
+
+export {
+  ORGANIZATION_TENANT_CACHE_TTL_MS,
+  organizationTenantCacheKey,
+  realmFromIssuer,
+  selectOrganizationMembership,
+} from "./organization-tenant.js";
 
 export {
   TRUSTED_CONTEXT_HEADERS,

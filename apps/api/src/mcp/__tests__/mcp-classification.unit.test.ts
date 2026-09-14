@@ -25,11 +25,24 @@ import {
   __clientSupportsMcpAppForTests as clientSupportsMcpApp,
   __configurationAppResultForTests as configurationAppResult,
   __configurationFallbackLeadForTests as configurationFallbackLead,
+  __configurationHandoffResultForTests as configurationHandoffResult,
   __describeEntityResourceForTests as describeEntityResource,
   __describeToolForTests as describeTool,
+  __publicOriginIsHttpsForTests as publicOriginIsHttps,
   __sessionMayInvokeForTests as sessionMayInvoke,
   __withholdClassifiedForTests as withholdClassified,
 } from "../generated-mcp-server.js";
+
+function withPublicOrigin(origin: string, run: () => void): void {
+  const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+  process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = origin;
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
+  }
+}
 
 describe("MCP App capability negotiation", () => {
   it("uses the app only when the official extension advertises its MIME type", () => {
@@ -52,23 +65,80 @@ describe("MCP App capability negotiation", () => {
     ).toBe(false);
   });
 
-  it("links elicited create tools to the fixed private app resource", () => {
-    const described = describeTool(
-      tool(CREATE_SCHEMA),
-      {
-        ...(entity([]) as AnyRecord),
-        elicitOnCreate: {
-          sourceTable: "erp.providers",
-          sourceField: "providerId",
-          definitionsField: "fields",
-          into: "configurationValues",
-        },
-      } as never,
-      table(),
-      session(WRITE),
-    ) as AnyRecord;
-    expect(described._meta).toEqual({
-      ui: { resourceUri: "ui://openshapeforge/configuration" },
+  it("links elicited create tools to the private app resource only on an https origin", () => {
+    const describe_ = () =>
+      describeTool(
+        tool(CREATE_SCHEMA),
+        {
+          ...(entity([]) as AnyRecord),
+          elicitOnCreate: {
+            sourceTable: "erp.providers",
+            sourceField: "providerId",
+            definitionsField: "fields",
+            into: "configurationValues",
+          },
+        } as never,
+        table(),
+        session(WRITE),
+      ) as AnyRecord;
+    withPublicOrigin("https://api.example.test", () => {
+      expect(publicOriginIsHttps()).toBe(true);
+      expect(describe_()._meta).toEqual({
+        ui: { resourceUri: "ui://openshapeforge/configuration" },
+      });
+    });
+    // An http/loopback origin cannot render inside a host's https iframe
+    // sandbox, so the app is not offered at all there.
+    withPublicOrigin("http://127.0.0.1:3271", () => {
+      expect(publicOriginIsHttps()).toBe(false);
+      expect(describe_()._meta).toBeUndefined();
+    });
+  });
+
+  it("answers clients without a secure form with the configuration URL in text and structure", () => {
+    withPublicOrigin("http://127.0.0.1:3271", () => {
+      const result = configurationHandoffResult({
+        continuation: { action: "configure", status: "awaiting_person", resumeWith: "list_connections" },
+        token: "handoff-token",
+        expiresInSeconds: 1800,
+        definitions: [
+          { key: "clientId", label: { en: "Google OAuth client ID" }, required: true },
+          {
+            key: "clientSecret",
+            label: { en: "Google OAuth client secret" },
+            required: true,
+            classification: { sensitivity: "confidential" },
+          },
+        ],
+        instructions: configurationFallbackLead("unsupported", "external"),
+        nowMs: Date.parse("2026-09-05T10:00:00.000Z"),
+      });
+      const url = "http://127.0.0.1:3271/api/entity-configuration/handoff-token";
+      expect(result.content[0]).toEqual({
+        type: "text",
+        text:
+          `Configuration needed: open ${url} in a browser and enter the values there ` +
+          "(link valid until 2026-09-05T10:30:00.000Z); they never pass through the chat.",
+      });
+      expect(result.structuredContent).toEqual({
+        action: "configure",
+        status: "awaiting_person",
+        resumeWith: "list_connections",
+        pending: true,
+        configurationUrl: url,
+        expiresAt: "2026-09-05T10:30:00.000Z",
+        fields: [
+          { key: "clientId", label: "Google OAuth client ID", secret: false },
+          { key: "clientSecret", label: "Google OAuth client secret", secret: true },
+        ],
+        instructions:
+          "The secure form could not be completed in this client. Give the person " +
+          "configurationUrl: open this link in a browser and enter the values there; " +
+          "they never pass through the chat.",
+      });
+      expect(JSON.parse(String((result.content[1] as { text: string }).text))).toEqual(
+        result.structuredContent,
+      );
     });
   });
 
@@ -81,7 +151,9 @@ describe("MCP App capability negotiation", () => {
         "private-token",
         "Provider",
       );
-      expect(result.content[0]?.text).not.toContain("private-token");
+      const first = result.content[0];
+      expect(first?.type).toBe("text");
+      expect(first?.type === "text" ? first.text : "").not.toContain("private-token");
       expect(JSON.stringify(result._meta)).toContain("private-token");
       expect(result._meta).toEqual({
         configurationUrl:
@@ -105,8 +177,8 @@ describe("MCP App capability negotiation", () => {
     );
     expect(configurationFallbackLead("unsupported", "external")).toBe(
       "The secure form could not be completed in this client. " +
-        "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
-        "it is the stable, signed-in secure configuration form and contains no bearer handoff token.",
+        "Give the person configurationUrl: open this link in a browser and enter " +
+        "the values there; they never pass through the chat.",
     );
     expect(configurationFallbackLead("timeout", "external")).toStartWith(
       "The secure form expired before it was completed — anything typed into it was NOT saved. ",
@@ -168,6 +240,33 @@ const tool = (inputSchema: AnyRecord) =>
     title: "Create Payment Detail",
     description: "Creates a new record.",
     inputSchema,
+    outputSchema: {
+      type: "object",
+      oneOf: [
+        {
+          type: "object",
+          required: ["data", "operations"],
+          properties: {
+            data: {
+              type: "object",
+              properties: {
+                accountHolder: { type: "string" },
+                iban: { type: "string" },
+                status: { type: "string" },
+              },
+              required: ["accountHolder", "iban"],
+              additionalProperties: true,
+            },
+            operations: { type: "array" },
+          },
+        },
+        {
+          type: "object",
+          required: ["error"],
+          properties: { error: { type: "object" } },
+        },
+      ],
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   }) as never;
 
@@ -432,6 +531,10 @@ describe("describeTool", () => {
     );
     const properties = (described.inputSchema as AnyRecord).properties as AnyRecord;
     expect(Object.keys(properties)).not.toContain("iban");
+    const success = (described.outputSchema!.oneOf as AnyRecord[])[0]!;
+    const output = (success.properties as AnyRecord).data as AnyRecord;
+    expect(Object.keys(output.properties as AnyRecord)).not.toContain("iban");
+    expect(output.required).toEqual(["accountHolder"]);
   });
 
   it("advertises them to a caller holding a write grant", () => {
@@ -443,6 +546,9 @@ describe("describeTool", () => {
     );
     const properties = (described.inputSchema as AnyRecord).properties as AnyRecord;
     expect(Object.keys(properties)).toContain("iban");
+    const success = (described.outputSchema!.oneOf as AnyRecord[])[0]!;
+    const output = (success.properties as AnyRecord).data as AnyRecord;
+    expect(Object.keys(output.properties as AnyRecord)).toContain("iban");
   });
 
   it("carries the operation annotations through either way", () => {

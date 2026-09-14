@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SQL } from "bun";
-import { sql, type Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
@@ -29,8 +29,8 @@ import {
 } from "../migrations/generated-schema.js";
 import {
   applyVersionedMigrations,
-  validateVersionedRegistry,
   type VersionedMigration,
+  validateVersionedRegistry,
 } from "../migrations/versioned-runner.js";
 
 // The migration chain now provisions the cluster-wide openshapeforge_app role and
@@ -72,10 +72,7 @@ async function withScratchDb<T>(fn: (url: string) => Promise<T>): Promise<T> {
   }
 }
 
-async function withDb<T>(
-  url: string,
-  fn: (db: Kysely<DB>) => Promise<T>,
-): Promise<T> {
+async function withDb<T>(url: string, fn: (db: Kysely<DB>) => Promise<T>): Promise<T> {
   const runtime = createDatabaseRuntime({
     databaseUrl: url,
     maxConnections: 1,
@@ -92,9 +89,7 @@ async function runChain(url: string, versioned?: VersionedMigration[]) {
   return withDb(url, (db) =>
     db
       .connection()
-      .execute((conn) =>
-        runMigrationChain(conn, versioned === undefined ? {} : { versioned }),
-      ),
+      .execute((conn) => runMigrationChain(conn, versioned === undefined ? {} : { versioned })),
   );
 }
 
@@ -104,11 +99,7 @@ async function runVersioned(url: string, registry: VersionedMigration[]) {
   );
 }
 
-async function tableExists(
-  db: Kysely<DB>,
-  schema: string,
-  table: string,
-): Promise<boolean> {
+async function tableExists(db: Kysely<DB>, schema: string, table: string): Promise<boolean> {
   const result = await sql<{ present: boolean }>`
     select exists (
       select 1 from information_schema.tables
@@ -135,10 +126,7 @@ async function columnExists(
   return result.rows[0]?.present ?? false;
 }
 
-async function recordedChecksum(
-  db: Kysely<DB>,
-  version: string,
-): Promise<string | null> {
+async function recordedChecksum(db: Kysely<DB>, version: string): Promise<string | null> {
   const result = await sql<{ checksum: string }>`
     select checksum from platform.schema_migrations where version = ${version}
   `.execute(db);
@@ -175,9 +163,14 @@ describe("generated schema migration", () => {
         // RECORDED, which is what stops it running against the first database
         // that later grows the table. 0007 installs the authoritative document
         // version constraints and commands. 0008 adds the encrypted MCP browser
-        // handoff store before the generated schema grants are applied. A fresh
-        // install applies all seven in order; the list mirrors the registry in
-        // migrations/versioned/index.ts.
+        // handoff store before the generated schema grants are applied. 0009
+        // makes a billing run item's period optional. 0010 introduces typed
+        // RelationGroups and the canonical many-to-many membership table,
+        // backfilling only the old Relation.relation_group_id link on upgrades.
+        // 0011 reconciles old generated RLS policy pairs, 0012 installs the
+        // canonical logical Document command seam, and 0013 removes the two
+        // legacy app.* Document mutators. A fresh install records every step in
+        // order; the list mirrors migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
           "0003_org-unit-parent-tenant-guard",
@@ -186,32 +179,30 @@ describe("generated schema migration", () => {
           "0006_workflow-node-category-localized",
           "0007_document-version-authority",
           "0008_mcp-handoffs",
+          "0009_billing-run-item-period-optional",
+          "0010_relation-group-memberships",
+          "0011_reconcile-generated-rls-policy-pairs",
+          "0012_document-logical-commands",
+          "0013_retire-legacy-document-commands",
+          "0014_document-artifact-binding",
+          "0015_document-type-authority",
         ]);
 
         await withDb(url, async (db) => {
-          expect(
-            await recordedChecksum(db, generatedSchemaMigrationVersion),
-          ).toBe(manifest.checksum);
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
+            manifest.checksum,
+          );
           expect(await tableExists(db, "erp", "relations")).toBe(true);
           expect(await tableExists(db, "platform", "tenants")).toBe(true);
           expect(await tableExists(db, "platform", "org_unit")).toBe(true);
-          expect(await tableExists(db, "platform", "org_unit_closure")).toBe(
-            true,
-          );
+          expect(await tableExists(db, "platform", "org_unit_closure")).toBe(true);
           // 0005's whole reason to exist: on a fresh install schema.sql no-ops
           // against the org_unit that 0002 already created, so without the
           // versioned ALTER these two columns would never appear here.
-          expect(await columnExists(db, "platform", "org_unit", "slug")).toBe(
+          expect(await columnExists(db, "platform", "org_unit", "slug")).toBe(true);
+          expect(await columnExists(db, "platform", "org_unit", "keycloak_organization_id")).toBe(
             true,
           );
-          expect(
-            await columnExists(
-              db,
-              "platform",
-              "org_unit",
-              "keycloak_organization_id",
-            ),
-          ).toBe(true);
         });
 
         const second = await runChain(url);
@@ -245,23 +236,15 @@ describe("generated schema migration", () => {
         const result = await runChain(url);
         expect(result.applied).toBe(true);
         expect(result.checksum).toBe(manifest.checksum);
-        expect(result.rollForward?.addedTables).toEqual([
-          "platform.entity_field_suggestions",
-        ]);
-        expect(result.rollForward?.addedColumns).toEqual([
-          "erp.relations.notes",
-        ]);
+        expect(result.rollForward?.addedTables).toEqual(["platform.entity_field_suggestions"]);
+        expect(result.rollForward?.addedColumns).toEqual(["erp.relations.notes"]);
 
         await withDb(url, async (db) => {
-          expect(
-            await tableExists(db, "platform", "entity_field_suggestions"),
-          ).toBe(true);
-          expect(await columnExists(db, "erp", "relations", "notes")).toBe(
-            true,
+          expect(await tableExists(db, "platform", "entity_field_suggestions")).toBe(true);
+          expect(await columnExists(db, "erp", "relations", "notes")).toBe(true);
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
+            manifest.checksum,
           );
-          expect(
-            await recordedChecksum(db, generatedSchemaMigrationVersion),
-          ).toBe(manifest.checksum);
         });
 
         const after = await runChain(url);
@@ -278,9 +261,7 @@ describe("generated schema migration", () => {
         await runChain(url);
 
         await withDb(url, async (db) => {
-          await sql`alter table erp.relations add column legacy_extra text`.execute(
-            db,
-          );
+          await sql`alter table erp.relations add column legacy_extra text`.execute(db);
           await sql`
             update platform.schema_migrations
             set checksum = ${"simulated-old"}
@@ -295,9 +276,7 @@ describe("generated schema migration", () => {
 
         // The failed run must not roll the checksum forward.
         await withDb(url, async (db) => {
-          expect(
-            await recordedChecksum(db, generatedSchemaMigrationVersion),
-          ).toBe("simulated-old");
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
         });
       });
     },
@@ -315,9 +294,7 @@ describe("generated schema migration", () => {
             insert into erp.relations (tenant_id, display_name, relation_type)
             values (gen_random_uuid(), ${"Populated"}, ${"person"})
           `.execute(db);
-          await sql`alter table erp.relations drop column display_name`.execute(
-            db,
-          );
+          await sql`alter table erp.relations drop column display_name`.execute(db);
           await sql`
             update platform.schema_migrations
             set checksum = ${"simulated-old"}
@@ -335,13 +312,9 @@ describe("generated schema migration", () => {
         });
         const result = await runChain(url);
         expect(result.applied).toBe(true);
-        expect(result.rollForward?.addedColumns).toEqual([
-          "erp.relations.display_name",
-        ]);
+        expect(result.rollForward?.addedColumns).toEqual(["erp.relations.display_name"]);
         await withDb(url, async (db) => {
-          expect(
-            await columnExists(db, "erp", "relations", "display_name"),
-          ).toBe(true);
+          expect(await columnExists(db, "erp", "relations", "display_name")).toBe(true);
         });
       });
     },
@@ -376,9 +349,7 @@ describe("generated schema migration", () => {
 
         // The failed run must not roll the checksum forward.
         await withDb(url, async (db) => {
-          expect(
-            await recordedChecksum(db, generatedSchemaMigrationVersion),
-          ).toBe("simulated-old");
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
         });
       });
     },
@@ -429,9 +400,7 @@ describe("generated schema migration", () => {
         });
 
         const result = await runChain(url);
-        expect(result.versionedApplied).toEqual([
-          "0006_workflow-node-category-localized",
-        ]);
+        expect(result.versionedApplied).toEqual(["0006_workflow-node-category-localized"]);
         // No non-additive complaint: the retype happened before the diff ran.
         expect(result.rollForward?.addedColumns).toEqual([]);
 
@@ -522,8 +491,10 @@ describe("generated schema column defaults", () => {
               quoted_label text not null default 'it''s',
               external_ref uuid not null default '00000000-0000-0000-0000-000000000001',
               payload jsonb not null default '{}',
+              execution_state jsonb not null default '{"version":1,"branches":[],"groups":[],"joins":[],"primaryOutput":null}'::jsonb,
               effective_on date not null default '2020-01-01',
               instance_key text not null default 'default',
+              wait_token text not null default (gen_random_uuid())::text,
               created_at timestamptz not null default now(),
               enabled boolean not null default false,
               attempts integer not null default 0
@@ -542,16 +513,21 @@ describe("generated schema column defaults", () => {
               probeColumn("category", "text", "'process'"),
               // Escaped quotes must survive the literal scan intact.
               probeColumn("quoted_label", "text", "'it''s'"),
-              probeColumn(
-                "external_ref",
-                "uuid",
-                "'00000000-0000-0000-0000-000000000001'",
-              ),
+              probeColumn("external_ref", "uuid", "'00000000-0000-0000-0000-000000000001'"),
               probeColumn("payload", "jsonb", "'{}'"),
+              // jsonb discards object-key order and authored whitespace.
+              probeColumn(
+                "execution_state",
+                "jsonb",
+                '\'{"primaryOutput":null, "joins":[], "groups":[], "branches":[], "version":1}\'::jsonb',
+              ),
               probeColumn("effective_on", "date", "'2020-01-01'"),
               // The other direction: authored WITH the cast, live column
               // created bare. Either spelling must compare equal to either.
               probeColumn("instance_key", "text", "'default'::text"),
+              // Postgres may render the function operand with one extra pair
+              // of parentheses before the same column-type cast.
+              probeColumn("wait_token", "text", "gen_random_uuid()::text"),
               // Non-literal defaults are untouched and still match.
               probeColumn("created_at", "timestamptz", "now()"),
               probeColumn("enabled", "boolean", "false"),
@@ -582,6 +558,10 @@ describe("generated schema column defaults", () => {
               foreign_cast text not null default 'process'::varchar,
               concatenated text not null default 'a' || '',
               shifted_clock timestamptz not null default now() - interval '1 day',
+              changed_json jsonb not null default '{"version":2,"branches":[]}',
+              precise_json jsonb not null default '{"amount":9007199254740993}',
+              precise_decimal jsonb not null default '{"amount":1.0000000000000001}',
+              tiny_exponent jsonb not null default '{"amount":1e-999}',
               unchanged text not null default 'process'
             )
           `.execute(db);
@@ -598,6 +578,14 @@ describe("generated schema column defaults", () => {
               probeColumn("foreign_cast", "text", "'process'"),
               probeColumn("concatenated", "text", "'a'"),
               probeColumn("shifted_clock", "timestamptz", "now()"),
+              probeColumn("changed_json", "jsonb", '\'{"branches":[],"version":1}\'::jsonb'),
+              // Distinct jsonb numerics outside JavaScript's safe integer
+              // range must never collapse to equality during normalization.
+              probeColumn("precise_json", "jsonb", "'{\"amount\":9007199254740992}'::jsonb"),
+              // JSON.parse rounds both of these live values to the manifest
+              // value; their original number tokens must remain distinct.
+              probeColumn("precise_decimal", "jsonb", "'{\"amount\":1}'::jsonb"),
+              probeColumn("tiny_exponent", "jsonb", "'{\"amount\":0}'::jsonb"),
               // Control: proves the five above are not drifting for some
               // unrelated reason.
               probeColumn("unchanged", "text", "'process'"),
@@ -606,33 +594,124 @@ describe("generated schema column defaults", () => {
 
           const diff = await diffManifestAgainstDatabase(db, [table]);
           const drifted = diff.nonAdditive;
-          expect(drifted).toHaveLength(5);
+          expect(drifted).toHaveLength(9);
           for (const column of [
             "changed_literal",
             "wrapped_call",
             "foreign_cast",
             "concatenated",
             "shifted_clock",
+            "changed_json",
+            "precise_json",
+            "precise_decimal",
+            "tiny_exponent",
           ]) {
             expect(
               drifted.some((line) =>
-                line.startsWith(
-                  `drift_probe.changed_defaults.${column}: default mismatch`,
-                ),
+                line.startsWith(`drift_probe.changed_defaults.${column}: default mismatch`),
               ),
             ).toBe(true);
           }
-          expect(drifted.some((line) => line.includes("unchanged"))).toBe(
-            false,
-          );
+          expect(drifted.some((line) => line.includes("unchanged"))).toBe(false);
 
           // The report quotes both sides verbatim; normalization is for the
           // comparison only, so a reader still sees what the database holds.
-          const foreignCast = drifted.find((line) =>
-            line.includes("foreign_cast"),
-          );
+          const foreignCast = drifted.find((line) => line.includes("foreign_cast"));
           expect(foreignCast).toContain("DEFAULT 'process'");
           expect(foreignCast).toContain("'process'::character varying");
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+describe("plugin-migration-owned columns", () => {
+  // The osf-integration plugin's 0004_platform-catalog migration ALTERs the
+  // generated integration.* tables to add its installation bookkeeping. Those
+  // columns exist in the database and not in the manifest by design, so the
+  // roll-forward diff must not classify them as non-additive drift — while a
+  // column nobody declared anywhere stays drift.
+  const idColumn = probeColumn("id", "uuid", "gen_random_uuid()", {
+    primaryKey: true,
+  });
+
+  test(
+    "a column owned by a plugin schema migration is not drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema integration`.execute(db);
+          await sql`
+            create table integration.adapters (
+              id uuid primary key default gen_random_uuid(),
+              key text not null default '',
+              catalog_entry_id uuid,
+              installed_version integer,
+              overridden boolean not null default false,
+              override_fields text[] not null default '{}',
+              update_available_version integer
+            )
+          `.execute(db);
+
+          const table: ManifestTable = {
+            name: "integration.adapters",
+            schema: "integration",
+            table: "adapters",
+            columns: [idColumn, probeColumn("key", "text", "''")],
+          };
+
+          const diff = await diffManifestAgainstDatabase(db, [table]);
+          expect(diff.nonAdditive).toEqual([]);
+          expect(diff.missingTables).toEqual([]);
+          expect(diff.missingColumns).toEqual([]);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a column no plugin migration owns is still non-additive drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema integration`.execute(db);
+          // The exempt table plus one column with no owner at all, and a
+          // second table where the plugin-owned NAME is not exempt: the
+          // exemption is keyed schema.table.column, not just column.
+          await sql`
+            create table integration.adapters (
+              id uuid primary key default gen_random_uuid(),
+              catalog_entry_id uuid,
+              rogue text
+            )
+          `.execute(db);
+          await sql`
+            create table integration.unrelated (
+              id uuid primary key default gen_random_uuid(),
+              catalog_entry_id uuid
+            )
+          `.execute(db);
+
+          const diff = await diffManifestAgainstDatabase(db, [
+            {
+              name: "integration.adapters",
+              schema: "integration",
+              table: "adapters",
+              columns: [idColumn],
+            },
+            {
+              name: "integration.unrelated",
+              schema: "integration",
+              table: "unrelated",
+              columns: [idColumn],
+            },
+          ]);
+          expect(diff.nonAdditive).toEqual([
+            "integration.adapters.rogue: column exists in the database but not in the generated manifest",
+            "integration.unrelated.catalog_entry_id: column exists in the database but not in the generated manifest",
+          ]);
         });
       });
     },
@@ -659,9 +738,7 @@ describe("versioned migrations framework", () => {
             up: async (db) => {
               upCalls += 1;
               await sql`create schema if not exists bespoke`.execute(db);
-              await sql`create table bespoke.things (id text primary key)`.execute(
-                db,
-              );
+              await sql`create table bespoke.things (id text primary key)`.execute(db);
             },
           },
         ];
@@ -675,9 +752,7 @@ describe("versioned migrations framework", () => {
           .update(await readFile(file))
           .digest("hex");
         await withDb(url, async (db) => {
-          expect(await recordedChecksum(db, "0002_create-bespoke-things")).toBe(
-            expectedChecksum,
-          );
+          expect(await recordedChecksum(db, "0002_create-bespoke-things")).toBe(expectedChecksum);
           expect(await tableExists(db, "bespoke", "things")).toBe(true);
         });
 
@@ -713,17 +788,13 @@ describe("versioned migrations framework", () => {
         const up: VersionedMigration["up"] = async (db) => {
           upCalls += 1;
           await sql`create schema if not exists bespoke`.execute(db);
-          await sql`create table bespoke.inert (id text primary key)`.execute(
-            db,
-          );
+          await sql`create table bespoke.inert (id text primary key)`.execute(db);
         };
 
         const before: VersionedMigration[] = [
           { version: "0002_inert-edit", fileUrl: pathToFileURL(file).href, up },
         ];
-        expect((await runVersioned(url, before)).applied).toEqual([
-          "0002_inert-edit",
-        ]);
+        expect((await runVersioned(url, before)).applied).toEqual(["0002_inert-edit"]);
         expect(upCalls).toBe(1);
 
         // The edit this exists for: a comment, changing the hash and nothing else.
@@ -755,9 +826,7 @@ describe("versioned migrations framework", () => {
         expect(upCalls).toBe(1);
 
         await withDb(url, async (db) => {
-          expect(await recordedChecksum(db, "0002_inert-edit")).toBe(
-            editedChecksum,
-          );
+          expect(await recordedChecksum(db, "0002_inert-edit")).toBe(editedChecksum);
         });
 
         // Once reconciled the entry is inert: the plain skip path takes over.
@@ -768,9 +837,7 @@ describe("versioned migrations framework", () => {
 
         // A hash nobody declared still fails, declaration list or not.
         await appendFile(file, "// a second, undeclared edit\n");
-        expect(await expectRejects(runVersioned(url, after))).toContain(
-          "immutable",
-        );
+        expect(await expectRejects(runVersioned(url, after))).toContain("immutable");
       });
     },
     TEST_TIMEOUT,
@@ -792,9 +859,7 @@ describe("versioned migrations framework", () => {
             fileUrl: pathToFileURL(file).href,
             up: async (db) => {
               await sql`create schema if not exists bespoke`.execute(db);
-              await sql`create table bespoke.partial (id text primary key)`.execute(
-                db,
-              );
+              await sql`create table bespoke.partial (id text primary key)`.execute(db);
               throw new Error("intentional failure");
             },
           },
@@ -825,20 +890,14 @@ describe("versioned migrations framework", () => {
     expect(() =>
       validateVersionedRegistry([entry("0002_ok"), entry("0003_also-ok")]),
     ).not.toThrow();
-    expect(() => validateVersionedRegistry([entry("2_bad")])).toThrow(
-      "invalid version",
+    expect(() => validateVersionedRegistry([entry("2_bad")])).toThrow("invalid version");
+    expect(() => validateVersionedRegistry([entry("0002_Bad_Name")])).toThrow("invalid version");
+    expect(() => validateVersionedRegistry([entry("0001_taken")])).toThrow("reserved");
+    expect(() => validateVersionedRegistry([entry("0003_late"), entry("0002_early")])).toThrow(
+      "strictly after",
     );
-    expect(() => validateVersionedRegistry([entry("0002_Bad_Name")])).toThrow(
-      "invalid version",
+    expect(() => validateVersionedRegistry([entry("0002_dup"), entry("0002_dup-again")])).toThrow(
+      "strictly after",
     );
-    expect(() => validateVersionedRegistry([entry("0001_taken")])).toThrow(
-      "reserved",
-    );
-    expect(() =>
-      validateVersionedRegistry([entry("0003_late"), entry("0002_early")]),
-    ).toThrow("strictly after");
-    expect(() =>
-      validateVersionedRegistry([entry("0002_dup"), entry("0002_dup-again")]),
-    ).toThrow("strictly after");
   });
 });

@@ -93,6 +93,23 @@ export interface FieldDefinition {
    * transport. Distinct from `readOnly`, which is a rendering choice (#177).
    */
   immutable?: boolean;
+  /**
+   * API contract: this field is written ONLY by the named operations, never
+   * through generated create/update. Operation contract keys, e.g.
+   * `["pentest.finding.review"]`.
+   *
+   * The third writability word next to `required` and `immutable`, and
+   * deliberately not a fourth meaning for `readOnly` — that one picks a
+   * display component and is enforced by nothing. A field carrying `writtenBy`
+   * is absent from the generated create and update schemas on every transport,
+   * and sending it anyway is refused with a message naming the operation that
+   * may set it. Use it for fields that record that a process took place — a
+   * review signed off, a scope approved, a retest concluded — where the
+   * operation is the only place the preconditions are checked.
+   *
+   * A name that matches no compiled operation fails the build.
+   */
+  writtenBy?: string[];
   label?: LocalizedText;
   description?: LocalizedText;
   placeholder?: LocalizedText;

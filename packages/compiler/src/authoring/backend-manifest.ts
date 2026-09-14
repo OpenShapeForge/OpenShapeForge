@@ -2,7 +2,6 @@
 import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
-import { isCollectionField } from "./compiler/helpers.js";
 import {
   discoverContextEntities,
   listEntityFiles,
@@ -26,7 +25,6 @@ import type {
   RetentionAction,
   RetentionDefinition,
   RowScopePolicy,
-  ScalarType,
   TableDefinition,
 } from "../schema.js";
 import { isGeneratedCrudEligible } from "../schema.js";
@@ -179,33 +177,6 @@ function flattenFields(fields: Field[] | undefined, result = new Map<string, Fie
   return result;
 }
 
-function serviceScalarForField(field: Field): ScalarType {
-  if (isCollectionField(field)) {
-    return "jsonb";
-  }
-  if (field.valueType === "string" && field.validation?.format === "uuid") {
-    return "uuid";
-  }
-  switch (field.valueType) {
-    case "string":
-      return "text";
-    case "integer":
-      return "integer";
-    case "number":
-      return "numeric";
-    case "boolean":
-      return "boolean";
-    case "date":
-      return "date";
-    case "datetime":
-      return "timestamptz";
-    case "object":
-      return "jsonb";
-    default:
-      throw new Error(`Unsupported authoring field valueType "${field.valueType}".`);
-  }
-}
-
 function defaultSql(field: Field | undefined, column: ColumnDefinition): string | undefined {
   if (column.primaryKey && column.type === "uuid") {
     return "gen_random_uuid()";
@@ -300,8 +271,9 @@ function filterRelationshipRegisterForTables(
  * time. `empty: restricted` with no axis is guarded at the call site (§C.2),
  * not here.
  *
- * Returns undefined when there is no restriction axis (owner and group both
- * absent) — today's `empty: public` + no-owner + no-group entities are
+ * Returns undefined when there is no restriction axis (owner, group and
+ * record permissions all absent) — today's `empty: public` entities without
+ * any such axis are
  * explicitly NOT a restriction and compile to plain tenant scoping (documented
  * no-op), so the 3 shipped entities stay byte-identical.
  */
@@ -315,6 +287,7 @@ export function deriveRowScope(
   const userColumns: string[] = [];
   const nullVisibleColumns: string[] = [];
   let group: RowScopePolicy["group"] | undefined;
+  let recordPermissions: RowScopePolicy["recordPermissions"] | undefined;
 
   const requireColumn = (col: string, axis: string) => {
     const c = columnsByName.get(col);
@@ -345,13 +318,32 @@ export function deriveRowScope(
     if (rowAccess.empty === "public") nullVisibleColumns.push(rowAccess.group.column);
   }
 
+  if (rowAccess.recordPermissions) {
+    const column = columnsByName.get(rowAccess.recordPermissions.column);
+    if (!column) {
+      throw new Error(
+        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" references column "${rowAccess.recordPermissions.column}", but that column was not emitted.`,
+      );
+    }
+    if (column.type !== "jsonb") {
+      throw new Error(
+        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" must persist as jsonb, found ${column.type}.`,
+      );
+    }
+    recordPermissions = {
+      column: rowAccess.recordPermissions.column,
+      empty: rowAccess.recordPermissions.empty,
+    };
+  }
+
   // No restriction axis declared → plain tenant scoping (documented no-op).
-  if (userColumns.length === 0 && !group) return undefined;
+  if (userColumns.length === 0 && !group && !recordPermissions) return undefined;
 
   return {
     ...(group ? { group } : {}),
     ...(userColumns.length > 0 ? { userColumns } : {}),
     ...(nullVisibleColumns.length > 0 ? { nullVisibleColumns } : {}),
+    ...(recordPermissions ? { recordPermissions } : {}),
     // bypassRoles wired in a later phase (see §E.3 note); omitted for now.
   };
 }
@@ -405,6 +397,29 @@ function collectImmutableFieldKeys(
     collectImmutableFieldKeys(field.children, result);
     if (field.item) {
       collectImmutableFieldKeys([field.item], result);
+    }
+  }
+  return result;
+}
+
+/**
+ * Flatten compiled fields into field key → the operation keys authored in
+ * `writtenBy`. Stamped onto the backing column so the transports can leave the
+ * field out of their create/update schemas and refuse it when a caller sends
+ * it anyway. Same route as `immutable`, for the same reason: an authored flag
+ * is worth nothing until the manifest carries it to the transports.
+ */
+function collectFieldWriters(
+  fields: CompiledField[] | undefined,
+  result = new Map<string, string[]>(),
+): Map<string, string[]> {
+  for (const field of fields ?? []) {
+    if (field.writtenBy && field.writtenBy.length > 0 && !result.has(field.key)) {
+      result.set(field.key, [...field.writtenBy]);
+    }
+    collectFieldWriters(field.children, result);
+    if (field.item) {
+      collectFieldWriters([field.item], result);
     }
   }
   return result;
@@ -968,6 +983,10 @@ export function compileAuthoringBackendManifest(
     // Field keys authored `immutable: true`, stamped onto their backing column
     // so the transports can refuse them on update (#177).
     const immutableFields = collectImmutableFieldKeys(candidate.contract.model.fields);
+    // Field keys authored `writtenBy: [...]`, stamped onto their backing column
+    // so no transport offers them on create/update and the CRUD layer can name
+    // the operation that may set them.
+    const fieldWriters = collectFieldWriters(candidate.contract.model.fields);
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
@@ -975,12 +994,18 @@ export function compileAuthoringBackendManifest(
       const sensitivity = fieldSensitivities.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
-        type: field ? serviceScalarForField(field) : storageColumn.type === "text" ? "text" : "uuid",
+        // Storage compilation is the single field-to-SQL type authority. Do
+        // not reconstruct it here: doing so silently collapsed bounded wide
+        // integers back to int4 after the entity contract already chose int8.
+        type: storageColumn.type as ColumnDefinition["type"],
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
         ...(sensitivity ? { classification: sensitivity } : {}),
         ...(immutableFields.has(storageColumn.field) ? { immutable: true as const } : {}),
+        ...(fieldWriters.has(storageColumn.field)
+          ? { writtenBy: fieldWriters.get(storageColumn.field)! }
+          : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
@@ -1064,20 +1089,25 @@ export function compileAuthoringBackendManifest(
     // Row-level access → rowScope translation (§B.3) + fail-closed guards (§C).
     const rowAccess = candidate.contract.authorization?.rowAccess;
     // §C.2 fail-closed: `empty: restricted` only makes sense when there is an
-    // owner/group column that can be NULL. Without any axis, "restricted" would
+    // owner/group column that can be NULL or an action-specific record ACL.
+    // Without any axis, "restricted" would
     // hide every row or silently degrade to tenant scoping — a declared-but-
     // unemitted confidentiality. Convert to a hard build failure.
     if (
       rowAccess?.enabled &&
       rowAccess.empty === "restricted" &&
       !rowAccess.owner &&
-      !rowAccess.group
+      !rowAccess.group &&
+      !rowAccess.recordPermissions
     ) {
       throw new Error(
-        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner or group axis — ` +
-          `otherwise the entity has no confidentiality column and "restricted" would hide every row ` +
-          `or silently degrade to tenant scoping. Add an owner/group axis or set empty: public.`,
+        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner, group or record-permissions axis — ` +
+          `otherwise the entity has no confidentiality predicate and "restricted" would hide every row ` +
+          `or silently degrade to tenant scoping. Add a restriction axis or set empty: public.`,
       );
+    }
+    if (candidate.contract.blueprint && !tenantScoped) {
+      throw new Error(`[${candidate.contract.entity.name}] blueprint copying requires a tenant-scoped entity.`);
     }
     const rowScope = deriveRowScope(
       rowAccess,
@@ -1090,6 +1120,7 @@ export function compileAuthoringBackendManifest(
       name,
       tenantScoped,
       domainInternal,
+      ...(candidate.contract.workerAccess ? { workerAccess: candidate.contract.workerAccess } : {}),
       generatedCrudEligible,
       generatedCrud,
       columns,
@@ -1098,16 +1129,33 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
+        ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
+        ...(candidate.contract.authoringVersion === 2
+          ? { authoringVersion: 2 as const }
+          : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
+        ...(() => {
+          const secureInput = candidate.contract.entityOperations.create
+            ?.interaction.secureInput;
+          if (!secureInput) return {};
+          const { type: _type, ...secureInputOnCreate } = secureInput;
+          return { secureInputOnCreate };
+        })(),
         ...(candidate.contract.entity.labels
           ? { labels: candidate.contract.entity.labels }
           : {}),
         ...(candidate.contract.entity.displayTemplate
           ? { displayTemplate: candidate.contract.entity.displayTemplate }
           : {}),
+        ...(() => {
+          const computedFields = candidate.contract.model.fields
+            .filter((field) => field.semanticType === "labelSet")
+            .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
+          return computedFields.length > 0 ? { computedFields } : {};
+        })(),
         graphql: {
           typeName: candidate.contract.graphql.typeName,
           singleQueryName: candidate.contract.graphql.queries.single.name,
@@ -1115,6 +1163,9 @@ export function compileAuthoringBackendManifest(
           createMutationName: candidate.contract.graphql.mutations.create.name,
           updateMutationName: candidate.contract.graphql.mutations.update.name,
           deleteMutationName: candidate.contract.graphql.mutations.delete.name,
+          ...(candidate.contract.graphql.operations
+            ? { operations: candidate.contract.graphql.operations }
+            : {}),
           relationships: candidate.contract.graphql.relationships
             .filter((relationship): relationship is typeof relationship & { resolve: "belongsTo" | "hasMany" } =>
               relationship.resolve === "belongsTo" || relationship.resolve === "hasMany",
@@ -1138,7 +1189,18 @@ export function compileAuthoringBackendManifest(
         // either way (bearer token or trusted context) matches by plain set
         // intersection.
         ...(candidate.contract.authorization
-          ? { authorization: { roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles) } }
+          ? {
+              authorization: {
+                roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles),
+                ...(candidate.contract.authorization.rowAccess?.recordPermissions
+                  ? {
+                      recordPermissions: {
+                        ...candidate.contract.authorization.rowAccess.recordPermissions,
+                      },
+                    }
+                  : {}),
+              },
+            }
           : {}),
         relationshipStatus: {
           emittedReferences,

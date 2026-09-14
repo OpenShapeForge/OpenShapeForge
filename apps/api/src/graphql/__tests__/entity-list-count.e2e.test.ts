@@ -19,7 +19,7 @@
 import { afterAll, expect } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { describe, registerSuiteLifecycle, remoteUrl, tenantA, test } from "./e2e/harness.js";
-import { createRow, tables } from "./e2e/entity-factory.js";
+import { createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
 import { createDatabaseRuntime } from "../../db/connection.js";
 import { createGraphqlYoga } from "../yoga.js";
 

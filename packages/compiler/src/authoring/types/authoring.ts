@@ -1,6 +1,11 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 import type {
+  OperationConcurrency,
+  OperationConfirmation,
+  OperationPrerequisite,
+} from "@openshapeforge/operations";
+import type {
   LocalizedText,
   FieldValidation,
   SemanticTypeLookupDefinition,
@@ -492,7 +497,184 @@ export interface McpConfig {
   test?: McpTestConfig;
 }
 
+/**
+ * Version 2 entity authoring keeps behaviour in canonical operations and lets
+ * interfaces only opt into those operations.  The first supported
+ * implementation kind is generated entity CRUD; custom/plugin operations can
+ * be added without changing this entity contract.
+ */
+export type EntityOperationAction = CrudOperationKey;
+
+/**
+ * Transport-neutral request for server-issued secure input on an Operation.
+ * The `into` field is server-owned: generated entity inputs must never accept
+ * it directly from a model, browser form, REST body or GraphQL mutation.
+ */
+export type EntityOperationSecureInput = {
+  type: "secureInput";
+  sourceField: string;
+  sourceEntity: string;
+  definitionsField: string;
+  into: string;
+  message?: string;
+};
+
+export interface EntityOperationDefinition {
+  /** Stable canonical id for a plugin Operation; defaults to `<Entity>.<key>`. */
+  id?: string;
+  name: string | LocalizedText;
+  description: string | LocalizedText;
+  guidance?: { assistant?: string | LocalizedText };
+  prerequisites?: OperationPrerequisite[];
+  implementation:
+    | {
+        type: "entity";
+        action: EntityOperationAction;
+      }
+    | {
+        /** Runtime code only; the YAML remains the canonical contract. */
+        type: "plugin";
+        plugin: string;
+        handler: string;
+        /** Canonical entity CRUD intent implemented by this handler. */
+        action?: "create" | "update" | "delete";
+      };
+  /** How a record-scoped plugin Operation binds the current record to input. */
+  target?:
+    | { scope: "collection" }
+    | { scope: "record"; inputField: string };
+  input?: { schema: Record<string, unknown> };
+  output?: { schema: Record<string, unknown> };
+  errors?: Array<{
+    status: number;
+    code: string;
+    description: string;
+    schema?: Record<string, unknown>;
+    rest?: { body?: unknown; contentType?: string };
+  }>;
+  auth?: import("../../plugins.js").PluginOperationAuth;
+  tenancy?: {
+    mode: "required" | "derived" | "none";
+    description?: string;
+  };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: {
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      /** Required for keyed plugin Operations; populated from Idempotency-Key on REST. */
+      inputField?: string;
+      header?: string;
+    };
+  };
+  concurrency?: OperationConcurrency;
+  confirmation: OperationConfirmation;
+  interaction?: EntityOperationSecureInput;
+}
+
+export interface EntityInterfaceOperationProjectionConfig {
+  /** MCP-only wording may refine, but never redefine, the operation. */
+  instructions?: string | LocalizedText;
+}
+
+export interface EntityRestOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  response?: {
+    status?: number;
+    kind: "json" | "binary" | "stream";
+    contentType?: string;
+  };
+}
+
+export interface EntityMcpOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  name?: string;
+}
+
+export interface EntityGraphqlOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  kind?: "query" | "mutation";
+  field?: string;
+}
+
+/** `false` is an explicit interface-local exclusion; omission inherits projection. */
+export type EntityInterfaceOperationProjection =
+  | false
+  | EntityInterfaceOperationProjectionConfig;
+
+export interface EntityWebViewDefinition {
+  collection: {
+    /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
+    renderer?: string;
+    route: string | LocalizedText;
+    title?: LocalizedText;
+    /** Ordered collection-scoped plugin Operations shown by Web consumers. */
+    actions?: string[];
+    columns: { key: string; sortable?: boolean }[];
+    defaultSort?: { key: string; direction: "asc" | "desc" };
+  };
+  record?: {
+    /** Opaque host renderer-registry key; omission uses the generic record renderer. */
+    renderer?: string;
+    routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
+    title: string;
+    subtitle?: string;
+    actions?: string[];
+    layout: {
+      tabs: import("./views.js").ViewGroup[];
+      /** Deliberately selected summary, independent of the full record tabs. */
+      context?: { fields: string[]; relationships?: string[] };
+    };
+    modes?: {
+      create?: { title: LocalizedText; groups: import("./views.js").ViewGroup[] };
+      update?: { title: LocalizedText; groups?: import("./views.js").ViewGroup[] };
+    };
+  };
+}
+
+export interface EntityInterfacesDefinition {
+  rest?: {
+    operations?: Record<
+      string,
+      false | EntityRestOperationProjectionConfig
+    >;
+  };
+  graphql?: {
+    operations?: Record<
+      string,
+      false | EntityGraphqlOperationProjectionConfig
+    >;
+  };
+  mcp?: {
+    /** Technical tool projection; defaults to one dedicated tool per operation. */
+    tools?: McpToolStyle;
+    operations?: Record<string, false | EntityMcpOperationProjectionConfig>;
+    resource?: McpResourceConfig;
+  };
+  web?: {
+    operations?: Record<string, EntityInterfaceOperationProjection>;
+    views: EntityWebViewDefinition;
+  };
+}
+
+/** YAML-owned module/global Operations that have no honest entity target. */
+export interface OperationCatalogDefinition {
+  schemaVersion: 1;
+  kind: "operationCatalog";
+  plugin: string;
+  operations: Record<string, EntityOperationDefinition>;
+  interfaces: Omit<EntityInterfacesDefinition, "web">;
+}
+
 export interface CoreEntity {
+  /** Explicit safe scalar content copied from a published blueprint. */
+  blueprint?: { fields: string[] };
+  /** Named cross-tenant worker; enforced together with the dedicated DB role. */
+  workerAccess?: string;
   schemaVersion: number;
   kind: "coreEntity";
   module: string;
@@ -569,6 +751,10 @@ export interface CoreEntity {
    * prefix, and the `generic` tool style for large catalogs.
    */
   mcp?: boolean | McpConfig;
+  /** Canonical version-2 operations. Forbidden on schemaVersion 1 by JSON Schema. */
+  operations?: Record<string, EntityOperationDefinition>;
+  /** Thin version-2 interface projections. Forbidden on schemaVersion 1 by JSON Schema. */
+  interfaces?: EntityInterfacesDefinition;
   workflow?: {
     nodes?: {
       actions?: {
@@ -735,6 +921,20 @@ export interface AuthorizationRealmRole {
   includes?: string[];
 }
 
+/**
+ * A client role that groups roles from one or more resource clients.
+ *
+ * This is the audience-scoped counterpart of a realm-role composite: hosts can
+ * expose product personas on their own API audience without promoting those
+ * personas to realm-global roles.
+ */
+export interface AuthorizationClientRoleComposite {
+  description?: string;
+  attributes?: Record<string, string[]>;
+  /** Per-client composite role mapping: {clientId: [roleName, ...]}. */
+  composites: Record<string, string[]>;
+}
+
 export interface AuthorizationRealmSettings {
   // Legacy v1 fields (still honored).
   eventsEnabled?: boolean;
@@ -765,6 +965,23 @@ export interface AuthorizationRealmConfig {
     enabled?: boolean;
     adminEnabled?: boolean;
     listeners?: string[];
+  };
+  /**
+   * WebAuthn / passkey settings. Every generated realm is passkey-only for
+   * humans (see generators/keycloak-passkeys.ts); the one value the compiler
+   * cannot work out for itself is authored here.
+   */
+  webAuthn?: {
+    /**
+     * The WebAuthn relying-party id: a BARE HOSTNAME (no scheme, no port, no
+     * path) that must be Keycloak's browser-facing hostname or a registrable
+     * parent it shares with the app — e.g. `example.com` for a login page on
+     * `auth.example.com`. May be a `${env:VAR:-devDefault}` reference.
+     * Required for a production realm; a development realm falls back to
+     * `localhost`, which it never actually uses because local login is
+     * relaxed to passwords by scripts/keycloak/kc-dev-password-login.py.
+     */
+    rpId?: string;
   };
 }
 
@@ -807,6 +1024,10 @@ export interface AuthorizationClient {
    * require (e.g. `{ "realm-management": ["manage-realm"] }`).
    */
   serviceAccountClientRoles?: Record<string, string[]>;
+  /** Tenant fixed to this service-account client by host-owned authorization. */
+  serviceAccountTenantId?: string;
+  /** Marks the client as an organization automation identity, never a human login. */
+  organizationAutomation?: boolean;
 }
 
 /**
@@ -880,6 +1101,7 @@ export interface AuthorizationIdentityProvider {
 export interface AuthorizationGroupNode {
   name: string;
   realmRoles?: string[];
+  clientRoles?: Record<string, string[]>;
   subGroups?: AuthorizationGroupNode[];
 }
 
@@ -927,6 +1149,15 @@ export interface AuthorizationConfigFile {
 
   /** v2 hand-authored client roles per clientId (merged with entity-derived). */
   clientRoles?: Record<string, string[]>;
+
+  /**
+   * v2 audience-scoped composite roles, keyed first by owning clientId and then
+   * by role name. Their grants may target any declared client role set.
+   */
+  clientRoleComposites?: Record<
+    string,
+    Record<string, AuthorizationClientRoleComposite>
+  >;
 
   /**
    * v2 Keycloak group hierarchy for dev/demo (organizational labels, optional

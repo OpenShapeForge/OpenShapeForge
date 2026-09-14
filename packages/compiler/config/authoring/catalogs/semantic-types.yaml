@@ -3,6 +3,15 @@ kind: semanticTypeCatalog
 
 # Core semantic types — always available
 types:
+  multilineText:
+    label: { en: Multiline text, nl: Meerregelige tekst }
+    valueType: string
+    render:
+      display: TextDisplay
+      input: Textarea
+    props:
+      rows: 4
+
   email:
     label: { en: Email, nl: E-mail }
     valueType: string
@@ -175,6 +184,28 @@ types:
         - { value: verified_identity, label: { en: Verified identity, nl: Geverifieerde identiteit } }
         - { value: manual, label: { en: Manually confirmed, nl: Handmatig bevestigd } }
 
+  referenceDataCode:
+    label: { en: Reference value, nl: Referentiewaarde }
+    valueType: string
+    icon: List
+    render:
+      display: TextDisplay
+      input: ReferenceSelect
+    props:
+      clearable: false
+
+  fileStorageLocation:
+    label: { en: File, nl: Bestand }
+    valueType: string
+    icon: File
+    render:
+      display: TextDisplay
+      input: FileUpload
+    props:
+      fileNameField: fileName
+      mimeTypeField: mimeType
+      checksumField: checksum
+
   workflowDefinitionId:
     label: { en: Workflow definition ID, nl: Workflow-definitie-ID }
     pluralLabel: { en: Workflow definition IDs, nl: Workflow-definitie-IDs }
@@ -216,6 +247,14 @@ types:
       input: ConditionBuilder
     props:
       mode: free
+
+  labelSet:
+    valueType: object
+    label: { en: Labels, nl: Labels }
+    icon: Tags
+    render:
+      display: BadgeList
+      input: JsonFieldEditor
 
   variableTemplate:
     valueType: string
@@ -1387,6 +1426,19 @@ types:
     entity: employee-role
     listUrl: /api/workflow/designer/core-entity-options?entity=employee-role
     displayTemplate: "{{roleKind}}"
+
+  agreementMilestoneId:
+    kind: entityId
+    label: { en: "Agreement Milestone ID", nl: "Overeenkomstmijlpaal ID" }
+    pluralLabel: { en: "Agreement Milestone IDs", nl: "Overeenkomstmijlpaal IDs" }
+    valueType: string
+    icon: Database
+    classification:
+      sensitivity: internal
+      category: workflow
+    entity: agreement-milestone
+    listUrl: /api/workflow/designer/core-entity-options?entity=agreement-milestone
+    displayTemplate: "{{description}}"
 
   billingScheduleId:
     kind: entityId

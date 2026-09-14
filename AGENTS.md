@@ -17,7 +17,7 @@ issues, pull requests, and review comments. Act accordingly.
 - The credentials that DO appear in this repo (`admin/admin` for the local
   Keycloak, `dev-secret` for the dev realm client,
   `openshapeforge-local-dev-context-secret`, the `openshapeforge/openshapeforge`
-  Postgres user, `acme-*`/`test` demo users) are **intentional, local-dev-only
+  Postgres user, `tenant-*-*`/`test` synthetic users) are **intentional, local-dev-only
   values** for the docker-compose stack. Never replace them with real
   credentials, and never reuse them outside local development.
 - **No internal or third-party project references.** Do not mention private

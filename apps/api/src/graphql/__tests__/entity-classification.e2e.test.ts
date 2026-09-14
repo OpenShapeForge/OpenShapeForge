@@ -32,7 +32,7 @@ import {
   createRow,
   fieldName,
   redactableColumnFor,
-  tables,
+  graphqlTables as tables,
   tablesByTypeName,
   withClassifiedColumn,
 } from "./e2e/entity-factory.js";

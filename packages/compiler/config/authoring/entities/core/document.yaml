@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: Document
@@ -19,9 +19,6 @@ indexes:
       - tenantId
       - id
     unique: true
-crud:
-  operations:
-    create: false
 retention:
   mode: policyRef
   policy: records-archive-7y
@@ -84,6 +81,7 @@ fields:
       storageClass: core
   - key: description
     valueType: string
+    semanticType: multilineText
     required: false
     label:
       en: Description
@@ -99,13 +97,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 5
-        maxLength: 8000
   - key: documentType
     valueType: string
+    semanticType: referenceDataCode
     required: true
     label:
       en: Document type
@@ -119,13 +113,10 @@ fields:
     persisted:
       column: document_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTTYPE
-        clearable: false
+    options: { type: entity, source: DocumentType, valueField: code }
   - key: status
     valueType: string
+    semanticType: referenceDataCode
     required: true
     label:
       en: Status
@@ -139,13 +130,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTSTATUS
-        clearable: false
+    options: { type: referentiedata, referentieGroep: DOCUMENTSTATUS }
   - key: confidentiality
     valueType: string
+    semanticType: referenceDataCode
     required: false
     label:
       en: Confidentiality
@@ -159,11 +147,7 @@ fields:
     persisted:
       column: confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTCONFIDENTIALITY
-        clearable: true
+    options: { type: referentiedata, referentieGroep: DOCUMENTCONFIDENTIALITY }
   - key: source
     valueType: string
     required: false
@@ -229,9 +213,6 @@ fields:
     persisted:
       column: registered_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: receivedAt
     valueType: datetime
     required: false
@@ -247,9 +228,6 @@ fields:
     persisted:
       column: received_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: publishedAt
     valueType: datetime
     required: false
@@ -265,9 +243,6 @@ fields:
     persisted:
       column: published_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: currentVersionId
     valueType: string
     required: false
@@ -320,12 +295,122 @@ relationships:
     label:
       en: Versions
       nl: Versies
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+operations:
+  list:
+    name: { en: List documents, nl: Documenten tonen }
+    description: Returns the visible document collection.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get document, nl: Document ophalen }
+    description: Returns one visible document and its available actions.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create document, nl: Document aanmaken }
+    description: Creates a document and its first logical version together, optionally binding a staged artifact.
+    implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        required: [document, version, idempotencyKey]
+        additionalProperties: false
+        properties:
+          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            description: Optional storage-issued handle; file facts are verified server-side.
+            required: [artifactId, expectedArtifactVersion]
+            additionalProperties: false
+            properties:
+              artifactId: { type: string, format: uuid }
+              expectedArtifactVersion: { type: integer, minimum: 1, maximum: 9007199254740991 }
+          document:
+            x-osf-entityInput:
+              entity: Document
+              fields: [code, title, description, documentType, status, confidentiality, source, author, isExternal, registeredAt, receivedAt, publishedAt, caseFileId, caseId, relationId]
+          version:
+            x-osf-entityInput:
+              entity: DocumentVersion
+              fields: [versionLabel, status, isMajorVersion, changeSummary, accountId]
+    output:
+      schema:
+        type: object
+        required: [id, currentVersionId]
+        properties:
+          id: { type: string, format: uuid }
+          currentVersionId: { type: string, format: uuid }
+        additionalProperties: true
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The document or version input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
+      - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
+  update:
+    name: { en: Update document, nl: Document wijzigen }
+    description: Updates the document metadata without changing its version pointer.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete document, nl: Document verwijderen }
+    description: Deletes a document subject to its canonical references and retention policy.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}
+  web:
+    views:
+      collection:
+        route: /documents
+        title: { en: Documents, nl: Documenten }
+        columns:
+          - { key: title, sortable: true }
+          - { key: documentType, sortable: true }
+          - { key: status, sortable: true }
+        defaultSort: { key: title, direction: asc }
+      record:
+        routes:
+          read: /documents/:id
+          edit: /documents/:id/edit
+          create: /documents/new
+        title: "{{title}}"
+        subtitle: "{{status}}"
+        layout:
+          context:
+            fields: [documentType, confidentiality, author, registeredAt]
+            relationships: [relation, caseFile, case, currentVersion]
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Document, nl: Document }
+                  fields: [code, title, description, documentType, status]
+                - title: { en: Origin and access, nl: Herkomst en toegang }
+                  fields: [author, source, isExternal, confidentiality]
+                - title: { en: Registration and publication, nl: Registratie en publicatie }
+                  fields: [receivedAt, registeredAt, publishedAt]
+            - id: versions
+              label: { en: Versions, nl: Versies }
+              relationship: versions
+        modes:
+          create:
+            title: { en: Create document, nl: Document aanmaken }
+            groups:
+              - title: { en: Document, nl: Document }
+                fields: [title, documentType, status]

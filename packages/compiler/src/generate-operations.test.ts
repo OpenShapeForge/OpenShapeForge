@@ -5,11 +5,15 @@ import { renderOpenApiSpec } from "./generate-openapi.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  buildStaticOperationCatalog,
+  collectAuthoredEntityPluginOperations,
   collectPluginOperations,
+  collectEntityOperations,
   operationOpenApiPaths,
   renderOperationCatalog,
 } from "./generate-operations.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import type { CompiledEntityOperation } from "./authoring/types.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const operation: PluginOperationContract = {
@@ -47,10 +51,375 @@ const operation: PluginOperationContract = {
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: false };
 
 describe("first-class plugin operations", () => {
+  test("distinguishes authenticated-session auth from an explicit deny-all role list", () => {
+    const authenticated = {
+      ...operation,
+      auth: { mode: "session" as const },
+    } satisfies PluginOperationContract;
+    const denied = {
+      ...operation,
+      key: "demo.quote.denied",
+      transports: {
+        ...operation.transports,
+        rest: { ...operation.transports.rest, path: "/api/demo/quotes/:quoteId/denied" },
+      },
+      auth: { mode: "session" as const, roles: [] },
+    } satisfies PluginOperationContract;
+
+    expect(collectPluginOperations([{ name: "demo", operations: [authenticated] }], context)[0]!.auth)
+      .toEqual({ mode: "session" });
+    expect(collectPluginOperations([{ name: "demo", operations: [denied] }], context)[0]!.auth)
+      .toEqual({ mode: "session", roles: [] });
+  });
+
+  test("derives custom write controls once for every adapter input schema", () => {
+    const authored = [{
+      contract: {
+        pluginOperations: [{
+          key: "approve",
+          id: "quoteVersions.approve",
+          entityId: "example.Quote",
+          entityName: "Quote",
+          definition: {
+            id: "quoteVersions.approve",
+            name: "Approve quote",
+            description: "Approves a quote.",
+            implementation: { type: "plugin", plugin: "new-owner", handler: "approveQuote" },
+            target: { scope: "record", inputField: "quoteId" },
+            input: {
+              schema: {
+                type: "object",
+                required: ["quoteId"],
+                properties: { quoteId: { type: "string", format: "uuid",
+                  "x-osf-reference": { entity: "Quote", valueField: "id", recordIdSourceField: "quoteId" } } },
+                additionalProperties: false,
+              },
+            },
+            output: { schema: { type: "object", properties: {} } },
+            errors: [],
+            auth: {
+              mode: "session",
+              roles: ["Quotes.All.Approve"],
+              recordPermission: "edit",
+            },
+            tenancy: { mode: "required" },
+            effects: { data: "write", external: "none" },
+            reliability: { idempotency: { mode: "natural" } },
+            concurrency: {
+              version: { mode: "required", field: "updatedAt" },
+              editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+            },
+            confirmation: { mode: "none" },
+          },
+          interfaces: {
+            rest: { method: "POST", path: "/api/demo/quotes/:quoteId/approve" },
+            graphql: { kind: "mutation", field: "approveQuote" },
+            mcp: { name: "approve_quote" },
+            web: {},
+          },
+        }],
+      },
+    }];
+    const [compiled] = collectAuthoredEntityPluginOperations(authored as never, context);
+    const logicalDocument = structuredClone(authored);
+    logicalDocument[0]!.contract.pluginOperations[0]!.id = "documents.create";
+    logicalDocument[0]!.contract.pluginOperations[0]!.definition.id = "documents.create";
+    expect(collectAuthoredEntityPluginOperations(logicalDocument as never, context)[0]!.key).toBe("documents.create");
+
+    for (const path of ["/api/mcp", "/api/health/x", "/api/demo/../secret", "/api/demo?query=secret"]) {
+      const invalid = structuredClone(authored);
+      invalid[0]!.contract.pluginOperations[0]!.interfaces.rest.path = path;
+      expect(() => collectAuthoredEntityPluginOperations(invalid as never, context)).toThrow();
+    }
+
+    expect(compiled!.key).toBe("quoteVersions.approve");
+    expect(compiled!.plugin).toBe("new-owner");
+    expect(compiled!.inputSchema).toMatchObject({ properties: { quoteId: {
+      "x-osf-reference": { entity: "Quote", valueField: "id", recordIdSourceField: "quoteId" },
+    } },
+    });
+    for (const reference of [{}, { entity: "" }, { entity: "Quote", unknown: true }, { entity: "Quote", valueField: "../id" }]) {
+      const invalid = structuredClone(authored);
+      invalid[0]!.contract.pluginOperations[0]!.definition.input.schema.properties.quoteId["x-osf-reference"] = reference as never;
+      expect(() => collectAuthoredEntityPluginOperations(invalid as never, context)).toThrow();
+    }
+
+    expect(compiled!.inputSchema).toMatchObject({
+      required: ["quoteId", "expectedVersion", "leaseToken"],
+      properties: {
+        expectedVersion: { type: "string", format: "date-time" },
+        leaseToken: { type: "string", minLength: 1 },
+      },
+      additionalProperties: false,
+    });
+    expect(compiled!.auth).toEqual({
+      mode: "session",
+      roles: ["Quotes.All.Approve"],
+      recordPermission: "edit",
+    });
+  });
+
+  test("renders canonical entity operations beside plugin operations", () => {
+  const entityOperation: CompiledEntityOperation = {
+    key: "list",
+    id: "Relation.list",
+      entityId: "hubble.Relation",
+    entityName: "Relation",
+    name: "List Relation",
+    description: "List Relation",
+    implementation: { type: "entity" },
+    effects: { data: "read", external: "none" },
+    reliability: { idempotency: { mode: "natural" } },
+      intent: "list",
+      input: {
+        kind: "collection-query",
+        entityId: "hubble.Relation",
+        filterMode: "declared-fields",
+        sortMode: "declared-fields",
+        pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
+      },
+      output: { kind: "entity-connection", entityId: "hubble.Relation" },
+      authorization: { action: "read", roles: ["Relations.Read"] },
+      interaction: { confirmation: { mode: "none" } },
+    };
+    const entities = [{
+      contract: {
+        entity: {
+          id: "hubble.Relation",
+          name: "Relation",
+          title: "Relation",
+        },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { list: entityOperation },
+      },
+    }] as never;
+
+    const collected = collectEntityOperations(entities);
+    expect(collected).toEqual([entityOperation]);
+    const catalog = buildStaticOperationCatalog([], collected, entities, {});
+    expect(catalog.operations).toEqual([
+      expect.objectContaining({
+        ...entityOperation,
+        inputSchema: expect.any(Object),
+        outputSchema: expect.any(Object),
+      }),
+    ]);
+    expect(JSON.parse(renderOperationCatalog(catalog))).toMatchObject({
+      version: 1,
+      operations: [],
+      entityOperations: [{ id: "Relation.list" }],
+    });
+  });
+
+  test("materializes platform controls for a plugin-backed entity delete", () => {
+    const entityOperation: CompiledEntityOperation = {
+      key: "remove",
+      id: "Relation.remove",
+      entityId: "hubble.Relation",
+      entityName: "Relation",
+      name: "Delete relation",
+      description: "Deletes a relation through its owning module.",
+      implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
+      target: {
+        entityId: "hubble.Relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      effects: { data: "delete", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      intent: "delete",
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: {
+            relationId: { type: "string", format: "uuid" },
+            requestKey: { type: "string", minLength: 1 },
+          },
+          required: ["relationId", "requestKey"],
+          additionalProperties: false,
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+          additionalProperties: false,
+        },
+      },
+      authorization: { action: "delete", roles: ["Relations.Delete"] },
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "displayName",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+    const entities = [{
+      contract: {
+        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { delete: entityOperation },
+      },
+    }] as never;
+
+    const [compiled] = buildStaticOperationCatalog([], [entityOperation], entities, {})
+      .operations;
+    expect(compiled).toMatchObject({
+      id: "Relation.remove",
+      intent: "delete",
+      inputSchema: {
+        properties: {
+          relationId: { type: "string", format: "uuid" },
+          requestKey: { type: "string", minLength: 1 },
+          expectedVersion: { type: "string", format: "date-time" },
+          leaseToken: { type: "string", minLength: 1 },
+          confirmationToken: { type: "string", minLength: 1 },
+          confirmationAnswer: { type: "string", minLength: 1 },
+        },
+        required: ["relationId", "requestKey", "expectedVersion", "leaseToken"],
+        dependentRequired: {
+          confirmationToken: ["confirmationAnswer"],
+          confirmationAnswer: ["confirmationToken"],
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        properties: { deleted: { type: "boolean" } },
+        required: ["deleted"],
+        additionalProperties: false,
+      },
+    });
+  });
+
+  test("rejects a duplicate id across entity and plugin/module Operations", () => {
+    const [compiledPlugin] = collectPluginOperations(
+      [{ name: "demo", operations: [operation] }],
+      context,
+    );
+    const entityOperation = {
+      id: operation.key,
+      key: "create",
+      intent: "create",
+      entityId: "hubble.Relation",
+      entityName: "Relation",
+      interaction: { confirmation: { mode: "none" } },
+    } as CompiledEntityOperation;
+
+    const entities = [{
+      contract: {
+        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { create: entityOperation },
+      },
+    }] as never;
+    expect(() => buildStaticOperationCatalog(
+      [compiledPlugin!],
+      [entityOperation],
+      entities,
+      {},
+    ))
+      .toThrow(/Duplicate canonical Operation id/);
+  });
+
+  test("accepts only a safe canonical invoke Operation as a create prerequisite", () => {
+    const target: CompiledEntityOperation = {
+      id: "Adapter.create",
+      key: "create",
+      intent: "create",
+      entityId: "osf-integration.Adapter",
+      entityName: "Adapter",
+      name: "Create adapter",
+      description: "Create adapter",
+      implementation: { type: "entity" },
+      prerequisites: [{
+        operation: "osf-integration.provider.setup-guide",
+        receipt: { binding: "loginSession" },
+      }],
+      input: { kind: "entity-create", entityId: "osf-integration.Adapter" },
+      output: { kind: "entity-record", entityId: "osf-integration.Adapter", nullable: false },
+      authorization: { action: "create", roles: ["integration_admin"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "none" } },
+      interaction: { confirmation: { mode: "none" } },
+    };
+    const entities = [{
+      contract: {
+        entity: { id: "osf-integration.Adapter", name: "Adapter", title: "Adapter" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { create: target },
+      },
+    }] as never;
+    const guideDefinition: PluginOperationContract = {
+      ...operation,
+      key: "osf-integration.provider.setup-guide",
+      title: "Provider setup guide",
+      description: "Shows the provider setup guide.",
+      handler: "providerSetupGuide",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      auth: { mode: "session", roles: ["integration_admin"] },
+      tenancy: { mode: "required" },
+      effects: { data: "read", external: "none" },
+      idempotency: { mode: "intrinsic" },
+      transports: {
+        rest: { method: "GET", path: "/api/osf-integration/provider/setup-guide", response: { kind: "json" } },
+        mcp: { enabled: true, name: "provider_setup_guide" },
+        graphql: { enabled: true, kind: "query", field: "providerSetupGuide" },
+        typescript: { enabled: true, functionName: "providerSetupGuide" },
+      },
+    };
+    const [guide] = collectPluginOperations(
+      [{ name: "osf-integration", operations: [guideDefinition] }],
+      context,
+    );
+
+    expect(() => buildStaticOperationCatalog([guide!], [target], entities, {}))
+      .not.toThrow();
+    expect(() => buildStaticOperationCatalog([], [target], entities, {}))
+      .toThrow(/missing prerequisite Operation/);
+    expect(() => buildStaticOperationCatalog([
+      { ...guide!, effects: { data: "write", external: "none" } },
+    ], [target], entities, {})).toThrow(/read\/no-external effects/);
+    expect(() => buildStaticOperationCatalog([
+      {
+        ...guide!,
+        inputSchema: {
+          type: "object",
+          required: ["provider"],
+          properties: { provider: { type: "string" } },
+        },
+      },
+    ], [target], entities, {})).toThrow(/no required input/);
+  });
+
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
     const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);
-    expect(JSON.parse(renderOperationCatalog(collected)).operations[0].key).toBe(operation.key);
+    const catalog = buildStaticOperationCatalog(collected, [], [], {});
+    expect(catalog.operations[0]).toMatchObject({
+      id: operation.key,
+      key: operation.key,
+      intent: "invoke",
+    });
+    expect(JSON.parse(renderOperationCatalog(catalog)).operations[0].key).toBe(operation.key);
     expect(collected).toHaveLength(1);
     const paths = operationOpenApiPaths(collected) as Record<string, Record<string, any>>;
     const canonical = paths["/api/demo/quotes/{quoteId}/publish"]!.post;
@@ -550,6 +919,8 @@ describe("first-class plugin operations", () => {
   });
 
   test("requires safe plugin-owned paths and declared path parameters", () => {
+    expect(() => collectPluginOperations([{ name: "new-owner", operations: [operation] }], context))
+      .toThrow(/stable lowercase key prefixed/);
     expect(() => collectPluginOperations([{ name: "demo", operations: [{
       ...operation,
       transports: {
@@ -606,7 +977,9 @@ describe("first-class plugin operations", () => {
     expect(first[0]!.transports.rest.path).toBe("/api/session");
     expect((operationOpenApiPaths(first) as Record<string, Record<string, unknown>>)["/api/session"])
       .toHaveProperty("get");
-    expect(renderOperationCatalog(first)).toBe(renderOperationCatalog(second));
+    expect(renderOperationCatalog(buildStaticOperationCatalog(first, [], [], {}))).toBe(
+      renderOperationCatalog(buildStaticOperationCatalog(second, [], [], {})),
+    );
 
     const hyphenated = collectPluginOperations([{ name: "user-session", operations: [{
       ...rootOperation,
@@ -641,6 +1014,8 @@ describe("first-class plugin operations", () => {
     ): CompiledPluginOperation => ({
       ...operation,
       plugin: "demo",
+      id: operation.key,
+      intent: "invoke",
       transports: {
         ...operation.transports,
         rest: { ...operation.transports.rest, method, path },
@@ -697,6 +1072,42 @@ describe("first-class plugin operations", () => {
     const canonical = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     expect(() => auditOperationSurfaceCollisions(canonical, generatedManifest, [], 60))
       .not.toThrow();
+
+    const overflow = Array.from({ length: 61 }, (_unused, index) => {
+      const compiled = compiledOperation("POST", `/api/demo/overflow/${index}`);
+      return {
+        ...compiled,
+        key: `demo.overflow.${index}`,
+        id: `demo.overflow.${index}`,
+        transports: {
+          ...compiled.transports,
+          mcp: { enabled: true as const, name: `demo_overflow_${index}` },
+          graphql: { enabled: false as const, reason: "Not exposed in this fixture." },
+        },
+      };
+    });
+    expect(auditOperationSurfaceCollisions(overflow, { version: 1, tables: [] }, [], 60))
+      .toBe("searchable");
+
+    const genericNameCollision = overflow.map((candidate, index) =>
+      index === 0
+        ? {
+            ...candidate,
+            transports: {
+              ...candidate.transports,
+              mcp: { enabled: true as const, name: "osf_search_operations" },
+            },
+          }
+        : candidate
+    );
+    expect(() =>
+      auditOperationSurfaceCollisions(
+        genericNameCollision,
+        { version: 1, tables: [] },
+        [],
+        60,
+      )
+    ).toThrow(/osf_search_operations.*plugin operation.*shared searchable Operation catalog/);
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {
@@ -748,6 +1159,8 @@ describe("first-class plugin operations", () => {
     };
     const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).toThrow(/GraphQL root field/);
+    manifest.tables[0]!.source!.graphql!.operations = { get: true, list: true, create: false, update: false, delete: false };
+    expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).not.toThrow();
     manifest.tables[0]!.source!.graphql!.createMutationName = "createQuote";
     if (collected[0]!.transports.mcp.enabled) collected[0]!.transports.mcp.name = "demo_publish_create";
     expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).toThrow(/MCP tool/);

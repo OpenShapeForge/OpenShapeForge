@@ -8,6 +8,7 @@
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
+  createGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
   isWritableColumn,
@@ -15,6 +16,7 @@ import {
 import {
   createdRows,
   expectData,
+  getRuntime,
   seed,
   type GeneratedTable,
   type Identity,
@@ -28,9 +30,16 @@ export const tables = eligibleTables.filter((table) =>
     isGeneratedCrudOperationEnabled(table, operation),
   ),
 );
-export const partialPolicyTables = eligibleTables.filter((table) => !tables.includes(table));
+export const graphqlTables = tables.filter((table) =>
+  (["list", "get", "create", "update", "delete"] as const).every(
+    (operation) => table.source?.graphql?.operations?.[operation] !== false,
+  ),
+);
+export const partialPolicyTables = eligibleTables.filter(
+  (table) => !graphqlTables.includes(table),
+);
 export const tablesByTypeName = new Map(
-  tables.map((table) => [table.source!.graphql!.typeName, table]),
+  graphqlTables.map((table) => [table.source!.graphql!.typeName, table]),
 );
 export const tablesByName = new Map(tables.map((table) => [table.name, table]));
 
@@ -117,7 +126,7 @@ export async function createRow(
   if (depth > 5) {
     throw new Error(`FK dependency chain too deep while creating ${table.name}`);
   }
-  const graphql = table.source!.graphql!;
+  const graphql = table.source?.graphql;
   const fkTargets = foreignKeyTargets(table);
   const input: Record<string, unknown> = {};
   const marker = `${seed}-${++rowSequence}`;
@@ -145,6 +154,17 @@ export async function createRow(
     if (column.required) {
       input[field] = sampleValue(column, marker);
     }
+  }
+
+  if (!graphql || graphql.operations?.create === false) {
+    const row = await createGeneratedEntity(getRuntime().db, identity, {
+      table: table.name,
+      values: input,
+    });
+    const id = String(row[table.primaryKey!]);
+    expect(id).toBeTruthy();
+    createdRows.push({ table, id, identity });
+    return id;
   }
 
   const data = await expectData(

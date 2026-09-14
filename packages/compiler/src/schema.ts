@@ -122,6 +122,15 @@ export type RowScopePolicy = {
    * at session establishment.
    */
   bypassRoles?: string[];
+  /**
+   * Persisted action ACL. The SELECT policy composes its `view` decision with
+   * the tenant/owner/group predicate; edit/delete stay Operation-semantic
+   * runtime checks because SQL UPDATE also implements actions such as archive.
+   */
+  recordPermissions?: {
+    column: string;
+    empty: "public" | "restricted";
+  };
 };
 
 export type RetentionAction = "retain" | "archive" | "redact" | "delete";
@@ -252,6 +261,14 @@ export type ColumnDefinition = {
    * keep byte-identical output.
    */
   immutable?: true;
+  /**
+   * Authored `writtenBy: [...]` on the field that backs this column: operation
+   * contract keys that are the only writers of the value. The column is absent
+   * from every generated create and update schema, and the CRUD layer refuses
+   * it with a message naming these operations. Omitted when unflagged, so
+   * unaffected columns keep byte-identical output.
+   */
+  writtenBy?: string[];
 };
 
 export type LocalizedTextManifest = {
@@ -261,9 +278,12 @@ export type LocalizedTextManifest = {
 };
 
 export type TableSourceDefinition = {
+  blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
+  /** Present only for strict v2 entity authoring; absence means legacy v1. */
+  authoringVersion?: 2;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",
@@ -280,6 +300,11 @@ export type TableSourceDefinition = {
    * `sourceField` map to bridge authoring fields → DB columns.
    */
   displayTemplate?: string;
+  /** Interface-neutral values computed by the operation runtime after reading a row. */
+  computedFields?: Array<{
+    field: string;
+    resolver: "labelRules";
+  }>;
   graphql?: {
     typeName: string;
     singleQueryName: string;
@@ -287,6 +312,14 @@ export type TableSourceDefinition = {
     createMutationName: string;
     updateMutationName: string;
     deleteMutationName: string;
+    /** Explicit v2 interface exposure; absent for v1 manifests. */
+    operations?: {
+      list: boolean;
+      get: boolean;
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+    };
     relationships: Array<{
       name: string;
       target: string;
@@ -319,6 +352,19 @@ export type TableSourceDefinition = {
       update: boolean;
       delete: boolean;
     };
+  };
+  /**
+   * Transport-neutral secure-input policy compiled from the canonical create
+   * Operation. `into` is server-owned on every generated interface. The MCP
+   * sub-object below temporarily mirrors this metadata for its existing
+   * secure browser/client handoff runtime.
+   */
+  secureInputOnCreate?: {
+    sourceField: string;
+    sourceEntity: string;
+    definitionsField: string;
+    into: string;
+    message?: string;
   };
   /**
    * Opt-in generated REST exposure for this table. Present only when the
@@ -392,6 +438,13 @@ export type TableSourceDefinition = {
       create: string[];
       update: string[];
       delete: string[];
+    };
+    recordPermissions?: {
+      field: string;
+      column: string;
+      empty: "public" | "restricted";
+      createRequires: import("./authoring/types/common.js").RecordPermissionAction[];
+      defaultValue?: Record<string, unknown>;
     };
   };
   relationshipStatus?: {

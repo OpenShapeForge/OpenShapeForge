@@ -32,14 +32,19 @@ import {
   type DatabaseRuntime,
 } from "../../../db/connection.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
-import { getGeneratedCrudTables } from "../../generated-crud.js";
+import {
+  getGeneratedCrudTables,
+  isGeneratedCrudOperationEnabled,
+} from "../../generated-crud.js";
 import { createGraphqlYoga } from "../../yoga.js";
 import persistedManifest from "../../../generated/graphql/persisted-operations.json" with { type: "json" };
+import { seedKeycloakTokenPeople } from "./keycloak.js";
 export {
   getKeycloakToken,
   getRolelessKeycloakToken,
   keycloakTokenFor,
 } from "./keycloak.js";
+export { seedKeycloakTokenPeople };
 
 process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
   "openshapeforge-local-dev-context-secret";
@@ -227,6 +232,14 @@ export function getRuntime(): DatabaseRuntime {
   return store.runtime;
 }
 
+/** Owner connection for e2e setup that deliberately sits outside app RLS. */
+export function getSeedRuntime(): DatabaseRuntime {
+  store.seedRuntime ??= createDatabaseRuntime({
+    databaseUrl: readMigrateDatabaseUrl(),
+  });
+  return store.seedRuntime;
+}
+
 function yogaHandler() {
   store.yoga ??= createGraphqlYoga({ cors: false, db: getRuntime().db });
   return store.yoga;
@@ -375,10 +388,7 @@ export function ensureTenantRows(): Promise<void> {
   store.tenantRowsEnsured ??= (async () => {
     // Tenant registry seeding is setup, not an API request: the restricted app
     // role is correctly blocked by RLS before it has a tenant session.
-    store.seedRuntime ??= createDatabaseRuntime({
-      databaseUrl: readMigrateDatabaseUrl(),
-    });
-    const db = store.seedRuntime.db;
+    const db = getSeedRuntime().db;
     for (const { tenantId } of [tenantA, tenantB]) {
       await sql`
         INSERT INTO erp.tenants (id, tenant_id, slug, name)
@@ -388,6 +398,13 @@ export function ensureTenantRows(): Promise<void> {
     }
   })();
   return store.tenantRowsEnsured;
+}
+
+/** Seed tenant membership for real bearer identities through the owner connection. */
+export async function ensureKeycloakTokenPeople(
+  tokens: readonly (string | null)[],
+): Promise<void> {
+  await seedKeycloakTokenPeople(getSeedRuntime().db, tokens);
 }
 
 export function registerSuiteLifecycle() {
@@ -402,12 +419,31 @@ export function registerSuiteLifecycle() {
     for (let i = 0; i < rows.length; i += batchSize) {
       await Promise.all(
         rows.slice(i, i + batchSize).map((row) => {
-          const graphql = row.table.source!.graphql!;
-          return gql(
-            row.identity,
-            `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-            { id: row.id },
-          ).catch(() => {});
+          const graphql = row.table.source?.graphql;
+          if (
+            graphql &&
+            graphql.operations?.delete !== false &&
+            isGeneratedCrudOperationEnabled(row.table, "delete")
+          ) {
+            return gql(
+              row.identity,
+              `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
+              { id: row.id },
+            ).catch(() => {});
+          }
+
+          // A strict-v2 entity may intentionally have no GraphQL mutation.
+          // Test cleanup must not re-open that product interface merely to
+          // remove a fixture, so the owner connection deletes the exact row.
+          if (!row.table.primaryKey) return Promise.resolve();
+          const tenantWhere = row.table.tenantScoped
+            ? sql`and ${sql.id("tenant_id")} = ${row.identity.tenantId}::uuid`
+            : sql``;
+          return sql`
+            delete from ${sql.id(row.table.schema, row.table.table)}
+            where ${sql.id(row.table.primaryKey)}::text = ${row.id}
+              ${tenantWhere}
+          `.execute(getSeedRuntime().db).then(() => {}).catch(() => {});
         }),
       );
     }

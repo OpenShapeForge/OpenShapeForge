@@ -45,13 +45,20 @@ import type { CompiledEntityContract } from "../types/compiled.js";
 import type {
   AuthorizationConfigFile,
   AuthorizationClient,
+  AuthorizationClientRoleComposite,
   AuthorizationGroupNode,
   AuthorizationIdentityProvider,
   AuthorizationIdentityProviderMapper,
+  OperationCatalogDefinition,
   AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
+import {
+  buildPasskeyProfile,
+  type KeycloakAuthenticationFlowExport,
+  type KeycloakRequiredActionExport,
+} from "./keycloak-passkeys.js";
 
 const DEFAULT_REALM_NAME = "openshapeforge";
 
@@ -148,11 +155,13 @@ interface KeycloakClient {
   directAccessGrantsEnabled: boolean;
   serviceAccountsEnabled: boolean;
   standardFlowEnabled: boolean;
+  implicitFlowEnabled?: boolean;
   fullScopeAllowed?: boolean;
   redirectUris?: string[];
   webOrigins?: string[];
   defaultClientScopes?: string[];
   protocolMappers?: KeycloakProtocolMapper[];
+  attributes?: Record<string, string>;
 }
 
 interface KeycloakIdentityProvider {
@@ -198,6 +207,27 @@ interface KeycloakRealmExport {
   eventsEnabled?: boolean;
   adminEventsEnabled?: boolean;
   eventsListeners?: string[];
+  /**
+   * Passkey profile — see generators/keycloak-passkeys.ts. Emitted for EVERY
+   * realm, with no mode switch: the browser flow a human meets must not be
+   * something a forgotten environment variable can relax.
+   */
+  browserFlow?: string;
+  directGrantFlow?: string;
+  registrationFlow?: string;
+  authenticationFlows?: KeycloakAuthenticationFlowExport[];
+  requiredActions?: KeycloakRequiredActionExport[];
+  webAuthnPolicyPasswordlessRpEntityName?: string;
+  webAuthnPolicyPasswordlessRpId?: string;
+  webAuthnPolicyPasswordlessSignatureAlgorithms?: string[];
+  webAuthnPolicyPasswordlessAttestationConveyancePreference?: string;
+  webAuthnPolicyPasswordlessAuthenticatorAttachment?: string;
+  webAuthnPolicyPasswordlessRequireResidentKey?: string;
+  webAuthnPolicyPasswordlessUserVerificationRequirement?: string;
+  webAuthnPolicyPasswordlessCreateTimeout?: number;
+  webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister?: boolean;
+  webAuthnPolicyPasswordlessAcceptableAaguids?: string[];
+  webAuthnPolicyPasswordlessExtraOrigins?: string[];
   clients: KeycloakClient[];
   identityProviders?: KeycloakIdentityProvider[];
   identityProviderMappers?: KeycloakIdentityProviderMapper[];
@@ -289,6 +319,31 @@ function gatewayProtocolMappers(resourceClientIds: string[]): KeycloakProtocolMa
     },
     ...audienceMappers(resourceClientIds),
   ];
+}
+
+/**
+ * Client-credentials tokens have no profile scope from which Keycloak can add
+ * `preferred_username`. The runtime still needs the exact synthetic username
+ * to distinguish the configured organization identity from an arbitrary
+ * client using the same tenant. Keep this mapper on tenant-bound service
+ * accounts only and emit it only in access tokens; this does not add human
+ * profile or email claims to the identity.
+ */
+function serviceAccountUsernameMapper(): KeycloakProtocolMapper {
+  return {
+    name: "service-account-preferred-username",
+    protocol: "openid-connect",
+    protocolMapper: "oidc-usermodel-property-mapper",
+    consentRequired: false,
+    config: {
+      "user.attribute": "username",
+      "claim.name": "preferred_username",
+      "jsonType.label": "String",
+      "id.token.claim": "false",
+      "access.token.claim": "true",
+      "userinfo.token.claim": "false",
+    },
+  };
 }
 
 /** Which kind of realm the compiler should emit. */
@@ -556,6 +611,30 @@ function buildClient(
         directAccessGrantsEnabled: false,
         serviceAccountsEnabled: true,
         standardFlowEnabled: false,
+        implicitFlowEnabled: false,
+        redirectUris: [],
+        webOrigins: [],
+        ...(def.serviceAccountTenantId ? {
+          defaultClientScopes: ["basic", "roles"],
+          // Only the tenant and resource audiences: an automatic identity must
+          // not carry the gateway's employee/organization-person claims.
+          protocolMappers: [
+            ...gatewayProtocolMappers([]).filter((mapper) => mapper.name === "tid-mapper"),
+            serviceAccountUsernameMapper(),
+            ...audienceMappers(resourceClientIds),
+          ],
+          attributes: {
+            "oauth2.device.authorization.grant.enabled": "false",
+            "oidc.ciba.grant.enabled": "false",
+            "osf.serviceAccountTenantId": def.serviceAccountTenantId,
+            ...(def.organizationAutomation ? { "osf.organizationAutomation": "true" } : {}),
+          },
+        } : {
+          attributes: {
+            "oauth2.device.authorization.grant.enabled": "false",
+            "oidc.ciba.grant.enabled": "false",
+          },
+        }),
       };
   }
 }
@@ -880,6 +959,7 @@ interface EntityRoleAggregate {
 function aggregateFromEntities(
   contracts: CompiledEntityContract[],
   entityRoleClient: string,
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): EntityRoleAggregate {
   const clientRoles = new Map<string, KeycloakRole[]>();
   const entityComposites = new Map<string, { entity: string; roles: string[] }>();
@@ -912,6 +992,20 @@ function aggregateFromEntities(
         : undefined,
     });
     clientRoles.set(clientId, list);
+  };
+
+  const pushOperationRoles = (
+    operationId: string,
+    auth: { mode: string; roles?: readonly string[] },
+  ) => {
+    if (auth.mode !== "session") return;
+    for (const role of auth.roles ?? []) {
+      push(entityRoleClient, {
+        name: role,
+        description: `Invoke ${operationId}`,
+        composite: false,
+      });
+    }
   };
 
   for (const contract of contracts) {
@@ -974,6 +1068,16 @@ function aggregateFromEntities(
         entity: auth.entitySlug,
         roles: normalizeKeycloakRoleNames(composite.composites ?? []),
       });
+    }
+
+    for (const operation of contract.pluginOperations ?? []) {
+      pushOperationRoles(operation.id, operation.definition.auth);
+    }
+  }
+
+  for (const catalog of operationCatalogs) {
+    for (const [key, operation] of Object.entries(catalog.operations)) {
+      pushOperationRoles(operation.id ?? `${catalog.plugin}.${key}`, operation.auth);
     }
   }
 
@@ -1078,6 +1182,25 @@ function buildRealmRole(
   return result;
 }
 
+function buildClientRoleComposite(
+  name: string,
+  def: AuthorizationClientRoleComposite,
+): KeycloakRole {
+  const composites = Object.fromEntries(
+    Object.entries(def.composites).map(([clientId, roles]) => [
+      clientId,
+      normalizeKeycloakRoleNames(roles),
+    ]),
+  );
+  return {
+    name: normalizeKeycloakRoleName(name),
+    description: def.description,
+    composite: true,
+    composites: { client: composites },
+    attributes: def.attributes,
+  };
+}
+
 function buildKeycloakGroupsFromAuthoring(nodes: AuthorizationGroupNode[], parentPath: string): KeycloakGroup[] {
   return nodes.map((node) => {
     const path = parentPath ? `${parentPath}/${node.name}` : `/${node.name}`;
@@ -1099,6 +1222,22 @@ export interface KeycloakRealmArtifact {
   contents: string;
 }
 
+/**
+ * Let the authored rpId be a `${env:VAR:-devDefault}` reference, under the
+ * same rule as every other environment-specific value in this file: the
+ * fallback is development-only, so a production build that forgot to set the
+ * variable fails instead of publishing the laptop hostname as the relying
+ * party — which would make every production passkey fail to verify.
+ */
+function resolveRpIdRef(
+  raw: string | undefined,
+  dev: boolean,
+  realmName: string,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  return resolveEnvRef(raw, dev, `Realm "${realmName}": realm.webAuthn.rpId`) ?? raw;
+}
+
 export function generateKeycloakRealmArtifacts(
   contracts: CompiledEntityContract[],
   authConfig: AuthorizationConfigFile | null | undefined,
@@ -1106,6 +1245,7 @@ export function generateKeycloakRealmArtifacts(
   // committed secrets are refused, and a security rule that can only be
   // exercised by mutating global state is a rule that stops being tested.
   mode: RealmMode = resolveRealmMode(),
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): KeycloakRealmArtifact[] {
   if (!authConfig) {
     return [];
@@ -1133,14 +1273,21 @@ export function generateKeycloakRealmArtifacts(
 
   const realmRolesDef = authConfig.realmRoles ?? authConfig.keycloak?.realmRoles ?? {};
 
-  const clientDefs = authConfig.keycloak?.clients ?? [];
+  const clientDefs = (authConfig.keycloak?.clients ?? []).map((client) =>
+    typeof client.serviceAccountTenantId === "string"
+      ? {
+          ...client,
+          serviceAccountTenantId: client.serviceAccountTenantId.toLowerCase(),
+        }
+      : client
+  );
   const resourceClientIds = clientDefs
     .filter((c) => c.kind === "bearerOnly")
     .map((c) => c.id);
   const dev = isDevRealm(authConfig.realm, mode);
 
   const entityAggregate = entityRoleClient
-    ? aggregateFromEntities(contracts, entityRoleClient)
+    ? aggregateFromEntities(contracts, entityRoleClient, operationCatalogs)
     : { clientRoles: new Map(), entityComposites: new Map() };
 
   const identityProviderDefs = authConfig.keycloak?.identityProviders ?? [];
@@ -1189,11 +1336,51 @@ export function generateKeycloakRealmArtifacts(
       clientRolesOut[clientId] = list;
     }
   }
+  if (authConfig.clientRoleComposites) {
+    for (const [clientId, definitions] of Object.entries(authConfig.clientRoleComposites)) {
+      const existing = clientRolesOut[clientId] ?? [];
+      const names = new Set(existing.map((role) => role.name));
+      const sourcesByNormalized = new Map<string, Set<string>>();
+      for (const [rawName, definition] of Object.entries(definitions)) {
+        const name = normalizeKeycloakRoleName(rawName);
+        const sources = sourcesByNormalized.get(name) ?? new Set<string>();
+        sources.add(rawName);
+        sourcesByNormalized.set(name, sources);
+        if (names.has(name)) {
+          throw new Error(
+            `Client role "${name}" on client "${clientId}" is declared both as a ` +
+              "plain client role and as a composite client role.",
+          );
+        }
+        names.add(name);
+        existing.push(buildClientRoleComposite(rawName, definition));
+      }
+      for (const [name, sources] of sourcesByNormalized) {
+        if (sources.size > 1) {
+          const spellings = [...sources].sort().map((source) => `"${source}"`).join(", ");
+          throw new Error(
+            `Keycloak role-name collision on client "${clientId}": ` +
+              `distinct authored composite roles ${spellings} all normalize to "${name}". ` +
+              "Use a single canonical spelling for this role.",
+          );
+        }
+      }
+      clientRolesOut[clientId] = existing;
+    }
+  }
   for (const [clientId, roles] of entityAggregate.clientRoles) {
     const existing = clientRolesOut[clientId] ?? [];
     const seen = new Set(existing.map((r) => r.name));
     for (const role of roles) {
-      if (!seen.has(role.name)) {
+      if (seen.has(role.name)) {
+        const authored = existing.find((candidate) => candidate.name === role.name);
+        if (authored?.composite) {
+          throw new Error(
+            `Client role "${role.name}" on client "${clientId}" is both an ` +
+              "authored composite client role and an entity-derived role.",
+          );
+        }
+      } else {
         existing.push(role);
         seen.add(role.name);
       }
@@ -1201,6 +1388,23 @@ export function generateKeycloakRealmArtifacts(
     clientRolesOut[clientId] = existing;
   }
 
+  const automationTenants = new Set<string>();
+  for (const client of clientDefs) {
+    if ((client.serviceAccountTenantId || client.organizationAutomation) && client.kind !== "serviceAccount") {
+      throw new Error(`Client ${client.id}: organization identity settings require kind serviceAccount.`);
+    }
+    if (client.serviceAccountTenantId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client.serviceAccountTenantId)) {
+      throw new Error(`Client ${client.id}: serviceAccountTenantId must be a tenant UUID.`);
+    }
+    if (client.organizationAutomation) {
+      if (!client.serviceAccountTenantId || !client.serviceAccountClientRoles ||
+          Object.values(client.serviceAccountClientRoles).every((roles) => roles.length === 0)) {
+        throw new Error(`Client ${client.id}: automatic Operations require an explicit tenant and service account role grants.`);
+      }
+      if (automationTenants.has(client.serviceAccountTenantId)) throw new Error("An organization may have only one automatic service identity.");
+      automationTenants.add(client.serviceAccountTenantId);
+    }
+  }
   const clients = clientDefs.map((c) => buildClient(c, resourceClientIds, dev));
 
   // External identity providers: host-authored, emitted unchanged, none by
@@ -1245,14 +1449,15 @@ export function generateKeycloakRealmArtifacts(
     .filter(
       (c) =>
         c.kind === "serviceAccount" &&
-        c.serviceAccountClientRoles &&
-        Object.keys(c.serviceAccountClientRoles).length > 0,
+        (c.serviceAccountTenantId || (c.serviceAccountClientRoles &&
+        Object.keys(c.serviceAccountClientRoles).length > 0)),
     )
     .map((c) => ({
       username: `service-account-${c.id}`,
       enabled: true,
       serviceAccountClientId: c.id,
       clientRoles: c.serviceAccountClientRoles,
+      ...(c.serviceAccountTenantId ? { attributes: { tid: [c.serviceAccountTenantId] } } : {}),
     }));
 
   const legacyEvents = authConfig.keycloak?.realm;
@@ -1272,7 +1477,12 @@ export function generateKeycloakRealmArtifacts(
     registrationAllowed: realmCfg.registrationAllowed,
     loginWithEmailAllowed: realmCfg.loginWithEmailAllowed,
     duplicateEmailsAllowed: realmCfg.duplicateEmailsAllowed,
-    resetPasswordAllowed: realmCfg.resetPasswordAllowed,
+    // Forced off, in every mode. "Forgot password" is a self-service path to a
+    // password credential, and this realm's browser flow has nowhere to put
+    // one. The equivalent for a passkey — an admin-issued, single-use,
+    // time-boxed enrolment link — is deliberately NOT self-service; see the
+    // escape-hatch section of generators/keycloak-passkeys.ts.
+    resetPasswordAllowed: false,
     editUsernameAllowed: realmCfg.editUsernameAllowed,
     // Also forced: an internet-reachable login endpoint without lockout is an
     // open invitation to credential stuffing, and the authored default is off
@@ -1285,6 +1495,16 @@ export function generateKeycloakRealmArtifacts(
     eventsEnabled: realmCfg.events?.enabled ?? legacyEvents?.eventsEnabled,
     adminEventsEnabled: realmCfg.events?.adminEnabled ?? legacyEvents?.adminEventsEnabled,
     eventsListeners: realmCfg.events?.listeners ?? legacyEvents?.eventsListeners,
+    // Passkeys. Unconditional on purpose — `dev` reaches this call only to
+    // supply an rpId fallback that a laptop never exercises. See
+    // generators/keycloak-passkeys.ts for why the development relaxation is a
+    // loopback-only admin script instead of a flag here.
+    ...buildPasskeyProfile({
+      realmName,
+      realmDisplayName: realmCfg.displayName,
+      rpId: resolveRpIdRef(realmCfg.webAuthn?.rpId, dev, realmName),
+      dev,
+    }),
     clients,
     ...(idp.identityProviders.length > 0
       ? {
@@ -1328,12 +1548,18 @@ export function generateAllKeycloakRealmArtifacts(
   contracts: CompiledEntityContract[],
   authConfigs: readonly (AuthorizationConfigFile | null | undefined)[],
   mode: RealmMode = resolveRealmMode(),
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): KeycloakRealmArtifact[] {
   const artifacts: KeycloakRealmArtifact[] = [];
   const seenPaths = new Set<string>();
 
   for (const authConfig of authConfigs) {
-    for (const artifact of generateKeycloakRealmArtifacts(contracts, authConfig, mode)) {
+    for (const artifact of generateKeycloakRealmArtifacts(
+      contracts,
+      authConfig,
+      mode,
+      operationCatalogs,
+    )) {
       if (seenPaths.has(artifact.path)) {
         throw new Error(
           `Two authorizationConfig documents declare realm "${authConfig?.realm?.name ?? DEFAULT_REALM_NAME}". ` +

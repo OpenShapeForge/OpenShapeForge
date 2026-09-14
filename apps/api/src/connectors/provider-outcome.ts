@@ -493,17 +493,65 @@ export function providerOutcomeOf(error: unknown): ConnectorProviderOutcome | un
  * typecheck; the unit test pins the full key set so a string-typed code
  * cannot drift either.
  *
- * Deliberately explicit rather than defaulted: an unmapped code becoming a
- * 500 is the right failure, because it means a new failure mode has appeared
- * that nobody decided how to present.
+ * Deliberately explicit for protocol adapters and untrusted failures. A
+ * canonical OperationFailure may additionally use a server-authored domain
+ * code; its adapter fallback is a conflict, never an internal exception.
  */
 export const HTTP_STATUS_BY_CODE = {
   BAD_USER_INPUT: 400,
+  IDEMPOTENCY_KEY_REQUIRED: 400,
+  IDEMPOTENCY_KEY_REUSED: 409,
+  OPERATION_IN_PROGRESS: 409,
+  OPERATION_OUTCOME_UNKNOWN: 409,
+  IDEMPOTENCY_RECEIPT_UNAVAILABLE: 503,
+  VALIDATION: 422,
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  VERSION_CONFLICT: 409,
+  LOCKED: 423,
+  LEASE_NOT_SUPPORTED: 400,
+  LEASE_ACQUIRE_FAILED: 409,
+  LEASE_EXPIRED: 409,
+  LEASE_INVALID: 409,
+  CONFIRMATION_NOT_SUPPORTED: 400,
+  CONFIRMATION_VALUE_UNAVAILABLE: 409,
+  CONFIRMATION_REQUIRED: 428,
+  CONFIRMATION_MISMATCH: 400,
+  CONFIRMATION_ALREADY_USED: 409,
+  CONFIRMATION_EXPIRED: 409,
+  CONFIRMATION_STALE: 409,
+  TOO_MANY_REQUESTS: 429,
+  INTERNAL_SERVER_ERROR: 500,
   GENERATED_CRUD_NOT_ENABLED: 404,
   GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
+  STORAGE_UNAVAILABLE: 503,
+  STORAGE_DISABLED: 503,
+  STORAGE_SETTINGS_INVALID: 503,
+  STORAGE_PROVIDER_FAILURE: 503,
+  STORAGE_PROVIDER_MISMATCH: 503,
+  ARTIFACT_INPUT_INVALID: 400,
+  ARTIFACT_ID_INVALID: 400,
+  ARTIFACT_TOO_LARGE: 413,
+  ARTIFACT_MEDIA_TYPE_UNRECOGNIZED: 415,
+  ARTIFACT_MEDIA_TYPE_FORBIDDEN: 415,
+  ARTIFACT_ACCESS_DENIED: 403,
+  ARTIFACT_NOT_FOUND: 404,
+  ARTIFACT_OWNER_MISMATCH: 409,
+  ARTIFACT_STATE_CONFLICT: 409,
+  // Database refusals (db/database-refusals.ts). NOT_PUBLISHABLE is the same
+  // code core's publication validation answers with, so a trigger saying it
+  // gets the same 400. A rule that refuses the requested state is a conflict
+  // (409); a reference the caller cannot see is not found (404); a row that
+  // clashes with an existing one is a conflict (409). An authored code
+  // absent from this table is 409.
+  NOT_PUBLISHABLE: 400,
+  OPERATION_REFUSED: 409,
+  REFERENCE_NOT_FOUND: 404,
+  REFERENCE_IN_USE: 409,
+  ALREADY_EXISTS: 409,
   // Catalog and configuration.
   CONNECTOR_NOT_FOUND: 404,
   CONNECTOR_NOT_CONFIGURED: 409,
@@ -570,7 +618,15 @@ export function httpStatusForCode(code: string): number | undefined {
  * different things.
  */
 export type FailureBody = {
-  error: { code: string; message: string } & Partial<Omit<ConnectorProviderOutcome, "code">>;
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    /** Authored DETAIL of a database rule's refusal (db/database-refusals.ts). */
+    detail?: string;
+    /** Safe structured details and next-step hints. */
+    data?: Readonly<Record<string, unknown>>;
+  } & Partial<Omit<ConnectorProviderOutcome, "code" | "retryable">>;
 };
 
 export function failureBody(
@@ -578,7 +634,14 @@ export function failureBody(
   message: string,
   outcome?: ConnectorProviderOutcome | undefined,
 ): FailureBody {
-  return { error: { code, message, ...(outcome ?? {}) } };
+  return {
+    error: {
+      code,
+      message,
+      retryable: outcome?.retryable ?? false,
+      ...(outcome ?? {}),
+    },
+  };
 }
 
 /**

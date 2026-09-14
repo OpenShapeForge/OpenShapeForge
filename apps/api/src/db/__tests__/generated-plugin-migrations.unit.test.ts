@@ -34,6 +34,32 @@ describe("generated plugin migration registry", () => {
     );
   });
 
+  test("loads a phase-bound pre-generated migration and rejects a phase edit", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
+    const sql = "ALTER TABLE workflow.definitions RENAME TO workflow_definitions;\n";
+    const migration = {
+      plugin: "workflow",
+      version: "0001_move-definition-owner",
+      phase: "beforeGenerated" as const,
+      checksum: createHash("sha256").update(`beforeGenerated\0${sql}`).digest("hex"),
+      sql,
+    };
+    const path = join(dir, "registry.json");
+    await writeFile(path, JSON.stringify({ version: 1, migrations: [migration] }));
+    expect(await loadGeneratedPluginMigrations(path)).toEqual([migration]);
+
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        migrations: [{ ...migration, phase: "afterGenerated" }],
+      }),
+    );
+    await expect(loadGeneratedPluginMigrations(path)).rejects.toThrow(
+      /Regenerate artifacts/,
+    );
+  });
+
   test("accepts the compiler tuple order when one plugin name prefixes another", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
     const migrations = ["cpq", "cpq-extra"].map((plugin) => {

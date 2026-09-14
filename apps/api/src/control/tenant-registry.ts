@@ -59,6 +59,10 @@ import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import type { KeycloakOrganizationAdminClient } from "./keycloak-organization-admin.js";
 import type { KeycloakSpiClient } from "./keycloak-spi-client.js";
 import { assertDisplayName, assertSlug, ControlInputError } from "./organization-naming.js";
+import type {
+  OrganizationScopeAdminClient,
+  OrganizationScopeSettings,
+} from "./organization-scopes.js";
 
 /**
  * The TENANTSTATUS codetable
@@ -164,6 +168,13 @@ export type ControlDeps = {
   keycloak: KeycloakSpiClient;
   /** Keycloak's own admin API: the `enabled` projection of a lifecycle state. */
   keycloakAdmin: KeycloakOrganizationAdminClient;
+  /**
+   * Keycloak's client-scope admin API: the per-organization MCP audience scope
+   * (`organization-scopes.ts`), provisioned beside the Organization.
+   */
+  organizationScopes: OrganizationScopeAdminClient;
+  /** The origins and clients every organization scope is provisioned for. */
+  mcpResource: OrganizationScopeSettings;
   /** The realm Organizations are created in; recorded on the tenant row. */
   tenantRealm: string;
   operator: ControlOperator;

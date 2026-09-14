@@ -20,6 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import {
@@ -30,6 +31,7 @@ import {
 import { invalidateIntegrationToken } from "./exchange.js";
 import { mintApiKey } from "./format.js";
 import { KeycloakAdmin } from "./keycloak-admin.js";
+import { parseRoleSubset } from "./store.js";
 
 export type ProvisioningSession = CeilingSession & {
   tenantId: string;
@@ -120,7 +122,7 @@ export async function createIntegration(
          created_by, created_at, updated_at)
       values
         (${integrationId}, ${session.tenantId}, ${displayName}, ${keycloakClientId},
-         'pending', ${JSON.stringify(input.roles)}::jsonb, ${session.userId}, ${now}, ${now})
+         'pending', ${jsonbLiteral(input.roles)}, ${session.userId}, ${now}, ${now})
     `.execute(trx);
   });
 
@@ -301,7 +303,7 @@ export async function listKeys(
       integrationId: row.integration_id,
       integrationName: row.integration_name,
       displayName: row.display_name,
-      roleSubset: Array.isArray(row.role_subset) ? (row.role_subset as string[]) : null,
+      roleSubset: parseRoleSubset(row.role_subset),
       createdAt: row.created_at,
       expiresAt: row.expires_at,
       revokedAt: row.revoked_at,
@@ -396,7 +398,7 @@ async function insertKeyRow(trx: unknown, args: InsertKeyArgs): Promise<void> {
     values
       (${args.keyId}, ${args.tenantId}, ${args.integrationId}, ${args.lookupId},
        ${args.secretHash}, ${args.displayName},
-       ${args.roleSubset === null ? null : JSON.stringify(args.roleSubset)}::jsonb,
+       ${jsonbLiteral(args.roleSubset)},
        ${args.expiresAt}, ${args.createdBy}, ${args.now})
   `.execute(trx as never);
 }

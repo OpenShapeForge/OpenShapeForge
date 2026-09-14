@@ -22,7 +22,7 @@ authoring/
     field-authoring-profiles.yaml  field-editor profiles (web authoring UI)
   authorization.yaml      Keycloak tenant realm: clients/roles/groups/dev users
   authorization.control.yaml  Keycloak control realm (platform operators)
-  appShell.yaml           web app shell + sidebar navigation
+  menu.yaml           web app shell + sidebar navigation
   views/                  optional standalone view YAML (empty here)
   contexts/, mappings/    supported by the loader, unused in this repo
 ```
@@ -124,6 +124,46 @@ crud:                       # common upper bound for every generated surface
 
 rest: true                   # opt-in generated REST exposure (see below)
 ```
+
+### Action-specific record permissions
+
+An entity can let one persisted JSON field further narrow its ordinary tenant
+and role authorization. The shape is fixed: optional `view`, `edit`, and
+`delete` objects, each containing optional `users`, `groups`, and `roles`
+string arrays. A valid empty subject set follows the authored `empty` rule;
+malformed JSON always denies access.
+
+```yaml
+authorization:
+  roles:                    # still required: a record ACL never grants a role
+    read: [Records.All.Read]
+    create: [Records.All.Manage]
+    update: [Records.All.Manage]
+    delete: [Records.All.Delete]
+  rowAccess:
+    enabled: true
+    empty: public
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires: [view, edit]
+
+fields:
+  - key: authorization
+    valueType: object
+    required: true
+    defaultValue: {}
+    persisted: { column: authorization, storageClass: core }
+```
+
+Generated list/get require `view`, update requires `view` and `edit`, and
+delete requires `view` and `delete`. Create checks the submitted/default ACL
+against `createRequires`, preventing an author from creating a record they
+cannot reopen. A record-scoped plugin Operation can add
+`auth.recordPermission: view|edit|delete`; this is checked before challenges
+or leases are issued and again inside the write transaction. This semantic
+action is independent of its SQL verb, so an archive implemented with UPDATE
+can truthfully require `delete`.
 
 Notes on what the compiler does with this:
 
@@ -294,9 +334,9 @@ Catalog files under `catalogs/` merge across authoring layers automatically
 
 One file authors one whole Keycloak realm export: realm settings (token
 lifespans, org feature), clients (`gateway` / `bearerOnly` / `serviceAccount`
-kinds), realm roles with per-client composites, hand-authored client roles, a
-demo group hierarchy, and dev users with plain passwords and a `tid` (tenant
-UUID) attribute. Each is generated to `keycloak/<realm.name>-realm.json` and
+kinds), optional realm roles, hand-authored client roles, audience-scoped
+`clientRoleComposites`, groups, and users with a `tid` (tenant UUID) attribute.
+Each is generated to `keycloak/<realm.name>-realm.json` and
 mounted into the local Keycloak container, whose `--import-realm` imports every
 file in its import directory.
 
@@ -304,7 +344,9 @@ Two realms are authored here:
 
 - **`authorization.yaml`** — the tenant realm `openshapeforge`. Its
   `keycloak.entityRoleClient` (`erp-provider`) is the designated target for
-  entity-derived roles. See [api.md](api.md#local-stack) for the dev logins.
+  entity-derived roles. The reusable base contains no product personas, groups
+  or users; hosts author those, while this repository adds neutral identities
+  from `test/fixtures/authoring/development-identities` for local and e2e runs.
 - **`authorization.control.yaml`** — the control realm
   `openshapeforge-control`, the issuer `apps/admin` signs platform operators in
   against. Deliberately minimal: one gateway client, one `platform-operator`
@@ -319,7 +361,83 @@ Either realm may also author `keycloak.identityProviders` — external social or
 corporate (OIDC/SAML) providers, emitted exactly as written. Neither shipped
 realm does; see [identity-providers.md](identity-providers.md).
 
-## `appShell.yaml`
+### Overlaying a realm: `kind: authorizationPatch`
+
+A host that consumes the compiler as a package inherits these realm files and
+usually wants to change a few things in one of them — the audience client's
+name, an extra client, or a product role composed on that audience — without forking
+the whole file. Shipping a plain `authorization.yaml` in a later layer is a
+layer collision, and a second `authorization.<x>.yaml` naming the same realm
+is refused by the generator; the supported way is a **patch at the same
+path** as the realm file it targets:
+
+```yaml
+# host-layer/authorization.yaml   (patches the base authorization.yaml;
+#                                   authorization.control.yaml patches that realm)
+kind: authorizationPatch
+
+# 1. Optional. Moves one client id everywhere the base refers to it:
+#    keycloak.entityRoleClient, keycloak.clients[].id, the client keys of
+#    realmRoles.*.composites, clientRoles, clientRoleComposites (owner and
+#    target ids), users[].clientRoles and serviceAccountClientRoles. Only the id moves; the client's own fields
+#    are set below, under the NEW id.
+renameClient: { from: erp-provider, to: application-api }
+
+# 2. Everything else strategic-merges onto the (renamed) base.
+keycloak:
+  clients:
+    - id: application-api                 # merges by id into the renamed client
+      name: Application API
+      devSecret: application-api-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_APPLICATION_API}
+    - id: application-reporting           # unknown id: appended
+      kind: bearerOnly
+    - id: openshapeforge-knowledge-base
+      $delete: true                       # keyed-array delete
+clientRoleComposites:
+  application-api:
+    Application.Editor:
+      description: May edit application data
+      composites:
+        application-api: [Relations.All.ReadWrite]
+realmRoles:                               # only when realm-global is intended
+  support-operator:
+    description: Support operator
+    composites:
+      application-api: [Relations.All.Read]
+clientRoles:
+  application-api: [Relations.All.ReadWrite, Relations.All.Read]
+```
+
+Rules, in the order they apply:
+
+1. **`renameClient: { from, to }`** rewrites references only. `from` must be
+   a client of the realm being patched (or its `entityRoleClient`); `to` must
+   not already exist. Nothing else in the client changes — so after a rename
+   the base's `secret: ${env:KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER}` is still
+   there until the patch sets a new one. Anything else that named the old id
+   outside authoring (runtime `aud` pins, setup scripts) is yours to move.
+2. **Strategic merge** of the rest ([layers.md](layers.md#kind-entitypatch--strategic-merge-semantics)):
+   objects deep-merge, `null` deletes a property, `keycloak.clients[]` merges
+   by `id` with `$delete: true`, other arrays (`users`, `groups`,
+   `redirectUris`, …) replace wholesale.
+3. **Role-name lists union** instead of replacing: `clientRoles.<client>`,
+   `clientRoleComposites.<client>.<role>.composites.<client>`,
+   `realmRoles.<role>.composites.<client>` and `realmRoles.<role>.includes`
+   keep the base's grants in base order and append the patch's. A grant list
+   is a set, and "add one composite" restating fifteen others is how a grant
+   silently goes missing. To take a grant away, set the client key to `null`
+   or change the owning layer.
+4. The merged document is **validated as an `authorizationConfig`** and the
+   error names the patch file, not the merged file nobody wrote.
+
+A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
+`clientRoles`, `clientRoleComposites`, `groups` and `users`; `schemaVersion` is the base's and cannot
+be patched. Patching a realm no earlier layer defines is an error (a new
+realm is an `authorizationConfig` under its own filename), as is a patch
+filed anywhere but the layer root. Patches stack across layers in order.
+
+## `menu.yaml`
 
 Shell component + sidebar navigation (labels, icons, `entity:` references).
 Consumed only by web UI generation, so it has no effect in a repo with no `apps/web`.
@@ -401,3 +519,33 @@ independently.
 To keep an authored entity **out of every generated CRUD surface**, set
 `crud: false` on that entity. Secret-bearing and runtime-scheduler entities in
 the base catalog use this declaration; no compiled slug denylist is involved.
+
+## Published blueprint copies
+
+A tenant-scoped v2 entity with built-in create and update Operations can opt in:
+
+```yaml
+blueprint:
+  fields: [name, description]
+```
+
+The listed fields must be writable, unclassified scalar values. Identity,
+source-identification, authorization, relationship, secret and computed fields
+cannot be copied. The compiler generates blueprint list, status, publish and
+reset Operations and their Web, REST, GraphQL and MCP projections. The regular
+create Operation accepts an optional `blueprintId` (the published source record's
+`externalId`); explicit create values override the selected snapshot.
+
+Publication requires a `platform-operator` identity in a blueprint tenant.
+Published versions are immutable snapshots. A privileged operator provisions the
+customer's single library assignment in `platform.blueprint_libraries`; no
+self-service assignment Operation is provided yet. A restricted database function
+can read only assigned published snapshots whose reader roles match the session.
+Ordinary entity RLS remains unchanged.
+
+A local copy records its source and adopted version. New publication only changes
+its update indicator. Reset requires explicit acknowledgement, the expected source
+version and the entity's version/edit-lease controls. It replaces only the declared
+fields, keeping the customer record's identity, relationships and other fields.
+This initial contract supports scalar configuration records, not workflow graphs
+or other aggregates. Existing plugin-backed mutations cannot silently opt in.

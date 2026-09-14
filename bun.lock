@@ -5,6 +5,7 @@
     "": {
       "name": "openshapeforge",
       "devDependencies": {
+        "@openshapeforge/documents": "workspace:*",
         "@types/bun": "^1.3.5",
       },
     },
@@ -45,7 +46,10 @@
         "@modelcontextprotocol/ext-apps": "^1.7.5",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "@openshapeforge/auth": "workspace:*",
+        "@openshapeforge/documents": "workspace:*",
         "@openshapeforge/observability": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
+        "@openshapeforge/plugin-runtime": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fastify": "^5.8.2",
@@ -167,11 +171,13 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
       "dependencies": {
+        "@openshapeforge/interface-web": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "ejs": "^5.0.1",
@@ -183,6 +189,33 @@
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "@types/ejs": "^3.1.5",
+      },
+    },
+    "packages/documents": {
+      "name": "@openshapeforge/documents",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+        "yaml": "^2.8.3",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+      "peerDependencies": {
+        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
+      },
+    },
+    "packages/interface-web": {
+      "name": "@openshapeforge/interface-web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
       },
     },
     "packages/observability": {
@@ -210,6 +243,43 @@
         "fastify": "^5.0.0",
         "graphql": "^16.0.0",
         "graphql-yoga": "^5.22.0",
+      },
+    },
+    "packages/operations": {
+      "name": "@openshapeforge/operations",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+    },
+    "packages/plugin-runtime": {
+      "name": "@openshapeforge/plugin-runtime",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+        "fastify": "^5.8.2",
+        "kysely": "^0.29.4",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+    },
+    "packages/preferences": {
+      "name": "@openshapeforge/preferences",
+      "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+        "yaml": "^2.8.3",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+      "peerDependencies": {
+        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },
     "packages/ui": {
@@ -454,11 +524,21 @@
 
     "@openshapeforge/connector-twinfield": ["@openshapeforge/connector-twinfield@workspace:connectors/twinfield"],
 
+    "@openshapeforge/documents": ["@openshapeforge/documents@workspace:packages/documents"],
+
     "@openshapeforge/example-plugin-workflow": ["@openshapeforge/example-plugin-workflow@workspace:examples/plugins/workflow"],
 
     "@openshapeforge/example-plugin-workflow-domain-nodes": ["@openshapeforge/example-plugin-workflow-domain-nodes@workspace:examples/plugins/workflow-domain-nodes"],
 
+    "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
+
     "@openshapeforge/observability": ["@openshapeforge/observability@workspace:packages/observability"],
+
+    "@openshapeforge/operations": ["@openshapeforge/operations@workspace:packages/operations"],
+
+    "@openshapeforge/plugin-runtime": ["@openshapeforge/plugin-runtime@workspace:packages/plugin-runtime"],
+
+    "@openshapeforge/preferences": ["@openshapeforge/preferences@workspace:packages/preferences"],
 
     "@openshapeforge/ui": ["@openshapeforge/ui@workspace:packages/ui"],
 
@@ -1359,6 +1439,10 @@
     "zustand": ["zustand@4.5.7", "", { "dependencies": { "use-sync-external-store": "^1.2.2" }, "peerDependencies": { "@types/react": ">=16.8", "immer": ">=9.0.6", "react": ">=16.8" }, "optionalPeers": ["@types/react", "immer", "react"] }, "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
+
+    "@envelop/on-resolve/@envelop/core": ["@envelop/core@5.6.0", "", { "dependencies": { "@envelop/instrumentation": "^1.0.0", "@envelop/types": "^5.2.1", "@whatwg-node/promise-helpers": "^1.2.4", "tslib": "^2.5.0" } }, "sha512-cD7HNfAzJVw/0Pxneu51UAKzUGLvkctk9rr9DVJ9b7FDe4nSa9kAGMRxx145H6ooELIUMjTd2buk3PuvjJmp/A=="],
+
+    "@envelop/prometheus/@envelop/core": ["@envelop/core@5.6.0", "", { "dependencies": { "@envelop/instrumentation": "^1.0.0", "@envelop/types": "^5.2.1", "@whatwg-node/promise-helpers": "^1.2.4", "tslib": "^2.5.0" } }, "sha512-cD7HNfAzJVw/0Pxneu51UAKzUGLvkctk9rr9DVJ9b7FDe4nSa9kAGMRxx145H6ooELIUMjTd2buk3PuvjJmp/A=="],
 
     "@graphql-tools/executor/@graphql-tools/utils": ["@graphql-tools/utils@12.0.0", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-aMdIo/l+8j4lhamWAf+MWHr+lOW8zArSBKXspqtKHgt5I2JF9LS55KDLUe/L9AiJOV/O6qJJ60hgYydbnJHbxg=="],
 

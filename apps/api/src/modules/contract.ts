@@ -26,6 +26,34 @@
  * fields inside it. Handing us a second `type Query` would be a schema error
  * that only surfaced at boot.
  */
+import type { Duplex } from "node:stream";
+import type { RuntimeSettingsService } from "@openshapeforge/plugin-runtime";
+import type { RuntimeRecordAccessServices } from "@openshapeforge/plugin-runtime";
+import type {
+  ModuleOperationErrorResult as PublicModuleOperationErrorResult,
+  ModuleOperationContextContract,
+  ModuleOperationHandlerContract,
+  ModuleOperationAvailabilityHandlerContract,
+  ModuleOperationResult as PublicModuleOperationResult,
+  ModuleOperationSuccessResult as PublicModuleOperationSuccessResult,
+  ModuleReadinessCheck as PublicModuleReadinessCheck,
+  ModuleRuntimeContextContract,
+  ModuleSeedContract,
+  RuntimeOperationDefinition,
+  RuntimeOperationExecutionOptions,
+  RuntimeOperationExecutionResult,
+  RuntimeOperationProvider,
+  RuntimeOperationRequest,
+  RuntimeFieldSchemaCompiler,
+  RuntimeJsonSchemaValidator,
+  RuntimeModuleContract,
+  RuntimeArtifactServices,
+  RuntimeArtifactStorageContribution,
+  RuntimeWorkerContextContract,
+  RuntimeWorkerContract,
+  RuntimeWorkerHandle,
+  RuntimeWorkerLogger,
+} from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -40,14 +68,14 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import type { PlatformCatalogProvider } from "../control/platform-catalog.js";
+import type { OperationError } from "@openshapeforge/operations";
 
 /** What a module may read when building its surfaces. */
-export type ModuleRuntimeContext = {
-  /** Absent when DATABASE_URL is unset; a module must degrade, not throw. */
-  db?: OpenShapeForgeDatabase | undefined;
-  /** Core-owned capabilities. Absent alongside `db` in database-free roles. */
-  platform?: ModulePlatformServices | undefined;
-};
+export type ModuleRuntimeContext = ModuleRuntimeContextContract<
+  OpenShapeForgeDatabase,
+  ModulePlatformServices
+>;
 
 /** Closed subjects whose identifiers core can resolve from trusted state. */
 export type ModuleAuthorizationSubject =
@@ -101,6 +129,13 @@ export type ModuleUnavailableInvocationSource = {
     | "unavailable"
     | "connection_required"
     | "reauthorization_required";
+  /**
+   * The platform's own next step for a connection gap, worded for the
+   * caller (mcp/connection-guidance.ts): which Adapter, which tool, who may
+   * run it. Never provider text. A coordinating module should surface it
+   * verbatim as the source's explanation when present.
+   */
+  guidance?: string;
 };
 
 export type ModuleInvocationSourceResolution = {
@@ -179,12 +214,95 @@ export type ModuleEgressRequest = {
 
 export type ModuleEgressFailureKind = "policy_blocked" | "timeout";
 
+/**
+ * Which Connection a module wants. `adapterKey` is the ordinary case — "the
+ * caller's own connection to this Adapter" — and deliberately needs no
+ * identifier from tool input, which would be untrusted anyway. `connectionId`
+ * is for a module that already holds one from its own stored state.
+ */
+export type ModuleConnectionSelector =
+  | { connectionId: string; adapterKey?: never }
+  | { adapterKey: string; connectionId?: never };
+
+/**
+ * Permission to open outbound connections, minted by core alongside a resolved
+ * Connection. Opaque on purpose: a module cannot read the allow-list off it,
+ * cannot widen it, and cannot construct one. It is handed straight back to
+ * `platform.egress.connect`, which looks the real policy up again.
+ */
+export type ModuleSocketGrant = { readonly __brand: unique symbol };
+
+export type ModuleSocketRequest = {
+  host: string;
+  port: number;
+  /** Implicit TLS from the first byte (an IMAPS port, say). */
+  tls: boolean;
+  /** SNI name; defaults to `host`. */
+  servername?: string;
+  /** Only a test server against a self-signed certificate sets this false. */
+  rejectUnauthorized?: boolean;
+  /** Deadline for establishing the connection. */
+  timeoutMs?: number;
+};
+
+/** One Connection's values, opened for the module core decided may see them. */
+export type ModuleConnectionValues = {
+  connectionId: string;
+  connectionKey: string;
+  adapterKey: string;
+  /** The Adapter's declared transport, e.g. "rest" or "socket". */
+  transport: string;
+  /** Whether this Adapter's Connections are per employee or per organization. */
+  connectionScope: "tenant" | "user";
+  /** The employee this Connection belongs to; null for an organization one. */
+  ownerUserId: string | null;
+  /**
+   * Every configuration value, decrypted: the plain ones and the ones stored
+   * as ciphertext, keyed by the Adapter's configuration field keys. Any OAuth
+   * tokens stored against the Connection appear as `accessToken` /
+   * `refreshToken` — a socket koppeling authenticates with the token the same
+   * way an HTTP one puts it in a header.
+   */
+  values: Readonly<Record<string, string>>;
+  /** Which of those keys the Adapter classifies as secret, for a module's own logging. */
+  secretKeys: readonly string[];
+  /** Permission to connect where this Adapter says it may. */
+  egressGrant: ModuleSocketGrant;
+};
+
+export type ModuleConnectionResolution =
+  | { ok: true; connection: ModuleConnectionValues }
+  | {
+      ok: false;
+      code:
+        | "NOT_FOUND"
+        | "FORBIDDEN"
+        | "CONNECTION_REQUIRED"
+        | "SECRET_KEYRING_MISSING"
+        /** The stored OAuth sign-in expired and could not be renewed: the person signs in again. */
+        | "REAUTHORIZATION_REQUIRED"
+        /** The provider's token endpoint or the Adapter's OAuth configuration failed; nothing was handed over. */
+        | "TOKEN_REFRESH_FAILED";
+      /** A sentence for the person who has to fix it. */
+      message: string;
+    };
+
 export type ModulePlatformServices = {
+  readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;
+  readonly settings: RuntimeSettingsService;
+  readonly artifacts: RuntimeArtifactServices<TrustedSessionContext>;
+  durableOperations?: {
+    organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;
+  };
   db: {
     withSession<T>(
       session: TrustedSessionContext,
       fn: (trx: Transaction<DB>) => Promise<T>,
     ): Promise<T>;
+  };
+  schemas: {
+    fields: RuntimeFieldSchemaCompiler;
+    json: RuntimeJsonSchemaValidator;
   };
   events: {
     append(
@@ -196,6 +314,49 @@ export type ModulePlatformServices = {
         payload: Record<string, unknown>;
       },
     ): Promise<void>;
+  };
+  errors: {
+    classifyDatabase(cause: unknown): OperationError | undefined;
+  };
+  operations: {
+    list(
+      session: TrustedSessionContext,
+    ): Promise<readonly RuntimeOperationDefinition[]>;
+    get(
+      session: TrustedSessionContext,
+      operationId: string,
+    ): Promise<RuntimeOperationDefinition | undefined>;
+    execute(
+      session: TrustedSessionContext,
+      request: RuntimeOperationRequest,
+      options?: RuntimeOperationExecutionOptions,
+    ): Promise<RuntimeOperationExecutionResult>;
+  };
+  /**
+   * The plaintext of a Connection's configuration — the seam a koppeling that
+   * is not HTTP needs and had no way to reach. Core resolves the row under the
+   * caller's session, enforces the Adapter's connection scope, and only then
+   * decrypts; the keyring itself never leaves core. See
+   * `modules/connection-secrets.ts` for the three gates.
+   */
+  secrets: {
+    resolveConnectionValues(
+      session: TrustedSessionContext,
+      selector: ModuleConnectionSelector,
+    ): Promise<ModuleConnectionResolution>;
+  };
+  /**
+   * Outbound connections that are not requests. `egressHosts` entries naming a
+   * port (`mail.example.com:993`) grant a socket to exactly that host and
+   * port; a bare hostname stays an HTTP grant and grants no socket. See
+   * `modules/socket-egress.ts`.
+   */
+  egress: {
+    connect(
+      session: TrustedSessionContext,
+      grant: ModuleSocketGrant,
+      request: ModuleSocketRequest,
+    ): Promise<Duplex>;
   };
   mcp: {
     notifyToolsChanged(scope: { tenantId: string | null }): void;
@@ -302,11 +463,9 @@ export type ModuleGraphqlContribution = {
 };
 
 /** A migration-chain seed step contributed by a module. */
-export type ModuleSeed = {
-  /** Reported under this key in the db:migrate output. */
-  name: string;
-  apply(db: Kysely<DB>): Promise<CatalogSeedResult>;
-};
+export type ModuleSeed = ModuleSeedContract<Kysely<DB>, CatalogSeedResult>;
+
+export type ModuleReadinessCheck = PublicModuleReadinessCheck;
 
 /**
  * The logger a worker writes to. Structurally the slice of Fastify's logger a
@@ -314,11 +473,7 @@ export type ModuleSeed = {
  * Fastify — or, worse, reach for `console` and land outside the process's log
  * stream.
  */
-export type ModuleWorkerLogger = {
-  info(payload: Record<string, unknown>, message: string): void;
-  warn(payload: Record<string, unknown>, message: string): void;
-  error(payload: Record<string, unknown>, message: string): void;
-};
+export type ModuleWorkerLogger = RuntimeWorkerLogger;
 
 /**
  * What a worker may read when it starts.
@@ -328,22 +483,11 @@ export type ModuleWorkerLogger = {
  * DATABASE_NOT_CONFIGURED; a queue-draining worker with no database has nothing
  * to do at all, so the worker role refuses to start rather than idling.
  */
-export type ModuleWorkerContext = {
-  db: OpenShapeForgeDatabase;
-  log: ModuleWorkerLogger;
-};
+export type ModuleWorkerContext = RuntimeWorkerContextContract<
+  OpenShapeForgeDatabase
+>;
 
-export type ModuleWorkerHandle = {
-  /**
-   * Stop, and settle only AFTER the in-flight tick has finished.
-   *
-   * A `stop()` that returns while a command is still claimed leaves the row
-   * `processing` until the visibility timeout reclaims it — a shutdown that
-   * costs the next worker a delay and an attempt, every time, which is exactly
-   * the sort of thing nobody notices until the retry bound is reached.
-   */
-  stop(): Promise<void>;
-};
+export type ModuleWorkerHandle = RuntimeWorkerHandle;
 
 /**
  * A long-running process a module contributes, run by the `worker` role rather
@@ -356,90 +500,55 @@ export type ModuleWorkerHandle = {
  * own OPENSHAPEFORGE_WORKER_DATABASE_URL, never the API's) and presents
  * `app.worker_role` on top, and the queue policies check both.
  */
-export type ModuleWorker = {
-  start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;
-};
+export type ModuleWorker = RuntimeWorkerContract<ModuleWorkerContext>;
 
-export type ModuleOperationSuccessResult = {
-  ok?: true;
-  value: unknown;
-  status?: number;
-  headers?: Record<string, string>;
-  contentType?: string;
-};
+export type ModuleOperationSuccessResult = PublicModuleOperationSuccessResult<
+  CallToolResult["content"]
+>;
 
 /** A non-success result must match one error declared by the compiler plugin. */
-export type ModuleOperationErrorResult = {
-  ok: false;
-  status: number;
-  code: string;
-  body: unknown;
-  headers?: Record<string, string>;
-  contentType?: string;
-};
+export type ModuleOperationErrorResult = PublicModuleOperationErrorResult;
 
-export type ModuleOperationResult =
-  | ModuleOperationSuccessResult
-  | ModuleOperationErrorResult;
+export type ModuleOperationResult = PublicModuleOperationResult<
+  CallToolResult["content"]
+>;
 
-export type ModuleOperationContext = ModuleRuntimeContext & {
-  transport: "rest" | "mcp" | "graphql";
-  session?: TrustedSessionContext;
-  request?: FastifyRequest;
-  reply?: FastifyReply;
-};
+export type ModuleOperationContext = ModuleOperationContextContract<
+  ModuleRuntimeContext,
+  TrustedSessionContext,
+  FastifyRequest,
+  FastifyReply
+>;
 
-export type ModuleOperationHandler = (
-  input: Record<string, unknown>,
-  context: ModuleOperationContext,
-) => ModuleOperationResult | Promise<ModuleOperationResult>;
+export type ModuleOperationHandler = ModuleOperationHandlerContract<
+  ModuleOperationContext,
+  ModuleOperationResult
+>;
 
-/** A required dependency reported through the host's canonical readiness route. */
-export type ModuleReadinessCheck = {
-  /** Stable lowercase identifier exposed as a key in the readiness response. */
-  name: string;
-  check(): Promise<void> | void;
-};
+export type ModuleOperationAvailabilityHandler = ModuleOperationAvailabilityHandlerContract<
+  Transaction<DB>, TrustedSessionContext
+>;
 
-export type RuntimeModule = {
-  /** Must match the CompilerPlugin name of the same package. */
-  name: string;
-  /**
-   * One-shot async setup, awaited before the process serves traffic.
-   *
-   * `graphql()` is synchronous — a schema cannot be built from a promise — so a
-   * module that must read something before it can answer has nowhere else to do
-   * it. The workflow module hydrates its node catalog here: without that, every
-   * node type resolves to null and definition validation silently passes while
-   * checking nothing, which is worse than failing.
-   *
-   * Throwing here is a load failure like any other: the module is recorded and
-   * skipped rather than taking the process down.
-   */
-  init?(context: ModuleRuntimeContext): Promise<void>;
-  /** Required dependencies, evaluated with the host readiness timeout. */
-  readinessChecks?: readonly ModuleReadinessCheck[];
-  /** Async cleanup awaited when the process stops, in reverse init order. */
-  close?(): Promise<void>;
+export type RuntimeModule = RuntimeModuleContract<
+  ModuleRuntimeContext,
+  ModuleOperationHandler,
+  FastifyInstance,
+  ModuleSeed,
+  RuntimeOperationProvider,
+  ModuleWorker,
+  ModuleOperationAvailabilityHandler,
+  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>
+> & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
-  /**
-   * Register fastify routes. Called inside the same child plugin the core
-   * routes use, so contributed routes are behind the rate limiter too.
-   */
-  restRoutes?(routes: FastifyInstance, context: ModuleRuntimeContext): void;
-  /** Handlers for compiler-declared canonical operations, keyed by `handler`. */
-  operationHandlers?: Record<string, ModuleOperationHandler>;
-  /** Seed steps appended to the migration chain, in declaration order. */
-  seeds?: ModuleSeed[];
-  /**
-   * Worker roles this module contributes, keyed by role name — the value
-   * `OPENSHAPEFORGE_ROLE` selects. A role name colliding across two modules is
-   * refused at boot rather than silently last-wins, exactly as a GraphQL field
-   * name is.
-   */
-  workers?: Record<string, ModuleWorker>;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */
   mcp?: RuntimeMcpContribution;
   /** At most one loaded module may own final outbound request execution. */
   egress?: { fetch(request: ModuleEgressRequest): Promise<Response> };
+  /**
+   * A platform-level (cross-tenant) catalog this module administers, used
+   * ONLY by the control plane's platform administrator MCP
+   * (`control/platform-catalog.ts`) on an audited system session. Never
+   * reached from a tenant session. At most one loaded module may supply it.
+   */
+  platformCatalog?: PlatformCatalogProvider;
 };

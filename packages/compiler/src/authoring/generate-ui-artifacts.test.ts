@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { isGeneratedCrudUiEnabled } from "./generate-ui-artifacts.js";
+import {
+  buildRuntimeAuthMetadata,
+  isGeneratedCrudUiEnabled,
+} from "./generate-ui-artifacts.js";
 
 function contract(
   operations: Record<"list" | "get" | "create" | "update" | "delete", boolean>,
@@ -27,5 +30,45 @@ describe("generated CRUD UI eligibility", () => {
       update: false,
       delete: false,
     }))).toBe(false);
+  });
+});
+
+describe("generated authorization fixture metadata", () => {
+  test("expands group-assigned audience client composites for neutral test users", () => {
+    const metadata = buildRuntimeAuthMetadata({
+      clientRoleComposites: {
+        "application-api": {
+          "Application.Editor": {
+            composites: { "resource-api": ["Data.All.ReadWrite"] },
+          },
+        },
+      },
+      groups: [
+        {
+          name: "test",
+          subGroups: [
+            {
+              name: "editors",
+              clientRoles: { "application-api": ["Application.Editor"] },
+            },
+          ],
+        },
+      ],
+      users: [
+        {
+          username: "test-editor",
+          tid: "tenant-a",
+          groups: ["/test/editors"],
+        },
+      ],
+    });
+
+    expect(metadata.realmRoleComposites).toEqual({
+      "Application.Editor": ["Data.All.ReadWrite"],
+    });
+    expect(metadata.personas[0]).toMatchObject({
+      username: "test-editor",
+      effectiveClientRoles: ["Application.Editor", "Data.All.ReadWrite"],
+    });
   });
 });

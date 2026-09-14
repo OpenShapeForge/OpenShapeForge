@@ -1,0 +1,127 @@
+# Test-only identities for the repository's local and end-to-end stacks.
+#
+# The reusable authorization base deliberately ships no product personas,
+# groups or users. This layer proves the same generic composition mechanisms a
+# consuming host uses, with neutral names and synthetic tenants.
+kind: authorizationPatch
+
+clientRoles:
+  erp-provider:
+    - workflow-admin
+
+clientRoleComposites:
+  erp-provider:
+    Test.Admin:
+      description: Synthetic full-access role for repository tests
+      composites:
+        erp-provider:
+          - General.All.ReadWrite
+          - CaseFile.All.ReadWrite
+          - Energy.All.ReadWrite
+          - Finance.All.ReadWrite
+          - Quality.All.ReadWrite
+          - Maintenance.All.ReadWrite
+          - Organization.All.ReadWrite
+          - Agreements.All.ReadWrite
+          - ProjectDevelopment.All.ReadWrite
+          - Relations.All.ReadWrite
+          - Relations.All.Delete
+          - RealEstate.All.ReadWrite
+          - HousingAllocation.All.ReadWrite
+          - Cases.All.ReadWrite
+          - Relations.Bsn.Read
+          - Platform.ApiKeys.Manage
+          - workflow-admin
+        openshapeforge-support:
+          - Support.Issues.All
+        openshapeforge-audit:
+          - Audit.Logs.All
+          - Audit.Settings.Manage
+        openshapeforge-timeline:
+          - Timeline.Events.ReadAll
+          - Timeline.All
+        openshapeforge-knowledge-base:
+          - KnowledgeBase.All
+        openshapeforge-auth-api:
+          - Organization.Employees.ReadWrite
+          - Organization.EmployeeRoles.ReadWrite
+          - Organization.Positions.ReadWrite
+          - Relations.RelationGroups.ReadWrite
+        openshapeforge-messaging:
+          - Messaging.OptIn.Read
+          - Messaging.OptIn.Write
+          - Messaging.Send
+          - Messaging.Read
+          - Messaging.Admin
+          - Messaging.Conversation.ReadAll
+          - Messaging.Conversation.ViewQueue
+          - Messaging.Conversation.Assign
+          - Messaging.Conversation.Reassign
+    Test.User:
+      description: Synthetic relation editor for tenant-isolation tests
+      composites:
+        erp-provider:
+          - General.All.Read
+          - Relations.All.ReadWrite
+    Test.ReadOnly:
+      description: Synthetic read-only identity for authorization tests
+      composites:
+        erp-provider:
+          - General.All.Read
+          - Relations.All.Read
+
+groups:
+  - name: openshapeforge-test
+    subGroups:
+      - name: tenant-a
+        subGroups:
+          - name: role-admin
+            clientRoles:
+              erp-provider: [Test.Admin]
+          - name: role-user
+            clientRoles:
+              erp-provider: [Test.User]
+          - name: role-readonly
+            clientRoles:
+              erp-provider: [Test.ReadOnly]
+          - name: role-no-access
+      - name: tenant-b
+        subGroups:
+          - name: role-user
+            clientRoles:
+              erp-provider: [Test.User]
+
+users:
+  - username: tenant-a-admin
+    email: admin@tenant-a.example.test
+    firstName: Alex
+    lastName: Admin
+    password: ${env:E2E_USER_PASSWORD_TENANT_A_ADMIN:-test}
+    tid: 11111111-1111-4111-8111-111111111111
+    groups: [/openshapeforge-test/tenant-a/role-admin]
+    clientRoles:
+      realm-management: [realm-admin]
+
+  - username: tenant-a-user
+    email: user@tenant-a.example.test
+    firstName: Taylor
+    lastName: User
+    password: ${env:E2E_USER_PASSWORD_TENANT_A_USER:-test}
+    tid: 11111111-1111-4111-8111-111111111111
+    groups: [/openshapeforge-test/tenant-a/role-user]
+
+  - username: tenant-a-no-access
+    email: no-access@tenant-a.example.test
+    firstName: Noah
+    lastName: Access
+    password: ${env:E2E_USER_PASSWORD_TENANT_A_NO_ACCESS:-test}
+    tid: 11111111-1111-4111-8111-111111111111
+    groups: [/openshapeforge-test/tenant-a/role-no-access]
+
+  - username: tenant-b-user
+    email: user@tenant-b.example.test
+    firstName: Bailey
+    lastName: User
+    password: ${env:E2E_USER_PASSWORD_TENANT_B_USER:-test}
+    tid: 33333333-3333-4333-8333-333333333333
+    groups: [/openshapeforge-test/tenant-b/role-user]

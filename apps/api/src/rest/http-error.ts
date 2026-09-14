@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Single translation point from the generated CRUD layer's GraphQLError
- * vocabulary (extensions.code / extensions.status) to REST HTTP responses.
- * Keeping the mapping here means REST handlers delegate to the exact same
- * CRUD functions as the GraphQL resolvers without duplicating error policy.
+ * Single translation point from canonical operation failures and remaining
+ * protocol-local failures to REST HTTP responses. Keeping the mapping here
+ * means REST handlers delegate to the shared operation runtime without
+ * duplicating error policy.
  */
 import { GraphQLError } from "graphql";
+import { operationErrorOf } from "@openshapeforge/operations";
+import { classifyDatabaseError } from "../db/database-refusals.js";
 import {
   failureBody,
   httpStatusForCode,
@@ -19,11 +21,21 @@ export type HttpErrorBody = FailureBody;
 export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Authored detail/hint carried along when the error relays a database rule's refusal. */
+  readonly detail: string | undefined;
+  readonly hint: string | undefined;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    authored?: { detail?: string; hint?: string },
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.detail = authored?.detail;
+    this.hint = authored?.hint;
   }
 }
 
@@ -82,15 +94,35 @@ export function toHttpError(error: unknown): {
         error: {
           code: "TOO_MANY_REQUESTS",
           message: "Rate limit exceeded. Please retry later.",
+          retryable: true,
         },
       },
+    };
+  }
+
+  const operationError = operationErrorOf(error);
+  if (operationError !== undefined) {
+    return {
+      // OperationFailure is an intentional, server-authored refusal. Unknown
+      // domain codes therefore remain conflicts rather than becoming 500s;
+      // unexpected exceptions never reach this branch.
+      status: httpStatusForCode(operationError.code) ?? 409,
+      body: { error: operationError },
     };
   }
 
   if (error instanceof HttpError) {
     return {
       status: error.status,
-      body: { error: { code: error.code, message: error.message } },
+      body: {
+        error: {
+          code: error.code,
+          message: error.message,
+          retryable: false,
+          ...(error.detail !== undefined ? { detail: error.detail } : {}),
+          ...(error.hint !== undefined ? { data: { hint: error.hint } } : {}),
+        },
+      },
     };
   }
 
@@ -115,8 +147,44 @@ export function toHttpError(error: unknown): {
         ? error.extensions.status
         : httpStatusForCode(code);
     if (status !== undefined) {
-      return { status, body: { error: { code, message: error.message } } };
+      // A database refusal translated by the generated CRUD layer carries the
+      // rule's authored detail and hint in its extensions; nothing else does.
+      const { detail, hint } = error.extensions ?? {};
+      return {
+        status,
+        body: {
+          error: {
+            code,
+            message: error.message,
+            retryable:
+              typeof error.extensions?.retryable === "boolean"
+                ? error.extensions.retryable
+                : false,
+            ...(typeof detail === "string" ? { detail } : {}),
+            ...(typeof hint === "string" ? { hint } : {}),
+          },
+        },
+      };
     }
+  }
+
+  // A database refusal that did not pass through the generated CRUD layer
+  // (a module or derived tool writing on its own): the same narrow classifier
+  // decides, without table context, so constraint answers are generic here.
+  const refusal = classifyDatabaseError(error);
+  if (refusal !== undefined) {
+    return {
+      status: refusal.status,
+      body: {
+        error: {
+          code: refusal.code,
+          message: refusal.message,
+          retryable: false,
+          ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
+          ...(refusal.hint !== undefined ? { data: { hint: refusal.hint } } : {}),
+        },
+      },
+    };
   }
 
   // Anything else (driver errors, bugs) is redacted — parity with the
@@ -124,7 +192,11 @@ export function toHttpError(error: unknown): {
   return {
     status: 500,
     body: {
-      error: { code: "INTERNAL_SERVER_ERROR", message: "Internal server error." },
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Internal server error.",
+        retryable: false,
+      },
     },
   };
 }

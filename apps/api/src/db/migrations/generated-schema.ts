@@ -82,8 +82,107 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
  */
 export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
+  "platform.blueprint_libraries",
+  "platform.blueprint_versions",
+  "platform.blueprint_copies",
   "platform.system_bypass_audit",
+  // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
+  "platform.operation_execution_receipts",
+  // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
+  // after the generated step (its FKs point at generated tables).
+  "platform.identities",
+  "platform.identity_relations",
+  // Pending employee invitations: created by migrations/employee-invitations.ts
+  // after the generated step.
+  "platform.employee_invitations",
+  // Update notices and who has been told: created by migrations/update-notices.ts
+  // after the generated step, for the same reason as the two above — they are
+  // runtime bookkeeping, not authored entities, so no manifest describes them
+  // and drift detection would read them as foreign schema.
+  "platform.update_notices",
+  "platform.user_update_notices",
 ]);
+
+/**
+ * Columns on generated (manifest-declared) tables that a plugin schema
+ * migration owns. A `CompilerPlugin.schemaMigrations` entry is free to
+ * `ALTER TABLE ... ADD COLUMN` a generated entity table — the manifest cannot
+ * express foreign keys into contributed platform tables, install bookkeeping,
+ * or anything else the DDL of a versioned plugin migration provides — and the
+ * resulting column is then, by design, present in the database and absent from
+ * the manifest. Without this exemption the roll-forward diff reports every
+ * such column as "exists in the database but not in the generated manifest",
+ * which is the non-additive class, and migrate refuses to run on a database
+ * the plugin migration has already touched.
+ *
+ * Keyed `schema.table.column`. Exported for the same reason as
+ * `nonManifestManagedTables`: ../schema-drift.ts must apply the identical
+ * exemption or readiness would flag these columns as foreign schema.
+ *
+ * This is an explicit list because the plugin migration contract
+ * (`PluginSchemaMigration` = `{ version, sql }`, projected verbatim into
+ * generated/plugin-migrations/registry.json as `{ plugin, version, checksum,
+ * sql }`) carries opaque DDL and no column metadata. Follow-up: let a plugin
+ * declare the columns its migrations own (e.g. `ownedColumns` next to
+ * `schemaMigrations`), emit them into the registry, and derive this set from
+ * it at runtime instead of hand-maintaining it here.
+ */
+const pluginMigrationOwnedColumns: {
+  plugin: string;
+  migration: string;
+  tables: string[];
+  columns: string[];
+}[] = [
+  {
+    // Installation bookkeeping on the tenant definition tables. `catalog`
+    // (the projected field) is declared in the manifest and deliberately NOT
+    // listed here.
+    plugin: "osf-integration",
+    migration: "0004_platform-catalog",
+    tables: [
+      "integration.adapters",
+      "integration.capabilities",
+      "integration.services",
+    ],
+    columns: [
+      "catalog_entry_id",
+      "installed_version",
+      "overridden",
+      "override_fields",
+      "update_available_version",
+    ],
+  },
+  {
+    // The tenant's own organization Relation, linked by a core migration
+    // after the generated step (it points at a generated table, so it cannot
+    // be part of the manifest that creates that table).
+    plugin: "core",
+    migration: "organization-relation-link",
+    tables: ["platform.tenants"],
+    columns: ["relation_id"],
+  },
+];
+
+export const nonManifestManagedColumns = new Set<string>(
+  pluginMigrationOwnedColumns.flatMap((entry) =>
+    entry.tables.flatMap((table) =>
+      entry.columns.map((column) => `${table}.${column}`),
+    ),
+  ),
+);
+
+/**
+ * True when `columnName` on the qualified `tableName` is owned by a plugin
+ * schema migration rather than the generated manifest. Both drift readers
+ * (the roll-forward diff below and ../schema-drift.ts) go through this so the
+ * exemption cannot diverge.
+ */
+export function isNonManifestManagedColumn(
+  tableName: string,
+  columnName: string,
+): boolean {
+  return nonManifestManagedColumns.has(`${tableName}.${columnName}`);
+}
 
 /**
  * Manifest scalar type -> information_schema.columns.data_type. Anything not
@@ -161,6 +260,153 @@ function quotedLiteralEnd(value: string): number {
 }
 
 /**
+ * Canonical JSON for the small, losslessly representable subset that can be
+ * compared in JavaScript without changing Postgres jsonb semantics. Object
+ * keys are sorted because jsonb does not preserve their authored order.
+ *
+ * Non-integer and unsafe integer numbers deliberately fail closed. Parsing
+ * either through a JS number could collapse distinct numeric lexemes (for
+ * example 9007199254740992 and 9007199254740993) into the same value. In that
+ * case the caller keeps the original SQL text and drift remains visible.
+ */
+function canonicalizeSafeJson(value: unknown, depth = 0): string | undefined {
+  if (depth > 100) return undefined;
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? JSON.stringify(value) : undefined;
+  }
+  if (Array.isArray(value)) {
+    const entries: string[] = [];
+    for (const entry of value) {
+      const canonical = canonicalizeSafeJson(entry, depth + 1);
+      if (canonical === undefined) return undefined;
+      entries.push(canonical);
+    }
+    return `[${entries.join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const entries: string[] = [];
+    for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )) {
+      const canonical = canonicalizeSafeJson(entry, depth + 1);
+      if (canonical === undefined) return undefined;
+      entries.push(`${JSON.stringify(key)}:${canonical}`);
+    }
+    return `{${entries.join(",")}}`;
+  }
+  return undefined;
+}
+
+/**
+ * Reject JSON number spellings that JavaScript cannot compare losslessly even
+ * when JSON.parse happens to round them to a safe integer (for example
+ * 1.0000000000000001 -> 1 or 1e-999 -> 0). Quoted strings and their escapes
+ * are skipped; malformed JSON is left for JSON.parse to reject.
+ */
+function hasFractionalOrExponentJsonNumber(json: string): boolean {
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < json.length; index += 1) {
+    const character = json.charAt(index);
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character !== "-" && (character < "0" || character > "9")) {
+      continue;
+    }
+
+    let cursor = character === "-" ? index + 1 : index;
+    if (json.charAt(cursor) === "0") {
+      cursor += 1;
+    } else if (
+      json.charAt(cursor) >= "1" &&
+      json.charAt(cursor) <= "9"
+    ) {
+      do {
+        cursor += 1;
+      } while (
+        json.charAt(cursor) >= "0" &&
+        json.charAt(cursor) <= "9"
+      );
+    } else {
+      continue;
+    }
+
+    const suffix = json.charAt(cursor);
+    if (
+      suffix === "." ||
+      suffix === "e" ||
+      suffix === "E"
+    ) {
+      return true;
+    }
+    index = cursor - 1;
+  }
+
+  return false;
+}
+
+function canonicalizeJsonbLiteral(literal: string): string | undefined {
+  try {
+    const sqlContent = literal.slice(1, -1).replaceAll("''", "'");
+    if (hasFractionalOrExponentJsonNumber(sqlContent)) return undefined;
+    const canonical = canonicalizeSafeJson(JSON.parse(sqlContent));
+    return canonical === undefined ? undefined : `jsonb:${canonical}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Postgres may add one pair of parentheses around a zero-argument function
+ * before rendering its cast (`fn()::text` -> `(fn())::text`). Strip only that
+ * provably redundant pair, and only for a cast to the column's own type.
+ */
+function normalizeZeroArgumentFunctionCast(
+  value: string,
+  columnType: string,
+): string {
+  const cast = /^(.*)::\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*)$/.exec(
+    value,
+  );
+  if (cast === null) return value;
+  const operandText = cast[1];
+  const castTargetText = cast[2];
+  if (operandText === undefined || castTargetText === undefined) return value;
+
+  const castTarget = castTargetText.trim().toLowerCase().replace(/\s+/g, " ");
+  if (redundantCastTargets[columnType]?.has(castTarget) !== true) return value;
+
+  const functionCall =
+    /^([a-zA-Z_][a-zA-Z0-9_$]*(?:\.[a-zA-Z_][a-zA-Z0-9_$]*)*)\s*\(\s*\)$/;
+  let operand = operandText.trim();
+  if (operand.startsWith("(") && operand.endsWith(")")) {
+    const inner = operand.slice(1, -1).trim();
+    if (functionCall.test(inner)) operand = inner;
+  }
+
+  const functionMatch = functionCall.exec(operand);
+  if (functionMatch === null) return value;
+  return `${functionMatch[1]}()::${castTarget}`;
+}
+
+/**
  * Normalize a SQL default expression for drift comparison.
  *
  * The manifest records the verbatim authoring default (`now()`, `'{}'::jsonb`,
@@ -171,21 +417,23 @@ function quotedLiteralEnd(value: string): number {
  * `'process'::text` are the same default, and comparing them verbatim reports
  * drift that does not exist (issue #210).
  *
- * The only rewrite performed is therefore: drop a trailing `::<type>` cast from
- * an expression that is EXACTLY one single-quoted literal followed by that
- * cast, and only when the cast names the column's own type. That case is
- * provably a no-op — an unadorned literal in a DEFAULT is coerced to the column
- * type anyway — and it is applied to both sides, so either spelling compares
- * equal to either spelling.
+ * The narrow rewrites are: drop a trailing `::<type>` cast from an expression
+ * that is EXACTLY one single-quoted literal followed by that cast; compare
+ * losslessly representable jsonb literals independent of object-key order and
+ * whitespace; and remove one redundant pair of parentheses that Postgres adds
+ * around a zero-argument function before a cast. Casts must always name the
+ * column's own type.
  *
  * Everything else stays strict, because a normalizer that accepts real drift is
  * worse than the bug it fixes:
- * - anything that is not a lone literal (`now()`, `gen_random_uuid()`,
- *   `CURRENT_DATE`, `now() - interval '1 day'`, `upper('x'::text)`,
- *   `('a'::text || 'b'::text)`, a parenthesised or dollar-quoted expression);
+ * - anything that is not a lone literal or zero-argument function cast
+ *   (`now() - interval '1 day'`, `upper('x'::text)`,
+ *   `('a'::text || 'b'::text)`, a dollar-quoted expression);
  * - a cast naming any other type (`'x'::character varying` on a text column),
  *   or a chain of casts;
- * - the literal's own content, which is compared byte for byte.
+ * - non-jsonb literal content, which is compared byte for byte; jsonb numeric
+ *   content that is not losslessly representable as a safe integer also stays
+ *   byte-strict and therefore fails closed.
  *
  * Two Postgres canonicalisations are deliberately NOT papered over, since
  * neither is a redundant cast and both would need the literal itself
@@ -203,15 +451,26 @@ function normalizeDefault(
   if (trimmed === null) return null;
 
   const literalEnd = quotedLiteralEnd(trimmed);
-  if (literalEnd === -1) return trimmed;
+  if (literalEnd === -1) {
+    return normalizeZeroArgumentFunctionCast(trimmed, columnType);
+  }
 
   const rest = trimmed.slice(literalEnd).trim();
-  if (!rest.startsWith("::")) return trimmed;
+  const bareLiteral = rest.length === 0;
+  if (!bareLiteral && !rest.startsWith("::")) return trimmed;
 
-  const castTarget = rest.slice(2).trim().toLowerCase().replace(/\s+/g, " ");
-  if (redundantCastTargets[columnType]?.has(castTarget) !== true) return trimmed;
+  if (!bareLiteral) {
+    const castTarget = rest.slice(2).trim().toLowerCase().replace(/\s+/g, " ");
+    if (redundantCastTargets[columnType]?.has(castTarget) !== true) return trimmed;
+  }
 
-  return trimmed.slice(0, literalEnd);
+  const literal = trimmed.slice(0, literalEnd);
+  if (columnType === "jsonb") {
+    const canonical = canonicalizeJsonbLiteral(literal);
+    if (canonical !== undefined) return canonical;
+  }
+
+  return literal;
 }
 
 /**
@@ -261,7 +520,8 @@ export type ManifestSchemaDiff = {
  *
  * Non-additive:
  * - required no-default non-identity column missing on a table WITH rows;
- * - DB column absent from the manifest;
+ * - DB column absent from the manifest (unless a plugin schema migration
+ *   owns it — see nonManifestManagedColumns);
  * - column type, nullability, identity, or (manifest-declared) default mismatch;
  * - DB table (in a covered schema, not in nonManifestManagedTables) absent
  *   from the manifest;
@@ -431,7 +691,10 @@ export async function diffManifestAgainstDatabase(
     }
 
     for (const columnName of live.keys()) {
-      if (!table.columns.some((column) => column.name === columnName)) {
+      if (
+        !table.columns.some((column) => column.name === columnName) &&
+        !isNonManifestManagedColumn(table.name, columnName)
+      ) {
         nonAdditive.push(
           `${table.name}.${columnName}: column exists in the database but not in the generated manifest`,
         );

@@ -11,6 +11,30 @@ groepen:
         label: { nl: Organisatie, en: Organization, fr: Organisation }
       - value: group
         label: { nl: Groep, en: Group, fr: Groupe }
+  RELATIONGROUPTYPE:
+    description: Kerncodetabel voor de functionele classificatie van relatiegroepen.
+    items:
+      - value: general
+        label: { nl: Algemeen, en: General, fr: General }
+      - value: department
+        label: { nl: Afdeling, en: Department, fr: Departement }
+      - value: team
+        label: { nl: Team, en: Team, fr: Equipe }
+      - value: project
+        label: { nl: Project, en: Project, fr: Projet }
+      - value: committee
+        label: { nl: Commissie, en: Committee, fr: Comite }
+      - value: other
+        label: { nl: Overig, en: Other, fr: Autre }
+
+  RELATIONGROUPSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een relatiegroep of groepslidmaatschap.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: inactive
+        label: { nl: Inactief, en: Inactive, fr: Inactif }
+
   COMMUNICATIONTYPE:
     description: Kerncodetabel voor functionele communicatiedoelen en berichttypen.
     items:
@@ -762,28 +786,6 @@ groepen:
       - value: destroyed
         label: { nl: Vernietigd, en: Destroyed, fr: Détruit }
 
-  DOCUMENTTYPE:
-    description: Kerncodetabel voor hoofdtypen van documenten.
-    items:
-      - value: incoming_mail
-        label: { nl: Inkomende post, en: Incoming mail, fr: Courrier entrant }
-      - value: outgoing_mail
-        label: { nl: Uitgaande post, en: Outgoing mail, fr: Courrier sortant }
-      - value: note
-        label: { nl: Notitie, en: Note, fr: Note }
-      - value: decision
-        label: { nl: Besluit, en: Decision, fr: Décision }
-      - value: attachment
-        label: { nl: Bijlage, en: Attachment, fr: Pièce jointe }
-      - value: form
-        label: { nl: Formulier, en: Form, fr: Formulaire }
-      - value: evidence
-        label: { nl: Bewijsstuk, en: Evidence, fr: Preuve }
-      - value: contract
-        label: { nl: Contract, en: Contract, fr: Contrat }
-      - value: report
-        label: { nl: Rapport, en: Report, fr: Rapport }
-
   DOCUMENTSTATUS:
     description: Kerncodetabel voor de levenscyclus van documenten.
     items:
@@ -991,6 +993,20 @@ groepen:
         label: { nl: Storneren, en: Void }
       - value: reissue
         label: { nl: Hercreatie (TWK), en: Reissue (TWK) }
+      - value: milestone
+        label: { nl: Mijlpaal, en: Milestone }
+
+  AGREEMENTMILESTONESTATUS:
+    description: Lifecycle status of an agreement milestone.
+    items:
+      - value: pending
+        label: { nl: In afwachting, en: Pending }
+      - value: triggered
+        label: { nl: Getriggerd, en: Triggered }
+      - value: invoiced
+        label: { nl: Gefactureerd, en: Invoiced }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
 
   BILLINGRUNITEMSTATUS:
     description: Per-agreement/per-period idempotency ledger status inside a BillingRun.

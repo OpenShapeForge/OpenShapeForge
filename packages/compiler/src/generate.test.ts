@@ -191,6 +191,71 @@ describe("platform schema generator", () => {
     // The plain tenant-isolation policy should NOT be emitted alongside the
     // row-scope policy; rowScope subsumes it.
     expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_tenant_isolation" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_tenant_isolation"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_row_scope"'),
+    );
+  });
+
+  it("drops the generated row-scope policy when a table returns to tenant isolation", () => {
+    const tenantOnlyManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+      ],
+    };
+
+    const sql = generateArtifacts(tenantOnlyManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents ?? "";
+
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_row_scope" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_row_scope"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_tenant_isolation"'),
+    );
+    expect(sql).not.toContain('CREATE POLICY "cases_row_scope"');
+  });
+
+  it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {
+    const manifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "protected_records",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "authorization", type: "jsonb", required: true },
+        ],
+        rowScope: {
+          recordPermissions: { column: "authorization", empty: "public" },
+        },
+      }],
+    };
+    const contents = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql")
+    )?.contents ?? "";
+
+    expect(contents).toContain(
+      `USING (app.bypass_rls() OR (tenant_id = app.current_tenant() AND app.record_permission_allows("authorization", 'view', true)))`,
+    );
+    expect(contents).toContain(
+      `WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
+    );
+    expect(contents.match(/record_permission_allows/g)?.length).toBe(1);
   });
 
   it("fails compile if a rowScope column is missing from the table", () => {
@@ -1892,5 +1957,115 @@ describe("generated REST OpenAPI artifact", () => {
       generateArtifacts(restManifest).find((item) => item.path.endsWith("rest/openapi.json"))!
         .contents;
     expect(render()).toBe(render());
+  });
+});
+
+describe("writtenBy columns", () => {
+  const writtenByManifest = (operationKey: string): PlatformSchemaManifest => ({
+    version: 1,
+    tables: [
+      {
+        schema: "pentest",
+        name: "findings",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "title", type: "text", required: true },
+          {
+            name: "reviewed_at",
+            type: "timestamptz",
+            sourceField: "reviewedAt",
+            writtenBy: [operationKey],
+          },
+        ],
+      },
+    ],
+  });
+
+  const reviewOperation = {
+    key: "pentest.finding.review",
+    id: "pentest.finding.review",
+    intent: "invoke",
+    transports: {
+      rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
+      mcp: { enabled: false },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: only the fields read here matter.
+  } as any;
+
+  it("resolves the authored operation key into a route a caller can use", () => {
+    const manifestJson = JSON.parse(
+      generateArtifacts(writtenByManifest("pentest.finding.review"), {
+        operations: [reviewOperation],
+      }).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables
+      .find((table: { name: string }) => table.name === "pentest.findings")
+      .columns.find((candidate: { name: string }) => candidate.name === "reviewed_at");
+    expect(column.writtenBy).toEqual([
+      {
+        operation: "pentest.finding.review",
+        rest: "POST /api/pentest/findings/:findingId/review",
+      },
+    ]);
+  });
+
+  it("resolves an entity create writer through its generated REST and generic MCP routes", () => {
+    const manifest = writtenByManifest("Finding.create");
+    manifest.tables[0]!.source = {
+      path: "entities/finding.yaml",
+      authoringEntityName: "Finding",
+      authoringEntitySlug: "finding",
+      generatedCrudEligibility: "explicitly_enabled",
+      crud: {
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      graphql: {
+        typeName: "Finding",
+        singleQueryName: "finding",
+        listQueryName: "findings",
+        createMutationName: "createFinding",
+        updateMutationName: "updateFinding",
+        deleteMutationName: "deleteFinding",
+        relationships: [],
+      },
+      rest: {
+        basePath: "findings",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      mcp: {
+        toolPrefix: "finding",
+        tools: "generic",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+    };
+    const createOperation = {
+      id: "Finding.create",
+      key: "create",
+      intent: "create",
+      entityId: "pentest.Finding",
+      entityName: "Finding",
+    } as any;
+    const manifestJson = JSON.parse(
+      generateArtifacts(manifest, { operations: [createOperation] })
+        .find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables[0].columns.find(
+      (candidate: { name: string }) => candidate.name === "reviewed_at",
+    );
+    expect(column.writtenBy).toEqual([{
+      operation: "Finding.create",
+      rest: "POST /api/rest/v1/findings",
+      mcp: "osf_create",
+    }]);
+  });
+
+  it("fails the build when the named operation does not exist", () => {
+    expect(() =>
+      generateArtifacts(writtenByManifest("pentest.finding.reviw"), {
+        operations: [reviewOperation],
+      }),
+    ).toThrow(/no.*compiled operation has that key/i);
   });
 });

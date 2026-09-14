@@ -21,11 +21,15 @@
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
  *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
- *     against `appShell.yaml`. This is how a PLUGIN contributes a sidebar
+ *     against `menu.yaml`. This is how a PLUGIN contributes a sidebar
  *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
- *     `appShell.yaml` outright collides.
+ *     `menu.yaml` outright collides.
+ *   - patch a realm file with `kind: authorizationPatch` at the SAME path as
+ *     the `authorization*.yaml` it targets: rename a client (`renameClient`),
+ *     add or amend clients, widen realm-role composites — without forking the
+ *     base realm. See ./authorization-patch.ts for the exact rules.
  *
  * Catalog files (`catalogs/*.yaml`) merge across layers automatically: a
  * later layer's file with the same path strategically merges into the earlier
@@ -52,6 +56,11 @@ import {
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
 import { packagedConfigFallback } from "../packaged-config.js";
+import {
+  AUTHORIZATION_PATCH_KIND,
+  applyAuthorizationPatch,
+  isAuthorizationFilePath,
+} from "./authorization-patch.js";
 
 export type AuthoringConfig = {
   layers: string[];
@@ -59,6 +68,14 @@ export type AuthoringConfig = {
   plugins?: string[];
   /** Host-owned developer onboarding rendered in the generated REST OpenAPI document. */
   restApi?: RestApiDocumentation;
+  /** Committed host selections for settings defined by their owning source. */
+  settings?: Record<string, AuthoringSettingValue>;
+};
+
+export type AuthoringSettingValue = boolean | number | string | string[];
+
+type ParsedAuthoringConfig = AuthoringConfig & {
+  plugins: string[];
 };
 
 export type RestApiDocumentation = {
@@ -108,14 +125,18 @@ const BUILD_DIR = ".authoring-build";
 function readConfigFile(
   path: string,
   filename: string,
-  { requireLayers, allowRestApi }: { requireLayers: boolean; allowRestApi: boolean },
-): { layers: string[]; plugins: string[]; restApi?: RestApiDocumentation } {
+  {
+    requireLayers,
+    allowRestApi,
+    allowSettings,
+  }: { requireLayers: boolean; allowRestApi: boolean; allowSettings: boolean },
+): ParsedAuthoringConfig {
   const parsed = YAML.parse(readFileSync(path, "utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${filename} must be an object.`);
   }
   const candidate = parsed as Record<string, unknown>;
-  const allowedKeys = ["layers", "plugins", "restApi"];
+  const allowedKeys = ["layers", "plugins", "restApi", "settings"];
   const unknownKeys = Object.keys(candidate).filter((key) => !allowedKeys.includes(key));
   if (unknownKeys.length > 0) {
     throw new Error(`${filename} has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
@@ -141,14 +162,47 @@ function readConfigFile(
       `${filename} cannot declare "restApi"; developer onboarding belongs in the committed config.`,
     );
   }
+  if (!allowSettings && candidate.settings !== undefined) {
+    throw new Error(
+      `${filename} cannot declare "settings"; effective settings must be selected in the committed config.`,
+    );
+  }
   const restApi = candidate.restApi === undefined
     ? undefined
     : validateRestApiDocumentation(candidate.restApi, filename);
+  const settings = candidate.settings === undefined
+    ? undefined
+    : validateAuthoringSettings(candidate.settings, filename);
   return {
     layers: layers as string[],
     plugins: plugins as string[],
     ...(restApi ? { restApi } : {}),
+    ...(settings ? { settings } : {}),
   };
+}
+
+function validateAuthoringSettings(
+  value: unknown,
+  filename: string,
+): Record<string, AuthoringSettingValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${filename} "settings" must be an object.`);
+  }
+  const settings: Record<string, AuthoringSettingValue> = {};
+  for (const [key, setting] of Object.entries(value as Record<string, unknown>)) {
+    const valid =
+      typeof setting === "boolean" ||
+      typeof setting === "number" ||
+      typeof setting === "string" ||
+      (Array.isArray(setting) && setting.every((item) => typeof item === "string"));
+    if (!valid) {
+      throw new Error(
+        `${filename} setting "${key}" must be a boolean, number, string, or string array.`,
+      );
+    }
+    settings[key] = Array.isArray(setting) ? [...setting] : setting;
+  }
+  return settings;
 }
 
 function nonEmptyString(value: unknown, path: string): string {
@@ -313,14 +367,19 @@ function absoluteHttpUrl(value: unknown, path: string): string {
   return url;
 }
 
-export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
+export function loadCommittedAuthoringConfig(repoRoot: string): ParsedAuthoringConfig {
   const configPath = join(repoRoot, AUTHORING_CONFIG_FILENAME);
-  const base = existsSync(configPath)
+  return existsSync(configPath)
     ? readConfigFile(configPath, AUTHORING_CONFIG_FILENAME, {
         requireLayers: true,
         allowRestApi: true,
+        allowSettings: true,
       })
     : { layers: [DEFAULT_LAYER], plugins: [] };
+}
+
+export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
+  const base = loadCommittedAuthoringConfig(repoRoot);
 
   const localPath = join(repoRoot, AUTHORING_LOCAL_CONFIG_FILENAME);
   if (!existsSync(localPath)) {
@@ -328,11 +387,13 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
       layers: base.layers,
       plugins: base.plugins,
       ...(base.restApi ? { restApi: base.restApi } : {}),
+      ...(base.settings ? { settings: base.settings } : {}),
     };
   }
   const local = readConfigFile(localPath, AUTHORING_LOCAL_CONFIG_FILENAME, {
     requireLayers: false,
     allowRestApi: false,
+    allowSettings: false,
   });
 
   // A duplicate is refused rather than de-duplicated. Appending a layer that
@@ -372,6 +433,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
     layers: [...base.layers, ...local.layers],
     plugins: [...base.plugins, ...local.plugins],
     ...(base.restApi ? { restApi: base.restApi } : {}),
+    ...(base.settings ? { settings: base.settings } : {}),
   };
 }
 
@@ -380,7 +442,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
  * to the plugin module (local specs) or at the package root (package specs).
  * Resolved synchronously — the plugin CODE is imported separately.
  */
-function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
+export function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
   let moduleDir: string | null = null;
   if (spec.startsWith(".") || isAbsolute(spec)) {
     const asPath = isAbsolute(spec) ? spec : resolve(repoRoot, spec);
@@ -409,7 +471,7 @@ function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
  * package root contains an `authoring/` directory (so contexts can ship as
  * workspace packages).
  */
-function resolveLayerDir(repoRoot: string, layer: string): string {
+export function resolveLayerDir(repoRoot: string, layer: string): string {
   const asPath = isAbsolute(layer) ? layer : resolve(repoRoot, layer);
   if (existsSync(asPath)) {
     return asPath;
@@ -568,6 +630,412 @@ function assertCrudPolicyOnlyNarrows(base: JsonValue, merged: JsonValue, origin:
   }
 }
 
+type JsonObject = { [key: string]: JsonValue };
+
+function stableJson(value: JsonValue | undefined): string {
+  if (value === undefined) return "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (isPlainObject(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sameJson(left: JsonValue | undefined, right: JsonValue | undefined): boolean {
+  return stableJson(left) === stableJson(right);
+}
+
+function objectProperty(value: JsonValue | undefined, key: string): JsonObject | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const property = value[key];
+  return isPlainObject(property) ? property : undefined;
+}
+
+function stringList(value: JsonValue | undefined): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? value
+    : undefined;
+}
+
+function assertOrListOnlyNarrows(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path: string,
+  origin: string,
+): void {
+  const prior = stringList(before);
+  if (!prior) return;
+  const next = stringList(after);
+  if (!next || next.some((item) => !prior.includes(item))) {
+    throw new Error(
+      `${origin} widens ${path}. OR-authorized values may only be removed by a later layer.`,
+    );
+  }
+}
+
+function assertAndListOnlyNarrows(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path: string,
+  origin: string,
+): void {
+  const prior = stringList(before);
+  if (!prior) return;
+  const next = stringList(after);
+  if (!next || prior.some((item) => !next.includes(item))) {
+    throw new Error(
+      `${origin} widens ${path}. Every required value from an earlier layer must remain required.`,
+    );
+  }
+}
+
+function assertExactWhenPresent(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path: string,
+  origin: string,
+): void {
+  if (before !== undefined && !sameJson(before, after)) {
+    throw new Error(
+      `${origin} changes ${path} declared by an earlier layer. This security contract is not ` +
+        "orderable, so entity patches must preserve it exactly.",
+    );
+  }
+}
+
+function assertLegacyInterfaceOnlyNarrows(
+  base: JsonObject,
+  merged: JsonObject,
+  interfaceKey: "rest" | "mcp",
+  origin: string,
+): void {
+  const resolve = (document: JsonObject, operation: (typeof CRUD_OPERATION_KEYS)[number]): boolean => {
+    const value = document[interfaceKey];
+    if (value === true) return true;
+    if (!isPlainObject(value) || value.enabled === false) return false;
+    const configured = objectProperty(value, "operations");
+    return configured?.[operation] !== false;
+  };
+  const widened = CRUD_OPERATION_KEYS.filter(
+    (operation) => !resolve(base, operation) && resolve(merged, operation),
+  );
+  if (widened.length > 0) {
+    throw new Error(
+      `${origin} widens ${interfaceKey} exposure (${widened.join(", ")}) disabled by an earlier layer.`,
+    );
+  }
+}
+
+function assertRoleMapsOnlyNarrow(
+  base: JsonObject | undefined,
+  merged: JsonObject | undefined,
+  keys: readonly string[],
+  path: string,
+  origin: string,
+): void {
+  if (!base) return;
+  for (const key of keys) {
+    assertOrListOnlyNarrows(base[key], merged?.[key], `${path}.${key}`, origin);
+  }
+}
+
+function keyedObjects(value: JsonValue | undefined, key = "key"): Map<string, JsonObject> {
+  const result = new Map<string, JsonObject>();
+  if (!Array.isArray(value)) return result;
+  for (const item of value) {
+    if (isPlainObject(item) && typeof item[key] === "string") {
+      result.set(item[key] as string, item);
+    }
+  }
+  return result;
+}
+
+function assertFieldsOnlyNarrow(base: JsonObject, merged: JsonObject, origin: string): void {
+  const beforeFields = keyedObjects(base.fields);
+  const afterFields = keyedObjects(merged.fields);
+  for (const [key, before] of beforeFields) {
+    const after = afterFields.get(key);
+    if (!after) continue;
+
+    assertRoleMapsOnlyNarrow(
+      objectProperty(before, "permissions"),
+      objectProperty(after, "permissions"),
+      ["read", "write"],
+      `fields.${key}.permissions`,
+      origin,
+    );
+    assertRoleMapsOnlyNarrow(
+      objectProperty(objectProperty(before, "authorization"), "roles"),
+      objectProperty(objectProperty(after, "authorization"), "roles"),
+      ["read", "write"],
+      `fields.${key}.authorization.roles`,
+      origin,
+    );
+
+    if (before.immutable === true && after.immutable !== true) {
+      throw new Error(`${origin} removes fields.${key}.immutable declared by an earlier layer.`);
+    }
+    assertOrListOnlyNarrows(before.writtenBy, after.writtenBy, `fields.${key}.writtenBy`, origin);
+  }
+}
+
+function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
+  return rowAccess.owner !== undefined || rowAccess.empty === "restricted"
+    ? "restricted"
+    : "public";
+}
+
+function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
+  const before = objectProperty(objectProperty(base, "authorization"), "rowAccess");
+  if (!before || before.enabled !== true) return;
+  const after = objectProperty(objectProperty(merged, "authorization"), "rowAccess");
+  if (!after || after.enabled !== true) {
+    throw new Error(`${origin} removes authorization.rowAccess enabled by an earlier layer.`);
+  }
+  if (resolvedRowEmpty(before) === "restricted" && resolvedRowEmpty(after) !== "restricted") {
+    throw new Error(`${origin} widens authorization.rowAccess.empty from restricted to public.`);
+  }
+
+  const priorAxes = (["owner", "group"] as const).filter((axis) => before[axis] !== undefined);
+  const nextAxes = (["owner", "group"] as const).filter((axis) => after[axis] !== undefined);
+  if (
+    priorAxes.length > 0 &&
+    (nextAxes.length === 0 || nextAxes.some((axis) => !priorAxes.includes(axis)))
+  ) {
+    throw new Error(
+      `${origin} widens authorization.rowAccess owner/group OR branches declared by an earlier layer.`,
+    );
+  }
+  for (const axis of priorAxes) {
+    if (after[axis] !== undefined) {
+      assertExactWhenPresent(
+        before[axis],
+        after[axis],
+        `authorization.rowAccess.${axis}`,
+        origin,
+      );
+    }
+  }
+
+  const beforeAcl = objectProperty(before, "recordPermissions");
+  if (!beforeAcl) return;
+  const afterAcl = objectProperty(after, "recordPermissions");
+  if (!afterAcl) {
+    throw new Error(`${origin} removes authorization.rowAccess.recordPermissions.`);
+  }
+  assertExactWhenPresent(
+    beforeAcl.field,
+    afterAcl.field,
+    "authorization.rowAccess.recordPermissions.field",
+    origin,
+  );
+  if (beforeAcl.empty === "restricted" && afterAcl.empty !== "restricted") {
+    throw new Error(
+      `${origin} widens authorization.rowAccess.recordPermissions.empty from restricted to public.`,
+    );
+  }
+  assertAndListOnlyNarrows(
+    beforeAcl.createRequires,
+    afterAcl.createRequires,
+    "authorization.rowAccess.recordPermissions.createRequires",
+    origin,
+  );
+
+  const beforeField = keyedObjects(base.fields).get(String(beforeAcl.field));
+  const afterField = keyedObjects(merged.fields).get(String(afterAcl.field));
+  if (!beforeField || !afterField) {
+    throw new Error(
+      `${origin} removes the authorization.rowAccess.recordPermissions field declared by an earlier layer.`,
+    );
+  }
+  assertExactWhenPresent(
+    beforeField.defaultValue,
+    afterField.defaultValue,
+    `fields.${String(beforeAcl.field)}.defaultValue`,
+    origin,
+  );
+}
+
+function assertConfirmationOnlyNarrows(
+  before: JsonValue | undefined,
+  after: JsonValue | undefined,
+  path: string,
+  origin: string,
+): void {
+  if (!isPlainObject(before)) return;
+  if (!isPlainObject(after)) {
+    throw new Error(`${origin} removes ${path} declared by an earlier layer.`);
+  }
+  const rank = { none: 0, acknowledgement: 1, challenge: 2 } as const;
+  const beforeMode = typeof before.mode === "string" ? before.mode : "";
+  const afterMode = typeof after.mode === "string" ? after.mode : "";
+  const beforeRank = rank[beforeMode as keyof typeof rank];
+  const afterRank = rank[afterMode as keyof typeof rank];
+  if (beforeRank === undefined || afterRank === undefined || afterRank < beforeRank) {
+    throw new Error(`${origin} weakens ${path} declared by an earlier layer.`);
+  }
+  if (beforeMode === "challenge" && !sameJson(before, after)) {
+    throw new Error(`${origin} changes ${path}.challenge declared by an earlier layer.`);
+  }
+}
+
+function assertSessionAuthOnlyNarrows(
+  before: JsonObject,
+  after: JsonObject | undefined,
+  path: string,
+  origin: string,
+): void {
+  if (!after || after.mode !== "session") {
+    throw new Error(`${origin} widens ${path} away from authenticated session authorization.`);
+  }
+  if (before.roles !== undefined) {
+    assertOrListOnlyNarrows(before.roles, after.roles, `${path}.roles`, origin);
+  }
+  assertAndListOnlyNarrows(before.scopes, after.scopes, `${path}.scopes`, origin);
+  assertExactWhenPresent(
+    before.recordPermission,
+    after.recordPermission,
+    `${path}.recordPermission`,
+    origin,
+  );
+}
+
+function assertOperationOnlyNarrows(
+  before: JsonObject,
+  after: JsonObject | undefined,
+  path: string,
+  origin: string,
+): void {
+  if (!after) {
+    throw new Error(`${origin} removes ${path} declared by an earlier layer.`);
+  }
+  for (const key of ["implementation", "target", "input", "effects", "reliability", "tenancy"] as const) {
+    assertExactWhenPresent(before[key], after[key], `${path}.${key}`, origin);
+  }
+
+  const beforeAuth = objectProperty(before, "auth");
+  const afterAuth = objectProperty(after, "auth");
+  if (beforeAuth?.mode === "session") {
+    assertSessionAuthOnlyNarrows(beforeAuth, afterAuth, `${path}.auth`, origin);
+  } else if (beforeAuth?.mode === "public") {
+    if (afterAuth?.mode !== "public" && afterAuth?.mode !== "session") {
+      throw new Error(`${origin} changes ${path}.auth to an incomparable authorization mode.`);
+    }
+  } else if (beforeAuth) {
+    assertExactWhenPresent(beforeAuth, afterAuth, `${path}.auth`, origin);
+  }
+
+  const beforeConcurrency = objectProperty(before, "concurrency");
+  const afterConcurrency = objectProperty(after, "concurrency");
+  for (const control of ["version", "editLease"] as const) {
+    if (beforeConcurrency?.[control] !== undefined) {
+      assertExactWhenPresent(
+        beforeConcurrency[control],
+        afterConcurrency?.[control],
+        `${path}.concurrency.${control}`,
+        origin,
+      );
+    }
+  }
+  assertConfirmationOnlyNarrows(before.confirmation, after.confirmation, `${path}.confirmation`, origin);
+  assertExactWhenPresent(before.interaction, after.interaction, `${path}.interaction`, origin);
+
+  if (before.prerequisites !== undefined) {
+    if (!Array.isArray(before.prerequisites) || !Array.isArray(after.prerequisites)) {
+      throw new Error(`${origin} removes ${path}.prerequisites declared by an earlier layer.`);
+    }
+    const afterItems = new Set(after.prerequisites.map(stableJson));
+    if (before.prerequisites.some((item) => !afterItems.has(stableJson(item)))) {
+      throw new Error(`${origin} widens ${path}.prerequisites by removing a required receipt.`);
+    }
+  }
+}
+
+function assertOperationsOnlyNarrow(base: JsonObject, merged: JsonObject, origin: string): void {
+  const beforeOperations = objectProperty(base, "operations");
+  if (!beforeOperations) return;
+  const afterOperations = objectProperty(merged, "operations");
+  for (const [key, before] of Object.entries(beforeOperations)) {
+    if (isPlainObject(before)) {
+      assertOperationOnlyNarrows(
+        before,
+        isPlainObject(afterOperations?.[key]) ? afterOperations[key] as JsonObject : undefined,
+        `operations.${key}`,
+        origin,
+      );
+    }
+  }
+
+  const beforeInterfaces = objectProperty(base, "interfaces");
+  const afterInterfaces = objectProperty(merged, "interfaces");
+  for (const interfaceKey of ["rest", "graphql", "mcp", "web"] as const) {
+    const beforeInterface = isPlainObject(beforeInterfaces?.[interfaceKey])
+      ? beforeInterfaces[interfaceKey] as JsonObject
+      : undefined;
+    const afterInterface = isPlainObject(afterInterfaces?.[interfaceKey])
+      ? afterInterfaces[interfaceKey] as JsonObject
+      : undefined;
+    const beforeProjected = objectProperty(beforeInterface, "operations");
+    const afterProjected = objectProperty(afterInterface, "operations");
+    for (const operationKey of Object.keys(beforeOperations)) {
+      const beforeEnabled = Boolean(beforeInterface) && beforeProjected?.[operationKey] !== false;
+      const afterEnabled = Boolean(afterInterface) && afterProjected?.[operationKey] !== false;
+      if (!beforeEnabled && afterEnabled) {
+        throw new Error(
+          `${origin} re-enables interfaces.${interfaceKey}.operations.${operationKey} disabled by an earlier layer.`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Entity patches are deployment composition, not a second authority source.
+ * Security policy is therefore monotone across layers: OR grants may shrink,
+ * AND requirements may grow and controls that cannot be safely ordered must
+ * stay structurally equal. New plugin operations remain valid extension
+ * points; these checks protect only contracts an earlier owner already set.
+ */
+function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: JsonValue, origin: string): void {
+  if (!isPlainObject(baseValue) || !isPlainObject(mergedValue)) return;
+  const base = baseValue;
+  const merged = mergedValue;
+
+  assertLegacyInterfaceOnlyNarrows(base, merged, "rest", origin);
+  assertLegacyInterfaceOnlyNarrows(base, merged, "mcp", origin);
+  assertRoleMapsOnlyNarrow(
+    objectProperty(base, "permissions"),
+    objectProperty(merged, "permissions"),
+    ["read", "create", "update", "delete"],
+    "permissions",
+    origin,
+  );
+  assertRoleMapsOnlyNarrow(
+    objectProperty(objectProperty(base, "authorization"), "roles"),
+    objectProperty(objectProperty(merged, "authorization"), "roles"),
+    ["read", "create", "update", "delete"],
+    "authorization.roles",
+    origin,
+  );
+  assertFieldsOnlyNarrow(base, merged, origin);
+  assertRowAccessOnlyNarrows(base, merged, origin);
+  assertOperationsOnlyNarrow(base, merged, origin);
+
+  if (base.workerAccess === undefined && merged.workerAccess !== undefined) {
+    throw new Error(`${origin} enables workerAccess not granted by the owning layer.`);
+  }
+  if (
+    base.workerAccess !== undefined &&
+    merged.workerAccess !== undefined &&
+    base.workerAccess !== merged.workerAccess
+  ) {
+    throw new Error(`${origin} changes workerAccess granted by an earlier layer.`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Layer resolution
 // ---------------------------------------------------------------------------
@@ -577,7 +1045,7 @@ function assertCrudPolicyOnlyNarrows(base: JsonValue, merged: JsonValue, origin:
  * reads it from exactly here, so a patch has to merge into this path and no
  * other for the result to be the document the generator sees.
  */
-const APP_SHELL_FILENAME = "appShell.yaml";
+const APP_SHELL_FILENAME = "menu.yaml";
 
 function isEntityFile(relativePath: string): boolean {
   return (
@@ -663,6 +1131,11 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
             merged,
             `entityPatch ${layerDir}/${relativePath}`,
           );
+          assertEntitySecurityOnlyNarrows(
+            baseDoc,
+            merged,
+            `entityPatch ${layerDir}/${relativePath}`,
+          );
           const mergedPath = join(buildDir, targetRelative);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
@@ -696,6 +1169,41 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           files.set(APP_SHELL_FILENAME, { layer: buildDir, path: APP_SHELL_FILENAME });
           continue;
         }
+
+        if (parsed?.kind === AUTHORIZATION_PATCH_KIND) {
+          // Path-targeted like the app shell: realm files are found by their
+          // filename at the tree root, so the patch names its target by
+          // sitting at that same path. A patch filed elsewhere is refused
+          // rather than copied through — the generator would then reject it
+          // as a realm file of the wrong kind, one step removed from the
+          // mistake.
+          if (!isAuthorizationFilePath(relativePath)) {
+            throw new Error(
+              `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath} must sit at the path of the ` +
+                "realm file it patches (authorization.yaml or authorization.<realm>.yaml at the layer root).",
+            );
+          }
+          const target = files.get(relativePath);
+          if (!target) {
+            throw new Error(
+              `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath} cannot be applied: ` +
+                `no earlier layer defines ${relativePath}. A patch overlays a realm; ` +
+                "to author a new realm, ship an authorizationConfig under its own filename.",
+            );
+          }
+          const baseDoc = YAML.parse(
+            readFileSync(join(target.layer, target.path), "utf8"),
+          ) as JsonValue;
+          const merged = applyAuthorizationPatch(baseDoc, parsed as JsonValue, {
+            strategicMerge,
+            origin: `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath}`,
+          });
+          const mergedPath = join(buildDir, relativePath);
+          mkdirSync(join(mergedPath, ".."), { recursive: true });
+          writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
+          files.set(relativePath, { layer: buildDir, path: relativePath });
+          continue;
+        }
       }
 
       if (files.has(relativePath)) {
@@ -718,7 +1226,8 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
             "Entities can be modified with kind: entityPatch; the app shell with " +
-            "kind: appShellPatch; catalogs/*.yaml merge automatically.",
+            "kind: appShellPatch; realm files (authorization*.yaml) with " +
+            "kind: authorizationPatch; catalogs/*.yaml merge automatically.",
         );
       }
       if (isEntityFile(relativePath)) {

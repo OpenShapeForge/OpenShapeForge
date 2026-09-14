@@ -5,6 +5,8 @@ import { Readable } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
+import { operationFailure } from "@openshapeforge/operations";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -30,6 +32,12 @@ import {
   type ModuleMcpServerBinding,
 } from "../modules/platform.js";
 import { HttpError } from "../rest/http-error.js";
+import { operationContractFingerprint } from "./contract-fingerprint.js";
+import {
+  __setOperationExecutionReceiptExecutorForTests,
+  keyedOperationReceiptIdentity,
+  type TestReceiptExecutor,
+} from "./execution-receipts.js";
 import {
   bindOperationHandlers,
   DeclaredOperationError,
@@ -37,7 +45,9 @@ import {
   operationGraphqlContribution,
   operationRestInput,
   registerOperationRestRoutes,
+  registerRuntimeOperationRestRoutes,
   requireOperationAuthorization,
+  runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "./runtime.js";
 
@@ -50,14 +60,44 @@ const session = {
   credential: "trusted-context" as const,
 };
 
-const testDatabase = () => new Kysely<DB>({
-  dialect: {
-    createAdapter: () => new PostgresAdapter(),
-    createDriver: () => new DummyDriver(),
-    createIntrospector: (db) => new PostgresIntrospector(db),
-    createQueryCompiler: () => new PostgresQueryCompiler(),
-  },
-});
+const testDatabase = (receiptExecutor?: TestReceiptExecutor, statements?: string[]) => {
+  const db = new Kysely<DB>({
+    log: event => { if (event.level === "query") statements?.push(event.query.sql); },
+    dialect: {
+      createAdapter: () => new PostgresAdapter(),
+      createDriver: () => new DummyDriver(),
+      createIntrospector: (database) => new PostgresIntrospector(database),
+      createQueryCompiler: () => new PostgresQueryCompiler(),
+    },
+  });
+  const stored = new Map<string, { request: string; contract: string; value: unknown }>();
+  const inMemory: TestReceiptExecutor = async (active, options) => {
+    await options.authorizeReplay?.(undefined as never);
+    const identity = keyedOperationReceiptIdentity(active, options);
+    const key = [identity.tenantId, identity.actorId, identity.operationId,
+      identity.operationIntent, identity.keyHash].join(":");
+    const existing = stored.get(key);
+    if (existing) {
+      if (existing.request !== identity.requestFingerprint ||
+        existing.contract !== identity.contractFingerprint) {
+        throw operationFailure({
+          code: "IDEMPOTENCY_KEY_REUSED",
+          message: "This idempotency key was already used for different input.",
+        });
+      }
+      return options.decode(existing.value);
+    }
+    const value = await options.execute(() => undefined);
+    stored.set(key, {
+      request: identity.requestFingerprint,
+      contract: identity.contractFingerprint,
+      value: options.encode(value),
+    });
+    return value;
+  };
+  __setOperationExecutionReceiptExecutorForTests(db, receiptExecutor ?? inMemory);
+  return db;
+};
 
 const restOperation: OperationContract = {
   key: "demo.quote.publish",
@@ -167,6 +207,75 @@ const declaredConflict = {
 };
 
 describe("canonical operation runtime", () => {
+  test("owner availability is rechecked inside the same transaction as execution", async () => {
+    const statements: string[] = [];
+    const db = testDatabase(undefined, statements);
+    const platform = new ModulePlatformRuntime(db);
+    const operation: OperationContract = {
+      ...restOperation,
+      key: "demo.relation.publish",
+      handler: "publish",
+      target: { entityId: "Relation", entityName: "Relation", scope: "record", inputField: "id" },
+      inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+      outputSchema: { type: "object" },
+      idempotency: { mode: "none" },
+      transports: { ...restOperation.transports, rest: { method: "POST", path: "/api/demo/relations/:id/publish", response: { status: 200, kind: "json" } } },
+    };
+    let allowed = false;
+    let calls = 0;
+    let policyDb: unknown;
+    const module: RuntimeModule = {
+      name: operation.plugin,
+      operationAvailabilityHandlers: { publish: async (ids, context) => {
+        policyDb = context.db;
+        return Object.fromEntries(ids.map(id => [id, allowed ? { available: true } : {
+          available: false, error: { code: "CONFLICT", message: "This record cannot be published yet.", retryable: false },
+        }]));
+      } },
+      operationHandlers: { publish: async (_input, context) => {
+        calls++;
+        await context.platform!.db.withSession(context.session!, async trx => { expect(trx === policyDb).toBe(true); });
+        return { value: {} };
+      } },
+    };
+    const bound = bindOperationHandlers([module], [operation]).get(operation.key)!;
+    const verified = { ...session, roles: ["quote-publisher"], tenantId: "22222222-2222-4222-8222-222222222222", userId: "33333333-3333-4333-8333-333333333333" };
+    try {
+      const context = { db, platform: platform.services, transport: "rest" as const, session: verified };
+      const input = { id: "44444444-4444-4444-8444-444444444444" };
+      await expect(invokeOperation(bound, input, context)).rejects.toThrow("cannot be published yet");
+      expect(calls).toBe(0);
+      allowed = true;
+      await expect(invokeOperation(bound, input, context)).resolves.toEqual({ value: {} });
+      expect(calls).toBe(1);
+      allowed = false;
+      await expect(invokeOperation(bound, input, context)).rejects.toThrow("cannot be published yet");
+      expect(calls).toBe(1);
+      const protectedBound = { ...bound, operation: { ...operation,
+        concurrency: { version: { mode: "required" as const, field: "updatedAt" as const } },
+        confirmation: { mode: "challenge" as const, challenge: {
+          kind: "type-current-field" as const, field: "displayName", issuedBy: "server" as const,
+          bindTo: ["subject", "tenant", "operation", "target.id", "target.version"] as const,
+          expiresAfter: "PT5M", singleUse: true as const,
+        } },
+        inputSchema: { type: "object", required: ["id", "expectedVersion"], properties: { id: { type: "string" }, expectedVersion: { type: "string" } } },
+      } };
+      await expect(invokeOperation(protectedBound, { ...input, expectedVersion: "2026-09-13T00:00:00.000Z" }, context))
+        .rejects.toThrow("cannot be published yet");
+      expect(statements.some(query => /insert\s+into\s+platform\.operation_confirmation_challenges/i.test(query))).toBe(false);
+      expect(calls).toBe(1);
+    } finally { await db.destroy(); }
+  });
+
+  test("availability cannot be registered outside the owning authored record operation", () => {
+    const module: RuntimeModule = { name: restOperation.plugin,
+      operationHandlers: { [restOperation.handler]: async () => ({ value: {} }) },
+      operationAvailabilityHandlers: { [restOperation.handler]: async () => ({}) },
+    };
+    expect(() => bindOperationHandlers([module], [restOperation])).toThrow("authenticated tenant record target");
+    expect(() => bindOperationHandlers([{ ...module, operationAvailabilityHandlers: { unknown: async () => ({}) } }], [restOperation]))
+      .toThrow("absent from its compiler contract");
+  });
   test("fails closed when the compiler contract has no runtime handler", () => {
     expect(() => bindOperationHandlers([])).toThrow(/has no loaded runtime module/);
     expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);
@@ -451,6 +560,63 @@ describe("canonical operation runtime", () => {
     })).toThrow(/cannot be invoked with an API key/);
   });
 
+  test("allows an authenticated tenant session when roles are omitted and keeps empty fail-closed", () => {
+    const authenticated: OperationContract = {
+      ...restOperation,
+      auth: { mode: "session" },
+    };
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      roles: [],
+    })).not.toThrow();
+    expect(() => requireOperationAuthorization(authenticated, undefined))
+      .toThrow(/authenticated bearer session/);
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      credential: "none",
+      roles: [],
+    })).toThrow(/authenticated bearer session/);
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      tenantId: null as never,
+      roles: [],
+    })).toThrow(/tenant context/);
+
+    const denied: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", roles: [] },
+    };
+    expect(() => requireOperationAuthorization(denied, session))
+      .toThrow(/required operation role/);
+    expect(() => requireOperationAuthorization(restOperation, session))
+      .toThrow(/required operation role/);
+    expect(() => requireOperationAuthorization(restOperation, {
+      ...session,
+      roles: ["quote-publisher"],
+    })).not.toThrow();
+
+    const scoped: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", scopes: ["session:read"] },
+    };
+    expect(() => requireOperationAuthorization(scoped, { ...session, roles: [] }))
+      .toThrow(/OAuth scope/);
+    expect(() => requireOperationAuthorization(scoped, {
+      ...session,
+      roles: [],
+      oauthScopes: ["session:read"],
+    })).not.toThrow();
+
+    const module: RuntimeModule = {
+      name: "demo",
+      operationHandlers: { publishQuote: async () => ({ value: {} }) },
+    };
+    const [available] = runtimeStaticOperationRegistrations([module], {}, [authenticated]);
+    const [unavailable] = runtimeStaticOperationRegistrations([module], {}, [denied]);
+    expect(available!.available({ ...session, roles: [] })).toBe(true);
+    expect(unavailable!.available({ ...session, roles: ["admin"] })).toBe(false);
+  });
+
   test("rejects a success status that differs from the canonical contract", async () => {
     const bound = bindOperationHandlers([{
       name: "workflow",
@@ -654,7 +820,9 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     },
   };
   const app = Fastify();
-  registerOperationRestRoutes(app, [module], {}, [restOperation]);
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  registerOperationRestRoutes(app, [module], { db, platform: platform.services }, [restOperation]);
   const paths = ["/api/demo/quotes/quote-1/publish"];
   try {
     for (const path of paths) {
@@ -672,6 +840,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       error: {
         code: "UNAUTHENTICATED",
         message: "Operation requires an authenticated bearer session.",
+        retryable: false,
       },
     });
 
@@ -713,7 +882,20 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       expect(response.headers["x-operation-handler"]).toBe("publishQuote");
       successfulBodies.push(response.json());
     }
-    expect(successfulBodies).toHaveLength(1);
+    const replay = await app.inject({
+      method: "POST",
+      url: paths[0]!,
+      headers: {
+        ...Object.fromEntries(authorized),
+        "idempotency-key": "request-1",
+      },
+      payload: { outcome: "ok" },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.headers["x-operation-handler"]).toBe("publishQuote");
+    successfulBodies.push(replay.json());
+    expect(successfulBodies).toHaveLength(2);
+    expect(successfulBodies[1]).toEqual(successfulBodies[0]);
     expect(observations).toHaveLength(1);
 
     for (const path of paths) {
@@ -728,7 +910,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       });
       expect(conflict.statusCode).toBe(409);
       expect(conflict.json() as unknown).toEqual({
-        error: { code: "CONFLICT", message: "Quote conflicts." },
+        error: { code: "CONFLICT", message: "Quote conflicts.", retryable: false },
       });
     }
 
@@ -746,6 +928,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     }
   } finally {
     await app.close();
+    await db.destroy();
     if (previousSecret === undefined) {
       delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
     } else {
@@ -755,6 +938,162 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = previousJwks;
     if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
     else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
+    __resetSessionResolverForTests();
+  }
+});
+
+test("explicit canonical handler envelopes preserve offers and resources without shape guessing", async () => {
+  const operation: OperationContract = { ...restOperation,
+    auth: { mode: "public" }, tenancy: { mode: "none" }, idempotency: { mode: "none" },
+    inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    transports: { ...restOperation.transports, rest: { ...restOperation.transports.rest, response: { kind: "json", status: 200 } } },
+  };
+  const envelope = { data: { status: "waiting" }, operations: [{
+    operation: { id: "example.respond", intent: "invoke" }, available: true as const,
+    interaction: { kind: "userInput" as const, offerId: "server-issued", expiresAt: "2026-09-12T13:15:00Z",
+      bindTo: { tenant: "tenant-a", subject: "user-a", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
+  }], resources: [{ uri: "osf://example/result", name: "result" }] };
+  for (const explicit of [true, false]) {
+    const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
+      publishQuote: async () => ({ value: envelope, ...(explicit ? { resultKind: "operation-envelope" as const } : {}) }),
+    } }];
+    const registration = runtimeStaticOperationRegistrations(modules, {}, [operation])[0]!;
+    const result = await registration.execute(session, { operation: { id: operation.key, intent: "invoke" }, input: {} }, {});
+    expect(result).toEqual(explicit ? envelope : { data: envelope, operations: [] });
+  }
+  for (const value of [{ data: {} }, { data: {}, operations: "invalid" }, { data: {}, operations: [], error: {} },
+    { data: {}, operations: [{ available: true }] }, { data: {}, operations: [], resources: [{ uri: "x" }] }]) {
+    const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
+      publishQuote: async () => ({ value, resultKind: "operation-envelope" }),
+    } }];
+    const registration = runtimeStaticOperationRegistrations(modules, {}, [operation])[0]!;
+    expect(await registration.execute(session, { operation: { id: operation.key, intent: "invoke" }, input: {} }, {}))
+      .toMatchObject({ error: { code: "HANDLER_CONTRACT_VIOLATION" } });
+  }
+});
+
+test("the generic runtime Operation route parses JSON inside a raw-buffer parent", async () => {
+  const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const secret = "runtime-operation-rest-json-test-secret";
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  __resetSessionResolverForTests();
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const seen: unknown[] = [];
+  const module: RuntimeModule = {
+    name: "demo",
+    operationHandlers: {
+      publishQuote: async (input, context) => {
+        seen.push(input);
+        return {
+          value: {
+            quoteId: input.quoteId,
+            idempotencyKey: input.idempotencyKey,
+            tenantId: context.session!.tenantId,
+            userId: context.session!.userId,
+          },
+        };
+      },
+    },
+  };
+  platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+    [module],
+    { db, platform: platform.services },
+    [restOperation],
+  ));
+  const app = Fastify();
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    (_request, body, done) => done(null, body),
+  );
+  registerRuntimeOperationRestRoutes(app, { db, platform: platform.services });
+  const headers = new Headers({
+    "content-type": "application/json",
+    "idempotency-key": "request-raw-buffer",
+  });
+  applyTrustedContextHeaders(headers, {
+    tenantId: "tenant-a",
+    userId: "user-a",
+    roles: ["quote-publisher"],
+    groups: [],
+  }, { secret });
+  try {
+    const discovered = await app.inject({
+      method: "GET",
+      url: `/api/operations/${restOperation.key}`,
+      headers: Object.fromEntries(headers),
+    });
+    expect(discovered.statusCode).toBe(200);
+    const definition = discovered.json() as RuntimeOperationDefinition;
+    const expectedContractFingerprint = operationContractFingerprint(definition);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: {
+        intent: "invoke",
+        input: { quoteId: "quote-raw-buffer" },
+        expectedContractFingerprint,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: {
+        quoteId: "quote-raw-buffer",
+        idempotencyKey: "request-raw-buffer",
+        tenantId: "tenant-a",
+        userId: "user-a",
+      },
+    });
+    expect(seen).toEqual([{
+      quoteId: "quote-raw-buffer",
+      idempotencyKey: "request-raw-buffer",
+    }]);
+
+    platform.registerStaticOperations([{
+      definition: {
+        ...definition,
+        reliability: { idempotency: { mode: "none" } },
+      },
+      available: () => true,
+      execute: async () => {
+        seen.push("changed-contract-executed");
+        return { data: {}, operations: [] };
+      },
+    }]);
+    const changed = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: {
+        intent: "invoke",
+        input: { quoteId: "must-not-run" },
+        expectedContractFingerprint,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+    });
+    expect(seen).toHaveLength(1);
+
+    const malformed = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: "{",
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json()).toMatchObject({
+      error: { code: "BAD_USER_INPUT", message: "Request body is not valid JSON." },
+    });
+  } finally {
+    await app.close();
+    await db.destroy();
+    if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+    else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
     __resetSessionResolverForTests();
   }
 });
@@ -935,7 +1274,11 @@ test("REST applies the exact status-and-code fixed representation to core author
     });
     expect(handlerFailure.statusCode).toBe(403);
     expect(JSON.parse(handlerFailure.body)).toEqual({
-      error: { code: "FORBIDDEN", message: "Handler failure." },
+      error: {
+        code: "FORBIDDEN",
+        message: "Handler failure.",
+        retryable: false,
+      },
     });
   } finally {
     await app.close();
@@ -969,7 +1312,12 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     idempotencyKey: "declared-error",
   };
 
-  const contribution = operationGraphqlContribution([module], {})?.graphql?.({});
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const contribution = operationGraphqlContribution(
+    [module],
+    { db, platform: platform.services },
+  )?.graphql?.({});
   const resolver = contribution?.resolvers?.Mutation?.workflowStartWebhook as
     | ((_parent: unknown, args: { input: unknown }, context: { session: TrustedSessionContext }) => Promise<unknown>)
     | undefined;
@@ -985,8 +1333,6 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     extensions: { code: "CONFLICT", status: 409, body },
   });
 
-  const db = testDatabase();
-  const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
@@ -1015,6 +1361,457 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     await client.close();
     await server.close();
     await db.destroy();
+  }
+});
+
+test("MCP projects a handler's content blocks next to the canonical value", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
+  const module: RuntimeModule = {
+    name: "workflow",
+    operationHandlers: {
+      startWebhook: () => ({
+        value,
+        mcp: { content: [{ type: "text", text: "one image" }, image] },
+      }),
+    },
+  };
+  const input = { definitionId: value.definitionId, idempotencyKey: "content-blocks" };
+
+  // Other transports keep the canonical value; the projection is not validated
+  // against the output schema and does not leak into it.
+  const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+  const direct = await invokeOperation(bound, input, { transport: "graphql", session });
+  expect(direct.value).toEqual(value);
+
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [module],
+    modulePlatform: platform,
+  });
+  const client = new Client({ name: "content-blocks-test", version: "1" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const result = await client.callTool({ name: "workflow_start_webhook", arguments: input });
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toEqual([{ type: "text", text: "one image" }, image]);
+    expect(result.structuredContent).toEqual(value);
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
+test("MCP searchable projection bounds tools/list while search, generic execute, and named calls stay canonical", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const calls: unknown[] = [];
+  const module: RuntimeModule = {
+    name: "workflow",
+    operationHandlers: {
+      startWebhook: (input, context) => {
+        calls.push({ input, userId: context.session?.userId });
+        return { value };
+      },
+    },
+  };
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+    [module],
+    { db, platform: platform.services },
+  ));
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [module],
+    modulePlatform: platform,
+    operationToolProjection: {
+      mode: "searchable",
+      search: "osf_search_operations",
+      execute: "osf_execute_operation",
+    },
+  });
+  const client = new Client(
+    { name: "searchable-operation-test", version: "1" },
+    { capabilities: {} },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const listed = await client.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_search_operations");
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
+    expect(listed.tools.map((tool) => tool.name)).not.toContain("workflow_start_webhook");
+
+    const searched = await client.callTool({
+      name: "osf_search_operations",
+      arguments: { query: "webhook", limit: 20 },
+    });
+    expect(searched.isError).not.toBe(true);
+    expect(searched.structuredContent).toMatchObject({
+      operations: [{
+        operation: { id: "workflow.instance.webhook-start", intent: "invoke" },
+        inputSchema: expect.objectContaining({
+          required: ["definitionId", "idempotencyKey"],
+        }),
+      }],
+    });
+
+    const generic = await client.callTool({
+      name: "osf_execute_operation",
+      arguments: {
+        operationId: "workflow.instance.webhook-start",
+        input: { definitionId: value.definitionId },
+        idempotencyKey: "generic-attempt",
+      },
+    });
+    expect(generic.isError).not.toBe(true);
+    expect(generic.structuredContent).toEqual({ data: value, operations: [] });
+
+    const named = await client.callTool({
+      name: "workflow_start_webhook",
+      arguments: {
+        definitionId: value.definitionId,
+        idempotencyKey: "named-attempt",
+      },
+    });
+    expect(named.isError).not.toBe(true);
+    expect(named.structuredContent).toEqual(value);
+    expect(calls).toEqual([
+      {
+        input: {
+          definitionId: value.definitionId,
+          idempotencyKey: "generic-attempt",
+        },
+        userId: session.userId,
+      },
+      {
+        input: {
+          definitionId: value.definitionId,
+          idempotencyKey: "named-attempt",
+        },
+        userId: session.userId,
+      },
+    ]);
+
+    const deniedSession = { ...session, userId: "user-denied", roles: [] };
+    const deniedServer = __buildGeneratedMcpServerForTests({
+      db,
+      session: deniedSession,
+      modules: [module],
+      modulePlatform: platform,
+      operationToolProjection: {
+        mode: "searchable",
+        search: "osf_search_operations",
+        execute: "osf_execute_operation",
+      },
+    });
+    const deniedClient = new Client(
+      { name: "searchable-operation-denied-test", version: "1" },
+      { capabilities: {} },
+    );
+    const [deniedClientTransport, deniedServerTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await deniedServer.connect(deniedServerTransport);
+      await deniedClient.connect(deniedClientTransport);
+      const hidden = await deniedClient.callTool({
+        name: "osf_search_operations",
+        arguments: { query: "webhook" },
+      });
+      expect(hidden.structuredContent).toEqual({ operations: [] });
+      const deniedGeneric = await deniedClient.callTool({
+        name: "osf_execute_operation",
+        arguments: {
+          operationId: "workflow.instance.webhook-start",
+          input: { definitionId: value.definitionId },
+          idempotencyKey: "denied-attempt",
+        },
+      });
+      expect(deniedGeneric).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: "NOT_FOUND" } },
+      });
+      const deniedNamed = await deniedClient.callTool({
+        name: "workflow_start_webhook",
+        arguments: {
+          definitionId: value.definitionId,
+          idempotencyKey: "denied-named-attempt",
+        },
+      });
+      expect(deniedNamed).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: "NOT_FOUND" } },
+      });
+      expect(calls).toHaveLength(2);
+    } finally {
+      await deniedClient.close();
+      await deniedServer.close();
+    }
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
+test("MCP projects and dispatches live runtime provider Operations canonically", async () => {
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const definition = {
+    id: "example.service.invoke:service-one@1",
+    intent: "invoke",
+    key: "find-tickets",
+    entityId: "service-one",
+    entityName: "Service",
+    name: "Find tickets",
+    description: "Find the tickets visible to this person.",
+    input: {
+      kind: "json-schema",
+      schema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    output: {
+      kind: "json-schema",
+      schema: {
+        type: "object",
+        properties: { found: { type: "number" } },
+        required: ["found"],
+        additionalProperties: false,
+      },
+    },
+    effects: { data: "read" as const, external: "read" as const },
+    reliability: { idempotency: { mode: "natural" as const } },
+  };
+  const calls: unknown[] = [];
+  const providerModule: RuntimeModule = {
+    name: "example",
+    operationProviders: [{
+      id: "example.services",
+      list: async (active) => active.userId === session.userId ? [definition] : [],
+      get: async (active, operationId) =>
+        active.userId === session.userId && operationId === definition.id
+          ? definition
+          : undefined,
+      execute: async (context, request) => {
+        calls.push({ session: context.session, request });
+        return {
+          data: { found: request.input?.query === "open" ? 2 : 0 },
+          operations: [],
+          resources: [{
+            uri: "osf://tickets/result-one",
+            name: "ticket-result",
+            mimeType: "application/json",
+          }],
+        };
+      },
+    }],
+  };
+  platform.registerOperationProviders([providerModule]);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [providerModule],
+    modulePlatform: platform,
+  });
+  const client = new Client(
+    { name: "runtime-operation-provider-test", version: "1" },
+    { capabilities: {} },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const listed = await client.listTools();
+    expect(listed.tools).toContainEqual(expect.objectContaining({
+      name: "find_tickets",
+      title: "Find tickets",
+      description: "Find the tickets visible to this person.",
+      inputSchema: definition.input.schema,
+      outputSchema: expect.objectContaining({
+        required: ["data", "operations"],
+        properties: expect.objectContaining({ data: definition.output.schema }),
+      }),
+      annotations: expect.objectContaining({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      }),
+    }));
+
+    const result = await client.callTool({
+      name: "find_tickets",
+      arguments: { query: "open" },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      data: { found: 2 },
+      operations: [],
+      resources: [{
+        uri: "osf://tickets/result-one",
+        name: "ticket-result",
+        mimeType: "application/json",
+      }],
+    });
+    expect(result.content).toContainEqual({
+      type: "resource_link",
+      uri: "osf://tickets/result-one",
+      name: "ticket-result",
+      mimeType: "application/json",
+    });
+    expect(calls).toEqual([{
+      session: expect.objectContaining({
+        tenantId: session.tenantId,
+        userId: session.userId,
+      }),
+      request: {
+        operation: { id: definition.id, intent: definition.intent },
+        input: { query: "open" },
+      },
+    }]);
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
+test("runtime provider keyed Operations replay through the same durable core boundary", async () => {
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const definition: RuntimeOperationDefinition = {
+    id: "example.keyed.invoke:one",
+    intent: "invoke",
+    key: "keyed-example",
+    name: "Keyed example",
+    description: "Writes once.",
+    input: { kind: "json-schema", schema: { type: "object" } },
+    output: { kind: "json-schema", schema: { type: "object" } },
+    effects: { data: "write", external: "none" },
+    reliability: { idempotency: { mode: "keyed" } },
+  };
+  let calls = 0;
+  platform.registerOperationProviders([{
+    name: "example",
+    operationProviders: [{
+      id: "example.keyed",
+      list: async () => [definition],
+      get: async (_active, id) => id === definition.id ? definition : undefined,
+      execute: async () => ({ data: { call: ++calls }, operations: [] }),
+    }],
+  }]);
+  try {
+    await platform.withActiveOperationSession(session, async (active) => {
+      const request = {
+        operation: { id: definition.id, intent: definition.intent },
+        input: { value: "same" },
+        idempotencyKey: "provider-key",
+      };
+      const first = await platform.services.operations.execute(active, request);
+      const replay = await platform.services.operations.execute(active, request);
+      expect(replay).toEqual(first);
+      expect(calls).toBe(1);
+      expect(await platform.services.operations.execute(active, {
+        ...request,
+        input: { value: "changed" },
+      })).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED", retryable: false } });
+    });
+  } finally {
+    await db.destroy();
+  }
+});
+
+test("MCP refuses unusable or colliding runtime provider tool keys", async () => {
+  for (const key of ["Find Tickets", "whoami"]) {
+    const db = testDatabase();
+    const platform = new ModulePlatformRuntime(db);
+    const providerModule: RuntimeModule = {
+      name: "example",
+      operationProviders: [{
+        id: `example.${key}`,
+        list: async () => [{
+          id: `example.invoke:${key}`,
+          intent: "invoke",
+          key,
+          name: key,
+          description: key,
+          input: { kind: "json-schema", schema: { type: "object" } },
+          output: { kind: "json-schema", schema: { type: "object" } },
+          effects: { data: "read", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+        }],
+        get: async () => undefined,
+        execute: async () => ({ data: {}, operations: [] }),
+      }],
+    };
+    platform.registerOperationProviders([providerModule]);
+    const server = __buildGeneratedMcpServerForTests({
+      db,
+      session,
+      modules: [providerModule],
+      modulePlatform: platform,
+    });
+    const client = new Client(
+      { name: "runtime-operation-collision-test", version: "1" },
+      { capabilities: {} },
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await expect(client.listTools()).rejects.toThrow(
+        key === "whoami" ? /contributed more than once/ : /no usable MCP key/,
+      );
+    } finally {
+      await client.close();
+      await server.close();
+      await db.destroy();
+    }
+  }
+});
+
+test("rejects an MCP projection that is not well-formed content", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const input = { definitionId: value.definitionId, idempotencyKey: "bad-blocks" };
+  for (const mcp of [
+    { content: [] },
+    { content: [{ type: "image", mimeType: "image/png" }] },
+    { content: [{ type: "image", data: "not base64!", mimeType: "image/png" }] },
+    { content: [{ type: "video", data: "AAAA", mimeType: "video/mp4" }] },
+    { content: [{ type: "text", text: "ok" }], structuredContent: ["not", "a", "record"] },
+  ]) {
+    const module: RuntimeModule = {
+      name: "workflow",
+      operationHandlers: { startWebhook: () => ({ value, mcp }) as ModuleOperationResult },
+    };
+    const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+    await expect(invokeOperation(bound, input, { transport: "mcp", session })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
   }
 });
 

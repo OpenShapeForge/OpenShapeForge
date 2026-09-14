@@ -12,7 +12,7 @@
  *   - resolveSessionContext() for bearer/trusted-context authentication,
  *   - the generated CRUD service layer, which applies tenant scoping and RLS
  *     via withDbSession() and gates every operation on entity roles,
- *   - the CRUD layer's GraphQLError vocabulary, translated by toHttpError().
+ *   - the shared operation result/error contract, projected to MCP results.
  *
  * Two things this transport does that the others do not, both because its
  * consumer is a language model reading schemas to decide what to do:
@@ -32,6 +32,18 @@
  * through, so this transport inherits them by construction.
  */
 import { createHash, randomUUID } from "node:crypto";
+import {
+  OperationFailure,
+  operationErrorOf,
+  type OperationError,
+} from "@openshapeforge/operations";
+import type {
+  RuntimeDeclarativeServiceRequest,
+  RuntimeHostOperationRequest,
+  RuntimeOperationDefinition,
+  RuntimeOperationExecutionResult,
+  RuntimeOperationExecutionOptions,
+} from "@openshapeforge/plugin-runtime";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -47,20 +59,42 @@ import {
   ReadResourceRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
-import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
+import { OrganizationBindingError } from "../auth/organization-binding.js";
+import {
+  buildAuthenticateChallenge,
+  canonicalResourceUri,
+  resourcePathOf,
+} from "./protected-resource-metadata.js";
+import {
+  isOrganizationAlias,
+  MCP_MOUNT_PATH,
+  ORGANIZATION_MCP_PATH_PREFIX,
+} from "./organization-resource.js";
+import {
+  assertBearerCredential,
+  assertJsonRpcContentType,
+  McpTransportError,
+  SHORT_ADDRESS_VARY,
+  withoutCookieIdentity,
+} from "./address.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { DbSessionInput } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
-  createGeneratedEntity,
+  isOperationWrittenColumn,
+  operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
-  deleteGeneratedEntity,
+  entityOperationRef,
+  entityOperationContract,
+  executeEntityOperation,
+  getEntityOperationContracts,
+  currentRecordOffers,
   getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
@@ -68,9 +102,12 @@ import {
   listGeneratedEntitiesForTable,
   listGeneratedEntityStorageRowsForTable,
   mergeGeneratedEntityObjectForTable,
-  updateGeneratedEntity,
+  invalidExpectedVersionFailure,
+  invalidMutationControlTypeFailure,
+  assertRecordPermission,
+  requireCreateOperationConfirmation,
   updateGeneratedEntityForTable,
-} from "../graphql/generated-crud.js";
+} from "../operations/entity/index.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -82,6 +119,7 @@ import {
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
 import { collectElicitedValues, type ElicitOnCreateEntry } from "./elicitation.js";
+import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -90,12 +128,32 @@ import {
   mintConfiguration,
   parseSubmission,
   peekConfiguration,
+  renderConfigurationExpiredPage,
+  renderConfigurationFailedPage,
   renderConfigurationForm,
   renderConfigurationApp,
-  renderMessagePage,
+  renderConfigurationSavedPage,
   storeSubmission,
   type PendingConfiguration,
+  findExistingConfiguration,
+  mergeConfigurationValues,
 } from "./configuration-handoff.js";
+import {
+  ARTIFACT_UPLOAD_APP_URI,
+  ARTIFACT_UPLOAD_PATH,
+  ARTIFACT_UPLOAD_TOOL_NAME,
+  claimArtifactUpload,
+  mintArtifactUpload,
+  renderArtifactUploadApp,
+  renderArtifactUploadPage,
+} from "./artifact-upload.js";
+import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
+import {
+  callEditLeaseTool,
+  editLeaseOperationIdsForSession,
+  EDIT_LEASE_TOOL_NAMES,
+  editLeaseToolsForOperationIds,
+} from "./edit-lease-tools.js";
 import {
   bindingSelected,
   composeBindingRequest,
@@ -109,6 +167,7 @@ import {
   secretFieldKeys,
   secretUrlPlaceholderError,
   templatePlaceholders,
+  type ExecutionCatalogEntry,
 } from "./declarative-execution.js";
 import { validateVisibleDefinition } from "./publication-validation.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
@@ -122,6 +181,13 @@ import {
   redeemState,
   scopesCovered,
 } from "./entity-oauth.js";
+import {
+  accessTokenNeedsRefresh,
+  type ConnectionTokenAudit,
+  recordConnectionTokenAudit,
+  refreshConnectionRowLocked,
+  refreshLeewaySeconds,
+} from "./connection-token-refresh.js";
 import {
   decryptSecret,
   encryptSecret,
@@ -137,10 +203,78 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+// ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+import {
+  callIdentityLinkTool,
+  identityLinkToolsForSession,
+} from "./identity-link-tools.js";
+// ---- organization profile (mcp/organization-profile-tools.ts) ----
+import {
+  callOrganizationProfileTool,
+  ORGANIZATION_PROFILE_RESOURCE,
+  ORGANIZATION_PROFILE_RESOURCE_URI,
+  organizationProfileToolsForSession,
+  readOrganizationProfileResource,
+} from "./organization-profile-tools.js";
+// ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+import {
+  callEmployeeInvitationTool,
+  employeeInvitationToolsForSession,
+} from "./employee-invitation-tools.js";
+import { readControlPlaneConfig } from "../control/config.js";
+import { createServiceAccountTokenProvider } from "../control/keycloak-service-account.js";
+import {
+  createKeycloakOrganizationMembersClient,
+  type KeycloakOrganizationMembersClient,
+} from "../control/keycloak-organization-members.js";
+import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
+// ---- first-use onboarding (mcp/onboarding.ts) ----
+import {
+  callOnboardingTool,
+  describeOnboarding,
+  ONBOARDING_TOOL_NAMES,
+  onboardingEnvironment,
+  onboardingToolsForSession,
+  withOnboarding,
+} from "./onboarding.js";
+// ---- the detail behind whoami's onboarding index (mcp/onboarding-resources.ts) ----
+import {
+  ONBOARDING_RESOURCE_URIS,
+  ONBOARDING_STEP_RESOURCE_TEMPLATE,
+  onboardingResourcesForSession,
+  readOnboardingStepResource,
+} from "./onboarding-resources.js";
+// ---- update notices (mcp/update-notices.ts) ----
+import {
+  callUpdateTool,
+  describeUpdates,
+  UPDATE_TOOL_NAMES,
+  updateNoticesStore,
+  updateToolsForSession,
+  withUpdates,
+} from "./update-notices.js";
+// ---- end update notices ----
+// ---- connection guidance (mcp/connection-guidance.ts): one vocabulary for
+// "a connection is needed" across descriptions, errors and onboarding ----
+import {
+  connectionFieldsOf,
+  connectionNeedsOf,
+  connectionProblemError,
+  connectionProblemMessage,
+  describeConnectionNeeds,
+  isConnectionProblemCode,
+  missingRequiredConnectionValues,
+  withConnectionNeeds,
+  type ConnectionProblem,
+} from "./connection-guidance.js";
+import { isOrganizationAdministrator } from "./onboarding.js";
+// ---- end first-use onboarding ----
+// ---- end identity ↔ Relation link ----
 import {
   ProviderOutcomeError,
   classifyModuleEgressOutcome,
   failureSummary,
+  httpStatusForCode,
   providerOutcomeMessage,
 } from "../connectors/provider-outcome.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
@@ -161,9 +295,11 @@ import type {
   McpProjectionContext,
   McpToolCallSource,
   ModuleDefinitionReference,
+  ModuleOperationSuccessResult,
   ModuleToolExecutionOptions,
   ModuleToolExecutionResult,
   ModuleInvocationSource,
+  ModuleUnavailableInvocationSource,
 } from "../modules/contract.js";
 import {
   assertUniqueToolNames,
@@ -204,25 +340,102 @@ import {
 } from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
+  createStatefulMcpSessionContext,
+  sameStatefulMcpAuthorization,
+  withFreshRelationGroupMemberships,
+} from "./stateful-session-authorization.js";
+// --- session-info (whoami / osf://session) — see ./session-info.ts ---
+import {
+  SESSION_INFO_TOOL,
+  SESSION_INFO_TOOL_NAME,
+  SESSION_RESOURCE,
+  SESSION_RESOURCE_URI,
+  carrySessionIdentity,
+  rememberSessionIdentity,
+  sessionLocale,
+} from "./session-info.js";
+import {
+  describeSession,
+  sessionInfoResourceResult,
+  sessionInfoToolResult,
+} from "./session-describe.js";
+// --- end session-info ---
+// --- the client and the opening sentence (mcp/session-client.ts, mcp/session-opening.ts) ---
+import {
+  clientInfoFromInitializeBody,
+  rememberSessionClient,
+  sessionClientOf,
+} from "./session-client.js";
+import { sessionOpeningSentence } from "./session-opening.js";
+// --- end the client and the opening sentence ---
+// --- the server's instructions (mcp/server-instructions.ts) ---
+import {
+  buildServerInstructions,
+  DATA_ACQUISITION_TOOL_FOOTER,
+  ENTITY_CATALOG_URI,
+} from "./server-instructions.js";
+// --- end the server's instructions ---
+// --- the person's language (mcp/locale.ts) ---
+import { localizedText, type ResolvedLocale } from "./locale.js";
+import {
+  canonicalRuntimeOperationSchema,
+  parseOperationExecuteArguments,
+  runtimeOperationEnvelopeSchema,
+  searchableOperationTools,
+  searchOperationDefinitions,
+  type SearchableOperationToolNames,
+} from "./operation-search.js";
+// --- end the person's language ---
+import {
   bindOperationHandlers,
+  operationModulesConfigured,
   DeclaredOperationError,
   invokeOperation,
+  isMcpProjection,
+  requireOperationAuthorization,
 } from "../operations/runtime.js";
+import { sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
-export const MCP_MOUNT_PATH = "/api/mcp";
+export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
 export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
+function entityMutationControls(args: Record<string, unknown>) {
+  return {
+    ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
+    ...(typeof args.expectedVersion === "string"
+      ? { expectedVersion: args.expectedVersion }
+      : {}),
+    ...(typeof args.leaseToken === "string"
+      ? { leaseToken: args.leaseToken }
+      : {}),
+    ...(typeof args.confirmed === "boolean"
+      ? { confirmed: args.confirmed }
+      : {}),
+    ...(typeof args.confirmationToken === "string"
+      ? { confirmationToken: args.confirmationToken }
+      : {}),
+    ...(typeof args.confirmationAnswer === "string"
+      ? { confirmationAnswer: args.confirmationAnswer }
+      : {}),
+  };
+}
+
+export const __entityMutationControlsForTests = entityMutationControls;
+
 type CatalogTool = {
   name: string;
+  /** Strict v2 catalogues publish the canonical id; v1 resolves it internally. */
+  operationId?: string;
   operation: McpOperation;
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -235,7 +448,22 @@ type CatalogEntity = {
   slug: string;
   table: string;
   toolPrefix: string;
+  /**
+   * `generic` entities share one set of `osf_*` tools instead of spending a
+   * slot of the dedicated-tool budget each — see MAX_DEDICATED_TOOLS in the
+   * compiler. The catalog still carries ONE entry per entity per operation
+   * (same name, entity-specific schema); projecting those into a session is
+   * this file's job (see genericToolForSession).
+   */
+  tools?: "dedicated" | "generic";
   title: string;
+  /**
+   * The authored label per language, when the entity has one. The compiler
+   * also collapses it into `title` for tool names; this keeps the map so a
+   * session reading Dutch can be shown "Testdoel" where an English one reads
+   * "Test target" (generate-mcp.ts).
+   */
+  labels?: Record<string, string>;
   description: string;
   domains: string[];
   displayTemplate?: string;
@@ -245,6 +473,48 @@ type CatalogEntity = {
   relationships: CatalogRelationship[];
   elicitOnCreate?: ElicitOnCreateEntry;
 };
+
+type ProjectedRuntimeOperationTool = {
+  definition: RuntimeOperationDefinition;
+  tool: Tool;
+};
+
+function projectRuntimeOperationTool(
+  definition: RuntimeOperationDefinition,
+  locale: ResolvedLocale,
+): ProjectedRuntimeOperationTool {
+  const name = deriveToolName(definition.key);
+  if (!name) {
+    throw new Error(
+      `Runtime Operation ${JSON.stringify(definition.id)} has no usable MCP key.`,
+    );
+  }
+  const title = localizedText(definition.name, locale) ?? definition.id;
+  const description = localizedText(definition.description, locale) ?? title;
+  return {
+    definition,
+    tool: {
+      name,
+      title,
+      description,
+      inputSchema: canonicalRuntimeOperationSchema(
+        definition.input,
+        definition.id,
+        "input",
+      ) as Tool["inputSchema"],
+      outputSchema: runtimeOperationEnvelopeSchema(definition) as Tool["outputSchema"],
+      annotations: {
+        title,
+        readOnlyHint:
+          definition.effects.data === "read" &&
+          definition.effects.external !== "write",
+        destructiveHint: definition.effects.data === "delete",
+        idempotentHint:
+          definition.reliability.idempotency.mode !== "none",
+      },
+    },
+  };
+}
 
 type CatalogField = {
   key: string;
@@ -330,6 +600,7 @@ type CatalogDiscoveryTool = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
 };
 
 type CatalogTestTool = {
@@ -337,6 +608,7 @@ type CatalogTestTool = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
 };
 
 type Catalog = {
@@ -353,21 +625,41 @@ type Catalog = {
     outputSchema: Record<string, unknown>;
     auth:
       | { mode: "public" }
-      | { mode: "session"; roles: string[]; scopes?: string[] };
+      | { mode: "session"; roles?: string[]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
       destructiveHint: boolean;
       idempotentHint: boolean;
     };
   }[];
+  operationToolProjection?: {
+    mode: "dedicated" | "searchable";
+    search: string;
+    execute: string;
+  };
   entities: CatalogEntity[];
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
   discoveryTools?: CatalogDiscoveryTool[];
   testTools?: CatalogTestTool[];
   guideTools?: CatalogGuideTool[];
+  executionCompatibility?: Array<{
+    plugin: string;
+    operation: string;
+    toolName: string;
+    auth:
+      | { mode: "public" }
+      | { mode: "session"; roles: string[]; scopes?: string[] };
+  }>;
 };
 const catalog = rawCatalog as unknown as Catalog;
+export type OperationToolProjection = NonNullable<Catalog["operationToolProjection"]>;
+const generatedOperationToolProjection: OperationToolProjection =
+  catalog.operationToolProjection ?? {
+    mode: "dedicated" as const,
+    search: "osf_search_operations",
+    execute: "osf_execute_operation",
+  };
 
 /** Which entity role an operation requires — mirrors the CRUD layer's gate. */
 const OPERATION_ROLE = {
@@ -383,13 +675,9 @@ const SERVER_INFO = {
   version: "1",
 } as const;
 
-const INSTRUCTIONS =
-  "Entity CRUD for an OpenShapeForge deployment. Every tool is scoped to the " +
-  "caller's tenant and roles; results are row-level filtered by the database. " +
-  "List tools return a page plus a nextCursor — pass it back as `after` to " +
-  "continue. Prefer filtering over paging through large result sets.";
-
-const ENTITY_CATALOG_URI = "osf://schema/entities";
+// The fixed instruction texts (INSTRUCTIONS, the data acquisition order,
+// the audience and presentation rules, the language sentence) live in
+// mcp/server-instructions.ts, which assembles them per session below.
 const JSON_MIME_TYPE = "application/json";
 
 function tablesByName(): Map<string, GeneratedTable> {
@@ -421,8 +709,12 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  */
 function connectionScopeOf(
   auth: Record<string, unknown> | null | undefined,
-): "user" | "tenant" {
-  if (auth?.connectionScope === "user" || auth?.connectionScope === "tenant") {
+): "user" | "tenant" | "both" {
+  if (
+    auth?.connectionScope === "user" ||
+    auth?.connectionScope === "tenant" ||
+    auth?.connectionScope === "both"
+  ) {
     return auth.connectionScope;
   }
   return auth?.profile === "oauth2AuthorizationCode" ? "user" : "tenant";
@@ -485,6 +777,39 @@ function sessionMayInvoke(
 }
 
 /**
+ * The catalog entries advertised under one tool name.
+ *
+ * A dedicated name has exactly one. A generic `osf_*` name has ONE PER ENTITY
+ * that opted into `mcp: { tools: generic }`: the compiler emits a tool entry
+ * per entity either way and skips `osf_`-prefixed names in its duplicate check
+ * (packages/compiler/src/generate-mcp.ts), so `osf_list` legitimately appears
+ * once for every generic entity in the deployment.
+ *
+ * That makes `catalog.tools.find((tool) => tool.name === name)` wrong for a
+ * generic name: it answers with whichever entity sorts first in the catalog,
+ * silently and regardless of who is asking. Every lookup by name goes through
+ * one of these two instead, and then says which entity it means.
+ */
+function crudToolsNamed(name: string): CatalogTool[] {
+  return catalog.tools.filter((tool) => tool.name === name);
+}
+
+/**
+ * The entries of `name` this session may invoke — exactly the set the tool
+ * listing merged into one `osf_*` tool, so "may I call this name at all" has
+ * the same answer here as the advertised catalogue gives.
+ */
+function invocableCrudToolsNamed(
+  name: string,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogTool[] {
+  return crudToolsNamed(name).filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+  );
+}
+
+/**
  * Strip classified entity fields from the root create schema and the two
  * wrappers that carry entity-field names (`filter` and `values`). Nested JSON
  * object children are a separate namespace and must not be matched against a
@@ -541,6 +866,61 @@ function withholdClassified(
   return root;
 }
 
+/**
+ * Remove classified record properties from the advertised output without
+ * changing the shared catalog. The record itself stays open to additional
+ * properties because the database redaction layer currently returns withheld
+ * columns as null and the schema must not reveal their names.
+ */
+function withholdClassifiedOutput(
+  schema: Record<string, unknown> | undefined,
+  operation: McpOperation,
+  classifiedFields: readonly string[],
+): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+  if (classifiedFields.length === 0 || operation === "delete") return schema;
+  const copy = structuredClone(schema);
+  const success = Array.isArray(copy.oneOf)
+    ? (copy.oneOf[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const successProperties = success?.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  let record = successProperties?.data;
+  if (operation === "list") {
+    const listProperties = record?.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    const items = listProperties?.items;
+    const item = items?.items as Record<string, unknown> | undefined;
+    const itemProperties = item?.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    record = itemProperties?.data;
+  }
+  if (!record) return copy;
+
+  const withheld = new Set(classifiedFields);
+  const properties = record.properties;
+  if (
+    properties &&
+    typeof properties === "object" &&
+    !Array.isArray(properties)
+  ) {
+    record.properties = Object.fromEntries(
+      Object.entries(properties as Record<string, unknown>).filter(
+        ([name]) => !withheld.has(name),
+      ),
+    );
+  }
+  if (Array.isArray(record.required)) {
+    record.required = record.required.filter(
+      (name) => !withheld.has(name as string),
+    );
+  }
+  return copy;
+}
+
 function toolsForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
@@ -574,12 +954,26 @@ function resourcesForSession(
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] =
   catalog.derivedTools ?? [];
+const projectedDerivedTools = catalogDerivedTools.filter(
+  (entry) => !entry.compatibility,
+);
 const catalogDiscoveryTools: CatalogDiscoveryTool[] =
   catalog.discoveryTools ?? [];
 const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
-function coreOwnsStaticToolName(name: string): boolean {
+const compatibilityOperations = catalog.executionCompatibility ?? [];
+const compatibilityOperationByKey = new Map(
+  compatibilityOperations.map((entry) => [entry.operation, entry]),
+);
+const compatibilityToolNames = new Set(
+  compatibilityOperations.map((entry) => entry.toolName),
+);
+
+function coreOwnsStaticToolName(
+  name: string,
+  projection: OperationToolProjection = generatedOperationToolProjection,
+): boolean {
   return [
     ...catalog.tools.map((tool) => tool.name),
     ...catalog.operationTools.map((tool) => tool.name),
@@ -592,6 +986,13 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
+    SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
+    ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
+    ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
+    ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
+    ...(projection.mode === "searchable"
+      ? [projection.search, projection.execute]
+      : []),
   ].includes(name);
 }
 
@@ -608,6 +1009,7 @@ function discoveryToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogDiscoveryTool[] {
   return catalogDiscoveryTools.filter((tool) =>
+    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -618,6 +1020,7 @@ function testToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogTestTool[] {
   return catalogTestTools.filter((tool) =>
+    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -652,10 +1055,13 @@ async function derivedToolsForSession(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
+  /** The language the projected titles and field labels are shown in. */
+  locale?: ResolvedLocale,
 ): Promise<DerivedTool[]> {
   const reserved = new Set(catalog.tools.map((tool) => tool.name));
   const tools: DerivedTool[] = [];
   for (const entry of catalogDerivedTools) {
+    if (entry.compatibility) continue;
     if (!sessionInAudience(entry, session.roles)) continue;
     const table = tables.get(entry.table);
     if (!table) continue;
@@ -668,6 +1074,7 @@ async function derivedToolsForSession(
       rows,
       reserved,
       session.roles ?? [],
+      locale,
     );
     // Honest annotations, derived from the chain instead of assumed: a tool
     // whose every bound operation is a query is read-only, and hosts treat
@@ -686,7 +1093,7 @@ async function derivedToolsForSession(
         );
         const operationTraits = new Map<
           string,
-          { mutation: boolean; destructive: boolean }
+          { mutation: boolean; destructive: boolean; providerId: string }
         >();
         for (const raw of operationRows.rows) {
           const row = serializeRow(operationTable, raw);
@@ -696,7 +1103,36 @@ async function derivedToolsForSession(
             destructive:
               typeof operation.method === "string" &&
               operation.method.toUpperCase() === "DELETE",
+            providerId: String(row[entry.execution.providerRef] ?? ""),
           });
+        }
+        // What each provider needs from the organization and the person,
+        // read from the Adapter rows (auth block and configuration contract)
+        // so the generated sentence can never disagree with execution.
+        const providerNeeds = new Map<string, string>();
+        const providerTable = tables.get(entry.execution.providerTable);
+        if (providerTable) {
+          const providerRows = await listGeneratedEntitiesForTable(
+            db,
+            session,
+            providerTable,
+            { limit: DERIVED_TOOLS_ROW_LIMIT },
+          );
+          const definitionsField =
+            entityForTable(entry.execution.connectionTable)?.elicitOnCreate
+              ?.definitionsField ?? "";
+          const toolNames = connectionToolsFor(entry.execution, entry);
+          for (const raw of providerRows.rows) {
+            const row = serializeRow(providerTable, raw);
+            providerNeeds.set(
+              String(row.id),
+              describeConnectionNeeds(
+                providerDisplayName(row, entry.execution),
+                connectionNeedsOf(row.auth, row[definitionsField]),
+                toolNames,
+              ),
+            );
+          }
         }
         const rowById = new Map(rows.map((row) => [String(row.id), row]));
         entryTools = entryTools.map((tool) => {
@@ -709,6 +1145,7 @@ async function derivedToolsForSession(
           let mutation = false;
           let destructive = false;
           let resolved = bindings.length > 0;
+          const needs: string[] = [];
           for (const binding of bindings) {
             const traits = operationTraits.get(
               String(binding?.[entry.execution!.operationRef] ?? ""),
@@ -719,8 +1156,15 @@ async function derivedToolsForSession(
             }
             mutation ||= traits.mutation;
             destructive ||= traits.destructive;
+            const sentence = providerNeeds.get(traits.providerId);
+            if (sentence && !needs.includes(sentence)) needs.push(sentence);
           }
-          return { ...tool, readOnly: resolved && !mutation, destructive };
+          return {
+            ...tool,
+            description: withConnectionNeeds(tool.description, needs.join(" ")),
+            readOnly: resolved && !mutation,
+            destructive,
+          };
         });
       }
     }
@@ -765,6 +1209,12 @@ export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";
 const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
 
+function schemaUsesArtifactUpload(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if ((value as Record<string, unknown>)["x-osf-control"] === "artifact-upload") return true;
+  return Object.values(value as Record<string, unknown>).some(schemaUsesArtifactUpload);
+}
+
 /**
  * Whether a failed elicitation should fall back to the browser handoff.
  * Unsupported clients, auto-answering clients (declared the capability, then
@@ -802,8 +1252,8 @@ function configurationFallbackLead(
   }
   return (
     prefix +
-    "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
-    "it is the stable, signed-in secure configuration form and contains no bearer handoff token."
+    "Give the person configurationUrl: open this link in a browser and enter " +
+    "the values there; they never pass through the chat."
   );
 }
 
@@ -811,6 +1261,21 @@ export const __configurationFallbackLeadForTests = configurationFallbackLead;
 
 function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+}
+
+/**
+ * The OAuth redirect URL the server instructions state, or null when this
+ * deployment has no public origin. Null rather than thrown: the origin is
+ * optional everywhere else on this surface (the onboarding step answers
+ * `null`, the configuration handoff is skipped), so its absence must not turn
+ * every MCP request into a 503. buildServerInstructions says so in words.
+ */
+function oauthCallbackUrlForInstructions(): string | null {
+  try {
+    return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+  } catch {
+    return null;
+  }
 }
 
 function callbackOrigin(): string {
@@ -826,18 +1291,32 @@ function callbackOrigin(): string {
   );
 }
 
-function configurationWebUrl(): string {
+/**
+ * The signed-in host web form, when a web origin is deployed. Optional: the
+ * handoff page is served on the API's own origin, so the runtime never needs
+ * a web origin to hand a person a working form.
+ */
+function configurationWebUrl(): string | undefined {
   const configured = process.env.OPENSHAPEFORGE_WEB_ORIGIN?.trim().replace(
     /\/$/,
     "",
   );
-  if (configured) return `${configured}/configuration`;
-  throw new HttpError(
-    503,
-    "WEB_ORIGIN_NOT_CONFIGURED",
-    "Set OPENSHAPEFORGE_WEB_ORIGIN before using the external configuration fallback.",
-  );
+  return configured ? `${configured}/configuration` : undefined;
 }
+
+/**
+ * The MCP App renders the handoff form in an iframe inside the host's own
+ * (https) sandbox, so the form's origin must be https as well: an http or
+ * loopback origin — local development, a tunnel-less laptop — is blocked by
+ * the browser and leaves the person with a blank panel. Such deployments
+ * skip the app and hand out the URL directly instead.
+ */
+function publicOriginIsHttps(): boolean {
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim() ?? "";
+  return /^https:\/\//i.test(configured);
+}
+
+export const __publicOriginIsHttpsForTests = publicOriginIsHttps;
 
 function clientSupportsMcpApp(capabilities: unknown): boolean {
   const typed = capabilities as
@@ -866,26 +1345,33 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   );
 }
 
-function accessTokenNeedsRefresh(
-  values: Record<string, unknown>,
-  refreshLeewaySeconds = 60,
-): boolean {
-  const expiresAt = values.accessTokenExpiresAt;
-  const expiresAtMs =
-    typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
-  return (
-    !Number.isFinite(expiresAtMs) ||
-    expiresAtMs <= Date.now() + refreshLeewaySeconds * 1000
-  );
-}
-
-function refreshLeewaySeconds(auth: Record<string, unknown> | null): number {
-  const configured = auth?.refreshLeewaySeconds;
-  return typeof configured === "number" &&
-    Number.isInteger(configured) &&
-    configured >= 0
-    ? configured
-    : 60;
+/**
+ * Read connection rows with their values as the object they encode.
+ *
+ * A values column written through a parameter the driver typed as jsonb was
+ * JSON-encoded twice (`"{\"accessToken\":…}"`): jsonb_typeof = string, and
+ * every field read (`grantedScopes`, `accessToken`, expiry) came back
+ * undefined, which source selection reported as "authorize again" although
+ * the stored tokens were valid. The writer no longer does that; rows persisted
+ * before the fix are read through this normalization until their next
+ * refresh rewrites them as an object.
+ */
+export function normalizeConnectionValueRows(
+  rows: readonly Record<string, unknown>[],
+  valuesField: string,
+): Record<string, unknown>[] {
+  return rows.map((row) => {
+    const stored = row[valuesField];
+    if (typeof stored !== "string") return row;
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { ...row, [valuesField]: parsed }
+        : row;
+    } catch {
+      return row;
+    }
+  });
 }
 
 /** The only OAuth connection-row selector used by derived execution. */
@@ -931,247 +1417,138 @@ export function capturePersonalOAuthConnections(
   return { tenantSupport: support[0], personal };
 }
 
-type ConnectionTokenAudit = {
-  sourceTable: string;
-  connectionId: string;
-  scope: "user" | "tenant";
-  correlationId: string;
-};
-
-async function recordConnectionTokenAudit(input: {
-  db: OpenShapeForgeDatabase;
-  session: DbSessionInput;
-  audit: ConnectionTokenAudit;
-  eventType: "connection.token_refreshed" | "connection.reauthorization_required";
-}) {
-  await withDbSession(input.db, input.session, (trx, scopedSession) =>
-    appendEntityEventInTransaction(trx, {
-      tenantId: scopedSession.tenantId,
-      aggregateType: "connection",
-      aggregateId: input.audit.connectionId,
-      eventType: input.eventType,
-      // Never include token material: this event is an operational signal,
-      // not a second store for provider responses.
-      payload: {
-        sourceTable: input.audit.sourceTable,
-        connectionId: input.audit.connectionId,
-        scope: input.audit.scope,
-        correlationId: input.audit.correlationId,
-      },
-    }),
-  );
+/** The tool names connection guidance refers to for one projection. */
+function connectionToolsFor(
+  execution: ExecutionCatalogEntry,
+  entry: Pick<DerivedToolsCatalogEntry, "connect"> | undefined,
+): { create: string; connect: string | null } {
+  const create =
+    catalog.tools.find(
+      (tool) =>
+        tool.table === execution.connectionTable && tool.operation === "create",
+    )?.name ?? `create_${execution.connectionEntity.toLowerCase()}`;
+  return { create, connect: entry?.connect?.name ?? null };
 }
 
-function decryptConnectionRefreshToken(input: {
-  keyring: NonNullable<ReturnType<typeof elicitedKeyring>>;
-  secretScope: string;
-  value: unknown;
-}): string {
-  if (!looksLikeStoredSecret(input.value)) {
-    throw new HttpError(
-      403,
-      "REAUTHORIZATION_REQUIRED",
-      "This connection has an expired access token and must be authorized again.",
-    );
-  }
-  try {
-    return decryptSecret(
-      input.keyring,
-      input.secretScope,
-      "refreshToken",
-      input.value,
-    );
-  } catch {
-    throw new HttpError(
-      403,
-      "REAUTHORIZATION_REQUIRED",
-      "This connection's stored authorization is unreadable and must be authorized again.",
-    );
-  }
+function providerDisplayName(
+  providerRow: Record<string, unknown>,
+  execution: ExecutionCatalogEntry,
+): string {
+  return String(providerRow.name ?? providerRow.key ?? execution.providerEntity);
 }
 
-export async function refreshConnectionRowLocked(input: {
+/**
+ * The organization-connection failure, worded for the caller (see
+ * connection-guidance.ts). An organization administrator additionally gets a
+ * fresh browser handoff to the same secure form the create tool would show,
+ * so setup can continue from a client that cannot render forms at all. The
+ * handoff is minted only when no Connection row exists yet (an incomplete
+ * row is recreated through the create tool, which names the missing values)
+ * and only when the create contract can be satisfied from the Adapter alone.
+ */
+async function organizationConnectionProblem(input: {
   db: OpenShapeForgeDatabase;
   session: DbSessionInput;
-  table: GeneratedTable;
-  rowId: string;
-  valuesField: string;
-  providerField: string;
-  expectedProviderId: string;
-  expectedOwnerUserId: string | null;
-  refreshLeewaySeconds?: number;
-  audit: ConnectionTokenAudit;
-  tokenUrl: string;
-  clientId: string;
-  clientSecret: string;
-  egress: string[];
-  keyring: NonNullable<ReturnType<typeof elicitedKeyring>>;
-  secretScope: string;
-  fetchImpl?: typeof fetch;
-  moduleEgress?: ModuleEgressDispatch | undefined;
-  signal?: AbortSignal;
-}): Promise<Record<string, unknown>> {
-  input.signal?.throwIfAborted();
-  const egressInvocation = createModuleEgressInvocation(input.moduleEgress);
-  const valuesColumn = input.table.columns.find(
-    (column) =>
-      (column.sourceField ??
-        column.name.replace(/_([a-z0-9])/g, (_match, char: string) =>
-          char.toUpperCase(),
-        )) === input.valuesField,
+  tables: Map<string, GeneratedTable>;
+  execution: ExecutionCatalogEntry;
+  entry: Pick<DerivedToolsCatalogEntry, "connect"> | undefined;
+  providerRow: Record<string, unknown>;
+  missingValues?: string[];
+}): Promise<HttpError> {
+  const { execution, providerRow, session } = input;
+  const elicit = entityForTable(execution.connectionTable)?.elicitOnCreate;
+  const adapterId = String(providerRow.id ?? "");
+  const administrator = isOrganizationAdministrator(session.roles);
+  const problem: ConnectionProblem = {
+    kind: "organization_missing",
+    adapter: providerDisplayName(providerRow, execution),
+    adapterId,
+    createTool: connectionToolsFor(execution, input.entry).create,
+    adapterArgument: elicit?.sourceField ?? "adapterId",
+    administrator,
+    ...(input.missingValues && input.missingValues.length > 0
+      ? { missingValues: input.missingValues }
+      : {}),
+  };
+  const table = input.tables.get(execution.connectionTable);
+  const createTool = catalog.tools.find(
+    (tool) => tool.table === execution.connectionTable && tool.operation === "create",
   );
-  const providerColumn = input.table.columns.find(
-    (column) => fieldNameForColumn(column) === input.providerField,
-  );
-  const ownerColumn = input.table.columns.find(
-    (column) => fieldNameForColumn(column) === "ownerUserId",
-  );
-  if (!valuesColumn || !providerColumn || !ownerColumn || !input.table.primaryKey) {
-    throw new HttpError(
-      500,
-      "INTERNAL",
-      "Connection values column is missing from the manifest.",
-    );
+  const required = Array.isArray(
+    (createTool?.inputSchema as { required?: unknown } | undefined)?.required,
+  )
+    ? ((createTool!.inputSchema as { required: unknown[] }).required as string[])
+    : [];
+  const modelValues: Record<string, unknown> = {};
+  if (elicit) {
+    modelValues[elicit.sourceField] = adapterId;
+    if (typeof providerRow.key === "string") modelValues.key = providerRow.key;
+    modelValues.name = problem.adapter;
   }
-  let trx: Transaction<DB> | undefined;
-  let current: Record<string, unknown> = {};
-  let result: Record<string, unknown> = {};
-  try {
-    await ensureOAuthTokenSet({
-      ...(input.refreshLeewaySeconds === undefined
-        ? {}
-        : { refreshLeewaySeconds: input.refreshLeewaySeconds }),
-      tokenUrl: input.tokenUrl,
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
-      ...(input.signal ? { signal: input.signal } : {}),
-      boundFetch: (url, init) =>
-        fetchWithAllowedRedirects(
-          url instanceof Request ? url.url : url,
-          { ...init, signal: boundedAbortSignal(input.signal, 15_000) },
-          input.egress,
-          input.fetchImpl,
-          egressInvocation.dispatch,
-        ),
-      store: {
-        withLockedRow: (work) =>
-          withDbSession(input.db, input.session, async (lockedTrx) => {
-            trx = lockedTrx;
-            input.signal?.throwIfAborted();
-            const locked = await sql<{
-              values: Record<string, unknown> | null;
-              provider_id: string | null;
-              owner_user_id: string | null;
-            }>`
-              select ${sql.id(valuesColumn.name)} as values,
-                     ${sql.id(providerColumn.name)}::text as provider_id,
-                     ${sql.id(ownerColumn.name)}::text as owner_user_id
-                from ${sql.id(input.table.schema, input.table.table)}
-               where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
-               for update
-            `.execute(lockedTrx);
-            input.signal?.throwIfAborted();
-            const lockedRow = locked.rows[0];
-            if (
-              !lockedRow ||
-              lockedRow.provider_id !== input.expectedProviderId ||
-              lockedRow.owner_user_id !== input.expectedOwnerUserId
-            ) {
-              throw new HttpError(
-                404,
-                "NOT_FOUND",
-                "Invocation source is unavailable.",
-              );
-            }
-            const storedValues = lockedRow.values;
-            current =
-              typeof storedValues === "string"
-                ? (JSON.parse(storedValues) as Record<string, unknown>)
-                : (storedValues ?? {});
-            result = current;
-            input.signal?.throwIfAborted();
-            return work();
-          }),
-        read: async () => current,
-        decode: (values): OAuthTokenSet => {
-          const expiresAt = Date.parse(String(values.accessTokenExpiresAt));
-          if (!Number.isFinite(expiresAt) || !looksLikeStoredSecret(values.accessToken)) {
-            throw new Error("Stored token state is incomplete.");
-          }
-          return {
-            accessToken: decryptSecret(input.keyring, input.secretScope, "accessToken", values.accessToken),
-            ...(looksLikeStoredSecret(values.refreshToken)
-              ? { refreshToken: decryptSecret(input.keyring, input.secretScope, "refreshToken", values.refreshToken) }
-              : {}),
-            expiresAt: Math.floor(expiresAt / 1000),
-          };
-        },
-        persist: async (tokens) => {
-          input.signal?.throwIfAborted();
-          result = {
-            ...current,
-            accessToken: encryptSecret(input.keyring, input.secretScope, "accessToken", tokens.accessToken),
-            ...(tokens.refreshToken
-              ? { refreshToken: encryptSecret(input.keyring, input.secretScope, "refreshToken", tokens.refreshToken) }
-              : {}),
-            accessTokenExpiresAt: new Date(tokens.expiresAt * 1000).toISOString(),
-          };
-          await sql`
-            update ${sql.id(input.table.schema, input.table.table)}
-               set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::jsonb
-             where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
-               and ${sql.id(providerColumn.name)}::text = ${input.expectedProviderId}
-               and ${sql.id(ownerColumn.name)}::text is not distinct from ${input.expectedOwnerUserId}
-          `.execute(trx!);
-          input.signal?.throwIfAborted();
-        },
-        auditRefreshed: async () => {
-          input.signal?.throwIfAborted();
-          await appendEntityEventInTransaction(trx!, {
-            tenantId: String(input.session.tenantId),
-            aggregateType: "connection",
-            aggregateId: input.audit.connectionId,
-            eventType: "connection.token_refreshed",
-            payload: { ...input.audit },
-          });
-        },
-        auditReauthorization: () =>
-          recordConnectionTokenAudit({
-            db: input.db,
-            session: input.session,
-            audit: input.audit,
-            eventType: "connection.reauthorization_required",
-          }),
-      },
-    });
-    return result;
-  } catch (error) {
-    input.signal?.throwIfAborted();
-    const failureKind = egressInvocation.consumeFailure(error);
-    const boundedTimeout =
-      error instanceof DOMException && error.name === "TimeoutError";
-    if (failureKind || boundedTimeout) {
-      const outcome = classifyModuleEgressOutcome({
-        kind: failureKind ?? "timeout",
-        correlationId: randomUUID(),
-        retryable: false,
+  const satisfiable = required.every((field) => field in modelValues);
+  if (
+    administrator &&
+    elicit &&
+    table &&
+    satisfiable &&
+    !problem.missingValues &&
+    session.tenantId &&
+    session.userId
+  ) {
+    try {
+      const definitions = Array.isArray(providerRow[elicit.definitionsField])
+        ? (providerRow[elicit.definitionsField] as Record<string, unknown>[])
+        : [];
+      const sourceAuth = providerRow.auth as Record<string, unknown> | null | undefined;
+      const messagePrefix =
+        sourceAuth?.profile === "oauth2AuthorizationCode"
+          ? `Before entering these values, register this exact redirect URL on the ` +
+            `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
+          : undefined;
+      const minted = await mintConfiguration({
+        db: input.db,
+        tenantId: session.tenantId,
+        userId: session.userId,
+        table: table.name,
+        elicit,
+        modelValues,
+        definitions,
+        displayName: problem.adapter,
+        messagePrefix,
       });
-      throw new ProviderOutcomeError(
-        outcome,
-        providerOutcomeMessage(outcome.code, "Connection authorization"),
-      );
+      problem.configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`;
+      problem.expiresAt = new Date(
+        Date.now() + minted.expiresInSeconds * 1000,
+      ).toISOString();
+    } catch {
+      // No public origin or no keyring: the create-tool instruction stands
+      // on its own; the handoff is an extra, never a precondition.
     }
-    if (error instanceof OAuthTokenLifecycleError) {
-      throw new HttpError(
-        error.code === "REAUTHORIZATION_REQUIRED" ? 403 : 502,
-        error.code === "REAUTHORIZATION_REQUIRED"
-          ? "REAUTHORIZATION_REQUIRED"
-          : "TOKEN_ENDPOINT_ERROR",
-        error.message,
-      );
-    }
-    throw error;
   }
+  return connectionProblemError(problem);
+}
+
+/**
+ * Re-raise a refresh failure as guidance naming the sign-in tool: the
+ * refresh helpers know the row, not the tool the person was using.
+ */
+function reauthorizationProblem(
+  error: unknown,
+  context: {
+    adapter: string;
+    toolName: string;
+    connectTool: string | null;
+    scope: "user" | "tenant";
+  },
+): unknown {
+  if (error instanceof HttpError && error.code === "REAUTHORIZATION_REQUIRED") {
+    return connectionProblemError({
+      kind: "reauthorization",
+      ...context,
+      reason: "expired and could not be refreshed",
+    });
+  }
+  return error;
 }
 
 /**
@@ -1304,10 +1681,41 @@ function assertSchemaValid(
   schema: Record<string, unknown>,
   value: unknown,
   what: string,
+  expectedVersionField?: string,
 ): void {
   const checker: ValidateFunction = ajv.compile(schema);
   try {
     if (!checker(value)) {
+      const invalidMutationControlType = (checker.errors ?? []).find(
+        (error) =>
+          error.keyword === "type" &&
+          [
+            "/expectedVersion",
+            "/leaseToken",
+            "/confirmed",
+            "/confirmationToken",
+            "/confirmationAnswer",
+          ].includes(error.instancePath),
+      );
+      if (invalidMutationControlType) {
+        const field = invalidMutationControlType.instancePath.slice(1) as
+          | "expectedVersion"
+          | "leaseToken"
+          | "confirmed"
+          | "confirmationToken"
+          | "confirmationAnswer";
+        const expectedType = field === "confirmed" ? "boolean" : "string";
+        throw invalidMutationControlTypeFailure(field, expectedType);
+      }
+      const invalidExpectedVersion = (checker.errors ?? []).some(
+        (error) =>
+          error.instancePath === "/expectedVersion" &&
+          error.keyword === "format" &&
+          error.params?.format === "date-time",
+      );
+      if (invalidExpectedVersion && expectedVersionField) {
+        throw invalidExpectedVersionFailure(expectedVersionField);
+      }
       const details = (checker.errors ?? [])
         .slice(0, 5)
         .map((error) => {
@@ -1342,22 +1750,296 @@ function describeTool(
     entity && !canReadClassifiedColumns(table?.source?.authorization, session)
       ? entity.classifiedFields
       : [];
+  // Every generated create/update tool carries the same short reminder — see
+  // DATA_ACQUISITION_TOOL_FOOTER and DATA_ACQUISITION_GUIDANCE in
+  // mcp/server-instructions.ts. Read
+  // and delete stay untouched: there is nothing to fill in.
+  const description =
+    tool.operation === "create" || tool.operation === "update"
+      ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER}`
+      : tool.description;
   return {
     name: tool.name,
     title: tool.title,
-    description: tool.description,
+    description,
     inputSchema: withholdClassified(
       tool.inputSchema as Record<string, unknown>,
       classified,
     ),
+    ...(tool.outputSchema
+      ? {
+          outputSchema: withholdClassifiedOutput(
+            tool.outputSchema,
+            tool.operation,
+            classified,
+          ) as Tool["outputSchema"],
+        }
+      : {}),
     annotations: {
       title: tool.title,
       ...tool.annotations,
     },
-    ...(tool.operation === "create" && entity?.elicitOnCreate
+    // The MCP App is only advertised where it can render (https origin —
+    // see publicOriginIsHttps); elsewhere the create tool answers with a
+    // plain configuration URL instead.
+    ...(tool.operation === "create" && entity?.elicitOnCreate && publicOriginIsHttps()
       ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
       : {}),
   };
+}
+
+/**
+ * Entities that share the `osf_*` tools rather than owning a prefixed set.
+ * The compiler stamps this on the entity, not on the tool: a tool entry is
+ * per-entity either way, and only the entity knows which style it opted into.
+ */
+function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
+  return entity?.tools === "generic";
+}
+
+const GENERIC_OPERATION_SUMMARY: Record<McpOperation, string> = {
+  list: "Return a page of records of one shared-catalog entity.",
+  get: "Read one record of one shared-catalog entity by id.",
+  create: "Create one record of one shared-catalog entity.",
+  update: "Update one record of one shared-catalog entity by id.",
+  delete: "Delete one record of one shared-catalog entity by id.",
+};
+
+const GENERIC_OPERATION_TITLE: Record<McpOperation, string> = {
+  list: "List records",
+  get: "Read record",
+  create: "Create record",
+  update: "Update record",
+  delete: "Delete record",
+};
+
+/**
+ * Project the per-entity catalog entries that share one `osf_*` name into the
+ * single tool a session actually sees.
+ *
+ * The merge happens AFTER the session filter on purpose: `entity` is the
+ * parameter that picks the table, so its enum is the authorization boundary
+ * the model is shown. Deduplicating on name instead would keep whichever
+ * entry came first and either narrow the surface arbitrarily or advertise an
+ * entity this session may not touch.
+ *
+ * Each entity keeps its own argument schema in an `anyOf` branch discriminated
+ * by `entity`, so nothing about the per-entity shape is lost in the merge —
+ * and the call path validates against that same per-entity schema.
+ */
+function describeGenericTool(
+  entries: { tool: CatalogTool; entity: CatalogEntity | undefined }[],
+  tables: Map<string, GeneratedTable>,
+  session: DbSessionInput,
+): Tool {
+  const first = entries[0]!.tool;
+  const operation = first.operation;
+  const branches = entries.map(({ tool, entity }) => {
+    const described = describeTool(tool, entity, tables.get(tool.table), session);
+    const schema = described.inputSchema as Record<string, unknown>;
+    const properties = {
+      entity: { const: tool.entity },
+      ...((schema.properties as Record<string, unknown> | undefined) ?? {}),
+    };
+    const required = [
+      "entity",
+      ...(Array.isArray(schema.required) ? (schema.required as string[]) : []),
+    ];
+    return {
+      ...schema,
+      title: `${tool.entity} arguments`,
+      description: described.description,
+      properties,
+      required,
+    };
+  });
+  const names = entries.map(({ tool }) => tool.entity);
+  const catalogue = entries
+    .map(({ tool, entity }) => `${tool.entity} (${entity?.title ?? tool.entity})`)
+    .join(", ");
+  const elicits = entries.find(
+    ({ entity }) => entity?.elicitOnCreate !== undefined,
+  );
+  return {
+    name: first.name,
+    title: GENERIC_OPERATION_TITLE[operation],
+    description:
+      `${GENERIC_OPERATION_SUMMARY[operation]} Set \`entity\` to the record type ` +
+      `you mean; the remaining arguments are that entity's own — the matching ` +
+      `\`anyOf\` branch below carries them, and the entity's ` +
+      `${ENTITY_CATALOG_URI} resource describes its fields. ` +
+      `Available to you here: ${catalogue}.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity: {
+          type: "string",
+          enum: names,
+          title: "Entity",
+          description:
+            "Which record type this call is about. Only the values listed here " +
+            "are addressable by this session; anything else is refused.",
+        },
+      },
+      required: ["entity"],
+      anyOf: branches,
+    } as Tool["inputSchema"],
+    // A shared generic tool may still contain legacy v1 entities. Do not add a
+    // response contract to that legacy surface; only an all-v2 group can
+    // advertise the common field-agnostic canonical envelope.
+    ...(entries.every(({ tool }) => tool.outputSchema !== undefined)
+      ? { outputSchema: first.outputSchema as Tool["outputSchema"] }
+      : {}),
+    annotations: {
+      title: GENERIC_OPERATION_TITLE[operation],
+      ...first.annotations,
+    },
+    ...(operation === "create" && elicits && publicOriginIsHttps()
+      ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
+      : {}),
+  } as Tool;
+}
+
+/**
+ * The CRUD half of a session's tool list: dedicated entities keep one tool per
+ * entity per operation, generic entities collapse into one tool per operation.
+ */
+function crudToolsForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): Tool[] {
+  const entries = toolsForSession(session, tables);
+  const generic = new Map<
+    string,
+    { tool: CatalogTool; entity: CatalogEntity | undefined }[]
+  >();
+  const listed: (Tool | { generic: string })[] = [];
+  for (const entry of entries) {
+    if (!entityIsGeneric(entry.entity)) {
+      listed.push(
+        describeTool(
+          entry.tool,
+          entry.entity,
+          tables.get(entry.tool.table),
+          session,
+        ) as unknown as Tool,
+      );
+      continue;
+    }
+    const current = generic.get(entry.tool.name);
+    if (current) {
+      current.push(entry);
+      continue;
+    }
+    // The merged tool takes the position of its first contributing entry, so
+    // an existing listing order does not shuffle when an entity is added.
+    generic.set(entry.tool.name, [entry]);
+    listed.push({ generic: entry.tool.name });
+  }
+  return listed.map((item) =>
+    "generic" in item
+      ? describeGenericTool(generic.get(item.generic)!, tables, session)
+      : item,
+  );
+}
+
+/**
+ * Resolve which catalog entry a call means. A dedicated name identifies one
+ * entry outright; a generic name needs the `entity` argument, which is checked
+ * against the entities THIS session may invoke the operation on — the same set
+ * the listing advertised.
+ */
+function resolveCrudTool(
+  name: string,
+  args: Record<string, unknown>,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogTool | undefined {
+  const candidates = crudToolsNamed(name);
+  if (candidates.length === 0) return undefined;
+  const generic = candidates.filter((tool) =>
+    entityIsGeneric(catalog.entities.find((item) => item.entity === tool.entity)),
+  );
+  if (generic.length === 0) return candidates[0];
+  const allowed = generic.filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+  );
+  // Nothing allowed reads as an unknown tool, exactly like an unauthorized
+  // dedicated tool: the listing omitted it, so saying more would leak which
+  // entities exist.
+  if (allowed.length === 0) return undefined;
+  const wanted = args.entity;
+  const match = allowed.find((tool) => tool.entity === wanted);
+  if (match) return match;
+  throw new HttpError(
+    400,
+    "BAD_USER_INPUT",
+    typeof wanted === "string" && wanted.length > 0
+      ? `"${wanted}" is not one of the entities "${name}" can address in this ` +
+          `session: ${allowed.map((tool) => tool.entity).join(", ")}.`
+      : `"${name}" needs an "entity" argument naming the record type. ` +
+          `Available here: ${allowed.map((tool) => tool.entity).join(", ")}.`,
+  );
+}
+
+/**
+ * `entity` selects the catalog entry; it is not a column, so it is dropped
+ * before the per-entity schema validates the call and before the executor
+ * sees it. A dedicated tool keeps whatever it was sent — a stray `entity`
+ * there is an invalid argument and its own schema says so.
+ */
+function withoutEntitySelector(
+  tool: CatalogTool,
+  args: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!args || !("entity" in args)) return args;
+  const entity = catalog.entities.find((item) => item.entity === tool.entity);
+  if (!entityIsGeneric(entity)) return args;
+  const { entity: _selector, ...rest } = args;
+  return rest;
+}
+
+/**
+ * The generated entity tool a native Service binding means, resolved first by
+ * its exact canonical Operation id and then by its legacy MCP tool name. An
+ * unknown key falls through to the deployment's plugin operations by key.
+ *
+ * A dedicated name identifies one entry. A generic `osf_*` name is emitted per
+ * entity, so the binding has to carry an `entity` input the same way an
+ * `osf_*` tool call carries the `entity` argument. Taking the first entry
+ * instead ran the binding against whichever generic entity sorts first —
+ * which is why plugins/cpq-catalog documents entity CRUD as unbindable and
+ * why a pentest Service cannot maintain its VulnerabilityType catalogue.
+ * Ambiguity is refused, loudly and at the binding, rather than guessed.
+ */
+function resolveNativeCrudTool(
+  operationKey: string,
+  inputs: Record<string, unknown>,
+): CatalogTool | undefined {
+  const canonical = catalog.tools.filter(
+    (tool) => tool.operationId === operationKey,
+  );
+  if (canonical.length > 1) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      `Canonical native operation "${operationKey}" resolves to more than one generated operation.`,
+    );
+  }
+  if (canonical.length === 1) return canonical[0];
+  const candidates = crudToolsNamed(operationKey);
+  if (candidates.length <= 1) return candidates[0];
+  const wanted = inputs.entity;
+  const match = candidates.find((tool) => tool.entity === wanted);
+  if (match) return match;
+  throw new HttpError(
+    400,
+    "OPERATION_MISCONFIGURED",
+    `Native operation "${operationKey}" is shared by the entities ` +
+      `${candidates.map((tool) => tool.entity).join(", ")}. The binding must ` +
+      `supply an "entity" input naming the one it means, exactly as a direct ` +
+      `"${operationKey}" call does.`,
+  );
 }
 
 type SessionEntity = {
@@ -1401,6 +2083,7 @@ function describeEntityResource(
   sessionEntities: SessionEntity[],
   tables: Map<string, GeneratedTable>,
   session: DbSessionInput,
+  locale?: ResolvedLocale,
 ) {
   const { entity, tools } = entry;
   const resourceByEntity = new Map(
@@ -1426,7 +2109,8 @@ function describeEntityResource(
   return {
     entity: entity.entity,
     slug: entity.slug,
-    title: entity.title,
+    title: localizedText(entity.labels, locale) ?? entity.title,
+    language: locale?.tag,
     description: entity.description,
     domains: entity.domains,
     ...(entity.displayTemplate && templateVisible
@@ -1467,15 +2151,26 @@ function describeEntityResource(
   };
 }
 
-function describeCatalogResource(entries: SessionEntity[]) {
+/**
+ * `locale` picks which authored label each entity is named by. It changes only
+ * the reading — `entity`, `slug` and every field key are identifiers and are
+ * the same in every language, which is what keeps this safe to vary per
+ * session: two people looking at the same deployment see the same catalog,
+ * spelled in their own language.
+ */
+function describeCatalogResource(
+  entries: SessionEntity[],
+  locale?: ResolvedLocale,
+) {
   return {
     catalogId: "openshapeforge.entity-schemas",
     generatedBy: catalog.generatedBy,
     source: catalog.source,
+    language: locale?.tag,
     entities: entries.map(({ entity, tools }) => ({
       entity: entity.entity,
       slug: entity.slug,
-      title: entity.title,
+      title: localizedText(entity.labels, locale) ?? entity.title,
       description: entity.description,
       domains: entity.domains,
       resourceUri: entityResourceUri(entity),
@@ -1500,19 +2195,212 @@ export const __describeToolForTests = describeTool;
 export const __resourcesForSessionForTests = resourcesForSession;
 
 type ToolResult = {
-  content: { type: "text"; text: string }[];
+  content: CallToolResult["content"];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
   _meta?: Record<string, unknown>;
 };
 
+type RuntimeDeclarativeServiceExecutor = (
+  request: RuntimeDeclarativeServiceRequest,
+  requestId: string | number,
+  assertInvocationActive?: () => void,
+  signal?: AbortSignal,
+) => Promise<RuntimeOperationExecutionResult>;
+
+type RuntimeHostOperationExecutor = (
+  request: RuntimeHostOperationRequest,
+  requestId: string | number,
+  assertInvocationActive?: () => void,
+  signal?: AbortSignal,
+) => Promise<RuntimeOperationExecutionResult>;
+
+const runtimeDeclarativeServiceExecutors =
+  new WeakMap<Server, RuntimeDeclarativeServiceExecutor>();
+const runtimeHostOperationExecutors =
+  new WeakMap<Server, RuntimeHostOperationExecutor>();
+
+/**
+ * A success carries its payload as `structuredContent` too when it is a
+ * plain object: a Service that aggregates several query bindings reads the
+ * typed field only, and a text-only success would reach it as `{}`.
+ * Arrays and scalars have no structured form and stay text-only.
+ */
 function ok(payload: unknown): ToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    ...(payload && typeof payload === "object" && !Array.isArray(payload)
+      ? { structuredContent: payload as Record<string, unknown> }
+      : {}),
   };
 }
 
 export const __okForTests = ok;
+
+/**
+ * An operation's MCP answer: the canonical JSON value as one text block, or —
+ * when the handler supplied an MCP projection — its content blocks verbatim
+ * (an image next to its metadata, say) with the value as structuredContent.
+ */
+function operationToolResult(
+  result: ModuleOperationSuccessResult,
+): ToolResult {
+  if (!result.mcp) return ok(result.value);
+  const structured =
+    result.mcp.structuredContent ??
+    (result.value && typeof result.value === "object" && !Array.isArray(result.value)
+      ? (result.value as Record<string, unknown>)
+      : undefined);
+  return {
+    content: result.mcp.content,
+    ...(structured ? { structuredContent: structured } : {}),
+  };
+}
+
+export const __operationToolResultForTests = operationToolResult;
+
+/**
+ * A plugin operation run as a native binding: its canonical value, plus —
+ * when the handler supplied an MCP projection — those content blocks under
+ * the reserved output `content`, so the binding's output mapping can carry
+ * them onto the Service and `derivedToolResult` can hand them to the model.
+ */
+function nativeOperationOutput(
+  result: ModuleOperationSuccessResult,
+): Record<string, unknown> {
+  const value = result.value;
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : { result: value };
+  return result.mcp ? { ...record, content: result.mcp.content } : record;
+}
+
+/**
+ * A derived (Service) tool's answer. Outputs are JSON, so by default they go
+ * out as one text block. A Service whose merged outputs carry `content` as a
+ * list of well-formed MCP content blocks (an image, extracted text — produced
+ * by a native plugin operation's MCP projection) answers with those blocks
+ * instead, and the remaining outputs as structuredContent: the generic
+ * passthrough that keeps binary content out of the JSON text block.
+ */
+function derivedToolResult(payload: Record<string, unknown>): ToolResult {
+  const { content, ...rest } = payload;
+  if (content === undefined || !isMcpProjection({ content })) return ok(payload);
+  return {
+    content: content as CallToolResult["content"],
+    structuredContent: rest,
+  };
+}
+
+export const __derivedToolResultForTests = derivedToolResult;
+
+/**
+ * Shape a native Capability's mapped inputs the way the entity tool expects
+ * them: create takes the values directly, get/delete an id, update an id
+ * plus values, list a filter.
+ */
+function nativeToolArguments(
+  operation: McpOperation,
+  inputs: Record<string, unknown>,
+): Record<string, unknown> {
+  switch (operation) {
+    case "create":
+      return inputs;
+    case "get":
+    case "delete":
+      return { id: inputs.id };
+    case "update": {
+      const { id, ...values } = inputs;
+      return { id, values };
+    }
+    case "list":
+      return { filter: inputs };
+  }
+}
+
+/** The JSON an entity tool produced, as the native executor's output record. */
+function nativeToolOutput(result: ToolResult): Record<string, unknown> {
+  if (result.isError) {
+    // The entity tool already failed through the shared envelope, so its
+    // structured body is the platform's own answer (a role gate, a database
+    // rule's refusal, a missing row): rethrow it with the same code and
+    // status rather than folding it into a generic provider fault, so the
+    // Service's caller learns the reason the way a direct tool call would.
+    const failure = (result.structuredContent as { error?: unknown } | undefined)?.error;
+    if (failure && typeof failure === "object") {
+      const { code, message, detail, hint, retryable, retryAt, violations, data } = failure as {
+        code?: unknown;
+        message?: unknown;
+        detail?: unknown;
+        hint?: unknown;
+        retryable?: unknown;
+        retryAt?: unknown;
+        violations?: unknown;
+        data?: unknown;
+      };
+      if (
+        typeof code === "string" &&
+        typeof message === "string" &&
+        typeof retryable === "boolean"
+      ) {
+        throw new OperationFailure({
+          code,
+          message,
+          retryable,
+          ...(typeof detail === "string" ? { detail } : {}),
+          ...(typeof retryAt === "string" ? { retryAt } : {}),
+          ...(Array.isArray(violations) ? { violations } : {}),
+          ...(data && typeof data === "object" && !Array.isArray(data)
+            ? { data: data as Record<string, unknown> }
+            : typeof hint === "string"
+              ? { data: { hint } }
+              : {}),
+        } as OperationError);
+      }
+    }
+    const text = result.content.find((item) => item.type === "text");
+    throw new HttpError(
+      502,
+      "PROVIDER_ERROR",
+      text && "text" in text ? String(text.text) : "Native operation failed.",
+    );
+  }
+  const text = result.content.find((item) => item.type === "text");
+  const parsed: unknown =
+    text && "text" in text ? JSON.parse(String(text.text)) : null;
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    // Operation offers are interface metadata, not values a composed Service
+    // maps between steps. Native composition consumes the canonical result's
+    // data while direct MCP callers retain the complete envelope.
+    if (Object.prototype.hasOwnProperty.call(record, "data") && Array.isArray(record.operations)) {
+      const data = record.data;
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        const projected = data as Record<string, unknown>;
+        if (Array.isArray(projected.items)) {
+          return {
+            ...projected,
+            items: projected.items.map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+              const envelope = item as Record<string, unknown>;
+              return Object.prototype.hasOwnProperty.call(envelope, "data") &&
+                Array.isArray(envelope.operations)
+                ? envelope.data
+                : item;
+            }),
+          };
+        }
+        return projected;
+      }
+      return { value: data };
+    }
+    return record;
+  }
+  return { value: parsed };
+}
+
+export const __nativeToolOutputForTests = nativeToolOutput;
 
 function configurationAppResult(
   payload: unknown,
@@ -1532,6 +2420,55 @@ function configurationAppResult(
 export const __configurationAppResultForTests = configurationAppResult;
 
 /**
+ * The model-visible handoff for clients without a usable secure form: the
+ * configuration URL in plain text AND structured, so an assistant can tell
+ * the person exactly where to go. The URL is the single-use, time-bound
+ * handoff token; the values are entered in the browser and never pass
+ * through the chat or the model.
+ */
+function configurationHandoffResult(input: {
+  continuation: Record<string, unknown>;
+  token: string;
+  expiresInSeconds: number;
+  definitions: unknown;
+  instructions: string;
+  nowMs?: number;
+}): ToolResult {
+  const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${input.token}`;
+  const expiresAt = new Date(
+    (input.nowMs ?? Date.now()) + input.expiresInSeconds * 1000,
+  ).toISOString();
+  const externalUrl = configurationWebUrl();
+  const payload = {
+    ...input.continuation,
+    pending: true,
+    configurationUrl,
+    expiresAt,
+    fields: connectionFieldsOf(input.definitions).map(({ key, label, secret }) => ({
+      key,
+      label,
+      secret,
+    })),
+    ...(externalUrl ? { externalUrl } : {}),
+    instructions: input.instructions,
+  };
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Configuration needed: open ${configurationUrl} in a browser and enter the ` +
+          `values there (link valid until ${expiresAt}); they never pass through the chat.`,
+      },
+      { type: "text", text: JSON.stringify(payload, null, 2) },
+    ],
+    structuredContent: payload,
+  };
+}
+
+export const __configurationHandoffResultForTests = configurationHandoffResult;
+
+/**
  * Errors are returned as tool results rather than protocol errors: a model
  * that gets "FORBIDDEN: not authorized to delete Relation" back as content can
  * adapt, where a transport-level failure just terminates the call. The code
@@ -1543,7 +2480,21 @@ export const __configurationAppResultForTests = configurationAppResult;
  * model sees the code and the retry meaning before anything else. The
  * summary is derived from the same fields, so it cannot contradict them.
  */
-function failed(error: unknown): ToolResult {
+function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
+  const error = body.error as Record<string, unknown> | undefined;
+  if (!error) return body;
+  const data = error.data as Record<string, unknown> | undefined;
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
+      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
+    },
+  };
+}
+
+function failed(error: unknown, canonical = true): ToolResult {
   if (error instanceof DeclaredOperationError) {
     const body = error.body;
     const bodyMessage = body && typeof body === "object" && !Array.isArray(body)
@@ -1563,15 +2514,103 @@ function failed(error: unknown): ToolResult {
       isError: true,
     };
   }
-  const { body } = toHttpError(error);
+  const mapped = toHttpError(error).body;
+  const body = canonical
+    ? mapped
+    : legacyFailureBody(mapped as unknown as Record<string, unknown>);
+  const failure = body.error as Parameters<typeof failureSummary>[0];
   return {
     content: [
-      { type: "text", text: failureSummary(body.error) },
+      { type: "text", text: failureSummary(failure) },
       { type: "text", text: JSON.stringify(body, null, 2) },
     ],
     structuredContent: body,
     isError: true,
   };
+}
+
+function runtimeOperationResult(
+  result: {
+    content: CallToolResult["content"];
+    structuredContent?: Record<string, unknown> | undefined;
+    isError?: boolean | undefined;
+  },
+): RuntimeOperationExecutionResult {
+  const structured = result.structuredContent;
+  if (result.isError) {
+    const candidate = structured?.error as Record<string, unknown> | undefined;
+    return {
+      error: {
+        code: typeof candidate?.code === "string" ? candidate.code : "OPERATION_FAILED",
+        message: typeof candidate?.message === "string"
+          ? candidate.message
+          : "The declarative Service failed.",
+        ...(typeof candidate?.detail === "string"
+          ? { detail: candidate.detail }
+          : {}),
+        retryable: candidate?.retryable === true,
+        ...(typeof candidate?.retryAt === "string"
+          ? { retryAt: candidate.retryAt }
+          : {}),
+      },
+    };
+  }
+  if (
+    structured &&
+    Object.hasOwn(structured, "data") &&
+    Array.isArray(structured.operations)
+  ) {
+    const resources = result.content.flatMap((block) =>
+      block.type === "resource_link"
+        ? [{
+            uri: block.uri,
+            name: block.name,
+            ...(block.title ? { title: block.title } : {}),
+            ...(block.description ? { description: block.description } : {}),
+            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          }]
+        : []
+    );
+    return {
+      ...(structured as RuntimeOperationExecutionResult),
+      ...(resources.length > 0 ? { resources } : {}),
+    };
+  }
+  const resources = result.content.flatMap((block) =>
+    block.type === "resource_link"
+      ? [{
+          uri: block.uri,
+          name: block.name,
+          ...(block.title ? { title: block.title } : {}),
+          ...(block.description ? { description: block.description } : {}),
+          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+        }]
+      : []
+  );
+  return {
+    data: structured ?? { content: result.content },
+    operations: [],
+    ...(resources.length > 0 ? { resources } : {}),
+  };
+}
+
+/** Project the canonical Operation envelope through an MCP tool contract. */
+function runtimeOperationToolResult(
+  result: RuntimeOperationExecutionResult,
+): ToolResult {
+  if ("error" in result) return failed(new OperationFailure(result.error));
+  const projected = ok(result);
+  const resources = (result.resources ?? []).map((resource) => ({
+    type: "resource_link" as const,
+    uri: resource.uri,
+    name: resource.name,
+    ...(resource.title ? { title: resource.title } : {}),
+    ...(resource.description ? { description: resource.description } : {}),
+    ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
+  }));
+  return resources.length > 0
+    ? { ...projected, content: [...projected.content, ...resources] }
+    : projected;
 }
 
 export const __failedForTests = failed;
@@ -1584,8 +2623,10 @@ function unavailableOutcome(error: unknown): {
   retryAt?: string;
   requiredAction: string;
   correlationId?: string;
+  /** Server-authored next step for a connection gap; never provider text. */
+  guidance?: string;
 } {
-  const { code, category, retryable, retryAt, requiredAction, correlationId } =
+  const { code, category, retryable, retryAt, requiredAction, correlationId, message } =
     toHttpError(error).body.error;
   return {
     code,
@@ -1594,10 +2635,138 @@ function unavailableOutcome(error: unknown): {
     ...(retryAt !== undefined ? { retryAt } : {}),
     requiredAction: requiredAction ?? "contact_admin",
     ...(correlationId !== undefined ? { correlationId } : {}),
+    // Connection failures are worded by connection-guidance.ts, so the
+    // message is the platform's own instruction and safe to pass on.
+    ...(isConnectionProblemCode(code) ? { guidance: message } : {}),
   };
 }
 
 export const __unavailableOutcomeForTests = unavailableOutcome;
+
+type CompletedStep = {
+  binding: number;
+  operation: string;
+  kind: "mutation" | "query";
+  outputs: Record<string, unknown>;
+};
+
+/** The name a person knows a step by: its native operation, else its key. */
+function operationDisplayKey(operationRow: Record<string, unknown>): string {
+  const operation = operationRow.operation as Record<string, unknown> | undefined;
+  const native = operation?.nativeOperation;
+  if (typeof native === "string" && native.length > 0) return native;
+  return String(operationRow.key ?? operationRow.id ?? "operation");
+}
+
+/**
+ * A required step of a composed call has no usable source. Raised BEFORE the
+ * first step runs, so the call refuses whole rather than writing half; the
+ * guidance is the same server-authored next step the resolution reported.
+ */
+function compositionGapError(
+  toolName: string,
+  binding: number,
+  gap: ModuleUnavailableInvocationSource | undefined,
+): HttpError {
+  const outcome = gap?.outcome ?? "unavailable";
+  const status = outcome === "unavailable" ? 400 : 403;
+  const code =
+    outcome === "reauthorization_required"
+      ? "REAUTHORIZATION_REQUIRED"
+      : outcome === "connection_required"
+        ? "CONNECTION_REQUIRED"
+        : "SERVICE_MISCONFIGURED";
+  const reason = gap?.guidance ??
+    (outcome === "unavailable"
+      ? "its Capability or Adapter is missing"
+      : "no usable connection is configured for its Adapter");
+  return new HttpError(
+    status,
+    code,
+    `${toolName} was not run: step ${binding} cannot execute — ${reason}` +
+      ` Nothing was written.`,
+  );
+}
+
+function describeOutputs(outputs: Record<string, unknown>): string {
+  const scalars = Object.entries(outputs).filter(
+    ([, value]) => value !== null && typeof value !== "object",
+  );
+  return scalars.length > 0
+    ? scalars.map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")
+    : "no scalar outputs";
+}
+
+/**
+ * A composed call that stopped after an earlier step had already written.
+ * It is an error — the call did not do what was asked — that still reports
+ * every effect: each step is its own transaction and nothing is rolled back,
+ * so silence here would let an agent retry and write step 1 twice.
+ */
+function partial(input: {
+  tool: string;
+  total: number;
+  completed: CompletedStep[];
+  failed: { binding: number; operation: string; error: unknown };
+  notRun: { binding: number; operation?: string }[];
+  outputs: Record<string, unknown>;
+  unavailable: { binding: number; outcome: ReturnType<typeof unavailableOutcome> }[];
+}): ToolResult {
+  const cause = toHttpError(input.failed.error).body.error;
+  const position = input.completed.length + 1;
+  const written = input.completed
+    .map(
+      (step) =>
+        `step ${step.binding} (${step.operation}) wrote ${describeOutputs(step.outputs)}`,
+    )
+    .join("; ");
+  const remaining = [
+    `step ${input.failed.binding} (${input.failed.operation})`,
+    ...input.notRun.map(
+      (step) => `step ${step.binding}${step.operation ? ` (${step.operation})` : ""}`,
+    ),
+  ].join(", ");
+  const message =
+    `${input.tool} stopped at step ${position} of ${input.total} ` +
+    `(${input.failed.operation}): ${cause.code}: ${cause.message} ` +
+    `The earlier step${input.completed.length === 1 ? "" : "s"} had already completed and ` +
+    `${input.completed.length === 1 ? "was" : "were"} NOT rolled back — each step is its own ` +
+    `transaction: ${written}. Still to do: ${remaining}. Finish the remaining step(s) with ` +
+    `their own tools, or remove what was written, before retrying; do not repeat this call ` +
+    `as-is — it would run the completed step${input.completed.length === 1 ? "" : "s"} again.`;
+  const body = {
+    error: {
+      code: "SERVICE_PARTIAL",
+      message,
+      retryable: false,
+      requiredAction: "change_input" as const,
+    },
+    status: "partial",
+    completed: input.completed.map((step) => ({
+      binding: step.binding,
+      operation: step.operation,
+      outputs: step.outputs,
+    })),
+    failed: {
+      binding: input.failed.binding,
+      operation: input.failed.operation,
+      outcome: { ...unavailableOutcome(input.failed.error), message: cause.message },
+    },
+    notRun: input.notRun,
+    outputs: input.outputs,
+    ...(input.unavailable.length > 0 ? { unavailable: input.unavailable } : {}),
+  };
+  return {
+    content: [
+      { type: "text", text: `SERVICE_PARTIAL: ${message}` },
+      { type: "text", text: JSON.stringify(body, null, 2) },
+    ],
+    structuredContent: body,
+    isError: true,
+  };
+}
+
+export const __partialForTests = partial;
 
 function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
@@ -1641,6 +2810,30 @@ function assertDeclaredProperties(
       "BAD_USER_INPUT",
       `Unknown or non-writable ${what}: ${unknown.sort().join(", ")}. ` +
         `Accepted: ${[...declared].sort().join(", ") || "(none)"}.`,
+    );
+  }
+}
+
+/**
+ * A field authored `writtenBy: [...]` is absent from the tool schema, so
+ * assertDeclaredProperties below would already refuse it — as "unknown or
+ * non-writable", which sends a model looking for a spelling mistake. Run this
+ * first so it hears the actual reason and the operation to call instead. The
+ * generated CRUD layer refuses it a second time; that is the backstop for any
+ * path that does not come through here.
+ */
+function assertOperationWrittenFields(
+  values: Record<string, unknown>,
+  table: GeneratedTable | undefined,
+): void {
+  for (const column of table?.columns ?? []) {
+    if (!isOperationWrittenColumn(column)) continue;
+    const field = fieldNameForColumn(column);
+    if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      operationWrittenRefusal(field, column.writtenBy!),
     );
   }
 }
@@ -1755,6 +2948,17 @@ async function invokeTool(
   elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
+  const canonical = tool.outputSchema !== undefined;
+  const operationRef = (intent: McpOperation) =>
+    tool.operationId
+      ? { id: tool.operationId, intent }
+      : entityOperationRef(table, intent);
+  const offerIntents = (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+    McpOperation,
+    boolean,
+  ]>)
+    .filter(([, enabled]) => enabled)
+    .map(([intent]) => intent);
 
   switch (tool.operation) {
     case "list": {
@@ -1776,34 +2980,88 @@ async function invokeTool(
           : undefined;
       // Like REST, the MCP list result always publishes totalCount, so the
       // count pass is always requested (#17).
-      const result = await listGeneratedEntities(db, session, {
-        table: table.name,
-        ...(typeof args.first === "number" ? { limit: args.first } : {}),
-        ...(typeof args.after === "string" ? { cursor: args.after } : {}),
-        ...(filter ? { filter } : {}),
-        ...(sort ? { sort } : {}),
-        includeTotalCount: true,
+      const operationResult = await executeEntityOperation(db, session, {
+        operation: operationRef("list"),
+        offerIntents,
+        input: {
+          ...(typeof args.first === "number" ? { limit: args.first } : {}),
+          ...(typeof args.after === "string" ? { cursor: args.after } : {}),
+          ...(filter ? { filter } : {}),
+          ...(sort ? { sort } : {}),
+          includeTotalCount: true,
+        },
       });
+      if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
+      if ("error" in operationResult) throw new OperationFailure(operationResult.error);
+      const result = operationResult.data;
+      if (!canonical) {
+        return ok({
+          items: result.items.map((item) =>
+            serializeRowForEntity(entity, table, item.data),
+          ),
+          totalCount: result.totalCount,
+          nextCursor: result.nextCursor,
+        });
+      }
       return ok({
-        items: result.rows.map((row) =>
-          serializeRowForEntity(entity, table, row),
-        ),
-        totalCount: result.totalCount,
-        nextCursor: result.nextCursor,
+        data: {
+          items: result.items.map((item) => ({
+            data: serializeRowForEntity(entity, table, item.data),
+            operations: item.operations,
+          })),
+          totalCount: result.totalCount,
+          nextCursor: result.nextCursor,
+        },
+        operations: operationResult.operations,
       });
     }
 
     case "get": {
-      const row = await getGeneratedEntity(db, session, {
-        table: table.name,
-        id: requireId(args),
+      const result = await executeEntityOperation(db, session, {
+        operation: operationRef("get"),
+        offerIntents,
+        input: { id: requireId(args) },
       });
+      if (result.intent !== "get") throw new Error("Unexpected entity result.");
+      if ("error" in result) throw new OperationFailure(result.error);
+      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRowForEntity(entity, table, row));
+      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
+      return ok({
+        data: serializeRowForEntity(entity, table, row),
+        operations: result.operations,
+      });
     }
 
     case "create": {
-      const values = requireArguments(args);
+      const operation = entityOperationContract(operationRef("create").id);
+      if (canonical && operation.implementation?.type === "plugin") {
+        const result = await executeEntityOperation(db, session, {
+          operation: operationRef("create"), offerIntents,
+          input: pluginEntityTransportInput(operation, args),
+        });
+        if (result.intent !== "create") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        if (!result.data) throw new Error("Create operation returned no record.");
+        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
+      }
+      const values = canonical
+        ? Object.fromEntries(
+            Object.entries(requireArguments(args)).filter(
+              ([key]) => key !== "confirmed" && key !== "blueprintId",
+            ),
+          )
+        : requireArguments(args);
+      if (canonical) {
+        requireCreateOperationConfirmation(
+          entityOperationContract(operationRef("create").id),
+          {
+            ...(typeof args.confirmed === "boolean"
+              ? { confirmed: args.confirmed }
+              : {}),
+          },
+        );
+      }
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -1813,24 +3071,73 @@ async function invokeTool(
             Object.entries(values).filter(([key]) => key !== elicitField),
           )
         : values;
+      assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values);
-      const row =
-        elicitationCompleted && elicitField
-          ? await createGeneratedEntityAfterElicitation(db, session, {
+      if (elicitationCompleted && elicitField) {
+        const row = await createGeneratedEntityAfterElicitation(db, session, {
               table: table.name,
               values,
               into: elicitField,
-            })
-          : await createGeneratedEntity(db, session, {
-              table: table.name,
-              values,
             });
-      return ok(serializeRowForEntity(entity, table, row));
+        const data = serializeRowForEntity(entity, table, row);
+        if (!canonical) return ok(data);
+        return ok({
+          data,
+          operations: await currentRecordOffers(
+            db,
+            session,
+            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
+            table,
+            {
+              id: String(data.id ?? ""),
+              row,
+              ...(typeof data.updatedAt === "string"
+                ? { version: data.updatedAt }
+                : {}),
+            },
+            ["get", "update", "delete"].filter((intent) =>
+              offerIntents.includes(intent as McpOperation),
+            ) as McpOperation[],
+          ),
+        });
+      }
+      const result = await executeEntityOperation(db, session, {
+        operation: operationRef("create"),
+        offerIntents,
+        input: {
+          values,
+          ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
+          ...(typeof args.confirmed === "boolean"
+            ? { confirmed: args.confirmed }
+            : {}),
+        },
+      });
+      if (result.intent !== "create") throw new Error("Unexpected entity result.");
+      if ("error" in result) throw new OperationFailure(result.error);
+      if (!result.data) throw new Error("Create operation returned no record.");
+      if (!canonical) {
+        return ok(serializeRowForEntity(entity, table, result.data));
+      }
+      return ok({
+        data: serializeRowForEntity(entity, table, result.data),
+        operations: result.operations,
+      });
     }
 
     case "update": {
+      const operation = entityOperationContract(operationRef("update").id);
+      if (canonical && operation.implementation?.type === "plugin") {
+        const result = await executeEntityOperation(db, session, {
+          operation: operationRef("update"), offerIntents,
+          input: pluginEntityTransportInput(operation, args),
+        });
+        if (result.intent !== "update") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        if (!result.data) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
+      }
       const id = requireId(args);
       assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);
@@ -1843,25 +3150,45 @@ async function invokeTool(
         values,
         "field",
       );
+      assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
-      const row = await updateGeneratedEntity(db, session, {
-        table: table.name,
-        id,
-        values,
+      const result = await executeEntityOperation(db, session, {
+        operation: operationRef("update"),
+        offerIntents,
+        input: {
+          id,
+          values,
+          ...entityMutationControls(args),
+        },
       });
+      if (result.intent !== "update") throw new Error("Unexpected entity result.");
+      if ("error" in result) throw new OperationFailure(result.error);
+      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRowForEntity(entity, table, row));
+      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
+      return ok({
+        data: serializeRowForEntity(entity, table, row),
+        operations: result.operations,
+      });
     }
 
     case "delete": {
-      const deleted = await deleteGeneratedEntity(db, session, {
-        table: table.name,
-        id: requireId(args),
+      const result = await executeEntityOperation(db, session, {
+        operation: operationRef("delete"),
+        offerIntents,
+        input: {
+          id: requireId(args),
+          ...entityMutationControls(args),
+        },
       });
+      if (result.intent !== "delete") throw new Error("Unexpected entity result.");
+      if ("error" in result) throw new OperationFailure(result.error);
+      const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok({ deleted: true });
+      if (!canonical) return ok({ deleted: true });
+      return ok({ data: result.data, operations: result.operations });
     }
   }
 }
@@ -1873,12 +3200,58 @@ function operationMayInvoke(
   if (tool.auth.mode === "public") return true;
   if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
     return false;
-  const roles = new Set(session.roles);
   const scopes = new Set(session.oauthScopes ?? []);
   return (
-    tool.auth.roles.some((role) => roles.has(role)) &&
+    sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );
+}
+
+function projectCatalogOperationTool(
+  tool: Catalog["operationTools"][number],
+): Tool {
+  return {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    inputSchema: tool.inputSchema as Tool["inputSchema"],
+    outputSchema: tool.outputSchema as Tool["outputSchema"],
+    annotations: { title: tool.title, ...tool.annotations },
+  };
+}
+
+// ---- employee invitations: lazy Keycloak client ----
+// Built once, from the tenant control plane's own configuration
+// (control/config.ts) — the SAME service account and realm `invite_employee`
+// needs is already required for tenant provisioning, so this reads no new
+// environment. `undefined` when that configuration is absent (an existing
+// deployment that never set it up), in which case the tool answers
+// CONTROL_PLANE_NOT_CONFIGURED rather than throwing at server-build time —
+// consistent with how registerControlRestRoutes stays registered and answers
+// 503 by name instead of refusing to start.
+let cachedEmployeeInvitationKeycloak: KeycloakOrganizationMembersClient | undefined | null = null;
+function employeeInvitationKeycloakClient(): KeycloakOrganizationMembersClient | undefined {
+  if (cachedEmployeeInvitationKeycloak !== null) return cachedEmployeeInvitationKeycloak;
+  const configResult = readControlPlaneConfig();
+  if (!configResult.ok) {
+    cachedEmployeeInvitationKeycloak = undefined;
+    return undefined;
+  }
+  const tokens = createServiceAccountTokenProvider(configResult.config.keycloak, {
+    unauthorized: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
+    unavailable: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
+  });
+  cachedEmployeeInvitationKeycloak = createKeycloakOrganizationMembersClient(
+    configResult.config.keycloak,
+    { tokens },
+  );
+  return cachedEmployeeInvitationKeycloak;
+}
+/** Test-only: force the next call to re-read configuration. */
+export function __resetEmployeeInvitationKeycloakClientForTests(): void {
+  cachedEmployeeInvitationKeycloak = null;
 }
 
 function buildServer(
@@ -1895,10 +3268,32 @@ function buildServer(
    */
   stateful = false,
   tableOverride?: Map<string, GeneratedTable>,
+  /**
+   * The opening sentence for this session (mcp/session-opening.ts), read
+   * before the server is built because it needs the registry; null when the
+   * session has no person to name.
+   */
+  opening: string | null = null,
+  /** Core-internal: reuse an already live Operation capability verbatim. */
+  moduleSessionOverride?: TrustedSessionContext,
+  /** @internal Test-only projection override. */
+  operationToolProjectionOverride?: OperationToolProjection,
 ): Server {
   const runtimeModules = modules ?? [];
-  const moduleSession = createModuleSessionCapability(session);
-  const hasDynamicModuleTools = hasDynamicModuleToolProjection(runtimeModules);
+  // Resolved once, here: the server's `instructions` are written at build time
+  // and every authored label this session projects is read through the same
+  // answer, so a second resolution could only disagree with the first.
+  const locale = sessionLocale(session);
+  const moduleSession = moduleSessionOverride ?? createModuleSessionCapability(session);
+  const operationToolProjection =
+    operationToolProjectionOverride ?? generatedOperationToolProjection;
+  const searchableOperationToolNames: SearchableOperationToolNames = {
+    search: operationToolProjection.search,
+    execute: operationToolProjection.execute,
+  };
+  const hasDynamicModuleTools =
+    hasDynamicModuleToolProjection(runtimeModules) ||
+    runtimeModules.some((module) => (module.operationProviders?.length ?? 0) > 0);
   const hasDynamicModuleResources = runtimeModules.some(
     (module) =>
       module.mcp?.resources !== undefined ||
@@ -1910,33 +3305,56 @@ function buildServer(
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.
       tools:
-        catalogDerivedTools.length > 0 || hasDynamicModuleTools
+        projectedDerivedTools.length > 0 || hasDynamicModuleTools
           ? { listChanged: true }
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},
       prompts: {},
     },
-    // The server owns the OAuth redirect URL, so it states it here rather
-    // than leaving assistants to ask the person for a value only this
-    // process knows. Providers register this exact URL.
-    instructions:
-      (catalogDerivedTools.some((entry) => entry.connect)
-        ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
-          `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
-          `OAuth client, give the person this exact URL to register; never ask them what it is.`
-        : INSTRUCTIONS) +
-      catalogGuideTools
+    // Written once, here, from the fixed guidance and this session's own
+    // parts: who the person is, which client is in front of the model and
+    // which language they read. See mcp/server-instructions.ts for the order.
+    // The server owns the OAuth redirect URL, so it states it rather than
+    // leaving assistants to ask the person for a value only this process
+    // knows; without a public origin it says that, instead of failing.
+    instructions: buildServerInstructions({
+      opening,
+      hasConnectors: projectedDerivedTools.some((entry) => entry.connect),
+      oauthCallbackUrl: oauthCallbackUrlForInstructions(),
+      guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
-        .map(
-          (guide) =>
-            ` Before creating a ${guide.entity ?? "definition"}, call ${guide.name} and ` +
-            `follow it — it is the fixed process and overrides any cached local instructions.`,
-        )
-        .join(""),
+        .map((guide) => ({ name: guide.name, entity: guide.entity ?? null })),
+      locale,
+      client: sessionClientOf(session),
+    }),
   });
   const tables = tableOverride ?? tablesByName();
-  const operations =
-    modules === undefined ? new Map() : bindOperationHandlers(modules);
+  const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
+  const canUploadArtifacts = hasArtifactStorage && crudToolsForSession(session, tables).some(
+    (tool) => schemaUsesArtifactUpload(tool.inputSchema),
+  );
+  // The same rule REST boot applies (roles/api.ts): with no operation module
+  // in the process there are no operation tools, rather than a 500 on every
+  // request because the catalog names a handler nothing loaded.
+  const operations = operationModulesConfigured(runtimeModules)
+    ? bindOperationHandlers(runtimeModules)
+    : new Map();
+  const searchableStaticOperationIds = new Set(
+    catalog.operationTools
+      .filter((tool) => operations.has(tool.key))
+      .map((tool) => tool.key),
+  );
+  const projectedEntityOperationIds = toolsForSession(session, tables)
+    .map(({ tool }) => tool.operationId)
+    .filter((operationId): operationId is string => Boolean(operationId));
+  const projectedPluginOperationIds = [...operations.values()]
+    .filter(({ operation }) => operation.transports.mcp.enabled)
+    .map(({ operation }) => operation.key);
+  const editLeaseOperationIds = editLeaseOperationIdsForSession(
+    session,
+    [...projectedEntityOperationIds, ...projectedPluginOperationIds],
+  );
+  const allowedEditLeaseOperationIds = new Set(editLeaseOperationIds);
   const sourceVault = new InvocationSourceVault();
 
   const projectionContext = (): McpProjectionContext => {
@@ -1969,10 +3387,15 @@ function buildServer(
     exact: [
       ENTITY_CATALOG_URI,
       ENTITY_CONFIGURATION_APP_URI,
+      ARTIFACT_UPLOAD_APP_URI,
+      ...ONBOARDING_RESOURCE_URIS,
       ...catalog.entities.map(entityResourceUri),
       ...catalogResources.map((resource) => resource.uri),
     ],
-    templates: catalogResources.map((resource) => resource.templateUri),
+    templates: [
+      ONBOARDING_STEP_RESOURCE_TEMPLATE.uriTemplate,
+      ...catalogResources.map((resource) => resource.templateUri),
+    ],
   };
 
   const definitionFor = (
@@ -2049,7 +3472,7 @@ function buildServer(
   };
 
   const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
-    if (coreOwnsStaticToolName(toolName)) return true;
+    if (coreOwnsStaticToolName(toolName, operationToolProjection)) return true;
     if (!session.tenantId || catalogDerivedTools.length === 0) return false;
     return withDbSession(db, session, async (trx) => {
       for (const entry of catalogDerivedTools) {
@@ -2066,7 +3489,7 @@ function buildServer(
   ): Promise<void> => {
     assertUniqueToolNames(tools);
     for (const { tool } of tools) {
-      if (coreOwnsStaticToolName(tool.name)) {
+      if (coreOwnsStaticToolName(tool.name, operationToolProjection)) {
         throw new Error(
           `MCP tool name ${JSON.stringify(tool.name)} is contributed more than once.`,
         );
@@ -2102,7 +3525,7 @@ function buildServer(
     | undefined
   > => {
     if (projectedOnly) {
-      const projected = (await derivedToolsForSession(db, session, tables)).find(
+      const projected = (await derivedToolsForSession(db, session, tables, locale)).find(
         (tool) => tool.name === toolName,
       );
       if (!projected) return undefined;
@@ -2131,6 +3554,43 @@ function buildServer(
     });
   };
 
+  /**
+   * Re-read one canonical provider definition through generated internal
+   * compatibility metadata. This deliberately does not project the row as an
+   * MCP tool; the runtime Operation provider owns public listing and lookup.
+   */
+  const compatibilityDefinition = async (
+    request: RuntimeDeclarativeServiceRequest,
+  ): Promise<
+    | { entry: DerivedToolsCatalogEntry; row: Record<string, unknown> }
+    | undefined
+  > => {
+    for (const entry of catalogDerivedTools) {
+      if (
+        !entry.compatibility ||
+        entry.entity !== request.definition.entity ||
+        !sessionInAudience(entry, session.roles)
+      ) continue;
+      const row = await runtimeRowByFilter(db, session, tables, entry.table, {
+        id: request.definition.id,
+      });
+      if (!row) continue;
+      const publiclyAvailable = derivedToolsFromRows(
+        entry,
+        [row],
+        new Set(),
+        session.roles,
+        locale,
+      ).length === 1;
+      if (
+        !publiclyAvailable &&
+        !isAuthorizedInternalDerivedRow(entry, row, session.roles)
+      ) continue;
+      return { entry, row };
+    }
+    return undefined;
+  };
+
   const authorizedSources = async (
     toolName: string,
     projectedOnly: boolean,
@@ -2155,6 +3615,7 @@ function buildServer(
               [serviceRow],
               new Set<string>(),
               session.roles,
+              locale,
             ).some((tool) => tool.name === toolName)
           : isAuthorizedInternalDerivedRow(entry, serviceRow, session.roles);
         if (!authorized) continue;
@@ -2168,6 +3629,7 @@ function buildServer(
         const definitionUnavailable = (
           binding: Record<string, unknown>,
           outcome: AuthorizedUnavailableInvocationSource["outcome"],
+          guidance?: string,
         ) => unavailable.push({
           tenantId,
           actorId: session.userId,
@@ -2175,7 +3637,59 @@ function buildServer(
           binding: Number(binding.order ?? 0),
           definition,
           outcome,
+          ...(guidance !== undefined ? { guidance } : {}),
         });
+        // The next step for a connection gap on this provider, worded for
+        // the caller — the same text the direct execution path raises.
+        const connectionGuidance = (
+          providerRow: Record<string, unknown>,
+          gap: "organization" | "personal" | "tenant_sign_in" | "reauthorization",
+        ): string => {
+          const adapter = providerDisplayName(providerRow, execution);
+          const connectTool = entry.connect?.name ?? null;
+          switch (gap) {
+            case "organization":
+              return connectionProblemMessage({
+                kind: "organization_missing",
+                adapter,
+                adapterId: String(providerRow.id ?? ""),
+                createTool: connectionToolsFor(execution, entry).create,
+                adapterArgument:
+                  entityForTable(execution.connectionTable)?.elicitOnCreate
+                    ?.sourceField ?? "adapterId",
+                administrator: isOrganizationAdministrator(session.roles),
+              });
+            case "personal":
+              return connectionProblemMessage({
+                kind: "personal_missing",
+                adapter,
+                toolName,
+                connectTool,
+              });
+            case "tenant_sign_in":
+              return connectionProblemMessage({
+                kind: "tenant_sign_in",
+                adapter,
+                toolName,
+                connectTool,
+                administrator: isOrganizationAdministrator(session.roles),
+              });
+            case "reauthorization":
+              return connectionProblemMessage({
+                kind: "reauthorization",
+                adapter,
+                toolName,
+                connectTool,
+                scope:
+                  connectionScopeOf(
+                    (providerRow.auth ?? null) as Record<string, unknown> | null,
+                  ) === "tenant"
+                    ? "tenant"
+                    : "user",
+                reason: "expired or no longer covers the scopes this tool needs",
+              });
+          }
+        };
         const selectedBindings = orderedBindings(
           serviceRow,
           execution.bindingsField,
@@ -2209,18 +3723,23 @@ function buildServer(
             definitionUnavailable(binding, "unavailable");
             continue;
           }
-          const connectionRows = await snapshotRowsByFilter(
-            trx,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerId },
+          const connectionRows = normalizeConnectionValueRows(
+            await snapshotRowsByFilter(
+              trx,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerId },
+            ),
+            execution.connectionValuesField,
           );
           const providerAuth = (providerRow.auth ?? null) as Record<
             string,
             unknown
           > | null;
-          const personal = connectionScopeOf(providerAuth) === "user";
+          const declaredScope = connectionScopeOf(providerAuth);
+          const allowsPersonal = declaredScope === "user" || declaredScope === "both";
+          const allowsTenant = declaredScope === "tenant" || declaredScope === "both";
           const personalOAuth =
-            personal && providerAuth?.profile === "oauth2AuthorizationCode";
+            allowsPersonal && providerAuth?.profile === "oauth2AuthorizationCode";
           const bindingNumber = Number(binding.order ?? 0);
           let personalCapture:
             | ReturnType<typeof capturePersonalOAuthConnections>
@@ -2232,17 +3751,26 @@ function buildServer(
                 session.userId,
               );
             } catch {
-              definitionUnavailable(binding, "connection_required");
+              // No (single) tenant support row: the organization's side is
+              // missing, which comes before any personal sign-in.
+              definitionUnavailable(
+                binding,
+                "connection_required",
+                connectionGuidance(providerRow, "organization"),
+              );
               continue;
             }
           }
           const eligible = personalCapture
-            ? personalCapture.personal
+            ? [
+                ...personalCapture.personal,
+                ...(allowsTenant ? [personalCapture.tenantSupport] : []),
+              ]
             : connectionRows
                 .filter((row) =>
-                  personal
-                    ? row.ownerUserId === session.userId
-                    : row.ownerUserId === null || row.ownerUserId === undefined,
+                  (allowsPersonal && row.ownerUserId === session.userId) ||
+                  (allowsTenant &&
+                    (row.ownerUserId === null || row.ownerUserId === undefined)),
                 )
                 .filter(
                   (row): row is Record<string, unknown> & { id: string } =>
@@ -2284,12 +3812,13 @@ function buildServer(
               needsReauthorization = true;
               continue;
             }
+            const sourceIsPersonal = connection.ownerUserId === session.userId;
             const identity = {
               tenantId,
-              actorId: personal ? session.userId : null,
-              scope: personal ? ("personal" as const) : ("tenant" as const),
+              actorId: sourceIsPersonal ? session.userId : null,
+              scope: sourceIsPersonal ? ("personal" as const) : ("tenant" as const),
               connectionTable: execution.connectionTable,
-              connectionId: connection.id,
+              connectionId: String(connection.id),
             };
             const sourceReference = mintInvocationSourceReference(identity);
             const internal: CapturedDerivedExecution = {
@@ -2298,10 +3827,10 @@ function buildServer(
               binding,
               operationRow,
               providerRow,
-              connectionRows: personalCapture
+              connectionRows: personalCapture && sourceIsPersonal
                 ? [personalCapture.tenantSupport, connection]
                 : [connection],
-              selectedConnectionId: connection.id,
+              selectedConnectionId: String(connection.id),
             };
             const fingerprint = authorityFingerprint(internal);
             const validate = async (validationSignal?: AbortSignal) => {
@@ -2339,11 +3868,20 @@ function buildServer(
             eligibleSourceCount += 1;
           }
           if (eligibleSourceCount === 0) {
+            const reauthorize = missingRequiredScopes || needsReauthorization;
             definitionUnavailable(
               binding,
-              missingRequiredScopes || needsReauthorization
-                ? "reauthorization_required"
-                : "connection_required",
+              reauthorize ? "reauthorization_required" : "connection_required",
+              connectionGuidance(
+                providerRow,
+                reauthorize
+                  ? "reauthorization"
+                  : allowsPersonal && !allowsTenant
+                    ? "personal"
+                    : providerAuth?.profile === "oauth2AuthorizationCode"
+                      ? "tenant_sign_in"
+                      : "organization",
+              ),
             );
           }
         }
@@ -2370,11 +3908,19 @@ function buildServer(
     return matching.length === 1 ? matching[0] : undefined;
   };
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  // --- session-info: the list is a named builder so `whoami` can count
+  // resources through the same per-session filtering `resources/list` uses. ---
+  const listedResources = async () => {
     const entries = entitiesForSession(session, tables);
     const authoredResources = resourcesForSession(session, tables);
     return {
       resources: [
+        SESSION_RESOURCE,
+        ORGANIZATION_PROFILE_RESOURCE,
+        // The detail behind whoami's onboarding index. Static per session:
+        // the five step keys are fixed, so listing them gathers no facts —
+        // which is what keeps whoami's own resource count cheap.
+        ...onboardingResourcesForSession(session),
         {
           uri: ENTITY_CATALOG_URI,
           name: "entity-catalog",
@@ -2408,6 +3954,17 @@ function buildServer(
               },
             ]
           : []),
+        ...(canUploadArtifacts && supportsMcpApp(server)
+          ? [
+              {
+                uri: ARTIFACT_UPLOAD_APP_URI,
+                name: "document-upload-app",
+                title: "Document upload",
+                description: "Private file picker for document bytes that must not pass through the model.",
+                mimeType: MCP_APP_MIME_TYPE,
+              },
+            ]
+          : []),
         ...(await moduleResources(
           runtimeModules,
           projectionContext(),
@@ -2415,10 +3972,76 @@ function buildServer(
         )),
       ],
     };
+  };
+  server.setRequestHandler(ListResourcesRequestSchema, listedResources);
+  // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
+  // same per-session projections tools/list uses, and rides on whoami. ----
+  const onboarding = onboardingEnvironment({
+    db,
+    session,
+    tables,
+    derivedEntries: projectedDerivedTools,
+    projectedTools: () => derivedToolsForSession(db, session, tables, locale),
+    guideTools: () => guideToolsForSession(session),
+    guidesCalled,
+    // The administrator step reads the same contract the create tool and
+    // the execution path use: which fields the form asks, which tool
+    // creates the row, and the redirect URL an OAuth client must register.
+    connectionContract: (connectionTable) => {
+      const elicit = entityForTable(connectionTable)?.elicitOnCreate;
+      const createTool = catalog.tools.find(
+        (tool) => tool.table === connectionTable && tool.operation === "create",
+      )?.name;
+      return elicit && createTool ? { elicit, createTool } : null;
+    },
+    tenantConnection: (connectionTable, providerRef, providerId) =>
+      runtimeRowsByFilter(db, session, tables, connectionTable, {
+        [providerRef]: providerId,
+      }).then((rows) => rows.find((row) => !row.ownerUserId) ?? null),
+    redirectUri: () => {
+      try {
+        return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+      } catch {
+        return null;
+      }
+    },
   });
+  // ---- end first-use onboarding ----
+  // ---- update notices (mcp/update-notices.ts): the same per-session view of
+  // the person's own stored instructions, joined with the platform's notices. ----
+  const updateNotices = {
+    session,
+    derivedEntries: projectedDerivedTools,
+    rowsByFilter: (
+      table: string,
+      filter: Record<string, unknown>,
+      limit = 200,
+    ) => runtimeRowsByFilter(db, session, tables, table, filter, limit),
+    store: updateNoticesStore(db, session),
+  };
+  // ---- end update notices ----
+  const sessionInfo = async () =>
+    withUpdates(
+      withOnboarding(
+        await describeSession({
+          db,
+          session,
+          access: async () => ({
+            tools: (await listedTools()).length,
+            resources: (await listedResources()).resources.length,
+          }),
+        }),
+        await describeOnboarding(onboarding),
+      ),
+      await describeUpdates(updateNotices),
+    );
+  // --- end session-info ---
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
     resourceTemplates: [
+      ...(onboardingResourcesForSession(session).length > 0
+        ? [ONBOARDING_STEP_RESOURCE_TEMPLATE]
+        : []),
       ...resourcesForSession(session, tables).map((resource) => ({
         uriTemplate: resource.templateUri,
         name: resource.templateName,
@@ -2453,6 +4076,25 @@ function buildServer(
       if (result !== undefined) return result;
       throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
     };
+    // --- session-info (whoami / osf://session) ---
+    if (request.params.uri === SESSION_RESOURCE_URI) {
+      return sessionInfoResourceResult(await sessionInfo());
+    }
+    // --- end session-info ---
+    // ---- organization profile (mcp/organization-profile-tools.ts) ----
+    if (request.params.uri === ORGANIZATION_PROFILE_RESOURCE_URI) {
+      return readOrganizationProfileResource(db, session);
+    }
+    // ---- end organization profile ----
+    // ---- onboarding step detail (mcp/onboarding-resources.ts): the same
+    // per-session environment the onboarding TOOLS use, so a resource read is
+    // authorized exactly as onboarding_status is. ----
+    const onboardingStep = await readOnboardingStepResource(
+      request.params.uri,
+      onboarding,
+    );
+    if (onboardingStep) return onboardingStep;
+    // ---- end onboarding step detail ----
     if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
       return {
         contents: [
@@ -2470,16 +4112,33 @@ function buildServer(
         ],
       };
     }
+    if (request.params.uri === ARTIFACT_UPLOAD_APP_URI && canUploadArtifacts) {
+      return {
+        contents: [
+          {
+            uri: request.params.uri,
+            mimeType: MCP_APP_MIME_TYPE,
+            text: await renderArtifactUploadApp(),
+            _meta: {
+              ui: {
+                csp: { connectDomains: [callbackOrigin()] },
+                prefersBorder: true,
+              },
+            },
+          },
+        ],
+      };
+    }
     const entries = entitiesForSession(session, tables);
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
-      payload = describeCatalogResource(entries);
+      payload = describeCatalogResource(entries, locale);
     } else if (request.params.uri.startsWith(`${ENTITY_CATALOG_URI}/`)) {
       const entry = entries.find(
         ({ entity }) => entityResourceUri(entity) === request.params.uri,
       );
       if (!entry) return fallbackOrNotFound();
-      payload = describeEntityResource(entry, entries, tables, session);
+      payload = describeEntityResource(entry, entries, tables, session, locale);
     } else {
       const uri = request.params.uri;
       const readable = resourcesForSession(session, tables);
@@ -2487,13 +4146,34 @@ function buildServer(
       if (direct) {
         const table = tables.get(direct.table);
         if (!table) return fallbackOrNotFound();
-        const result = await listGeneratedEntities(db, session, {
-          table: table.name,
-          limit: RESOURCE_READ_LIMIT,
+        const result = await executeEntityOperation(db, session, {
+          operation: entityOperationRef(table, "list"),
+          offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+            McpOperation,
+            boolean,
+          ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
+          input: { limit: RESOURCE_READ_LIMIT },
         });
-        payload = result.rows.map((row) =>
-          serializeRowForEntity(entityForTable(direct.table), table, row),
-        );
+        if (result.intent !== "list") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        payload = table.source?.authoringVersion === 2
+          ? {
+              data: {
+                ...result.data,
+                items: result.data.items.map((item) => ({
+                  data: serializeRowForEntity(
+                    entityForTable(direct.table),
+                    table,
+                    item.data,
+                  ),
+                  operations: item.operations,
+                })),
+              },
+              operations: result.operations,
+            }
+          : result.data.items.map((item) =>
+              serializeRowForEntity(entityForTable(direct.table), table, item.data),
+            );
       } else {
         const templated = readable.find((resource) =>
           uri.startsWith(`${resource.uri}/`),
@@ -2501,16 +4181,25 @@ function buildServer(
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
         if (templated && table && id.length > 0 && !id.includes("/")) {
-          const row = await getGeneratedEntity(db, session, {
-            table: table.name,
-            id,
+          const result = await executeEntityOperation(db, session, {
+            operation: entityOperationRef(table, "get"),
+            offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+              McpOperation,
+              boolean,
+            ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
+            input: { id },
           });
-          if (row) {
-            payload = serializeRowForEntity(
+          if (result.intent !== "get") throw new Error("Unexpected entity result.");
+          if ("error" in result) throw new OperationFailure(result.error);
+          if (result.data) {
+            const data = serializeRowForEntity(
               entityForTable(templated.table),
               table,
-              row,
+              result.data,
             );
+            payload = table.source?.authoringVersion === 2
+              ? { data, operations: result.operations }
+              : data;
           }
         }
         if (payload === undefined) {
@@ -2533,12 +4222,41 @@ function buildServer(
     prompts: [],
   }));
 
-  const listedTools = async (): Promise<SourcedTool[]> => {
+  type ListedTool = SourcedTool & {
+    runtimeOperation?: RuntimeOperationDefinition;
+  };
+  const runtimeProviderToolsForSession = async (): Promise<
+    ProjectedRuntimeOperationTool[]
+  > => modulePlatform
+    ? (await modulePlatform.listRuntimeProviderOperations(moduleSession)).map(
+        (definition) => projectRuntimeOperationTool(definition, locale),
+      )
+    : [];
+
+  const listedTools = async (): Promise<ListedTool[]> => {
+    const runtimeOperationTools = await runtimeProviderToolsForSession();
     const coreTools = [
-      ...toolsForSession(session, tables).map(({ tool, entity }) =>
-        describeTool(tool, entity, tables.get(tool.table), session),
-      ),
-      ...catalogDerivedTools
+      SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
+      ...(canUploadArtifacts
+        ? [{
+            name: ARTIFACT_UPLOAD_TOOL_NAME,
+            title: "Upload document file",
+            description:
+              "Open a private file picker so the person can upload document bytes directly to Hubble. Use the returned artifactId in the requested create operation.",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: false,
+              idempotentHint: false,
+            },
+            ...(supportsMcpApp(server) && publicOriginIsHttps()
+              ? { _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } } }
+              : {}),
+          }]
+        : []),
+      ...crudToolsForSession(session, tables),
+      ...editLeaseToolsForOperationIds(editLeaseOperationIds),
+      ...projectedDerivedTools
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
         )
@@ -2551,7 +4269,13 @@ function buildServer(
               tool: {
                 type: "string",
                 description:
-                  "Name of the tool to create your personal connection for.",
+                  "Name of the tool to connect.",
+              },
+              connectionScope: {
+                type: "string",
+                enum: ["personal", "organization"],
+                description:
+                  "Connect your own account (default) or an organization-managed shared account. Organization scope requires an administrator role.",
               },
             },
             required: ["tool"],
@@ -2563,7 +4287,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...catalogDerivedTools
+      ...projectedDerivedTools
         .filter(
           (entry) =>
             entry.personalization && sessionInAudience(entry, session.roles),
@@ -2595,7 +4319,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...catalogDerivedTools
+      ...projectedDerivedTools
         .filter(
           (entry) =>
             entry.dryRun &&
@@ -2630,6 +4354,21 @@ function buildServer(
             idempotentHint: true,
           },
         })),
+      // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+      ...identityLinkToolsForSession(session),
+      // ---- end identity ↔ Relation link ----
+      // ---- organization profile (mcp/organization-profile-tools.ts) ----
+      ...organizationProfileToolsForSession(session),
+      // ---- end organization profile ----
+      // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+      ...employeeInvitationToolsForSession(session),
+      // ---- end employee invitations ----
+      // ---- first-use onboarding (mcp/onboarding.ts) ----
+      ...onboardingToolsForSession(session),
+      // ---- end first-use onboarding ----
+      // ---- update notices (mcp/update-notices.ts) ----
+      ...updateToolsForSession(session),
+      // ---- end update notices ----
       ...guideToolsForSession(session).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -2689,7 +4428,7 @@ function buildServer(
         },
       })),
       // Derived tools: definition rows projected per session and per tenant.
-      ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
+      ...(await derivedToolsForSession(db, session, tables, locale)).map((tool) => ({
         name: tool.name,
         ...(tool.title ? { title: tool.title } : {}),
         description: tool.description,
@@ -2712,22 +4451,29 @@ function buildServer(
         inputSchema: tool.inputSchema,
         annotations: { title: tool.title, ...tool.annotations },
       })),
-      ...catalog.operationTools
-        .filter(
-          (tool) =>
-            operations.has(tool.key) && operationMayInvoke(tool, session),
-        )
-        .map((tool) => ({
-          name: tool.name,
-          title: tool.title,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-          annotations: { title: tool.title, ...tool.annotations },
-        })),
+      ...(operationToolProjection.mode === "dedicated"
+        ? catalog.operationTools
+            .filter(
+              (tool) =>
+                operations.has(tool.key) && operationMayInvoke(tool, session),
+            )
+            .map(projectCatalogOperationTool)
+        : modulePlatform && searchableStaticOperationIds.size > 0
+        ? searchableOperationTools(searchableOperationToolNames)
+        : []),
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
+      if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
+      if (EDIT_LEASE_TOOL_NAMES.includes(name as (typeof EDIT_LEASE_TOOL_NAMES)[number])) {
+        return "operation";
+      }
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
+        return "operation";
+      if (
+        operationToolProjection.mode === "searchable" &&
+        Object.values(searchableOperationToolNames).includes(name)
+      )
         return "operation";
       if (
         connectorToolsForSession(listConnectorContracts(), {
@@ -2743,8 +4489,13 @@ function buildServer(
       projectionContext(),
     );
     await assertModuleToolNamesAvailable(projectedModuleTools);
-    const sourced: SourcedTool[] = [
+    const sourced: ListedTool[] = [
       ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
+      ...runtimeOperationTools.map(({ definition, tool }) => ({
+        tool,
+        source: "operation" as const,
+        runtimeOperation: definition,
+      })),
       ...projectedModuleTools,
     ];
     assertUniqueToolNames(sourced);
@@ -2754,7 +4505,7 @@ function buildServer(
       projectionContext(),
     );
     assertUniqueToolNames(decorated);
-    return decorated;
+    return decorated as ListedTool[];
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -2769,6 +4520,13 @@ function buildServer(
     selectedOptions?: ModuleToolExecutionOptions,
     assertParentInvocationActive?: () => void,
     signal?: AbortSignal,
+    bypassInterceptors = false,
+    idempotencyKey?: string,
+    compatibilityCall = false,
+    internalDerivedDefinition?: {
+      entry: DerivedToolsCatalogEntry;
+      row: Record<string, unknown>;
+    },
   ): Promise<ModuleToolExecutionResult> => {
     signal?.throwIfAborted();
     assertParentInvocationActive?.();
@@ -2784,7 +4542,174 @@ function buildServer(
     assertInterceptorActive?.();
     const selectedReference = selected?.sourceReference;
     const egressSource = egressSourceFromResolvedInvocation(selected);
-    const captured = selected?.internal as CapturedDerivedExecution | undefined;
+    const leadCapture = selected?.internal as CapturedDerivedExecution | undefined;
+    // --- session-info (whoami / osf://session): no arguments, no roles ---
+    if (name === SESSION_INFO_TOOL_NAME) {
+      try {
+        return sessionInfoToolResult(await sessionInfo());
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    if (name === ARTIFACT_UPLOAD_TOOL_NAME && canUploadArtifacts) {
+      try {
+        const keyring = elicitedKeyring();
+        if (!keyring) {
+          throw new HttpError(
+            503,
+            "SECRET_STORAGE_NOT_CONFIGURED",
+            "Secure upload handoffs are not configured.",
+          );
+        }
+        const minted = await mintArtifactUpload({
+          db,
+          keyring,
+          session,
+          origin: callbackOrigin(),
+        });
+        if (supportsMcpApp(server) && publicOriginIsHttps()) {
+          return {
+            content: [{ type: "text", text: "A private document upload control is ready." }],
+            _meta: {
+              uploadUrl: minted.uploadUrl,
+              expiresAt: minted.expiresAt,
+            },
+          };
+        }
+        return {
+          content: [{
+            type: "text",
+            text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
+          }],
+          structuredContent: {
+            pending: true,
+            uploadUrl: minted.uploadUrl,
+            expiresAt: minted.expiresAt,
+          },
+        };
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    // --- end session-info ---
+    const editLeaseOutcome = await (async () => {
+      try {
+        return await callEditLeaseTool(
+          name,
+          (request.params.arguments ?? {}) as Record<string, unknown>,
+          db,
+          session,
+          allowedEditLeaseOperationIds,
+        );
+      } catch (error) {
+        return failed(error);
+      }
+    })();
+    if (editLeaseOutcome) {
+      return "content" in editLeaseOutcome
+        ? editLeaseOutcome as ToolResult
+        : ok({ data: editLeaseOutcome, operations: [] });
+    }
+    if (
+      operationToolProjection.mode === "searchable" &&
+      name === searchableOperationToolNames.search
+    ) {
+      if (!modulePlatform) {
+        return failed(
+          new HttpError(
+            503,
+            "OPERATION_UNAVAILABLE",
+            "The canonical Operation runtime is unavailable.",
+          ),
+        );
+      }
+      try {
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        const definitions = await modulePlatform.services.operations.list(
+          moduleSession,
+        );
+        return ok(searchOperationDefinitions({
+          definitions,
+          allowedIds: searchableStaticOperationIds,
+          arguments: request.params.arguments ?? {},
+          locale,
+        }));
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    if (
+      operationToolProjection.mode === "searchable" &&
+      name === searchableOperationToolNames.execute
+    ) {
+      if (!modulePlatform) {
+        return failed(
+          new HttpError(
+            503,
+            "OPERATION_UNAVAILABLE",
+            "The canonical Operation runtime is unavailable.",
+          ),
+        );
+      }
+      try {
+        const parsed = parseOperationExecuteArguments(
+          request.params.arguments ?? {},
+        );
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        const definition = searchableStaticOperationIds.has(parsed.operationId)
+          ? await modulePlatform.services.operations.get(
+              moduleSession,
+              parsed.operationId,
+            )
+          : undefined;
+        if (!definition || !searchableStaticOperationIds.has(definition.id)) {
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            "The requested Operation is not available.",
+          );
+        }
+        const result = await modulePlatform.services.operations.execute(
+          moduleSession,
+          {
+            operation: { id: definition.id, intent: definition.intent },
+            input: parsed.input,
+            ...(parsed.idempotencyKey
+              ? { idempotencyKey: parsed.idempotencyKey }
+              : {}),
+          },
+          signal ? { signal } : {},
+        );
+        return runtimeOperationToolResult(result);
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    if (current?.runtimeOperation) {
+      if (!modulePlatform) {
+        return failed(
+          new HttpError(
+            503,
+            "OPERATION_UNAVAILABLE",
+            "The canonical Operation runtime is unavailable.",
+          ),
+        );
+      }
+      assertParentInvocationActive?.();
+      assertInterceptorActive?.();
+      const definition = current.runtimeOperation;
+      const result = await modulePlatform.services.operations.execute(
+        moduleSession,
+        {
+          operation: { id: definition.id, intent: definition.intent },
+          input: request.params.arguments ?? {},
+        },
+        signal ? { signal } : {},
+      );
+      return runtimeOperationToolResult(result);
+    }
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -2810,7 +4735,7 @@ function buildServer(
             ...(modulePlatform ? { platform: modulePlatform.services } : {}),
           },
         );
-        return ok(result.value);
+        return operationToolResult(result);
       } catch (error) {
         return failed(error);
       }
@@ -2867,6 +4792,9 @@ function buildServer(
         const toolArg = (
           request.params.arguments as Record<string, unknown> | undefined
         )?.tool;
+        const requestedConnectionScope = (
+          request.params.arguments as Record<string, unknown> | undefined
+        )?.connectionScope;
         if (typeof toolArg !== "string" || toolArg.length === 0) {
           throw new HttpError(
             400,
@@ -2884,6 +4812,7 @@ function buildServer(
           db,
           session,
           tables,
+          locale,
         );
         const target = projectedTools.find(
           (tool) =>
@@ -3059,12 +4988,16 @@ function buildServer(
             requiredScopesByProvider.get(providerRowId) ?? new Set<string>();
           const providerRow = signIn.row;
           const auth = signIn.auth;
-          const scope_ = connectionScopeOf(auth);
+          const declaredScope = connectionScopeOf(auth);
+          const scope_ =
+            declaredScope === "both"
+              ? requestedConnectionScope === "organization"
+                ? "tenant"
+                : "user"
+              : declaredScope;
           if (
             scope_ === "tenant" &&
-            !connectEntry.connect!.roles.some((role) =>
-              (session.roles ?? []).includes(role),
-            )
+            !isOrganizationAdministrator(session.roles)
           ) {
             throw new HttpError(
               403,
@@ -3108,12 +5041,15 @@ function buildServer(
             );
           }
 
-          const connectionRows = await runtimeRowsByFilter(
-            db,
-            session,
-            tables,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerRowId },
+          const connectionRows = normalizeConnectionValueRows(
+            await runtimeRowsByFilter(
+              db,
+              session,
+              tables,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerRowId },
+            ),
+            execution.connectionValuesField,
           );
           const existingForScope =
             scope_ === "user"
@@ -3147,11 +5083,38 @@ function buildServer(
           const secretScope =
             entityForTable(execution.connectionTable)?.elicitOnCreate
               ?.sourceTable ?? execution.providerTable;
-          const credentials = readClientCredentials(
-            tenantConnection,
-            execution.connectionValuesField,
-            secretScope,
-          );
+          let credentials: ReturnType<typeof readClientCredentials>;
+          try {
+            credentials = readClientCredentials(
+              tenantConnection,
+              execution.connectionValuesField,
+              secretScope,
+            );
+          } catch (error) {
+            if (error instanceof HttpError && error.code === "CONNECTION_MISSING") {
+              throw await organizationConnectionProblem({
+                db,
+                session,
+                tables,
+                execution,
+                entry: connectEntry,
+                providerRow,
+                ...(tenantConnection
+                  ? {
+                      missingValues: missingRequiredConnectionValues(
+                        providerRow[
+                          entityForTable(execution.connectionTable)?.elicitOnCreate
+                            ?.definitionsField ?? ""
+                        ],
+                        auth,
+                        tenantConnection[execution.connectionValuesField],
+                      ),
+                    }
+                  : {}),
+              });
+            }
+            throw error;
+          }
 
           // Provider OAuth endpoints are routinely per-tenant
           // (https://{subdomain}.provider.com/...): placeholders resolve from
@@ -3279,7 +5242,7 @@ function buildServer(
         if (typeof args.tool === "string" && args.tool.length > 0) {
           const wanted = deriveToolName(args.tool) ?? args.tool;
           const projected = (
-            await derivedToolsForSession(db, session, tables)
+            await derivedToolsForSession(db, session, tables, locale)
           ).find(
             (tool) =>
               tool.name === wanted && tool.table === personalizationEntry.table,
@@ -3413,6 +5376,7 @@ function buildServer(
           rows,
           new Set(catalog.tools.map((tool) => tool.name)),
           session.roles ?? [],
+          locale,
         ).find((tool) => tool.name === wantedName);
         const definitionRow = target
           ? rows.find((row) => String(row.id ?? "") === target.rowId)
@@ -3494,12 +5458,15 @@ function buildServer(
             });
             continue;
           }
-          const connectionRows = await runtimeRowsByFilter(
-            db,
-            session,
-            tables,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerId },
+          const connectionRows = normalizeConnectionValueRows(
+            await runtimeRowsByFilter(
+              db,
+              session,
+              tables,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerId },
+            ),
+            execution.connectionValuesField,
           );
           const tenantConnection = connectionRows.find(
             (row) => !row.ownerUserId,
@@ -3533,9 +5500,11 @@ function buildServer(
               auth: { scheme: "bearer", tokenFrom: "accessToken" },
             };
             notes.push(
-              connectionScopeOf(providerAuth) === "user"
-                ? "Executing uses the caller's personal sign-in token as the bearer value."
-                : "Executing uses the tenant sign-in token as the bearer value.",
+              connectionScopeOf(providerAuth) === "both"
+                ? "Execution can use an explicitly selected personal or organization sign-in token."
+                : connectionScopeOf(providerAuth) === "user"
+                  ? "Executing uses the caller's personal sign-in token as the bearer value."
+                  : "Executing uses the tenant sign-in token as the bearer value.",
             );
           }
           try {
@@ -3582,6 +5551,55 @@ function buildServer(
       }
     }
 
+    // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+    const identityLinkOutcome = await callIdentityLinkTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+    );
+    if (identityLinkOutcome) return identityLinkOutcome as ToolResult;
+    // ---- end identity ↔ Relation link ----
+
+    // ---- organization profile (mcp/organization-profile-tools.ts) ----
+    const organizationProfileOutcome = await callOrganizationProfileTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+    );
+    if (organizationProfileOutcome) return organizationProfileOutcome as ToolResult;
+    // ---- end organization profile ----
+
+    // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+    const employeeInvitationOutcome = await callEmployeeInvitationTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+      employeeInvitationKeycloakClient(),
+    );
+    if (employeeInvitationOutcome) return employeeInvitationOutcome as ToolResult;
+    // ---- end employee invitations ----
+
+    // ---- first-use onboarding (mcp/onboarding.ts) ----
+    const onboardingOutcome = await callOnboardingTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      onboarding,
+    );
+    if (onboardingOutcome) return onboardingOutcome as ToolResult;
+    // ---- end first-use onboarding ----
+
+    // ---- update notices (mcp/update-notices.ts) ----
+    const updateOutcome = await callUpdateTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      updateNotices,
+    );
+    if (updateOutcome) return updateOutcome as ToolResult;
+    // ---- end update notices ----
+
     const guideTool = catalogGuideTools.find((tool) => tool.name === name);
     if (guideTool) {
       if (!guideToolsForSession(session).includes(guideTool)) {
@@ -3616,6 +5634,33 @@ function buildServer(
         });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         const serialized = serializeRow(table, row);
+        // The platform-owned native provider has no schema document to
+        // fetch: its "API" is this deployment's own generated operation
+        // catalog, listed the way a Capability's operation.nativeOperation
+        // names them and filtered to what this session may invoke.
+        if (serialized.transport === "native") {
+          const operations = catalog.tools
+            .filter((tool) => {
+              const toolTable = tables.get(tool.table);
+              return toolTable
+                ? sessionMayInvoke(toolTable, tool.operation, session)
+                : false;
+            })
+            .map((tool) => ({
+              nativeOperation: tool.operationId ?? tool.name,
+              ...(tool.operationId && tool.operationId !== tool.name
+                ? { legacyNativeOperation: tool.name }
+                : {}),
+              operation: tool.operation,
+              entity: tool.entity,
+              description: tool.description,
+            }));
+          return ok({
+            discovery: "native",
+            operationCount: operations.length,
+            operations,
+          });
+        }
         return ok(
           await discoverProviderSchema(serialized, fetch, {
             owner: egressOwner,
@@ -3735,7 +5780,20 @@ function buildServer(
       }
     }
 
-    const match = catalog.tools.find((tool) => tool.name === name);
+    // A generic (`osf_*`) name is carried by one catalog entry per entity, so
+    // the `entity` argument is what picks the entry — bounded to the entities
+    // this session may invoke the operation on.
+    let match: CatalogTool | undefined;
+    try {
+      match = resolveCrudTool(
+        name,
+        (request.params.arguments ?? {}) as Record<string, unknown>,
+        session,
+        tables,
+      );
+    } catch (error) {
+      return failed(error);
+    }
     const table = match ? tables.get(match.table) : undefined;
     // An unknown tool and one the caller may not invoke get the same answer:
     // the listing already omitted both, so distinguishing them would leak
@@ -3751,11 +5809,29 @@ function buildServer(
       // not exist yet, so the honest answer is a clear failure, not a stub
       // success an agent would act on.
       if (catalogDerivedTools.length > 0) {
-        let derived = (
-          await derivedToolsForSession(db, session, tables)
-        ).find((tool) => tool.name === name);
-        if (captured) {
-          const hidden = captured;
+        let derived = internalDerivedDefinition
+          ? {
+              name,
+              description: String(
+                internalDerivedDefinition.row[
+                  internalDerivedDefinition.entry.descriptionField
+                ] ?? name,
+              ),
+              inputSchema: inputSchemaFromStoredFields(
+                internalDerivedDefinition.row[
+                  internalDerivedDefinition.entry.inputFieldsField
+                ],
+                locale,
+              ),
+              entity: internalDerivedDefinition.entry.entity,
+              table: internalDerivedDefinition.entry.table,
+              rowId: String(internalDerivedDefinition.row.id ?? ""),
+            }
+          : (
+              await derivedToolsForSession(db, session, tables, locale)
+            ).find((tool) => tool.name === name);
+        if (leadCapture) {
+          const hidden = leadCapture;
           if (deriveToolName(hidden.serviceRow[hidden.entry.keyField]) === name) {
             derived = {
               name,
@@ -3763,6 +5839,7 @@ function buildServer(
                 String(hidden.serviceRow[hidden.entry.descriptionField] ?? ""),
               inputSchema: inputSchemaFromStoredFields(
                 hidden.serviceRow[hidden.entry.inputFieldsField],
+                locale,
               ),
               entity: hidden.entry.entity,
               table: hidden.entry.table,
@@ -3772,7 +5849,8 @@ function buildServer(
         }
         if (derived) {
           const entry =
-            captured?.entry ??
+            leadCapture?.entry ??
+            internalDerivedDefinition?.entry ??
             catalogDerivedTools.find(
               (candidate) => candidate.table === derived.table,
             );
@@ -3796,7 +5874,8 @@ function buildServer(
             assertSchemaValid(derived.inputSchema, args, "arguments");
 
             const serviceRow =
-              captured?.serviceRow ??
+              leadCapture?.serviceRow ??
+              internalDerivedDefinition?.row ??
               (await runtimeRowByFilter(
                 db,
                 session,
@@ -3818,21 +5897,94 @@ function buildServer(
               binding: number;
               outcome: ReturnType<typeof unavailableOutcome>;
             }[] = [];
-            for (const binding of orderedBindings(
+            const selectedBindings = orderedBindings(
               serviceRow,
               execution.bindingsField,
-            )) {
-              if (
-                selected &&
-                Number(binding.order ?? 0) !== selected.binding
-              ) {
-                continue;
-              }
               // A binding the call's selector input does not choose is not
               // part of this call at all — deliberate routing, not an
               // outage, so it does not surface in `unavailable`.
-              if (!bindingSelected(binding, args as Record<string, unknown>))
+            ).filter((binding) =>
+              bindingSelected(binding, args as Record<string, unknown>),
+            );
+            // Which bindings this handle stands for. Two selection modes,
+            // two meanings: `all-authorized` hands out one handle per
+            // (binding, provider) and the caller composes the union — a
+            // handle runs ONLY its binding, or a read would fan out N times.
+            // A `default` handle stands for the composed call: every
+            // selected binding runs in order, each with the one provider the
+            // vault chose for it (`composition.steps`). That composition is
+            // what makes a two-step mutation service actually take both
+            // steps; a query-only definition keeps the one-binding contract
+            // so an existing union read is not run twice.
+            const composition = selected?.composition;
+            const stepCaptures = new Map<
+              number,
+              {
+                capture: CapturedDerivedExecution;
+                source: { sourceReference: string; scope: "tenant" | "personal" };
+              }
+            >();
+            if (selected && leadCapture) {
+              stepCaptures.set(selected.binding, {
+                capture: leadCapture,
+                source: selected,
+              });
+            }
+            const composedCall =
+              composition !== undefined &&
+              [
+                leadCapture,
+                ...composition.steps.map(
+                  (step) => step.internal as CapturedDerivedExecution | undefined,
+                ),
+              ].some((capture) => capture?.operationRow.kind === "mutation");
+            if (composedCall) {
+              for (const step of composition.steps) {
+                const capture = step.internal as CapturedDerivedExecution | undefined;
+                if (capture) stepCaptures.set(step.binding, { capture, source: step });
+              }
+              // Fail before the first write when a required step has no
+              // usable source: a gap known up front must never become a
+              // half-done call.
+              for (const binding of selectedBindings) {
+                const order = Number(binding.order ?? 0);
+                if (stepCaptures.has(order) || binding.optional === true) continue;
+                throw compositionGapError(
+                  name,
+                  order,
+                  composition.unavailable.find((gap) => gap.binding === order),
+                );
+              }
+            }
+            const completed: CompletedStep[] = [];
+            const bindingsToRun = composedCall || !selected
+              ? selectedBindings
+              : selectedBindings.filter(
+                  (binding) => Number(binding.order ?? 0) === selected.binding,
+                );
+            for (const [position, binding] of bindingsToRun.entries()) {
+              const order = Number(binding.order ?? 0);
+              const step = stepCaptures.get(order);
+              const captured = step?.capture;
+              const stepEgressSource = step
+                ? egressSourceFromResolvedInvocation(step.source)
+                : egressSource;
+              if (composedCall && !step) {
+                // Optional and without a source: skipped, and said so — the
+                // required case was refused above.
+                unavailable.push({
+                  binding: order,
+                  outcome: unavailableOutcome(
+                    compositionGapError(
+                      name,
+                      order,
+                      composition.unavailable.find((gap) => gap.binding === order),
+                    ),
+                  ),
+                });
                 continue;
+              }
+              let operationLabel = `binding ${order}`;
               try {
                 const operationId = binding[execution.operationRef];
                 const operationRow = captured
@@ -3855,6 +6007,7 @@ function buildServer(
                     `A binding references a missing ${execution.operationEntity}.`,
                   );
                 }
+                operationLabel = operationDisplayKey(operationRow);
                 const providerId = operationRow[execution.providerRef];
                 const providerRow = captured
                   ? captured.providerRow
@@ -3878,27 +6031,30 @@ function buildServer(
                 }
                 let connectionRows = captured
                   ? captured.connectionRows
-                  : await runtimeRowsByFilter(
-                      db,
-                      session,
-                      tables,
-                      execution.connectionTable,
-                      { [execution.connectionProviderRef]: providerId },
+                  : normalizeConnectionValueRows(
+                      await runtimeRowsByFilter(
+                        db,
+                        session,
+                        tables,
+                        execution.connectionTable,
+                        { [execution.connectionProviderRef]: providerId },
+                      ),
+                      execution.connectionValuesField,
                     );
                 const providerAuth = (providerRow.auth ?? null) as Record<
                   string,
                   unknown
                 > | null;
                 if (selectedReference && session.tenantId && !captured) {
-                  const personalSource =
-                    connectionScopeOf(providerAuth) === "user";
                   connectionRows = connectionRows.filter((row) =>
                     sameInvocationSourceReference(
                       selectedReference,
                       mintInvocationSourceReference({
                         tenantId: session.tenantId!,
-                        actorId: personalSource ? session.userId : null,
-                        scope: personalSource ? "personal" : "tenant",
+                        actorId:
+                          row.ownerUserId === session.userId ? session.userId : null,
+                        scope:
+                          row.ownerUserId === session.userId ? "personal" : "tenant",
                         connectionTable: execution.connectionTable,
                         connectionId: String(row.id),
                       }),
@@ -3912,8 +6068,27 @@ function buildServer(
                 let connectionValues: unknown;
                 let secretScope = elicitScope;
                 let oauthConnectionAudit: ConnectionTokenAudit | undefined;
+                const selectedConnectionId = captured?.selectedConnectionId;
+                const selectedConnection = selectedConnectionId
+                  ? connectionRows.find((row) => row.id === selectedConnectionId)
+                  : connectionRows.length === 1
+                    ? connectionRows[0]
+                    : undefined;
+                const declaredScope = connectionScopeOf(providerAuth);
+                if (declaredScope === "both" && !selectedConnection) {
+                  throw new HttpError(
+                    400,
+                    "CONNECTION_AMBIGUOUS",
+                    "Choose one authorized personal or organization connection for this mutation.",
+                  );
+                }
+                const personalExecution =
+                  declaredScope === "user" ||
+                  (declaredScope === "both" &&
+                    selectedConnection?.ownerUserId === session.userId);
+                const effectiveScope = personalExecution ? "user" : "tenant";
 
-                if (connectionScopeOf(providerAuth) === "user") {
+                if (personalExecution) {
                   // Every personal auth profile resolves ONLY the caller's
                   // captured connection. OAuth adds tenant support/config and
                   // refresh below; API-key/header/basic profiles use this same
@@ -3924,11 +6099,35 @@ function buildServer(
                     session.userId,
                   );
                   if (!personal) {
-                    throw new HttpError(
-                      403,
-                      "CONNECTION_REQUIRED",
-                      `This tool needs your personal ${String(providerRow.name ?? "provider")} connection.`,
+                    // The organization's side comes first: a person cannot
+                    // sign in at a provider whose shared configuration (the
+                    // OAuth client, say) nobody has created yet.
+                    const needs = connectionNeedsOf(
+                      providerAuth,
+                      providerRow[
+                        entityForTable(execution.connectionTable)?.elicitOnCreate
+                          ?.definitionsField ?? ""
+                      ],
                     );
+                    if (
+                      needs.organization &&
+                      !connectionRows.some((row) => !row.ownerUserId)
+                    ) {
+                      throw await organizationConnectionProblem({
+                        db,
+                        session,
+                        tables,
+                        execution,
+                        entry,
+                        providerRow,
+                      });
+                    }
+                    throw connectionProblemError({
+                      kind: "personal_missing",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                    });
                   }
                   if (providerAuth?.profile !== "oauth2AuthorizationCode") {
                     connectionValues =
@@ -3946,13 +6145,12 @@ function buildServer(
                   let values = (personal?.[execution.connectionValuesField] ??
                     null) as Record<string, unknown> | null;
                   if (!values?.accessToken) {
-                    throw new HttpError(
-                      403,
-                      "CONNECTION_REQUIRED",
-                      `This tool needs your personal ${String(providerRow.name ?? "provider")} ` +
-                        `connection. Call ${entry?.connect?.name ?? "the connect tool"} with ` +
-                        `{"tool":"${name}"} to start it.`,
-                    );
+                    throw connectionProblemError({
+                      kind: "personal_missing",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                    });
                   }
                   if (
                     accessTokenNeedsRefresh(
@@ -3964,11 +6162,29 @@ function buildServer(
                     const tenantConnection = connectionRows.find(
                       (row) => !row.ownerUserId,
                     );
-                    const credentials = readClientCredentials(
-                      tenantConnection,
-                      execution.connectionValuesField,
-                      elicitScope,
-                    );
+                    let credentials: ReturnType<typeof readClientCredentials>;
+                    try {
+                      credentials = readClientCredentials(
+                        tenantConnection,
+                        execution.connectionValuesField,
+                        elicitScope,
+                      );
+                    } catch (error) {
+                      if (
+                        error instanceof HttpError &&
+                        error.code === "CONNECTION_MISSING"
+                      ) {
+                        throw await organizationConnectionProblem({
+                          db,
+                          session,
+                          tables,
+                          execution,
+                          entry,
+                          providerRow,
+                        });
+                      }
+                      throw error;
+                    }
                     if (!keyring || typeof providerAuth.tokenUrl !== "string") {
                       throw new HttpError(
                         400,
@@ -3994,6 +6210,7 @@ function buildServer(
                         "INTERNAL",
                         "Connection table is missing.",
                       );
+                    try {
                     values = await refreshConnectionRowLocked({
                       db,
                       session,
@@ -4024,6 +6241,14 @@ function buildServer(
                         },
                         ...(signal ? { signal } : {}),
                       });
+                    } catch (error) {
+                      throw reauthorizationProblem(error, {
+                        adapter: providerDisplayName(providerRow, execution),
+                        toolName: name,
+                        connectTool: entry?.connect?.name ?? null,
+                        scope: "user",
+                      });
+                    }
                   }
                   // The personal connection holds only tokens; tenant-owned
                   // NON-secret configuration (subdomain and friends) still
@@ -4061,12 +6286,14 @@ function buildServer(
                     session.userId,
                   );
                   if (!tenantConnection) {
-                    throw new HttpError(
-                      400,
-                      "CONNECTION_MISSING",
-                      `No ${execution.connectionEntity} is configured for this ` +
-                        `${execution.providerEntity}; an administrator must create one first.`,
-                    );
+                    throw await organizationConnectionProblem({
+                      db,
+                      session,
+                      tables,
+                      execution,
+                      entry,
+                      providerRow,
+                    });
                   }
                   oauthConnectionAudit = {
                     sourceTable: execution.providerTable,
@@ -4084,13 +6311,13 @@ function buildServer(
                       unknown
                     > | null;
                     if (!tenantValues?.accessToken) {
-                      throw new HttpError(
-                        403,
-                        "CONNECTION_REQUIRED",
-                        `This provider needs a one-time sign-in for the whole tenant. ` +
-                          `An administrator calls ${entry?.connect?.name ?? "the connect tool"} ` +
-                          `with {"tool":"${name}"} and approves at the provider.`,
-                      );
+                      throw connectionProblemError({
+                        kind: "tenant_sign_in",
+                        adapter: providerDisplayName(providerRow, execution),
+                        toolName: name,
+                        connectTool: entry?.connect?.name ?? null,
+                        administrator: isOrganizationAdministrator(session.roles),
+                      });
                     }
                     if (
                       accessTokenNeedsRefresh(
@@ -4099,11 +6326,37 @@ function buildServer(
                       )
                     ) {
                       const keyring = elicitedKeyring();
-                      const credentials = readClientCredentials(
-                        tenantConnection,
-                        execution.connectionValuesField,
-                        elicitScope,
-                      );
+                      let credentials: ReturnType<typeof readClientCredentials>;
+                      try {
+                        credentials = readClientCredentials(
+                          tenantConnection,
+                          execution.connectionValuesField,
+                          elicitScope,
+                        );
+                      } catch (error) {
+                        if (
+                          error instanceof HttpError &&
+                          error.code === "CONNECTION_MISSING"
+                        ) {
+                          throw await organizationConnectionProblem({
+                            db,
+                            session,
+                            tables,
+                            execution,
+                            entry,
+                            providerRow,
+                            missingValues: missingRequiredConnectionValues(
+                              providerRow[
+                                entityForTable(execution.connectionTable)
+                                  ?.elicitOnCreate?.definitionsField ?? ""
+                              ],
+                              providerAuth,
+                              tenantConnection[execution.connectionValuesField],
+                            ),
+                          });
+                        }
+                        throw error;
+                      }
                       const connectionTableDef = tables.get(
                         execution.connectionTable,
                       );
@@ -4127,6 +6380,7 @@ function buildServer(
                         ],
                         elicitScope,
                       );
+                      try {
                       tenantValues = await refreshConnectionRowLocked({
                         db,
                         session,
@@ -4158,6 +6412,14 @@ function buildServer(
                         },
                         ...(signal ? { signal } : {}),
                       });
+                      } catch (error) {
+                        throw reauthorizationProblem(error, {
+                          adapter: providerDisplayName(providerRow, execution),
+                          toolName: name,
+                          connectTool: entry?.connect?.name ?? null,
+                          scope: "tenant",
+                        });
+                      }
                     }
                     // The row mixes AAD scopes: elicited fields were encrypted
                     // under the elicitation scope, tokens under the personal
@@ -4207,13 +6469,21 @@ function buildServer(
                         .grantedScopes
                     : undefined;
                 if (!scopesCovered(operationScopes, grantedScopes)) {
-                  throw new HttpError(
-                    403,
-                    "REAUTHORIZATION_REQUIRED",
-                    `The connection does not cover required scopes: ${operationScopes.join(", ")}.`,
-                  );
+                  throw connectionProblemError({
+                    kind: "reauthorization",
+                    adapter: providerDisplayName(providerRow, execution),
+                    toolName: name,
+                    connectTool: entry?.connect?.name ?? null,
+                    scope: effectiveScope,
+                    reason: `does not cover the required scopes: ${operationScopes.join(", ")}`,
+                  });
                 }
 
+                const stepIdempotencyKey = idempotencyKey
+                  ? createHash("sha256")
+                      .update(`${idempotencyKey}\0${order}\0${operationLabel}`)
+                      .digest("hex")
+                  : undefined;
                 let outputs;
                 try {
                   assertParentInvocationActive?.();
@@ -4224,6 +6494,72 @@ function buildServer(
                     providerRow: providerForExecution,
                     connectionValues,
                     serviceInputs: { ...args, ...accumulated },
+                    // The platform-owned native provider: run the generated
+                    // operation in-process through the same executor an
+                    // entity tool call uses, under the caller's own session —
+                    // roles, tenant and row-level identity all preserved.
+                    native: async (operationKey, inputs) => {
+                      const nativeTool = resolveNativeCrudTool(
+                        operationKey,
+                        inputs,
+                      );
+                      const nativeTable = nativeTool
+                        ? tables.get(nativeTool.table)
+                        : undefined;
+                      if (!nativeTool || !nativeTable) {
+                        // Not an entity tool: a plugin operation by key. It
+                        // runs through the operation runtime exactly as its
+                        // own transports would (roles, tenancy, contract
+                        // validation), whether or not it carries a dedicated
+                        // MCP tool — that is what lets a Service hand the
+                        // model an operation's content blocks without
+                        // spending a slot of the dedicated-tool budget.
+                        const bound = operations.get(operationKey);
+                        if (!bound) {
+                          throw new HttpError(
+                            400,
+                            "OPERATION_MISCONFIGURED",
+                            `Native operation "${operationKey}" is not a generated operation of this deployment.`,
+                          );
+                        }
+                        requireOperationAuthorization(bound.operation, moduleSession);
+                        const operationInputs =
+                          stepIdempotencyKey &&
+                            bound.operation.idempotency.mode === "idempotency-key"
+                            ? {
+                                ...inputs,
+                                [bound.operation.idempotency.inputField!]:
+                                  stepIdempotencyKey,
+                              }
+                            : inputs;
+                        const produced = await invokeOperation(bound, operationInputs, {
+                          db,
+                          session: moduleSession,
+                          transport: "mcp",
+                          ...(modulePlatform
+                            ? { platform: modulePlatform.services }
+                            : {}),
+                        });
+                        return nativeOperationOutput(produced);
+                      }
+                      // `entity` picked the catalog entry; it is not a
+                      // column, so it is dropped before the per-entity shape
+                      // is built — the same split a direct call makes.
+                      const nativeArgs = nativeToolArguments(
+                        nativeTool.operation,
+                        withoutEntitySelector(nativeTool, inputs) ?? {},
+                      );
+                      const produced = await invokeTool(
+                        nativeTool,
+                        entityForTable(nativeTool.table),
+                        nativeTable,
+                        tables,
+                        db,
+                        session,
+                        nativeArgs,
+                      );
+                      return nativeToolOutput(produced);
+                    },
                     secretScope,
                     providerDefinitions:
                       providerRow[
@@ -4240,9 +6576,12 @@ function buildServer(
                         operation: String(operationRow.id ?? operationRow.key ?? "operation"),
                         kind: operationRow.kind === "mutation" ? "mutation" : "query",
                       },
-                      ...(egressSource ? { source: egressSource } : {}),
+                      ...(stepEgressSource ? { source: stepEgressSource } : {}),
                     },
                     ...(signal ? { signal } : {}),
+                    ...(stepIdempotencyKey
+                      ? { idempotencyKey: stepIdempotencyKey }
+                      : {}),
                   });
                 } catch (error) {
                   if (error instanceof SecretError && oauthConnectionAudit) {
@@ -4256,24 +6595,59 @@ function buildServer(
                     } catch {
                       // Stable recovery guidance must survive an audit outage.
                     }
-                    throw new HttpError(
-                      403,
-                      "REAUTHORIZATION_REQUIRED",
-                      "This connection's stored authorization is unreadable and must be authorized again.",
-                    );
+                    throw connectionProblemError({
+                      kind: "reauthorization",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                      scope: effectiveScope,
+                      reason: "is stored in a form this runtime can no longer read",
+                    });
                   }
                   throw error;
                 }
                 mergeOutputs(accumulated, outputs);
-              } catch (error) {
-                if (binding.optional !== true) throw error;
-                unavailable.push({
-                  binding: Number(binding.order ?? 0),
-                  outcome: unavailableOutcome(error),
+                completed.push({
+                  binding: order,
+                  operation: operationLabel,
+                  kind: operationRow.kind === "mutation" ? "mutation" : "query",
+                  outputs,
                 });
+              } catch (error) {
+                if (binding.optional === true) {
+                  unavailable.push({
+                    binding: order,
+                    outcome: unavailableOutcome(error),
+                  });
+                  continue;
+                }
+                // A required step failed after an earlier step already
+                // wrote: the steps are separate transactions, so nothing is
+                // undone — and nothing is hidden either.
+                if (completed.some((done) => done.kind === "mutation")) {
+                  return partial({
+                    tool: name,
+                    total: bindingsToRun.length,
+                    completed,
+                    failed: { binding: order, operation: operationLabel, error },
+                    notRun: bindingsToRun.slice(position + 1).map((later) => {
+                      const laterOrder = Number(later.order ?? 0);
+                      const laterCapture = stepCaptures.get(laterOrder)?.capture;
+                      return {
+                        binding: laterOrder,
+                        ...(laterCapture
+                          ? { operation: operationDisplayKey(laterCapture.operationRow) }
+                          : {}),
+                      };
+                    }),
+                    outputs: accumulated,
+                    unavailable,
+                  });
+                }
+                throw error;
               }
             }
-            return ok(
+            return derivedToolResult(
               unavailable.length > 0
                 ? { ...accumulated, unavailable }
                 : accumulated,
@@ -4309,11 +6683,16 @@ function buildServer(
             `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
               `this setup, and it overrides any cached local instructions or memories.`,
           ),
+          match.outputSchema !== undefined,
         );
       }
     }
+    const crudArguments = withoutEntitySelector(
+      match,
+      request.params.arguments as Record<string, unknown> | undefined,
+    );
     try {
-      let callArguments = request.params.arguments;
+      let callArguments: Record<string, unknown> | undefined = crudArguments;
       let elicitationCompleted = false;
       if (match.operation === "create" && entity?.elicitOnCreate) {
         const elicit = entity.elicitOnCreate;
@@ -4377,9 +6756,29 @@ function buildServer(
             sourceRow,
             values: modelArguments,
             relatedRequestId: extra.requestId,
+            locale,
             ...(messagePrefix ? { messagePrefix } : {}),
           });
           elicitationCompleted = true;
+          // A Connection to a PERSONAL provider belongs to the person who
+          // just entered its values, and to nobody else. Until this existed,
+          // only the OAuth callback set an owner, so a personal provider
+          // configured with a password (an IMAP mailbox, an LDAP bind) landed
+          // as an organization row that row-level security shows to everyone
+          // — the credential of one employee, readable by the next. The owner
+          // comes from the verified session, never from tool input.
+          if (
+            connectionScopeOf(sourceAuth) === "user" &&
+            session.userId &&
+            table.columns.some(
+              (column) => fieldNameForColumn(column) === "ownerUserId",
+            )
+          ) {
+            callArguments = {
+              ...(callArguments as Record<string, unknown>),
+              ownerUserId: session.userId,
+            };
+          }
         } catch (error) {
           const reason = elicitationFallback(error);
           if (!reason || !sourceRow) throw error;
@@ -4418,7 +6817,9 @@ function buildServer(
             "seconds or so — the record exists once they have saved. Only if " +
             "nothing has appeared after about three minutes, ask the person to tell " +
             "you when they are done.";
-          if (supportsMcpApp(server)) {
+          // The private MCP App only where its iframe can render (https
+          // origin); every other client gets the URL in the open.
+          if (supportsMcpApp(server) && publicOriginIsHttps()) {
             return configurationAppResult(
               {
                 ...continuation,
@@ -4431,9 +6832,11 @@ function buildServer(
             );
           }
 
-          return ok({
-            ...continuation,
-            externalUrl: configurationWebUrl(),
+          return configurationHandoffResult({
+            continuation,
+            token: minted.token,
+            expiresInSeconds: minted.expiresInSeconds,
+            definitions,
             instructions:
               configurationFallbackLead(reason, "external") +
               waitInstruction,
@@ -4479,10 +6882,7 @@ function buildServer(
       {
         // Validate what the MODEL sent against the advertised schema — before
         // elicited values join, since those are server-set and outside it.
-        const modelSent = (request.params.arguments ?? {}) as Record<
-          string,
-          unknown
-        >;
+        const modelSent = (crudArguments ?? {}) as Record<string, unknown>;
         const elicitField = entity?.elicitOnCreate?.into;
         const toValidate =
           match.operation === "create" && elicitField
@@ -4492,7 +6892,26 @@ function buildServer(
                 ),
               )
             : modelSent;
-        assertSchemaValid(match.inputSchema, toValidate, "arguments");
+        // Before the advertised schema does: a `writtenBy` field is absent from
+        // that schema, so ajv would call it an additional property and send the
+        // caller hunting for a typo instead of naming the operation.
+        assertOperationWrittenFields(
+          match.operation === "update"
+            ? ((toValidate.values ?? {}) as Record<string, unknown>)
+            : toValidate,
+          table,
+        );
+        const expectedVersionField = match.operationId
+          ? getEntityOperationContracts().find(
+              (operation) => operation.id === match.operationId,
+            )?.concurrency?.version?.field
+          : undefined;
+        assertSchemaValid(
+          match.inputSchema,
+          toValidate,
+          "arguments",
+          expectedVersionField,
+        );
       }
       const outcome = await invokeTool(
         match,
@@ -4519,12 +6938,12 @@ function buildServer(
       }
       return outcome;
     } catch (error) {
-      return failed(error);
+      return failed(error, match.outputSchema !== undefined);
     }
     };
 
     let preselectedReference: ResolvedInvocationSource | undefined;
-    let current: SourcedTool | undefined;
+    let current: ListedTool | undefined;
     try {
       signal?.throwIfAborted();
       const initialSelection = parseModuleToolExecutionOptions(selectedOptions);
@@ -4562,6 +6981,8 @@ function buildServer(
           catalogGuideTools.some((tool) => tool.name === name) ||
           (catalog.discoveryTools ?? []).some((tool) => tool.name === name) ||
           (catalog.testTools ?? []).some((tool) => tool.name === name) ||
+          (operationToolProjection.mode === "searchable" &&
+            Object.values(searchableOperationToolNames).includes(name)) ||
           resolveConnectorTool(listConnectorContracts(), name, {
             roles: session.roles ?? [],
           }) !== undefined;
@@ -4578,17 +6999,68 @@ function buildServer(
               ),
               inputSchema: inputSchemaFromStoredFields(
                 hidden.serviceRow[hidden.entry.inputFieldsField],
+                locale,
               ) as Tool["inputSchema"],
             },
           };
         }
       } else {
         signal?.throwIfAborted();
-        current = (await listedTools()).find((entry) => entry.tool.name === name);
+        current = internalDerivedDefinition
+          ? {
+              source: "derived",
+              tool: {
+                name,
+                description: String(
+                  internalDerivedDefinition.row[
+                    internalDerivedDefinition.entry.descriptionField
+                  ] ?? name,
+                ),
+                inputSchema: inputSchemaFromStoredFields(
+                  internalDerivedDefinition.row[
+                    internalDerivedDefinition.entry.inputFieldsField
+                  ],
+                  locale,
+                ) as Tool["inputSchema"],
+              },
+            }
+          : compatibilityCall && compatibilityToolNames.has(name)
+          ? {
+              source: "operation",
+              tool: {
+                name,
+                description: "Internal compatibility implementation.",
+                inputSchema: { type: "object", additionalProperties: true },
+              },
+            }
+          : await (async (): Promise<ListedTool | undefined> => {
+              const listed = (await listedTools()).find(
+                (entry) => entry.tool.name === name,
+              );
+              if (listed || operationToolProjection.mode !== "searchable") {
+                return listed;
+              }
+              // Searchable projection bounds tools/list, but a previously
+              // integrated client may still call the authored direct name.
+              // Reapply the same live availability guard before selecting it.
+              const direct = catalog.operationTools.find(
+                (tool) => tool.name === name,
+              );
+              return direct &&
+                  operations.has(direct.key) &&
+                  operationMayInvoke(direct, session)
+                ? { source: "operation", tool: projectCatalogOperationTool(direct) }
+                : undefined;
+            })();
         signal?.throwIfAborted();
       }
     } catch (error) {
-      return { result: failed(error) };
+      return {
+        result: failed(
+          error,
+          current?.source !== "crud" || current.tool.outputSchema !== undefined,
+        ),
+      };
     }
     if (!current) {
       return {
@@ -4703,25 +7175,31 @@ function buildServer(
       };
     };
     try {
-      const run = () =>
-        interceptMcpToolCall(
-          runtimeModules,
-          {
-            name,
-            source: current.source,
-            arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
-            ctx,
-          },
-          (options = selectedOptions, assertActive) =>
-            invoke(options, assertActive),
-        );
+      const run = () => bypassInterceptors
+        ? invoke(selectedOptions, assertParentInvocationActive)
+        : interceptMcpToolCall(
+            runtimeModules,
+            {
+              name,
+              source: current.source,
+              arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
+              ctx,
+            },
+            (options = selectedOptions, assertActive) =>
+              invoke(options, assertActive),
+          );
       assertParentInvocationActive?.();
       signal?.throwIfAborted();
       return modulePlatform
         ? await modulePlatform.withActiveInvocation(ctx, run, name)
         : await run();
     } catch (error) {
-      return { result: failed(error) };
+      return {
+        result: failed(
+          error,
+          current.source !== "crud" || current.tool.outputSchema !== undefined,
+        ),
+      };
     }
   };
 
@@ -4734,6 +7212,102 @@ function buildServer(
     );
     return outcome.result;
   });
+
+  const executeDeclarativeService: RuntimeDeclarativeServiceExecutor = async (
+    request,
+    requestId,
+    assertInvocationActive,
+    signal,
+  ) => {
+    signal?.throwIfAborted();
+    assertInvocationActive?.();
+    const toolName = deriveToolName(request.definition.key);
+    if (!toolName) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const current = await compatibilityDefinition(request) ??
+      await derivedDefinition(toolName, true);
+    if (!current) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const definition = definitionFor(current.entry, current.row);
+    if (
+      definition.kind !== request.definition.entity ||
+      definition.id !== request.definition.id ||
+      String(definition.version) !== String(request.definition.version) ||
+      String(current.row[current.entry.keyField] ?? "") !== request.definition.key
+    ) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const selectedOptions = request.sourceReference
+      ? {
+          sourceReference: request.sourceReference,
+          expectedDefinition: definition,
+        }
+      : undefined;
+    const outcome = await dispatchTool(
+      toolName,
+      request.input ?? {},
+      requestId,
+      true,
+      selectedOptions,
+      assertInvocationActive,
+      signal,
+      true,
+      request.idempotencyKey,
+      false,
+      current,
+    );
+    return runtimeOperationResult(outcome.result);
+  };
+  runtimeDeclarativeServiceExecutors.set(server, executeDeclarativeService);
+
+  const executeHostOperation: RuntimeHostOperationExecutor = async (
+    request,
+    requestId,
+    assertInvocationActive,
+    signal,
+  ) => {
+    signal?.throwIfAborted();
+    assertInvocationActive?.();
+    const implementation = compatibilityOperationByKey.get(request.operation);
+    if (!implementation) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
+      ));
+    }
+    const roles = new Set(session.roles);
+    const scopes = new Set(session.oauthScopes ?? []);
+    if (
+      implementation.auth.mode !== "session" ||
+      !implementation.auth.roles.some((role) => roles.has(role)) ||
+      !(implementation.auth.scopes ?? []).every((scope) => scopes.has(scope))
+    ) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
+      ));
+    }
+    const outcome = await dispatchTool(
+      implementation.toolName,
+      request.input ?? {},
+      requestId,
+      true,
+      undefined,
+      assertInvocationActive,
+      signal,
+      true,
+      request.idempotencyKey,
+      true,
+    );
+    return runtimeOperationResult(outcome.result);
+  };
+  runtimeHostOperationExecutors.set(server, executeHostOperation);
 
   modulePlatform?.registerServer({
     server,
@@ -4749,15 +7323,17 @@ function buildServer(
           if (action !== "call" && action !== "invoke") {
             return { allowed: false, code: "NOT_FOUND" };
           }
-          const entityTool = catalog.tools.find(
-            (tool) => tool.name === subject.name,
-          );
-          if (entityTool) {
-            return sessionMayInvoke(
-              tables.get(entityTool.table),
-              entityTool.operation,
-              session,
-            )
+          // A generic `osf_*` name covers several entities, so "may this
+          // session call it" is "may it call the operation on ANY of them" —
+          // the same question the listing answered when it merged them into
+          // one tool. Resolving the name to its first entry instead would
+          // authorize every caller against whichever entity sorts first:
+          // a pentest-only session asking about `osf_list` was measured
+          // against Deal and told NOT_FOUND for a tool it can use.
+          const named = crudToolsNamed(subject.name);
+          if (named.length > 0) {
+            return invocableCrudToolsNamed(subject.name, session, tables)
+              .length > 0
               ? { allowed: true }
               : { allowed: false, code: "NOT_FOUND" };
           }
@@ -4809,7 +7385,28 @@ function buildServer(
             id: subject.id,
           });
           if (!row) return { allowed: false, code: "NOT_FOUND" };
-          if (operation !== "get") return { allowed: true };
+          if (operation !== "get") {
+            const permission = operation === "update" ? "edit" : "delete";
+            if (table.source?.authorization?.recordPermissions) {
+              try {
+                await assertRecordPermission(
+                  db,
+                  session,
+                  table,
+                  subject.id,
+                  permission,
+                );
+              } catch (error) {
+                if (
+                  operationErrorOf(error)?.code === "FORBIDDEN"
+                ) {
+                  return { allowed: false, code: "FORBIDDEN" };
+                }
+                throw error;
+              }
+            }
+            return { allowed: true };
+          }
           const includeClassified = canReadClassifiedColumns(
             table.source?.authorization,
             session,
@@ -4925,6 +7522,94 @@ function buildServer(
   return server;
 }
 
+/**
+ * Host adapter around the one declarative engine. It creates no protocol
+ * transport: the temporary server object only scopes the existing core
+ * catalog/execution closure, while the caller's exact live Operation session
+ * remains the authority for database, OAuth, egress and nested Operations.
+ */
+export function createRuntimeDeclarativeServiceExecutor(input: {
+  db: OpenShapeForgeDatabase;
+  modules: readonly RuntimeModule[];
+  modulePlatform: ModulePlatformRuntime;
+  egressOwner?: RuntimeModule["egress"];
+  /** @internal Test-only generated-table override. */
+  tablesForTests?: Map<string, GeneratedTable>;
+}): (
+  session: TrustedSessionContext,
+  request: RuntimeDeclarativeServiceRequest,
+  options?: RuntimeOperationExecutionOptions,
+) => Promise<RuntimeOperationExecutionResult> {
+  return async (session, request, options) => {
+    const server = buildServer(
+      input.db,
+      session,
+      input.modules,
+      input.modulePlatform,
+      input.egressOwner,
+      undefined,
+      false,
+      input.tablesForTests,
+      null,
+      session,
+    );
+    const execute = runtimeDeclarativeServiceExecutors.get(server);
+    if (!execute) {
+      input.modulePlatform.unregisterServer(server);
+      throw new Error("The core declarative Service executor did not initialise.");
+    }
+    try {
+      return await execute(request, randomUUID(), undefined, options?.signal);
+    } finally {
+      input.modulePlatform.unregisterServer(server);
+      runtimeDeclarativeServiceExecutors.delete(server);
+    }
+  };
+}
+
+/**
+ * Executes a generated internal compatibility handler by canonical Operation
+ * key. The temporary Server scopes existing core state only; no MCP transport
+ * or model-visible tool name is created.
+ */
+export function createRuntimeHostOperationExecutor(input: {
+  db: OpenShapeForgeDatabase;
+  modules: readonly RuntimeModule[];
+  modulePlatform: ModulePlatformRuntime;
+  egressOwner?: RuntimeModule["egress"];
+}): (
+  session: TrustedSessionContext,
+  request: RuntimeHostOperationRequest,
+  options?: RuntimeOperationExecutionOptions,
+) => Promise<RuntimeOperationExecutionResult> {
+  return async (session, request, options) => {
+    const server = buildServer(
+      input.db,
+      session,
+      input.modules,
+      input.modulePlatform,
+      input.egressOwner,
+      undefined,
+      false,
+      undefined,
+      null,
+      session,
+    );
+    const execute = runtimeHostOperationExecutors.get(server);
+    if (!execute) {
+      input.modulePlatform.unregisterServer(server);
+      throw new Error("The core host Operation executor did not initialise.");
+    }
+    try {
+      return await execute(request, randomUUID(), undefined, options?.signal);
+    } finally {
+      input.modulePlatform.unregisterServer(server);
+      runtimeHostOperationExecutors.delete(server);
+      runtimeDeclarativeServiceExecutors.delete(server);
+    }
+  };
+}
+
 /** Direct in-memory transport seam for adversarial runtime-module tests. */
 export function __buildGeneratedMcpServerForTests(input: {
   db: OpenShapeForgeDatabase;
@@ -4934,6 +7619,7 @@ export function __buildGeneratedMcpServerForTests(input: {
   egressOwner?: RuntimeModule["egress"];
   stateful?: boolean;
   tables?: Map<string, GeneratedTable>;
+  operationToolProjection?: OperationToolProjection;
 }): Server {
   return buildServer(
     input.db,
@@ -4944,6 +7630,9 @@ export function __buildGeneratedMcpServerForTests(input: {
     undefined,
     input.stateful ?? true,
     input.tables,
+    null,
+    undefined,
+    input.operationToolProjection,
   );
 }
 
@@ -4962,14 +7651,54 @@ export function registerGeneratedMcpServer(
     return;
   }
 
+  /**
+   * The resource a request is addressed to. `/api/mcp` resolves the tenant
+   * from the token alone (legacy). `/api/mcp/organizations/<alias>` binds the
+   * session to that organization: the token must be a member of it, carry
+   * this resource's URL in `aud` and link to a tenant through the registry
+   * (auth/organization-binding.ts). A refusal there is a 403 with the same
+   * body for every cause, so the path cannot enumerate organizations.
+   */
   async function requireMcpSession(request: FastifyRequest): Promise<{
     db: OpenShapeForgeDatabase;
     session: TrustedSessionContext;
+    resource: string;
   }> {
-    const resolved = await resolveSessionContext(
-      headersFromFastify(request.headers),
-      { db: options.db },
-    );
+    const alias = (request.params as { alias?: unknown } | undefined)?.alias;
+    if (alias !== undefined && !isOrganizationAlias(alias)) {
+      throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
+    }
+    const resource = resourcePathOf(request, alias ?? null);
+    const binding = alias
+      ? { alias, resource: canonicalResourceUri(request, alias) }
+      : null;
+    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
+    // Checked before anything reads the body or the credential, so a refused
+    // media type never becomes an authenticated request.
+    assertJsonRpcContentType(request.method, request.headers["content-type"]);
+    // BOLT 1 (mcp/address.ts). The cookie header is dropped rather than
+    // ignored on every MCP path — the app shares this origin, so the browser
+    // sends its session cookie here whether or not the page meant to — and an
+    // organization resource additionally requires a bearer token, which is the
+    // one credential a page cannot obtain by merely being open.
+    // Order matters: the bearer check reads the ORIGINAL headers, because
+    // "you sent a cookie and no token" is the case worth naming in the answer
+    // and it is invisible once the cookie has been dropped.
+    if (binding) assertBearerCredential(request.headers);
+    const mcpHeaders = withoutCookieIdentity(request.headers);
+
+    let resolved: TrustedSessionContext;
+    try {
+      resolved = await resolveSessionContext(headersFromFastify(mcpHeaders), {
+        db: options.db,
+        ...(binding ? { organization: binding } : {}),
+      });
+    } catch (error) {
+      if (error instanceof OrganizationBindingError) {
+        throw new HttpError(error.status, error.code, error.message);
+      }
+      throw error;
+    }
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(
         401,
@@ -4984,9 +7713,14 @@ export function registerGeneratedMcpServer(
         "Database is not configured for MCP access.",
       );
     }
+    // session-info (whoami / osf://session): keep the credential's display
+    // facts (name, client, expiry, memberships) beside the verified session,
+    // and the organization this endpoint bound it to, when it did.
+    rememberSessionIdentity(resolved, headersFromFastify(mcpHeaders), binding);
     return {
       db: options.db,
       session: resolved,
+      resource,
     };
   }
 
@@ -5018,8 +7752,82 @@ export function registerGeneratedMcpServer(
       },
     );
 
+    if (options.modulePlatform && options.modules?.some((module) => module.artifactStorage !== undefined)) {
+      instance.addContentTypeParser(
+        "application/octet-stream",
+        (_request, payload, done) => done(null, payload),
+      );
+      instance.get(`${ARTIFACT_UPLOAD_PATH}/:token`, async (request, reply) => {
+        const token = (request.params as { token?: string }).token;
+        const uploadUrl = `${callbackOrigin()}${ARTIFACT_UPLOAD_PATH}/${encodeURIComponent(token ?? "")}`;
+        return reply.type("text/html").send(renderArtifactUploadPage(uploadUrl));
+      });
+      instance.post(
+        `${ARTIFACT_UPLOAD_PATH}/:token`,
+        { bodyLimit: 64 * 1024 * 1024 },
+        async (request, reply) => {
+          const keyring = elicitedKeyring();
+          if (!keyring) {
+            throw new HttpError(
+              503,
+              "SECRET_STORAGE_NOT_CONFIGURED",
+              "Secure upload handoffs are not configured.",
+            );
+          }
+          const pending = await claimArtifactUpload({
+            db: options.db!,
+            keyring,
+            token: (request.params as { token?: string }).token,
+          });
+          if (!pending) {
+            throw new HttpError(404, "NOT_FOUND", "This upload is unavailable, expired, or already used.");
+          }
+          const rawName = request.headers["x-file-name"];
+          if (typeof rawName !== "string") {
+            throw new HttpError(400, "BAD_USER_INPUT", "Header x-file-name is required.");
+          }
+          let fileName: string;
+          try {
+            fileName = decodeURIComponent(rawName);
+          } catch {
+            throw new HttpError(400, "BAD_USER_INPUT", "The file name is not valid UTF-8.");
+          }
+          if (!fileName || fileName.length > 255 || /[\r\n\0/\\]/.test(fileName)) {
+            throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
+          }
+          const source = request.body as AsyncIterable<Uint8Array> | undefined;
+          if (!source || typeof source[Symbol.asyncIterator] !== "function") {
+            throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
+          }
+          const uploadSession: TrustedSessionContext = {
+            tenantId: pending.tenantId,
+            userId: pending.userId,
+            roles: pending.roles,
+            groups: pending.groups,
+            scope: pending.scope,
+            credential: pending.credential,
+          };
+          const descriptor = await options.modulePlatform!.withActiveOperationSession(
+            uploadSession,
+            (activeSession) => options.modulePlatform!.services.artifacts.stage(
+              activeSession,
+              { purpose: "document-upload", fileName, source },
+            ),
+          );
+          return reply.status(201).send({ data: descriptor, operations: [] });
+        },
+      );
+    }
+
     instance.setErrorHandler((error, request, reply) => {
-      const { status, body } = toHttpError(error);
+      const { status, body } = toHttpError(
+        error instanceof McpTransportError
+          ? new HttpError(error.status, error.code, error.message)
+          : error,
+      );
+      // One URL, two representations: say so on the failures too, or a cache
+      // that saw this answer serves it to the other kind of client.
+      void reply.header("vary", SHORT_ADDRESS_VARY);
       if (status >= 500) {
         instance.log.error({ err: error }, "MCP request failed.");
       }
@@ -5030,6 +7838,13 @@ export function registerGeneratedMcpServer(
         void reply.header(
           "www-authenticate",
           buildAuthenticateChallenge(request),
+        );
+      } else if (status === 403 && body.error.code === "ORGANIZATION_RESOURCE_FORBIDDEN") {
+        // RFC 6750 §3.1: the token verified but is not bound to this
+        // resource; the challenge names the scopes that would be.
+        void reply.header(
+          "www-authenticate",
+          buildAuthenticateChallenge(request, { insufficientScope: true }),
         );
       }
       void reply.status(status).send(body);
@@ -5045,25 +7860,26 @@ export function registerGeneratedMcpServer(
     type McpSessionEntry = {
       transport: StreamableHTTPServerTransport;
       server: Server;
+      /** Resource path the session was initialized on; it is not portable. */
+      resource: string;
+      /**
+       * The session context `buildServer` captured at `initialize`. Held so a
+       * later request can refresh the display facts hanging off it — see
+       * carrySessionIdentity — rather than leaving `whoami` answering with the
+       * expiry of the very first access token forever.
+       */
+      session: TrustedSessionContext;
       tenantId: string;
       userId: string;
       roles: string[];
       oauthScopes: string[];
       groups: string[];
-      scope: DbSessionInput["scope"];
+      scope: TrustedSessionContext["scope"];
       credential: TrustedSessionContext["credential"];
+      loginSessionBinding?: string;
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
-    const sameClaims = (
-      left: readonly string[],
-      right: readonly string[],
-    ): boolean => {
-      if (left.length !== right.length) return false;
-      const sortedLeft = [...left].sort();
-      const sortedRight = [...right].sort();
-      return sortedLeft.every((value, index) => value === sortedRight[index]);
-    };
     const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
     const sweep = setInterval(() => {
       const now = Date.now();
@@ -5118,10 +7934,7 @@ export function registerGeneratedMcpServer(
     // browser navigation. It trusts nothing in its query beyond looking up
     // the single-use state minted by the connect tool; tenant, user, token
     // endpoint and credentials all come from that pending record.
-    const html = (message: string) =>
-      `<!doctype html><meta charset="utf-8"><title>Connection</title>` +
-      `<body style="font-family:system-ui;margin:4rem auto;max-width:28rem">` +
-      `<p>${message}</p></body>`;
+    const html = renderEntityOAuthCallbackPage;
     instance.get(ENTITY_OAUTH_CALLBACK_PATH, async (request, reply) => {
       const query = (request.query ?? {}) as Record<string, unknown>;
       const pending = await redeemState(query.state, options.db);
@@ -5129,26 +7942,25 @@ export function registerGeneratedMcpServer(
         return reply
           .status(400)
           .type("text/html")
-          .send(
-            html(
-              "This sign-in link is invalid or expired. Start again from your chat.",
-            ),
-          );
+          .send(html({ outcome: "invalid_state" }));
       }
       if (typeof query.error === "string" && query.error) {
         return reply
           .status(400)
           .type("text/html")
-          .send(html("The provider refused the sign-in. Nothing was stored."));
+          .send(
+            html({
+              outcome: "provider_refused",
+              providerName: pending.providerName,
+            }),
+          );
       }
       if (typeof query.code !== "string" || query.code.length === 0) {
         return reply
           .status(400)
           .type("text/html")
           .send(
-            html(
-              "The provider sent no authorization code. Nothing was stored.",
-            ),
+            html({ outcome: "no_code", providerName: pending.providerName }),
           );
       }
       try {
@@ -5214,9 +8026,11 @@ export function registerGeneratedMcpServer(
           .status(200)
           .type("text/html")
           .send(
-            html(
-              "Connected. You can close this window and return to your chat.",
-            ),
+            html({
+              outcome: "connected",
+              providerName: pending.providerName,
+              connectionScope: pending.connectionScope,
+            }),
           );
       } catch (error) {
         request.log.error(
@@ -5227,7 +8041,10 @@ export function registerGeneratedMcpServer(
           .status(500)
           .type("text/html")
           .send(
-            html("Storing the connection failed. Start again from your chat."),
+            html({
+              outcome: "store_failed",
+              providerName: pending.providerName,
+            }),
           );
       }
     });
@@ -5318,7 +8135,48 @@ export function registerGeneratedMcpServer(
               prefill: content,
             };
           }
+          // Same rule as the in-band elicitation path: a Connection to a
+          // personal provider belongs to the person who filled the form in.
+          if (
+            connectionScopeOf(
+              sourceRow.auth as Record<string, unknown> | null | undefined,
+            ) === "user" &&
+            pending.userId &&
+            tableDef.columns.some(
+              (column) => fieldNameForColumn(column) === "ownerUserId",
+            )
+          ) {
+            values.ownerUserId = pending.userId;
+          }
         }
+      }
+      // A key that already exists (the form submitted twice, a rotated
+      // secret) updates that row's values in place; submitted keys replace,
+      // untouched keys stay. Only a new key creates a row.
+      const existingRows =
+        typeof pending.modelValues.key === "string"
+          ? (
+              await listGeneratedEntitiesForTable(db, writeSession, tableDef, {
+                limit: 5,
+                fixedWhere: [{ column: "key", value: pending.modelValues.key }],
+              })
+            ).rows.map((row) => serializeRow(tableDef, row))
+          : [];
+      const existing = findExistingConfiguration(existingRows, pending);
+      if (existing) {
+        await updateGeneratedEntityForTable(
+          db,
+          writeSession,
+          tableDef,
+          String(existing.id),
+          {
+            [pending.elicit.into]: mergeConfigurationValues(
+              existing[pending.elicit.into],
+              values[pending.elicit.into] as Record<string, unknown>,
+            ),
+          },
+        );
+        return { ok: true };
       }
       await createGeneratedEntityForTable(db, writeSession, tableDef, values);
       return { ok: true };
@@ -5395,11 +8253,7 @@ export function registerGeneratedMcpServer(
           return reply
             .status(404)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "This configuration link is invalid or expired. Ask your assistant to start again.",
-              ),
-            );
+            .send(renderConfigurationExpiredPage());
         }
         return reply
           .type("text/html")
@@ -5422,11 +8276,7 @@ export function registerGeneratedMcpServer(
           return reply
             .status(404)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "This configuration link is invalid or expired. Ask your assistant to start again.",
-              ),
-            );
+            .send(renderConfigurationExpiredPage());
         }
         const body = typeof request.body === "string" ? request.body : "";
         try {
@@ -5463,162 +8313,198 @@ export function registerGeneratedMcpServer(
           await consumeConfiguration(pending.token, options.db);
           return reply
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "Saved. You can close this window and return to your chat.",
-              ),
-            );
+            .send(renderConfigurationSavedPage(pending.displayName));
         } catch (error) {
           request.log.error(
             { err: error },
             "Configuration handoff submission failed.",
           );
-          const { body: errorBody } = toHttpError(error);
           return reply
             .status(400)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                `Saving failed: ${errorBody.error.message} Return to your chat and try again.`,
-              ),
-            );
+            .send(renderConfigurationFailedPage(pending.displayName));
         }
       },
     );
 
-    instance.route({
-      url: MCP_MOUNT_PATH,
-      method: ["GET", "POST", "DELETE"],
-      handler: async (request, reply) => {
-        const { db, session } = await requireMcpSession(request);
+    const handleMcpRequest = async (
+      request: FastifyRequest,
+      reply: FastifyReply,
+    ): Promise<void> => {
+      void reply.header("vary", SHORT_ADDRESS_VARY);
+      const { db, session, resource } = await requireMcpSession(request);
 
-        const sessionHeader = request.headers["mcp-session-id"];
-        const sessionId = Array.isArray(sessionHeader)
-          ? sessionHeader[0]
-          : sessionHeader;
+      const sessionHeader = request.headers["mcp-session-id"];
+      const sessionId = Array.isArray(sessionHeader)
+        ? sessionHeader[0]
+        : sessionHeader;
 
-        if (sessionId) {
-          const existing = mcpSessions.get(sessionId);
-          if (!existing) {
-            // Per spec: an unknown session id answers 404 so the client
-            // reinitializes, rather than being silently handled statelessly.
-            throw new HttpError(
-              404,
-              "SESSION_NOT_FOUND",
-              "Unknown MCP session; reinitialize.",
-            );
-          }
-          // The session is a credential: it was initialized by one identity
-          // and stays bound to it.
-          if (
-            existing.tenantId !== session.tenantId ||
-            existing.userId !== session.userId
-          ) {
-            throw new HttpError(
-              403,
-              "FORBIDDEN",
-              "MCP session belongs to another identity.",
-            );
-          }
-          if (
-            !sameClaims(existing.roles, session.roles ?? []) ||
-            !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
-            !sameClaims(existing.groups, session.groups ?? []) ||
-            existing.scope !== session.scope ||
-            existing.credential !== session.credential
-          ) {
-            mcpSessions.delete(sessionId);
-            options.modulePlatform?.unregisterServer(existing.server);
-            void existing.transport.close();
-            void existing.server.close();
-            throw new HttpError(
-              404,
-              "SESSION_NOT_FOUND",
-              "Authorization changed; reinitialize the MCP session.",
-            );
-          }
-          existing.lastSeenMs = Date.now();
-          reply.hijack();
-          await existing.transport.handleRequest(
+      if (sessionId) {
+        const existing = mcpSessions.get(sessionId);
+        if (!existing) {
+          // Per spec: an unknown session id answers 404 so the client
+          // reinitializes, rather than being silently handled statelessly.
+          throw new HttpError(
+            404,
+            "SESSION_NOT_FOUND",
+            "Unknown MCP session; reinitialize.",
+          );
+        }
+        // The session is a credential: it was initialized by one identity
+        // on one resource and stays bound to both. A session id minted on
+        // one organization's resource is not a ticket to another's, nor to
+        // the legacy mount.
+        if (existing.resource !== resource) {
+          throw new HttpError(
+            403,
+            "FORBIDDEN",
+            "MCP session was initialized on another MCP resource.",
+          );
+        }
+        if (
+          existing.tenantId !== session.tenantId ||
+          existing.userId !== session.userId
+        ) {
+          throw new HttpError(
+            403,
+            "FORBIDDEN",
+            "MCP session belongs to another identity.",
+          );
+        }
+        if (!sameStatefulMcpAuthorization(existing, session)) {
+          mcpSessions.delete(sessionId);
+          options.modulePlatform?.unregisterServer(existing.server);
+          void existing.transport.close();
+          void existing.server.close();
+          throw new HttpError(
+            404,
+            "SESSION_NOT_FOUND",
+            "Authorization changed; reinitialize the MCP session.",
+          );
+        }
+        existing.lastSeenMs = Date.now();
+        // The credential this request carried is newer than the one the
+        // session was initialized with — the client refreshes silently — so
+        // the display facts move over to the captured context before the
+        // server answers from it.
+        carrySessionIdentity(existing.session, session);
+        reply.hijack();
+        await withFreshRelationGroupMemberships(
+          session,
+          () => existing.transport.handleRequest(
             request.raw,
             reply.raw,
             request.body,
-          );
-          return;
-        }
+          ),
+        );
+        return;
+      }
 
-        if (request.method === "POST" && isInitializeBody(request.body)) {
-          const server = buildServer(
-            db,
-            session,
-            options.modules,
-            options.modulePlatform,
-            options.egressOwner,
-            notifyDerivedDefinitionChanged,
-            true,
-          );
-          const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (id) => {
-              mcpSessions.set(id, {
-                transport,
-                server,
-                tenantId: session.tenantId as string,
-                userId: session.userId as string,
-                roles: [...(session.roles ?? [])],
-                oauthScopes: [...(session.oauthScopes ?? [])],
-                groups: [...(session.groups ?? [])],
-                scope: session.scope,
-                credential: session.credential,
-                lastSeenMs: Date.now(),
-              });
-            },
-          });
-          transport.onclose = () => {
-            if (transport.sessionId) mcpSessions.delete(transport.sessionId);
-            options.modulePlatform?.unregisterServer(server);
-          };
-          reply.hijack();
-          // The SDK declares Transport's optional callbacks as required-when-present,
-          // which collides with this repo's exactOptionalPropertyTypes. The cast is
-          // to the SDK's own Transport shape and changes no behaviour.
-          await server.connect(
-            transport as unknown as Parameters<Server["connect"]>[0],
-          );
-          await transport.handleRequest(request.raw, reply.raw, request.body);
-          return;
-        }
-
-        // Sessionless non-initialize request: the pre-session stateless
-        // single-shot behaviour, kept for probes and legacy callers. No
-        // server-initiated exchange is possible on this path, but a mutation
-        // made through it still nudges the live sessions.
+      if (request.method === "POST" && isInitializeBody(request.body)) {
+        const statefulSession = createStatefulMcpSessionContext(session);
+        // What the client says about itself is said once, here; the server
+        // built next reads it for its instructions, and `whoami` for the
+        // life of the session (mcp/session-client.ts).
+        rememberSessionClient(statefulSession, clientInfoFromInitializeBody(request.body));
         const server = buildServer(
           db,
-          session,
+          statefulSession,
           options.modules,
           options.modulePlatform,
           options.egressOwner,
           notifyDerivedDefinitionChanged,
+          true,
+          undefined,
+          await sessionOpeningSentence({ db, session: statefulSession }),
         );
-        // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
-        // reads it as `=== undefined` to mean stateless, and omitting keeps
-        // exactOptionalPropertyTypes happy.
         const transport = new StreamableHTTPServerTransport({
-          enableJsonResponse: true,
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            mcpSessions.set(id, {
+              transport,
+              server,
+              resource,
+              session: statefulSession,
+              tenantId: session.tenantId as string,
+              userId: session.userId as string,
+              roles: [...(session.roles ?? [])],
+              oauthScopes: [...(session.oauthScopes ?? [])],
+              groups: [...(session.groups ?? [])],
+              scope: session.scope,
+              credential: session.credential,
+              ...(session.loginSessionBinding !== undefined
+                ? { loginSessionBinding: session.loginSessionBinding }
+                : {}),
+              lastSeenMs: Date.now(),
+            });
+          },
         });
-        reply.raw.on("close", () => {
+        transport.onclose = () => {
+          if (transport.sessionId) mcpSessions.delete(transport.sessionId);
           options.modulePlatform?.unregisterServer(server);
-          void transport.close();
-          void server.close();
-        });
+        };
         reply.hijack();
+        // The SDK declares Transport's optional callbacks as required-when-present,
+        // which collides with this repo's exactOptionalPropertyTypes. The cast is
+        // to the SDK's own Transport shape and changes no behaviour.
         await server.connect(
           transport as unknown as Parameters<Server["connect"]>[0],
         );
-        await transport.handleRequest(request.raw, reply.raw, request.body);
-      },
+        await withFreshRelationGroupMemberships(
+          session,
+          () => transport.handleRequest(request.raw, reply.raw, request.body),
+        );
+        return;
+      }
+
+      // Sessionless non-initialize request: the pre-session stateless
+      // single-shot behaviour, kept for probes and legacy callers. No
+      // server-initiated exchange is possible on this path, but a mutation
+      // made through it still nudges the live sessions.
+      const server = buildServer(
+        db,
+        session,
+        options.modules,
+        options.modulePlatform,
+        options.egressOwner,
+        notifyDerivedDefinitionChanged,
+      );
+      // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
+      // reads it as `=== undefined` to mean stateless, and omitting keeps
+      // exactOptionalPropertyTypes happy.
+      const transport = new StreamableHTTPServerTransport({
+        enableJsonResponse: true,
+      });
+      reply.raw.on("close", () => {
+        options.modulePlatform?.unregisterServer(server);
+        void transport.close();
+        void server.close();
+      });
+      reply.hijack();
+      await server.connect(
+        transport as unknown as Parameters<Server["connect"]>[0],
+      );
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    };
+
+    instance.route({
+      url: MCP_MOUNT_PATH,
+      method: ["GET", "POST", "DELETE"],
+      handler: handleMcpRequest,
     });
+    // One resource per Keycloak Organization, same server, same handler;
+    // what differs is how the session is admitted (requireMcpSession).
+    instance.route({
+      url: `${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
+      method: ["GET", "POST", "DELETE"],
+      handler: handleMcpRequest,
+    });
+    // The short spellings `/<alias>` and `/<alias>/mcp` arrive here already
+    // rewritten to the long URL (roles/api.ts, rewriteUrl), so there is one
+    // handler, one set of routes and one parser for the alias. What a client
+    // is TOLD the resource is called comes from organizationMcpPath, which is
+    // the short form — the long URL is now an internal spelling that also
+    // happens to still be reachable from outside.
   });
 }
 
@@ -5638,7 +8524,11 @@ export function hasMcpSurface(
     core.tools > 0 ||
     core.operationTools > 0 ||
     core.connectors > 0 ||
-    modules.some((module) => module.mcp !== undefined)
+    modules.some(
+      (module) =>
+        module.mcp !== undefined ||
+        (module.operationProviders?.length ?? 0) > 0,
+    )
   );
 }
 

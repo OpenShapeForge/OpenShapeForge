@@ -53,6 +53,7 @@
  *   KC_ADMIN_USER / KC_ADMIN_PASSWORD  bootstrap admin (default admin/admin)
  */
 import { readJwtClaims } from "../packages/auth/src/index.ts";
+import { disableDefaultPasskeyEnrollment, relaxRealmForLocalPasswords } from "./keycloak-dev-password-login.ts";
 import { generateKeycloakRealmArtifacts } from "../packages/compiler/src/authoring/generators/keycloak.ts";
 import type { AuthorizationConfigFile } from "../packages/compiler/src/authoring/types/authoring.ts";
 
@@ -416,6 +417,12 @@ async function main() {
   await importRealm(token, upstream);
   await importRealm(token, broker);
   check(true, "both generated realms imported through the admin API (201)");
+
+  // The upstream is a test fixture whose seeded users are driven over plain
+  // HTML forms. Mutate only that running loopback realm after import; the
+  // generated artifact and the broker realm under test stay passkey-only.
+  await relaxRealmForLocalPasswords({ baseUrl: KC_URL, token, realm: IDP_REALM });
+  await disableDefaultPasskeyEnrollment({ baseUrl: KC_URL, token, realm: BROKER_REALM });
 
   // Upstream SAML client — a fixture, not under test (see header).
   const samlClient = await admin(token, "POST", `/realms/${IDP_REALM}/clients`, {

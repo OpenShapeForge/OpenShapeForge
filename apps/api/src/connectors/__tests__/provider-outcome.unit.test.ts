@@ -6,6 +6,7 @@
  * piece is wired in; this one pins what the pieces mean.
  */
 import { describe, expect, it } from "bun:test";
+import { operationFailure } from "@openshapeforge/operations";
 import {
   HTTP_STATUS_BY_CODE,
   PROVIDER_FAILURE_METRIC_LABELS,
@@ -288,16 +289,53 @@ describe("observations", () => {
 });
 
 describe("the one status table", () => {
+  it("reports absent file storage as unavailable rather than a record conflict", () => {
+    const failure = operationFailure({ code: "STORAGE_UNAVAILABLE", message: "File storage is not configured.", retryable: false });
+    expect(toHttpError(failure)).toEqual({
+      status: 503,
+      body: { error: { code: "STORAGE_UNAVAILABLE", message: "File storage is not configured.", retryable: false } },
+    });
+  });
   // Every code any connector surface can answer with, so a code added
   // anywhere without a decision here fails this test rather than becoming a
   // silent 500. Extend the list when adding a code, not the other way round.
   const PUBLIC_CODES = [
     "BAD_USER_INPUT",
+    "IDEMPOTENCY_KEY_REQUIRED",
+    "IDEMPOTENCY_KEY_REUSED",
+    "OPERATION_IN_PROGRESS",
+    "OPERATION_OUTCOME_UNKNOWN",
+    "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
+    "VALIDATION",
     "UNAUTHENTICATED",
     "FORBIDDEN",
+    "NOT_FOUND",
+    "CONFLICT",
+    "VERSION_CONFLICT",
+    "LOCKED",
+    "LEASE_NOT_SUPPORTED",
+    "LEASE_ACQUIRE_FAILED",
+    "LEASE_EXPIRED",
+    "LEASE_INVALID",
+    "CONFIRMATION_NOT_SUPPORTED",
+    "CONFIRMATION_VALUE_UNAVAILABLE",
+    "CONFIRMATION_REQUIRED",
+    "CONFIRMATION_MISMATCH",
+    "CONFIRMATION_ALREADY_USED",
+    "CONFIRMATION_EXPIRED",
+    "CONFIRMATION_STALE",
+    "TOO_MANY_REQUESTS",
+    "INTERNAL_SERVER_ERROR",
     "GENERATED_CRUD_NOT_ENABLED",
     "GENERATED_CRUD_OPERATION_NOT_ENABLED",
     "DATABASE_NOT_CONFIGURED",
+    "STORAGE_UNAVAILABLE",
+    // Database refusals (db/database-refusals.ts), answered on every transport.
+    "NOT_PUBLISHABLE",
+    "OPERATION_REFUSED",
+    "REFERENCE_NOT_FOUND",
+    "REFERENCE_IN_USE",
+    "ALREADY_EXISTS",
     "CONNECTOR_NOT_FOUND",
     "CONNECTOR_NOT_CONFIGURED",
     "CONNECTOR_NEEDS_REPAIR",
@@ -372,7 +410,11 @@ describe("the failure envelope", () => {
       error: { message: "Rate limited.", ...outcome },
     });
     expect(failureBody("CONNECTOR_NOT_CONFIGURED", "Not configured.")).toEqual({
-      error: { code: "CONNECTOR_NOT_CONFIGURED", message: "Not configured." },
+      error: {
+        code: "CONNECTOR_NOT_CONFIGURED",
+        message: "Not configured.",
+        retryable: false,
+      },
     });
   });
 
@@ -412,7 +454,9 @@ describe("the failure envelope", () => {
     expect(failureSummary(denied.error)).not.toContain("Retry after");
 
     // An unclassified failure keeps the plain `CODE: message` form.
-    expect(failureSummary({ code: "FORBIDDEN", message: "No." })).toBe("FORBIDDEN: No.");
+    expect(failureSummary({ code: "FORBIDDEN", message: "No.", retryable: false })).toBe(
+      "FORBIDDEN: No.",
+    );
   });
 
   // REST and MCP both go through toHttpError, so proving it once proves the

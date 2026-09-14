@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: DocumentVersion
@@ -26,13 +26,6 @@ indexes:
       - documentId
       - id
     unique: true
-crud:
-  operations:
-    create: false
-    update: false
-    delete: false
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -62,6 +55,7 @@ fields:
       storageClass: core
   - key: status
     valueType: string
+    semanticType: referenceDataCode
     required: true
     label:
       en: Status
@@ -69,11 +63,9 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTVERSIONSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: DOCUMENTVERSIONSTATUS
   - key: createdBy
     valueType: string
     required: false
@@ -97,6 +89,33 @@ fields:
     persisted:
       column: file_name
       storageClass: core
+  - key: artifactId
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: Artifact, nl: Bestandreferentie }
+    description:
+      en: Opaque identity of the storage-managed file bound to this version.
+      nl: Ondoorzichtige referentie naar het door opslag beheerde bestand van deze versie.
+    validation: { format: uuid }
+    persisted: { column: artifact_id, storageClass: core }
+  - key: artifactVersion
+    valueType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: Artifact version, nl: Bestandreferentieversie }
+    validation: { min: 1, max: 9007199254740991 }
+    persisted: { column: artifact_version, storageClass: core }
+  - key: byteSize
+    valueType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: File size in bytes, nl: Bestandsgrootte in bytes }
+    validation: { min: 0, max: 9007199254740991 }
+    persisted: { column: byte_size, storageClass: core }
   - key: mimeType
     valueType: string
     required: false
@@ -111,7 +130,10 @@ fields:
       storageClass: core
   - key: storageLocation
     valueType: string
+    semanticType: fileStorageLocation
     required: false
+    readOnly: true
+    immutable: true
     label:
       en: File
       nl: Bestand
@@ -120,12 +142,6 @@ fields:
     persisted:
       column: storage_location
       storageClass: core
-    render:
-      component: FileUpload
-      props:
-        fileNameField: fileName
-        mimeTypeField: mimeType
-        checksumField: checksum
   - key: checksum
     valueType: string
     required: false
@@ -150,6 +166,7 @@ fields:
       storageClass: core
   - key: changeSummary
     valueType: string
+    semanticType: multilineText
     required: false
     label:
       en: Change summary
@@ -159,11 +176,6 @@ fields:
     persisted:
       column: change_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
   - key: documentId
     valueType: string
     required: true
@@ -196,11 +208,110 @@ relationships:
     label:
       en: Account
       nl: Account
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: true
-      list: true
-      update: false
-      delete: false
+operations:
+  list:
+    name: { en: List document versions, nl: Documentversies tonen }
+    description:
+      en: Returns a filtered and sorted page of document versions.
+      nl: Geeft een gefilterde en gesorteerde pagina met documentversies terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get document version, nl: Documentversie ophalen }
+    description:
+      en: Returns one immutable document version by its canonical id.
+      nl: Geeft één onveranderlijke documentversie terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+
+  create:
+    name: { en: Add document version, nl: Documentversie toevoegen }
+    description: Adds a logical version, optionally binds a staged artifact, and advances the owning document pointer atomically.
+    implementation: { type: plugin, plugin: documents, handler: createDocumentVersion, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        required: [documentId, version, idempotencyKey]
+        additionalProperties: false
+        properties:
+          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            description: Optional storage-issued handle; file facts are verified server-side.
+            required: [artifactId, expectedArtifactVersion]
+            additionalProperties: false
+            properties:
+              artifactId: { type: string, format: uuid }
+              expectedArtifactVersion: { type: integer, minimum: 1, maximum: 9007199254740991 }
+          documentId: { type: string, format: uuid, x-osf-reference: { entity: Document } }
+          version:
+            x-osf-entityInput:
+              entity: DocumentVersion
+              fields: [versionLabel, status, isMajorVersion, changeSummary, accountId]
+    output:
+      schema:
+        type: object
+        required: [id, documentId]
+        properties:
+          id: { type: string, format: uuid }
+          documentId: { type: string, format: uuid }
+        additionalProperties: true
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The version input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The owning document is not accessible. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
+      - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}
+  web:
+    views:
+      collection:
+        route: /document-versions
+        title: { en: Document versions, nl: Documentversies }
+        columns:
+          - { key: versionLabel, sortable: true }
+          - { key: status, sortable: true }
+          - { key: fileName, sortable: true }
+          - { key: createdBy, sortable: true }
+        defaultSort: { key: versionLabel, direction: asc }
+      record:
+        routes:
+          read: /document-versions/:id
+          create: /document-versions/new
+        title: "{{versionLabel}}"
+        subtitle: "{{status}}"
+        layout:
+          context:
+            fields: [isMajorVersion, createdBy, mimeType, byteSize]
+            relationships: [document, account]
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Version, nl: Versie }
+                  fields: [versionLabel, status, isMajorVersion, createdBy, changeSummary]
+                - title: { en: File, nl: Bestand }
+                  fields: [fileName, mimeType, byteSize]
+                - title: { en: File integrity, nl: Bestandsintegriteit }
+                  fields: [checksum]
+        modes:
+          create:
+            title: { en: Add document version, nl: Documentversie toevoegen }
+            groups:
+              - title: { en: Version, nl: Versie }
+                fields: [versionLabel, status, changeSummary]

@@ -7,6 +7,7 @@ import { readStatementTimeoutMs } from "../config/limits.js";
 export type DbSessionScope = "tenant" | "group" | "self";
 
 const MAX_SESSION_GROUPS = 256;
+const MAX_RELATION_GROUPS = 256;
 
 // Closure expansion of the direct set (capped at MAX_SESSION_GROUPS) can
 // legitimately grow far beyond it: a shallow-but-wide org tree turns one
@@ -20,8 +21,21 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /**
+   * Opaque binding to a verified interactive login session. This is control
+   * metadata for canonical Operations and is deliberately not projected into
+   * a PostgreSQL GUC or used as database authority.
+   */
+  loginSessionBinding?: string;
+  /** Server-derived display label used only in safe, tenant-local messages. */
+  userDisplayName?: string | null;
   roles?: readonly string[] | null;
   groups?: readonly string[] | null;
+  /**
+   * Server-derived active RelationGroup memberships. These are not Keycloak
+   * groups and are never expanded through the platform org-unit hierarchy.
+   */
+  relationGroupIds?: readonly string[] | null;
   scope?: DbSessionScope | null;
 };
 
@@ -30,6 +44,7 @@ export type DbSessionContext = {
   userId: string;
   roles: readonly string[];
   groups: readonly string[];
+  relationGroupIds: readonly string[];
   scope: DbSessionScope;
 };
 
@@ -37,6 +52,12 @@ type DbSessionAfterCommitHook = () => Promise<void> | void;
 
 const dbSessionHooks = new AsyncLocalStorage<{
   afterCommit: DbSessionAfterCommitHook[];
+}>();
+
+const activeDbSession = new AsyncLocalStorage<{
+  db: Kysely<unknown>;
+  trx: Transaction<unknown>;
+  session: DbSessionContext;
 }>();
 
 export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
@@ -57,7 +78,7 @@ function assertUuid(value: string, label: string) {
 function normalizeGroups(groups: readonly string[] | null | undefined): readonly string[] {
   if (!groups || groups.length === 0) return [];
   // Trusted-context now propagates Keycloak group PATHS (e.g.
-  // "/openshapeforge-demo/tenant-acme/role-directie") for app-level authorization.
+  // "/customer/region/editors") for app-level authorization.
   // The DB session GUC `app.user_groups` only accepts UUIDs — path → org-unit
   // UUID translation is a separate concern. Silently filter the paths so the
   // session can still apply, while UUID groups (when present) flow through.
@@ -70,6 +91,20 @@ function normalizeGroups(groups: readonly string[] | null | undefined): readonly
     );
   }
   return uuids;
+}
+
+function normalizeRelationGroupIds(
+  groups: readonly string[] | null | undefined,
+): readonly string[] {
+  if (!groups || groups.length === 0) return [];
+  if (groups.length > MAX_RELATION_GROUPS) {
+    throw new Error(
+      `Database session has ${groups.length} RelationGroup memberships; cap is ${MAX_RELATION_GROUPS}.`,
+    );
+  }
+  const unique = [...new Set(groups)];
+  for (const groupId of unique) assertUuid(groupId, "relationGroupId");
+  return unique.sort();
 }
 
 function assertExpandedGroupsWithinCap(expanded: readonly string[], label: string) {
@@ -101,6 +136,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     userId: input.userId,
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
+    relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
     scope: normalizeScope(input.scope),
   };
 }
@@ -125,6 +161,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
+  await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -184,6 +221,27 @@ export async function withDbSession<TDatabase, TResult>(
   options: { isolationLevel?: "repeatable read" | "serializable" } = {},
 ): Promise<TResult> {
   const session = createDbSessionContext(input);
+  const active = activeDbSession.getStore();
+  if (active && active.db === db) {
+    const sameSession = active.session.tenantId === session.tenantId &&
+      active.session.userId === session.userId &&
+      active.session.scope === session.scope &&
+      active.session.roles.length === session.roles.length &&
+      active.session.roles.every((role, index) => role === session.roles[index]) &&
+      active.session.groups.length === session.groups.length &&
+      active.session.groups.every((group, index) => group === session.groups[index]) &&
+      active.session.relationGroupIds.length === session.relationGroupIds.length &&
+      active.session.relationGroupIds.every(
+        (group, index) => group === session.relationGroupIds[index],
+      );
+    if (!sameSession) {
+      throw new Error("Nested database work cannot replace the active session.");
+    }
+    return callback(
+      active.trx as Transaction<TDatabase>,
+      active.session,
+    );
+  }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await dbSessionHooks.run(hooks, () => {
@@ -192,7 +250,14 @@ export async function withDbSession<TDatabase, TResult>(
       : db.transaction();
     return transaction.execute(async (trx) => {
       await applyDbSession(trx, session);
-      return callback(trx, session);
+      return activeDbSession.run(
+        {
+          db: db as Kysely<unknown>,
+          trx: trx as Transaction<unknown>,
+          session,
+        },
+        () => callback(trx, session),
+      );
     });
   });
 
@@ -269,6 +334,12 @@ export type SystemSessionInput = {
   tenantId?: string | null;
 };
 
+export type SystemSessionAuditContext = {
+  /** The row written for this invocation; useful when an audit read must omit itself. */
+  auditId: string;
+  startedAt: string;
+};
+
 /**
  * Break-glass wrapper that disables RLS for the duration of the callback.
  * Use ONLY for:
@@ -285,7 +356,10 @@ export type SystemSessionInput = {
 export async function withSystemSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
   input: SystemSessionInput,
-  callback: (trx: Transaction<TDatabase>) => Promise<TResult>,
+  callback: (
+    trx: Transaction<TDatabase>,
+    audit: SystemSessionAuditContext,
+  ) => Promise<TResult>,
 ): Promise<TResult> {
   if (!input.roles.includes(SYSTEM_BYPASS_ROLE)) {
     throw new Error(
@@ -323,7 +397,7 @@ export async function withSystemSession<TDatabase, TResult>(
           (${auditId}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${input.tenantId ?? null})
       `.execute(trx);
 
-      const result = await callback(trx);
+      const result = await callback(trx, { auditId, startedAt });
       succeeded = true;
       endedAt = new Date().toISOString();
 

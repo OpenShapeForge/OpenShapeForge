@@ -5,7 +5,11 @@
  */
 import { expect } from "bun:test";
 import { describe, registerSuiteLifecycle, test } from "./e2e/harness.js";
-import { eligibleTables, partialPolicyTables, tables } from "./e2e/entity-factory.js";
+import {
+  eligibleTables,
+  graphqlTables as tables,
+  partialPolicyTables,
+} from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 

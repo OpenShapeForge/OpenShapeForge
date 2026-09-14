@@ -42,16 +42,61 @@ async function withScratchDb<T>(fn: (url: string) => Promise<T>): Promise<T> {
 function migration(
   sqlText: string,
   version = "0001_tenant-trigger",
+  phase?: "beforeGenerated" | "afterGenerated",
 ): GeneratedPluginMigration {
   return {
     plugin: "cpq",
     version,
-    checksum: createHash("sha256").update(sqlText).digest("hex"),
+    ...(phase ? { phase } : {}),
+    checksum: createHash("sha256")
+      .update(phase === "beforeGenerated" ? `beforeGenerated\0${sqlText}` : sqlText)
+      .digest("hex"),
     sql: sqlText,
   };
 }
 
 describe("generated plugin schema migrations", () => {
+  test(
+    "applies ownership cutovers before generated non-additive drift is evaluated",
+    async () => {
+      await withScratchDb(async (url) => {
+        const runtime = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
+        try {
+          await runtime.db.connection().execute((db) => runMigrationChain(db));
+          await sql`create table erp.plugin_cutover_legacy (id uuid primary key)`.execute(
+            runtime.db,
+          );
+          await sql`
+            update platform.schema_migrations
+            set checksum = ${"0".repeat(64)}
+            where version = ${"0001_generated_platform_schema"}
+          `.execute(runtime.db);
+
+          const cutover = migration(
+            "DROP TABLE erp.plugin_cutover_legacy;\n",
+            "0001_remove-legacy-owner",
+            "beforeGenerated",
+          );
+          const result = await runtime.db.connection().execute((db) =>
+            runMigrationChain(db, { pluginMigrations: [cutover] }),
+          );
+
+          expect(result.pluginMigrationsApplied).toEqual([
+            "plugin:cpq:0001_remove-legacy-owner",
+          ]);
+          expect(result.applied).toBe(true);
+          const legacy = await sql<{ relation: string | null }>`
+            select to_regclass('erp.plugin_cutover_legacy')::text as relation
+          `.execute(runtime.db);
+          expect(legacy.rows[0]?.relation).toBeNull();
+        } finally {
+          await runtime.close();
+        }
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
   test(
     "applies after generated tables, refuses edits, and tolerates rollback extras",
     async () => {

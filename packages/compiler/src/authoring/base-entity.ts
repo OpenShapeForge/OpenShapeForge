@@ -121,8 +121,11 @@ export function applyBaseEntityToCore(
 
   const idSemanticType = entityIdSemanticType(coreEntity.entity);
   const baseFieldsWithSemantics = base.fields.map((baseField) => {
-    if (baseField.key !== "id") return baseField;
-    return { ...baseField, semanticType: idSemanticType };
+    const field = coreEntity.schemaVersion === 2
+      ? { ...baseField, render: undefined }
+      : baseField;
+    if (field.key !== "id") return field;
+    return { ...field, semanticType: idSemanticType };
   });
 
   return {

@@ -19,8 +19,13 @@
  */
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import type { CompiledEntityContract } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledEntityOperation,
+} from "./authoring/types.js";
+import type { FieldSchemaCompiler } from "./field-json-schema.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
+import type { EffectiveSettingsPolicy } from "./settings.js";
 import type { GeneratedArtifact, PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
 export type CompiledEntityInfo = {
@@ -37,15 +42,104 @@ export type PluginBaseContext = {
   webPresent: boolean;
 };
 
+/** A static plugin-backed Operation after compiler ownership is attached. */
+export type CompiledPluginOperation = PluginOperationContract & {
+  plugin: string;
+  /** Stable canonical identity. Equal to `key` for this operation kind. */
+  id: string;
+  intent: "invoke";
+};
+
+export type CompiledStaticEntityOperation = CompiledEntityOperation & {
+  /** Concrete input accepted by platform.operations.execute. */
+  inputSchema: JsonSchema;
+  /** Concrete success data returned by platform.operations.execute. */
+  outputSchema: JsonSchema;
+};
+
+export type CompiledStaticOperation =
+  | CompiledStaticEntityOperation
+  | CompiledPluginOperation;
+
+/**
+ * Stable, interface-neutral catalog exposed to compiler plugins.
+ *
+ * This is the complete static catalog: generated entity CRUD and authored
+ * plugin/module Operations share one ordered namespace. Record-derived runtime
+ * Operations remain runtime contributions and therefore do not belong here.
+ */
+export type StaticOperationCatalog = {
+  version: 1;
+  operations: readonly CompiledStaticOperation[];
+};
+
+/** @deprecated Use StaticOperationCatalog; retained as a migration alias. */
+export type EntityOperationCatalog = StaticOperationCatalog;
+
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;
   entities: CompiledEntityInfo[];
+  operationCatalog: StaticOperationCatalog;
+  /** Canonical build-time FieldDefinition -> compiled field/JSON Schema projection. */
+  fieldSchemas: FieldSchemaCompiler;
+  /** Owner-defined settings after committed host narrowing and provider validation. */
+  settingsPolicy: EffectiveSettingsPolicy;
+};
+
+/**
+ * Temporary, generated bridge for core execution code that predates the
+ * canonical Operation registry. It is internal runtime metadata, never an
+ * interface projection. A plugin supplies field identities once; operation
+ * labels, authorization and reliability are resolved from its canonical
+ * Operation contributions.
+ */
+export type PluginExecutionCompatibility = {
+  version: 1;
+  records?: Array<{
+    providerId: string;
+    entity: string;
+    keyField: string;
+    titleField?: string;
+    descriptionField: string;
+    inputFieldsField: string;
+    outputFieldsField?: string;
+    versionField: string;
+    visibleWhen?: { field: string; equals: string };
+    visibleToRolesField?: string;
+    internalOnlyField?: string;
+    execution: {
+      bindingsField: string;
+      operationRef: string;
+      operationEntity: string;
+      providerRef: string;
+      providerEntity: string;
+      connectionEntity: string;
+      connectionProviderRef: string;
+      connectionValuesField: string;
+    };
+    connectOperation?: string;
+    dryRunOperation?: string;
+    personalization?: {
+      entity: string;
+      serviceRef: string;
+      instructionField: string;
+      setOperation: string;
+    };
+  }>;
+  discovery?: Array<{ operation: string; entity: string }>;
+  tests?: Array<{ operation: string; entity: string }>;
 };
 
 export type PluginSchemaMigration = {
   /** Plugin-local immutable migration version, e.g. `0100_install-triggers`. */
   version: string;
-  /** PostgreSQL DDL applied after the generated tables exist. */
+  /**
+   * Ownership cutovers may have to remove non-additive drift before the
+   * generated manifest is compared with the live database. Omission retains
+   * the historical post-generated invariant phase.
+   */
+  phase?: "beforeGenerated" | "afterGenerated";
+  /** PostgreSQL DDL applied in the selected migration phase. */
   sql: string;
 };
 
@@ -78,7 +172,14 @@ export type PluginOperationError = {
 
 export type PluginOperationAuth =
   | { mode: "public" }
-  | { mode: "session"; roles: string[]; scopes?: string[] }
+  | {
+      mode: "session";
+      /** Omitted means any authenticated session; [] deliberately denies all. */
+      roles?: string[];
+      scopes?: string[];
+      /** Current target-record permission checked in addition to roles. */
+      recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
+    }
   | {
       mode: "custom";
       /** OpenAPI components.securitySchemes key. */
@@ -102,6 +203,13 @@ export type PluginOperationContract = {
   description: string;
   /** Key in the runtime module's `operationHandlers` map. */
   handler: string;
+  /** Optional entity attachment authored in strict-v2 YAML. */
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   errors: PluginOperationError[];
@@ -117,6 +225,17 @@ export type PluginOperationContract = {
     inputField?: string;
     description?: string;
   };
+  /**
+   * Interface-neutral effects. Optional only for existing plugins; new
+   * contracts should declare it. The compiler keeps the historical HTTP
+   * method inference as a compatibility fallback until those plugins migrate.
+   */
+  effects?: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  concurrency?: import("@openshapeforge/operations").OperationConcurrency;
+  confirmation?: import("@openshapeforge/operations").OperationConfirmation;
   transports: {
     rest: {
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -144,6 +263,14 @@ export type CompilerPlugin = {
   operations?:
     | PluginOperationContract[]
     | ((context: PluginBaseContext) => PluginOperationContract[]);
+  /**
+   * Removal seam while legacy execution engines are extracted from their old
+   * interface adapter. The compiler lowers this into an internal manifest;
+   * canonical Operations remain the only public source of truth.
+   */
+  executionCompatibility?:
+    | PluginExecutionCompatibility
+    | ((context: PluginGenerateContext) => PluginExecutionCompatibility);
   /**
    * Extra platform tables merged into the base manifest before authoring
    * entities are promoted (e.g. a workflow plugin's catalog/instance tables).

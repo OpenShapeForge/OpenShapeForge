@@ -46,7 +46,11 @@ import {
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
-import { fakeAdmin, fakeSpi } from "./__fixtures__/control-keycloak-fakes.js";
+import {
+  fakeAdmin,
+  fakeOrganizationScopes,
+  fakeSpi,
+} from "./__fixtures__/control-keycloak-fakes.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -113,6 +117,8 @@ const depsFor = (db: Kysely<DB>, keycloak: ReturnType<typeof fakeSpi>): Provisio
   db: db as never,
   keycloak,
   keycloakAdmin: fakeAdmin(keycloak),
+  organizationScopes: fakeOrganizationScopes(),
+  mcpResource: { origins: ["http://127.0.0.1:3001"], clients: ["codex"] },
   tenantRealm: TENANT_REALM,
   operator,
 });

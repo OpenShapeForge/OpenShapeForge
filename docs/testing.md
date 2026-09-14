@@ -131,7 +131,7 @@ Properties worth knowing:
   206 pass / 0 skip.
 - Keycloak knobs: `E2E_KEYCLOAK_CLIENT_ID` (default `openshapeforge-gateway`),
   `E2E_KEYCLOAK_CLIENT_SECRET` (`dev-secret`), `E2E_KEYCLOAK_USERNAME`
-  (`acme-directie`), `E2E_KEYCLOAK_PASSWORD` (`test`).
+  (`tenant-a-admin`), `E2E_KEYCLOAK_PASSWORD` (`test`).
 - **The provisioning tests are opt-in the same way**, and for the same reason —
   they reach a real Keycloak through the identity-configuration SPI, so without
   one they would prove nothing. They skip unless the control plane is configured
@@ -331,8 +331,9 @@ The web app must be served from an origin the dev realm's gateway client accepts
 authorization-code flow through the Keycloak login page, because the web session
 is written into Redis by the NextAuth callback and nothing outside that callback
 can produce one. Credentials follow the same convention as the GraphQL e2e
-harness: `E2E_USER_PASSWORD_<USERNAME>`, falling back to the committed dev-realm
-literal. `E2E_WEB_URL` points the suite somewhere other than `:3000`.
+harness: `E2E_USER_PASSWORD_<USERNAME>`, falling back to the committed literal
+in `test/fixtures/authoring/development-identities`. `E2E_WEB_URL` points the
+suite somewhere other than `:3000`.
 
 CI runs it as its own workflow (`.github/workflows/web-e2e.yml`) rather than
 inside `gates`, which has no Postgres. It runs on pull requests to `main` and on

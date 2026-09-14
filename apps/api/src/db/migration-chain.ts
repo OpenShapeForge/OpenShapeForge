@@ -19,9 +19,26 @@
  *   3. versioned bespoke      — hand-written transformations; run BEFORE the
  *      generated step so a bespoke migration can eliminate non-additive drift
  *      before the roll-forward evaluates it.
+ *   3b. plugin cutovers       — immutable compiler-plugin migrations that
+ *      must transform legacy ownership before generated drift is evaluated.
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   4b. plugin invariants     — immutable compiler-plugin constraints,
  *      functions, triggers, and other DDL, after contributed tables exist.
+ *   4c. identity link         — runtime-owned platform.identities /
+ *      platform.identity_relations (idempotent DDL, like step 2); after the
+ *      generated step because they reference platform.tenants and
+ *      erp.relations.
+ *   4d. employee invitations  — runtime-owned platform.employee_invitations
+ *      (idempotent DDL, same reasoning); references platform.tenants only, so
+ *      it could run before 4c, but sits next to it because both are the
+ *      "login ↔ party" story (db/migrations/employee-invitations.ts).
+ *   4e. organization relation link — platform.tenants.relation_id (idempotent
+ *      DDL, same reasoning); references erp.relations, so it must run after
+ *      the generated step like 4c/4d
+ *      (db/migrations/organization-relation-link.ts).
+ *   4f. Operation execution receipts — runtime-owned, actor-scoped durable
+ *      idempotency ledger. It references platform.tenants, so it also runs
+ *      after generated schema and before the app grant sweep.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -41,11 +58,20 @@
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — CREATE ROLE / GRANT / DDL require it.
  */
 import type { Kysely } from "kysely";
+import { fileURLToPath } from "node:url";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { DB } from "../generated/db/types.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
+import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
+import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
+import { applyOnboardingMigration } from "./migrations/onboarding.js";
+import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
+import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
+import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -106,14 +132,35 @@ export async function runMigrationChain(
     db,
     options.versioned ?? versionedMigrations,
   );
-  const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
-  const pluginMigrations = await applyGeneratedPluginMigrations(
+  const configuredPluginMigrations =
+    options.pluginMigrations ?? (await loadGeneratedPluginMigrations());
+  const beforeGeneratedPluginMigrations = configuredPluginMigrations.filter(
+    ({ phase }) => phase === "beforeGenerated",
+  );
+  const afterGeneratedPluginMigrations = configuredPluginMigrations.filter(
+    ({ phase }) => phase !== "beforeGenerated",
+  );
+  const beforeGenerated = await applyGeneratedPluginMigrations(
     db,
-    options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
+    beforeGeneratedPluginMigrations,
     options.appliedBy,
   );
+  const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  const afterGenerated = await applyGeneratedPluginMigrations(
+    db,
+    afterGeneratedPluginMigrations,
+    options.appliedBy,
+  );
+  await applyIdentityLinkMigration(db);
+  await applyEmployeeInvitationsMigration(db);
+  await applyOrganizationRelationLinkMigration(db);
+  await applyOnboardingMigration(db);
+  await applyUpdateNoticesMigration(db);
+  await applyOperationExecutionReceiptsMigration(db);
+  await applyBlueprintsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
+  await applyBlueprintsGrants(db);
   // The worker role's grants are enumerated from the manifest rather than
   // swept, and re-evaluated here on every migrate so a table that newly
   // declares (or stops declaring) workerDml is picked up without a bespoke
@@ -122,13 +169,19 @@ export async function runMigrationChain(
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
-    moduleSeeds[seed.name] = await seed.apply(db);
+    moduleSeeds[seed.name] = await seed.apply(db, {
+      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
+      seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
+    });
   }
   return {
     ...generated,
     versionedApplied: versioned.applied,
     versionedReconciled: versioned.reconciled,
-    pluginMigrationsApplied: pluginMigrations.applied,
+    pluginMigrationsApplied: [
+      ...beforeGenerated.applied,
+      ...afterGenerated.applied,
+    ],
     pageConfigs,
     moduleSeeds,
   };

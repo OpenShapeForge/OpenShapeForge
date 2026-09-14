@@ -3,9 +3,6 @@ import { describe, expect, test } from "bun:test";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import mcpCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import openApi from "../../generated/rest/openapi.json" with { type: "json" };
-import workflowNodes from "../../generated/workflow/entity-workflow-nodes.generated.json" with {
-  type: "json",
-};
 import { buildGraphqlSchema } from "../../graphql/schema.js";
 
 const tables = manifest.tables as Array<{
@@ -39,10 +36,8 @@ describe("generated Document contracts", () => {
     expect(updateInput?.getFields()).not.toHaveProperty("currentVersionId");
     expect(schema.getMutationType()?.getFields()).toHaveProperty("createDocument");
 
-    const documentActions = workflowNodes
-      .filter((node) => node.entity === "Document")
-      .map((node) => node.action);
-    expect(documentActions).not.toContain("create");
+    // The current workflow plugin exposes canonical Operations and no longer
+    // emits the former entity-workflow-nodes.generated.json bridge.
   });
 
   test("DocumentVersion is required-owned and exposes only its canonical create command", () => {

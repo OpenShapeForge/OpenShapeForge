@@ -16,6 +16,7 @@
  * no entity opts in — so the API runtime can statically import it
  * unconditionally. Determinism: no timestamps; entities sorted by base path.
  */
+import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -1140,6 +1141,7 @@ export function renderOpenApiSpec(
         ? { required: [...creatable.required, ...createControls.required] }
         : {}),
     };
+    if (!createPluginSchemas) schemas[`${name}Input`] = withBlueprintCreate(schemas[`${name}Input`] as JsonObject, table.source?.blueprint);
     schemas[updateSchemaName] = updatePluginSchemas?.inputSchema ?? {
       type: "object",
       additionalProperties: false,

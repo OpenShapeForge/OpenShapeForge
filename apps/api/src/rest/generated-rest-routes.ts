@@ -74,6 +74,7 @@ const RESERVED_LIST_PARAMS = new Set([
 ]);
 
 const MUTATION_CONTROL_FIELDS = new Set([
+  "blueprintId",
   "expectedVersion",
   "leaseToken",
   "confirmed",
@@ -82,6 +83,7 @@ const MUTATION_CONTROL_FIELDS = new Set([
 ]);
 
 type MutationControlField =
+  | "blueprintId"
   | "expectedVersion"
   | "leaseToken"
   | "confirmed"
@@ -111,6 +113,7 @@ function splitMutationBody(
       const field = key as MutationControlField;
       const expectedType = expectedMutationControlType(field);
       if (typeof value !== expectedType) {
+        if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
         throw invalidMutationControlTypeFailure(field, expectedType);
       }
     }
@@ -544,6 +547,7 @@ export function registerGeneratedRestRoutes(
             ? pluginEntityTransportInput(operation, request.body ?? {}, id,
                 typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
             : { id, values: assertWritableBody(table, valuesBody, "update"), ...controls };
+          if (Object.hasOwn(controls, "blueprintId")) throw new HttpError(400, "BAD_USER_INPUT", "blueprintId is only supported when creating a record.");
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "update"),
             offerIntents,

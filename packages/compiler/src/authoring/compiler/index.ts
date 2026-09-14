@@ -31,6 +31,7 @@ import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
 import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
+import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
 import {
   isCoreEntityV2,
@@ -112,12 +113,18 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     id: `${coreEntity.module}.${coreEntity.entity}`,
     name: coreEntity.entity,
   };
+  const blueprint = buildBlueprint(coreEntity, modelFields, columns);
   const entityOperations = buildEntityOperations({
     entity,
     coreEntity,
     crud,
     authorization,
   });
+  if (blueprint && (coreEntity.schemaVersion !== 2 ||
+      entityOperations.create?.implementation.type !== "entity" ||
+      entityOperations.update?.implementation.type !== "entity")) {
+    throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
+  }
   const tableName = deriveTableName(coreEntity.entity);
   const canonical = buildCanonicalCompilerKernel({
     model: { fields: modelFields, relationships },
@@ -143,6 +150,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         : {}),
     },
     storage: { table: tableName, columns },
+    ...(blueprint ? { blueprint } : {}),
     ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
     model: { fields: modelFields, relationships },
     crud,

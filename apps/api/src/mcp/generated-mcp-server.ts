@@ -405,6 +405,7 @@ export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
 function entityMutationControls(args: Record<string, unknown>) {
   return {
+    ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
     ...(typeof args.expectedVersion === "string"
       ? { expectedVersion: args.expectedVersion }
       : {}),
@@ -3048,7 +3049,7 @@ async function invokeTool(
       const values = canonical
         ? Object.fromEntries(
             Object.entries(requireArguments(args)).filter(
-              ([key]) => key !== "confirmed",
+              ([key]) => key !== "confirmed" && key !== "blueprintId",
             ),
           )
         : requireArguments(args);
@@ -3108,6 +3109,7 @@ async function invokeTool(
         offerIntents,
         input: {
           values,
+          ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
           ...(typeof args.confirmed === "boolean"
             ? { confirmed: args.confirmed }
             : {}),

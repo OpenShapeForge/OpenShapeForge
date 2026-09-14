@@ -1158,6 +1158,23 @@
         ]
       }
     },
+    "webInterfaceOperationsV2": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instructions": { "$ref": "#/$defs/localizedOrString" },
+              "resultRenderer": { "type": "string", "pattern": "^[a-z][A-Za-z0-9.-]*$" }
+            }
+          }
+        ]
+      }
+    },
     "restInterfaceOperationsV2": {
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
@@ -1226,7 +1243,7 @@
           "additionalProperties": false,
           "required": ["views"],
           "properties": {
-            "operations": { "$ref": "#/$defs/interfaceOperationsV2" },
+            "operations": { "$ref": "#/$defs/webInterfaceOperationsV2" },
             "views": { "$ref": "#/$defs/webViewsV2" }
           }
         }

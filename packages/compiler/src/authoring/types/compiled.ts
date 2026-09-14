@@ -44,6 +44,7 @@ import type {
   EntityMcpOperationProjectionConfig,
   EntityRestOperationProjectionConfig,
   EntityInterfaceOperationProjectionConfig,
+  EntityWebOperationProjectionConfig,
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
@@ -361,7 +362,7 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
     rest?: false | EntityRestOperationProjectionConfig;
     graphql?: false | EntityGraphqlOperationProjectionConfig;
     mcp?: false | EntityMcpOperationProjectionConfig;
-    web?: false | EntityInterfaceOperationProjectionConfig;
+    web?: false | EntityWebOperationProjectionConfig;
   };
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: readonly OperationPrerequisite[];
@@ -717,7 +718,7 @@ export interface CompiledEntityContract {
       rest?: false | EntityRestOperationProjectionConfig;
       graphql?: false | EntityGraphqlOperationProjectionConfig;
       mcp?: false | EntityMcpOperationProjectionConfig;
-      web?: false | EntityInterfaceOperationProjectionConfig;
+      web?: false | EntityWebOperationProjectionConfig;
     };
   }>;
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */

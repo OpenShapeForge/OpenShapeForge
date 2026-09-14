@@ -372,7 +372,16 @@ describe("web manifest projection", () => {
 
     const projected = buildWebManifest([relation]).entities.Relation;
     expect(projected).toBeDefined();
-    expect(projected!.operations.list).toEqual({ id: "Relation.list", intent: "list" });
+    expect(projected!.operations.list).toEqual({
+      id: "Relation.list",
+      intent: "list",
+      input: {
+        kind: "collection-query",
+        filterFields: ["displayName"],
+        sortFields: ["displayName"],
+        pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
+      },
+    });
     expect(projected!.views.collection.route).toBe("/relations");
   });
 

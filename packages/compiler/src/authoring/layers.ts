@@ -21,7 +21,9 @@
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
  *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
- *     against `menu.yaml`. This is how a PLUGIN contributes a sidebar
+ *     against canonical `menu.yaml` (legacy `appShell.yaml` is normalized to
+ *     that path and retained as a read alias for older hosts). This is how a
+ *     PLUGIN contributes a sidebar
  *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
@@ -1046,6 +1048,7 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
  * other for the result to be the document the generator sees.
  */
 const APP_SHELL_FILENAME = "menu.yaml";
+const LEGACY_APP_SHELL_FILENAME = "appShell.yaml";
 
 function isEntityFile(relativePath: string): boolean {
   return (
@@ -1089,7 +1092,10 @@ export function authoringLayerDirs(repoRoot: string, config?: AuthoringConfig): 
 export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig): string {
   const layerDirs = authoringLayerDirs(repoRoot, config);
 
-  if (layerDirs.length === 1) {
+  if (
+    layerDirs.length === 1 &&
+    !existsSync(join(layerDirs[0]!, LEGACY_APP_SHELL_FILENAME))
+  ) {
     return layerDirs[0]!;
   }
 
@@ -1105,6 +1111,9 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   for (const layerDir of layerDirs) {
     for (const relativePath of walkFiles(layerDir)) {
       const sourcePath = join(layerDir, relativePath);
+      const resolvedRelativePath = relativePath === LEGACY_APP_SHELL_FILENAME
+        ? APP_SHELL_FILENAME
+        : relativePath;
 
       if (relativePath.endsWith(".yaml")) {
         const parsed = YAML.parse(readFileSync(sourcePath, "utf8")) as
@@ -1206,24 +1215,24 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         }
       }
 
-      if (files.has(relativePath)) {
+      if (files.has(resolvedRelativePath)) {
         const isCatalog =
-          relativePath.startsWith("catalogs/") && relativePath.endsWith(".yaml");
+          resolvedRelativePath.startsWith("catalogs/") && resolvedRelativePath.endsWith(".yaml");
         if (isCatalog) {
-          const target = files.get(relativePath)!;
+          const target = files.get(resolvedRelativePath)!;
           const baseDoc = YAML.parse(
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
           const overlayDoc = YAML.parse(readFileSync(sourcePath, "utf8")) as JsonValue;
           const merged = strategicMerge(baseDoc, overlayDoc);
-          const mergedPath = join(buildDir, relativePath);
+          const mergedPath = join(buildDir, resolvedRelativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
-          files.set(relativePath, { layer: buildDir, path: relativePath });
+          files.set(resolvedRelativePath, { layer: buildDir, path: resolvedRelativePath });
           continue;
         }
         throw new Error(
-          `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
+          `Layer collision on ${resolvedRelativePath}: ${files.get(resolvedRelativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
             "Entities can be modified with kind: entityPatch; the app shell with " +
             "kind: appShellPatch; realm files (authorization*.yaml) with " +
@@ -1241,7 +1250,7 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         }
         entityPathBySlug.set(slug, relativePath);
       }
-      files.set(relativePath, { layer: layerDir, path: relativePath });
+      files.set(resolvedRelativePath, { layer: layerDir, path: relativePath });
     }
   }
 
@@ -1252,6 +1261,11 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
     const target = join(buildDir, relativePath);
     mkdirSync(join(target, ".."), { recursive: true });
     cpSync(join(source.layer, source.path), target);
+  }
+
+  const appShellPath = join(buildDir, APP_SHELL_FILENAME);
+  if (existsSync(appShellPath)) {
+    cpSync(appShellPath, join(buildDir, LEGACY_APP_SHELL_FILENAME));
   }
 
   return buildDir;

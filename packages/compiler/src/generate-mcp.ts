@@ -700,6 +700,10 @@ function buildToolsForEntity(
     );
   };
   const v2Contract = contract.authoringVersion === 2;
+  const listInput = contract.entityOperations.list?.input;
+  const listPagination = listInput?.kind === "collection-query"
+    ? listInput.pagination
+    : { defaultLimit: 50, maxLimit: 200 };
 
   const idSchema: JsonObject = {
     type: "object",
@@ -827,8 +831,10 @@ function buildToolsForEntity(
           first: {
             type: "integer",
             minimum: 1,
-            maximum: 200,
-            description: "Page size (1-200, default 50).",
+            maximum: listPagination.maxLimit,
+            default: listPagination.defaultLimit,
+            description:
+              `Page size (1-${listPagination.maxLimit}, default ${listPagination.defaultLimit}).`,
           },
           after: {
             type: "string",

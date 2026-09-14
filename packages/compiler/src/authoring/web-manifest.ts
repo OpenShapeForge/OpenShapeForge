@@ -64,9 +64,44 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
 
 function operation(
   source: CompiledEntityOperation | undefined,
+  contract: CompiledEntityContract,
 ): WebOperationRef | undefined {
   if (!source) return undefined;
   if (source.implementation.type === "entity") {
+    if (source.intent === "list") {
+      if (source.input.kind !== "collection-query") {
+        throw new Error(
+          `Entity list Operation "${source.id}" has no collection-query input.`,
+        );
+      }
+      const secureInputTarget = contract.entityOperations.create
+        ?.interaction.secureInput?.into;
+      const queryFields = contract.model.fields
+        .filter((field) =>
+          field.key !== secureInputTarget &&
+          field.cardinality !== "collection" &&
+          field.valueType !== "object"
+        )
+        .map((field) => field.key);
+      for (const relationship of contract.model.relationships) {
+        if (relationship.kind !== "belongsTo" || !relationship.foreignKey) continue;
+        const column = contract.storage.columns.find(
+          (candidate) => candidate.column === relationship.foreignKey,
+        );
+        const key = column?.field ?? snakeToCamel(relationship.foreignKey);
+        if (!queryFields.includes(key)) queryFields.push(key);
+      }
+      return {
+        id: source.id,
+        intent: "list",
+        input: {
+          kind: "collection-query",
+          filterFields: queryFields,
+          sortFields: queryFields,
+          pagination: source.input.pagination,
+        },
+      };
+    }
     return {
       id: source.id,
       intent: source.intent,
@@ -324,9 +359,12 @@ function projectableEntities(
       (["list", "get", "create", "update", "delete"] as const)
         .map((intent) => [
           intent,
-          operation(exposed && exposed[intent] !== true
-            ? undefined
-            : contract.entityOperations[intent]),
+          operation(
+            exposed && exposed[intent] !== true
+              ? undefined
+              : contract.entityOperations[intent],
+            contract,
+          ),
         ])
         .filter((entry): entry is [WebOperationIntent, WebOperationRef] => Boolean(entry[1])),
     );

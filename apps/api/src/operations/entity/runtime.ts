@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createFromBlueprint } from "./blueprints.js";
 import {
   operationFailure,
   operationErrorOf,
@@ -822,11 +821,10 @@ export async function executeEntityOperation(
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const data = typeof request.input?.blueprintId === "string"
-          ? await createFromBlueprint(db, session, table, request.input.blueprintId, request.input.values ?? {})
-          : await createGeneratedEntity(db, session, {
-              table: table.name, values: requireValues(request.input),
-            });
+        const data = await createGeneratedEntity(db, session, {
+          table: table.name,
+          values: requireValues(request.input),
+        });
         return {
           intent: "create",
           data,

@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
 import { describe, expect, test } from "bun:test";
 import type {
   CompiledEntityContract,
@@ -255,20 +253,4 @@ describe("canonical entity Operation JSON Schemas", () => {
       Object.keys((updateTool.inputSchema.properties as Record<string, any>).values.properties),
     );
   });
-});
-
-
-test("blueprint create requires ordinary fields unless an explicit source is supplied", () => {
-  const copied = { ...contract, blueprint: { fields: ["title"], labelField: "title", operations: { list: "b.list", status: "b.status", reset: "b.reset", publish: "b.publish" } } };
-  const { inputSchema } = entityOperationJsonSchemas(copied, entityOperations.create!, [copied], { groups: {} } as never);
-  const ajv = new Ajv2020.default({ strict: false });
-  addFormats.default(ajv);
-  const validate = ajv.compile(inputSchema);
-  expect(validate({ values: {} })).toBe(false);
-  expect(validate({ values: {}, blueprintId: "standard" })).toBe(false);
-  const projectId = "11111111-1111-4111-8111-111111111111";
-  expect(validate({ values: { projectId }, blueprintId: "standard" })).toBe(true);
-  expect(validate({ values: {}, blueprintId: "" })).toBe(false);
-  expect(validate({ values: { title: "Valid", projectId } })).toBe(true);
-  expect(validate({ values: { title: "x" }, blueprintId: "standard" })).toBe(false);
 });

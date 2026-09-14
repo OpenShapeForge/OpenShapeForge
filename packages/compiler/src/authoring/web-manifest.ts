@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { collectBlueprintOperations } from "../blueprint-operations.js";
 /**
  * Web interface projection.
  *
@@ -643,23 +642,12 @@ function projectEntity(
   } : undefined;
 
   return {
-    ...(contract.blueprint ? { blueprint: contract.blueprint } : {}),
     entityId: entityName,
     ...(contract.entity.displayTemplate ? { displayTemplate: contract.entity.displayTemplate } : {}),
     entitySlug: source.slug,
     title: source.collection.title,
     fields,
-    operations: { ...operations, ...customOperations, ...Object.fromEntries(
-      collectBlueprintOperations([{ contract, slug: source.slug }]).map((operation) => [operation.id, {
-        id: operation.id, key: operation.key, intent: "invoke" as const,
-        name: localized(operation.title, operation.title), description: localized(operation.description, operation.description),
-        target: operation.target!, input: { kind: "json-schema" as const, schema: operation.inputSchema },
-        output: { kind: "json-schema" as const, schema: operation.outputSchema }, effects: operation.effects!,
-        reliability: { idempotency: { mode: operation.idempotency.mode === "intrinsic" ? "natural" as const : "none" as const } },
-        ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
-        confirmation: operation.confirmation!, rest: operation.transports.rest,
-      }]),
-    ) },
+    operations: { ...operations, ...customOperations },
     views: {
       collection: source.collection,
       ...(record ? { record } : {}),

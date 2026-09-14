@@ -121,7 +121,6 @@ function operationControlFields(
   if (!usesCanonicalGraphqlOperations(table) || !operationEnabled(table, intent)) return [];
   const operation = entityOperationContract(entityOperationRef(table, intent).id);
   return [
-    ...(intent === "create" && table.source?.blueprint ? ["      blueprintId: String"] : []),
     ...(operation.concurrency?.version ? ["      expectedVersion: String!"] : []),
     ...(operation.concurrency?.editLease ? ["      leaseToken: String!"] : []),
     ...(operation.interaction.confirmation.mode === "acknowledgement"
@@ -709,7 +708,6 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
 }
 
 const GRAPHQL_OPERATION_CONTROLS = new Set([
-  "blueprintId",
   "expectedVersion",
   "leaseToken",
   "confirmed",

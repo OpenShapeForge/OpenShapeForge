@@ -519,33 +519,3 @@ independently.
 To keep an authored entity **out of every generated CRUD surface**, set
 `crud: false` on that entity. Secret-bearing and runtime-scheduler entities in
 the base catalog use this declaration; no compiled slug denylist is involved.
-
-## Published blueprint copies
-
-A tenant-scoped v2 entity with built-in create and update Operations can opt in:
-
-```yaml
-blueprint:
-  fields: [name, description]
-```
-
-The listed fields must be writable, unclassified scalar values. Identity,
-source-identification, authorization, relationship, secret and computed fields
-cannot be copied. The compiler generates blueprint list, status, publish and
-reset Operations and their Web, REST, GraphQL and MCP projections. The regular
-create Operation accepts an optional `blueprintId` (the published source record's
-`externalId`); explicit create values override the selected snapshot.
-
-Publication requires a `platform-operator` identity in a blueprint tenant.
-Published versions are immutable snapshots. A privileged operator provisions the
-customer's single library assignment in `platform.blueprint_libraries`; no
-self-service assignment Operation is provided yet. A restricted database function
-can read only assigned published snapshots whose reader roles match the session.
-Ordinary entity RLS remains unchanged.
-
-A local copy records its source and adopted version. New publication only changes
-its update indicator. Reset requires explicit acknowledgement, the expected source
-version and the entity's version/edit-lease controls. It replaces only the declared
-fields, keeping the customer record's identity, relationships and other fields.
-This initial contract supports scalar configuration records, not workflow graphs
-or other aggregates. Existing plugin-backed mutations cannot silently opt in.

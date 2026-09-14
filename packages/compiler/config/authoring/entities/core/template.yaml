@@ -92,6 +92,9 @@ interfaces:
             - id: details
               label: { en: Details, nl: Details }
               groups: [{ title: { en: Template, nl: Template }, fields: [key, name, description] }]
+            - id: versions
+              label: { en: Versions, nl: Versies }
+              relationship: versions
         modes:
           create:
             title: { en: Create, nl: Toevoegen }

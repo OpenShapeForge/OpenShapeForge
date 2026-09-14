@@ -219,6 +219,8 @@ export type WebRecordView = {
     actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
+  /** Authored form layout retained even when standalone create is unavailable. */
+  formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
   layout: {
     tabs: WebRecordTab[];

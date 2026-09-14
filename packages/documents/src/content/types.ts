@@ -29,6 +29,8 @@ export type CompiledContentBlockDefinition = {
   readonly renderers: Readonly<Record<string, string>>;
   /** Exact compiler definition used for validation/presentation, frozen with the result. */
   readonly source?: JsonObject;
+  /** Frozen canonical materialization output schema, not the input field shape. */
+  readonly materializationSchema?: JsonObject;
   /** Optional compiled composition metadata, not a special hardcoded block entity. */
   readonly composition?: {
     readonly templateVersionField: string;

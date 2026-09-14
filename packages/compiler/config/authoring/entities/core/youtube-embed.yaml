@@ -43,7 +43,15 @@ operations:
         properties:
           definitionKey: { type: string, const: YouTubeEmbed }
           values: { type: object }
-    output: { schema: { type: object } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [kind, value]
+        properties:
+          kind: { type: string, const: block }
+          value:
+            x-osf-entityInput: { entity: YouTubeEmbed, fields: [title, url, showControls] }
     errors: []
     auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }

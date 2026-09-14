@@ -503,6 +503,7 @@ function projectEntity(
     }
   }
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
+  const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
@@ -629,6 +630,7 @@ function projectEntity(
     kind: "record" as const,
     renderer: contract.interfaces?.web?.renderers?.record ?? "entity.record",
     preset: "inbox-main-context" as const,
+    formGroups: { create: authoredCreateGroups, update: updateGroups },
     modes,
     routes: {
       ...(modes.includes("read")

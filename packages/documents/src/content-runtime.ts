@@ -120,16 +120,22 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   const carrier = contentCarrier(context);
   const collection = platform.schemas.entityValues?.collection("TemplateVariant", "blocks");
   if (!collection || collection.targetEntity !== carrier.entityName) refuse("INVALID_DEFINITION", "The compiled template block collection is unavailable.");
-  const registry = Object.fromEntries(Object.entries(carrier.definitions).map(([key, entry]) => [key, {
+  const operationDefinitions = await platform.operations.list(session);
+  const registry = Object.fromEntries(await Promise.all(Object.entries(carrier.definitions).map(async ([key, entry]) => {
+    const operation = entry.materializeOperationId ? await platform.operations.get(session, entry.materializeOperationId) : undefined;
+    return [key, {
     entityName: entry.entityName, schemaVersion: 1,
     source: immutableContent(entry) as unknown as JsonObject,
+    ...(operation?.output?.kind === "json-schema"
+      ? { materializationSchema: immutableContent(operation.output.schema) as JsonObject }
+      : {}),
     fields: Object.fromEntries(entry.fields.map((field) => [text(field.key, "field key"), contentFieldProjection(field)])),
     // Generic field output is available on these channels. A domain Operation
     // can refuse a channel; no renderer is allowed to silently drop a block.
     renderers: { document: "entityFields", email: "entityFields", whatsapp: "entityFields" },
-  }]));
+    }];
+  })));
   const parameterFields = new Map<string, readonly Record<string, unknown>[]>();
-  const operationDefinitions = await platform.operations.list(session);
   const authorized = (entityName: string, id: string) => platform.records.assertAccess(session, { entityName, id, intent: "get" });
   // Record access alone does not redact classified fields. All content must
   // come from the canonical read result, including logical entity-value refs.

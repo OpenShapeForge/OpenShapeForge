@@ -168,6 +168,15 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     expect(after.version).not.toBe(seeded.expectedVersion);
     expect(result.parent.id).toBe(seeded.id);
   });
+  test("insert validates child references against the operation's bundled definitions", async () => {
+    const f = fixture(), seeded = await seed(0);
+    const create = f.operations.find(op => op.entityName === "Block" && op.intent === "create")!;
+    (create.inputSchema!.properties as any).values.properties.title = { $ref: "#/$defs/title" };
+    create.inputSchema!.$defs = { title: { type: "string", minLength: 3 } };
+    await expect(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "x" } })).rejects.toThrow("Child values");
+    const result = await f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Valid child" } });
+    expect(result.orderedIds).toEqual([result.childId]);
+  });
   test("moves existing IDs to before another child and to the end", async () => {
     const { execute } = fixture(), seeded = await seed(3);
     const result = await execute(restricted!.db, session, { ...binding, action: "move" }, { id: seeded.id, expectedVersion: seeded.expectedVersion, childId: seeded.children[2]!, beforeId: seeded.children[0]! });
@@ -398,6 +407,9 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
   });
   test("entityValue references require target read role, record view, tenant and existence in the write transaction", async () => {
     const f = valueFixture(), seeded = await seed(0), foreign = await seed(0, otherTenant);
+    // This fixture deliberately separates child-write and target-read rights;
+    // production template administrators legitimately hold both now.
+    f.parent.source!.authorization!.roles.read = ["General.All.Read"];
     const before = await state(seeded.id);
     await fails(insertValue(f, seeded.id, { version: seeded.id }, "Include", { ...session, roles: ["Organization.All.ReadWrite"] }), "FORBIDDEN");
     for (const versionId of [foreign.id, randomUUID()]) await fails(insertValue(f, seeded.id, { version: versionId }), "FORBIDDEN");

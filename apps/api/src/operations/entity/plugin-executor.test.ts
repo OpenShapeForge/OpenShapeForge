@@ -9,7 +9,7 @@ import { __setOperationExecutionReceiptExecutorForTests } from "../execution-rec
 import { bindOperationHandlers, entityPluginOperationContract } from "../runtime.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createEntityPluginExecutor } from "./plugin-executor.js";
-import { entityPluginOfferBinding } from "./runtime.js";
+import { entityRecordOfferBinding } from "./runtime.js";
 import type { EntityOperationContract } from "./types.js";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
@@ -172,7 +172,7 @@ describe("plugin-backed Entity Operation runtime", () => {
 
   test("binds plugin update offers to the authored target input", () => {
     expect(
-      entityPluginOfferBinding(entityOperation("update"), {
+      entityRecordOfferBinding(entityOperation("update"), {
         id: recordId,
         version: "2026-09-13T10:01:00.000Z",
       }),
@@ -187,7 +187,7 @@ describe("plugin-backed Entity Operation runtime", () => {
       },
     });
     expect(
-      entityPluginOfferBinding(entityOperation("delete"), {
+      entityRecordOfferBinding(entityOperation("delete"), {
         id: recordId,
         version: "2026-09-13T10:01:00.000Z",
       }),
@@ -201,7 +201,7 @@ describe("plugin-backed Entity Operation runtime", () => {
         input: { relationId: recordId },
       },
     });
-    expect(entityPluginOfferBinding(entityOperation("create"), { id: recordId })).toEqual({});
+    expect(entityRecordOfferBinding(entityOperation("create"), { id: recordId })).toEqual({});
   });
 
   test("returns a canonical delete result without requiring or fabricating a record head", async () => {

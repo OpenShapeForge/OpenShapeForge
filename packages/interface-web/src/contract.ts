@@ -34,6 +34,8 @@ export type WebSchemaOperationRef<
   };
   input: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
   output: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
+  /** Opaque result presentation key; absent uses structured schema rendering. */
+  resultRenderer?: WebRendererKey;
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";

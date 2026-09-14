@@ -149,6 +149,7 @@ function customOperation(
     },
     input: { kind: "json-schema", schema: definition.input.schema },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     effects: definition.effects,
     reliability: {
       idempotency: {

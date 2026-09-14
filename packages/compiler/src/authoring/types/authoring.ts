@@ -593,6 +593,11 @@ export interface EntityRestOperationProjectionConfig
   };
 }
 
+export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
+  /** Presentation only; never changes the operation result or its authorization. */
+  resultRenderer?: string;
+}
+
 export interface EntityMcpOperationProjectionConfig
   extends EntityInterfaceOperationProjectionConfig {
   name?: string;
@@ -659,7 +664,7 @@ export interface EntityInterfacesDefinition {
     resource?: McpResourceConfig;
   };
   web?: {
-    operations?: Record<string, EntityInterfaceOperationProjection>;
+    operations?: Record<string, false | EntityWebOperationProjectionConfig>;
     views: EntityWebViewDefinition;
   };
 }

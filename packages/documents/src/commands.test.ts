@@ -169,6 +169,10 @@ describe("Document commands", () => {
     expect(Object.keys(runtime.operationHandlers)).toEqual([
       "createDocument",
       "createDocumentVersion",
+      "composeTemplate",
+      "materializeFields",
+      "materializeTemplate",
+      "createDocumentFromTemplate",
     ]);
   });
 

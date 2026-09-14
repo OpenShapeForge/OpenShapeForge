@@ -33,4 +33,5 @@ test("real template Web contracts expose owned collections as navigable editor t
   expect(values.parameters).toBeDefined();
   expect(values.variants).toBeUndefined();
   expect(manifest.entities.TemplateVersion!.operations.materialize).toMatchObject({ resultRenderer: "document.content" });
+  expect(JSON.stringify(manifest.entities.TemplateVersion!.views.record.formGroups?.create)).toContain("parameters");
 });

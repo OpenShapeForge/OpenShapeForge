@@ -43,6 +43,7 @@ function fixture(blockDefault?: string, withReference = false) {
   } });
   const op = {
     id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" },
+    output: { kind: "json-schema", schema: { type: "object", properties: { value: { type: "object", properties: { text: { type: "string", title: "Text" } } } } } },
     input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } },
   };
   const context = {
@@ -116,6 +117,7 @@ describe("template materialization runtime adapter", () => {
     expect(f.reads).toEqual(["TemplateVersion", "TemplateVariant", "Block", "Chip"]);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
     expect(f.executions).toHaveLength(1);
+    expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.text.title).toBe("Text");
     f.data.chip = "Changed";
     expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
   });

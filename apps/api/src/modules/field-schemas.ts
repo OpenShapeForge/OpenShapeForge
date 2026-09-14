@@ -25,6 +25,9 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     addFormats.default(ajv);
     ajv.addKeyword(operationI18nKeyword);
     ajv.addKeyword(operationReferenceKeyword);
+    // Match canonical Operation validation: this is presentation metadata,
+    // never an alternative to the artifact object's actual value constraints.
+    ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

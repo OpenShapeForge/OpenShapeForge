@@ -329,14 +329,22 @@ describe("canonical operation database sessions", () => {
         const tenantId = randomUUID();
         const userId = randomUUID();
         const visibleId = randomUUID();
+        // A keyed Operation persists its execution receipt against the tenant
+        // row, so the tenant must exist — it is not only a session claim.
+        await sql`
+          insert into platform.tenants (id, slug, name, status)
+          values (${tenantId}::uuid, ${`session-${tenantId.slice(0, 8)}`}, ${"Session test"}, ${"active"})
+        `.execute(admin);
         await admin.insertInto("module_operation_session_test" as never).values([
           { id: visibleId, tenant_id: tenantId, owner_user_id: userId },
           { id: randomUUID(), tenant_id: tenantId, owner_user_id: randomUUID() },
           { id: randomUUID(), tenant_id: randomUUID(), owner_user_id: userId },
         ] as never).execute();
 
+        // Any module-provided operation on every transport; the blueprint
+        // operations are bound to the core runtime and take no module.
         const operation = listOperationContracts().find((entry) =>
-          entry.transports.mcp.enabled && entry.transports.graphql.enabled
+          entry.plugin !== "osf-blueprints" && entry.transports.mcp.enabled && entry.transports.graphql.enabled
         );
         if (!operation || operation.auth.mode !== "session" || !operation.auth.roles?.length) {
           throw new Error("Expected a session-authenticated operation on every transport.");

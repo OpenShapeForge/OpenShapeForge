@@ -145,6 +145,24 @@ async function migratedScratchDb<T>(fn: (db: Kysely<DB>, name: string) => Promis
 }
 
 describe("tenant provisioning", () => {
+  test("cannot replay a tenant into another realm", async () => {
+    await migratedScratchDb(async (db) => {
+      const spi = fakeSpi();
+      const deps = depsFor(db, spi);
+      const first = await provisionTenant(deps, { slug: "acme", name: "Acme" });
+      const otherSpi = fakeSpi();
+      await expect(provisionTenant({ ...depsFor(db, otherSpi), tenantRealm: "other-realm" }, {
+        slug: "acme", name: "Rebound",
+      })).rejects.toMatchObject({ code: "CONTROL_TENANT_NOT_FOUND" });
+      expect(otherSpi.organizations.size).toBe(0);
+      const rows = await sql<{ name: string; keycloak_realm: string; keycloak_organization_id: string }>`
+        select name, keycloak_realm, keycloak_organization_id from platform.tenants where slug = 'acme'
+      `.execute(db);
+      expect(rows.rows[0]).toEqual({ name: "Acme", keycloak_realm: TENANT_REALM,
+        keycloak_organization_id: first.tenant.keycloakOrganizationId });
+    });
+  }, TEST_TIMEOUT);
+
   test(
     "writes the registry row, links the organization, and audits both bypass sessions",
     async () => {

@@ -42,7 +42,7 @@
 import { sql } from "kysely";
 import { withSystemSession } from "../db/session.js";
 import { systemSessionForOperator } from "./authorization.js";
-import { ControlServiceError } from "./errors.js";
+import { ControlServiceError, tenantNotFound } from "./errors.js";
 import {
   MAX_ORG_UNIT_DEPTH,
   ORG_UNIT_COLUMNS,
@@ -166,6 +166,8 @@ export async function provisionTenant(
                 then now()
                 else platform.tenants.updated_at
               end
+        where platform.tenants.keycloak_realm = excluded.keycloak_realm
+          or (platform.tenants.keycloak_realm is null and platform.tenants.keycloak_organization_id is null)
         returning ${TENANT_COLUMNS}, ${insertedMarker()} as inserted
       `.execute(trx);
       // `status` is deliberately NOT in the conflict target's SET list. Replaying
@@ -174,7 +176,10 @@ export async function provisionTenant(
       // replayed the provisioning call. `name` IS rewritten, so that the display
       // name and the Organization the SPI rewrites on the same call cannot
       // diverge.
-      return result.rows[0]!;
+      // Never repoint another realm's registry entry, including during replay.
+      // The conflict predicate is atomic with the upsert, not a racy preflight.
+      if (!result.rows[0]) throw tenantNotFound(slug);
+      return result.rows[0];
     },
   );
 

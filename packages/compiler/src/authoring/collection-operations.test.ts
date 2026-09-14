@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
+import { missingSchemaUiTranslations } from "@openshapeforge/interface-web";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,6 +71,10 @@ test("real authored template collection Operations compile with recursive fieldD
   });
   // The production collector validates every published schema with strict:true.
   const operations = collectAuthoredEntityPluginOperations(entries, { ...context, authoringDir });
+  for (const operation of operations) {
+    expect(missingSchemaUiTranslations(operation.inputSchema, `${operation.id}.input`)).toEqual([]);
+    expect(missingSchemaUiTranslations(operation.outputSchema, `${operation.id}.output`)).toEqual([]);
+  }
   expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVersion", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVersion.insertVariant"]);
   const schema = operations.find((operation) => operation.id === "Template.insertVersion")!.inputSchema;
   const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);

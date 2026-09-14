@@ -89,7 +89,11 @@ export function entityRecordOutputSchema(
     };
     add(
       column.field,
-      column.nullable ? nullableSchema(schema) : schema,
+      {
+        ...(column.nullable ? nullableSchema(schema) : schema),
+        ...(field?.label && typeof field.label === "object"
+          ? { "x-osf-i18n": { title: field.label } } : {}),
+      },
       !column.nullable,
     );
   }
@@ -99,7 +103,13 @@ export function entityRecordOutputSchema(
     ["createdAt", { type: "string", format: "date-time" }],
     ["updatedAt", { type: "string", format: "date-time" }],
   ] as const) {
-    if (!(key in properties)) add(key, schema, true);
+    if (!(key in properties)) {
+      const labels = {
+        id: { en: "ID", nl: "ID" }, tenantId: { en: "Organization ID", nl: "Organisatie-ID" },
+        createdAt: { en: "Created at", nl: "Aangemaakt op" }, updatedAt: { en: "Updated at", nl: "Bijgewerkt op" },
+      };
+      add(key, { ...schema, "x-osf-i18n": { title: labels[key] } }, true);
+    }
   }
   return { type: "object", properties, required, additionalProperties: true };
 }

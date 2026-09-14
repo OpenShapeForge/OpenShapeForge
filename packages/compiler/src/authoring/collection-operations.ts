@@ -6,6 +6,7 @@ import { compiledObjectSchema, splitBundledDefinitions } from "../field-json-sch
 import type { CompiledEntityOperation, EntityOperationDefinition } from "./types.js";
 
 const uuid = { type: "string", format: "uuid" };
+const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
 
 /** Complete ordinary invoke Operations from the same compiled entity corpus. */
 export function materializeCollectionOperations(
@@ -45,8 +46,9 @@ export function materializeCollectionOperations(
       if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" || definition.concurrency?.editLease) fail("unsupported collection guard/effect combination.");
 
       const properties: Record<string, unknown> = {
-        id: { ...uuid }, expectedVersion: { type: "string", format: "date-time" },
-        ...(relation.sortable ? { beforeId: { anyOf: [{ ...uuid }, { type: "null" }] } } : {}),
+        id: { ...uuid, ...title("Parent ID", "Bovenliggend ID") },
+        expectedVersion: { type: "string", format: "date-time", ...title("Expected version", "Verwachte versie") },
+        ...(relation.sortable ? { beforeId: { anyOf: [{ ...uuid }, { type: "null" }], ...title("Insert before", "Invoegen voor") } } : {}),
       };
       const required = ["id", "expectedVersion"];
       let definitions: unknown;
@@ -63,7 +65,15 @@ export function materializeCollectionOperations(
         for (const valueField of child.model.fields.filter((field) => field.entityValue)) {
           if (!field.allowedDefinitions?.length) fail("entityValue insert requires allowedDefinitions on its collection.");
           const discriminator = valueField.entityValue!.definitionField;
-          valueProperties[discriminator] = { ...(valueProperties[discriminator] as object), enum: [...field.allowedDefinitions].sort() };
+          const discriminatorSchema = valueProperties[discriminator] as Record<string, unknown>;
+          valueProperties[discriminator] = {
+            ...discriminatorSchema, enum: [...field.allowedDefinitions].sort(),
+            "x-osf-i18n": {
+              ...(discriminatorSchema["x-osf-i18n"] as object | undefined),
+              enum: Object.fromEntries([...field.allowedDefinitions].sort().map((name) => [name,
+                contracts.find((contract) => contract.entity.name === name)?.entity.labels])),
+            },
+          };
           for (const name of field.allowedDefinitions) {
             const valueDefinition = contracts.find((contract) => contract.entity.name === name);
             if (!valueDefinition?.entity.valueDefinition) fail(`missing entityValue definition ${name}.`);
@@ -76,16 +86,18 @@ export function materializeCollectionOperations(
           }
         }
         if (branches.length) values.allOf = [...(Array.isArray(values.allOf) ? values.allOf : []), ...branches];
-        properties.values = values; required.push("values");
+        properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
       } else {
-        properties.childId = { ...uuid }; required.push("childId");
+        properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
       }
       const normalized: EntityOperationDefinition = {
         ...definition,
         target: { scope: "record", inputField: "id" },
         input: { schema: { type: "object", additionalProperties: false, properties, required, ...(definitions ? { $defs: definitions } : {}) } },
         output: { schema: { type: "object", additionalProperties: false, required: ["parent", "childId", "orderedIds"], properties: {
-          parent: entityRecordOutputSchema(owner), childId: { ...uuid }, orderedIds: { type: "array", items: { ...uuid } },
+          parent: { ...entityRecordOutputSchema(owner), ...title("Parent", "Bovenliggend record") },
+          childId: { ...uuid, ...title("Child ID", "Onderliggend ID") },
+          orderedIds: { type: "array", items: { ...uuid }, ...title("Ordered IDs", "Geordende IDs") },
         } } },
         auth: { mode: "session", roles: [...update.authorization.roles] },
         tenancy: { mode: "required" },

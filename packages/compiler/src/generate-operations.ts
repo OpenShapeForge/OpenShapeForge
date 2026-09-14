@@ -67,6 +67,7 @@ function withOperationControls(
     properties.expectedVersion = {
       type: "string",
       format: "date-time",
+      "x-osf-i18n": { title: { en: "Expected version", nl: "Verwachte versie" } },
       description: `Version from the record's ${definition.concurrency.version.field} field.`,
     };
     required.add("expectedVersion");

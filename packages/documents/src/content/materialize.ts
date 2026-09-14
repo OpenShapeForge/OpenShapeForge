@@ -106,11 +106,13 @@ export async function materializeTemplateContent(
   }
 
   async function variable(expression: string, parameters: JsonObject): Promise<JsonValue> {
-    const match = /^(local|global)\.([A-Za-z][A-Za-z0-9_.-]*)$/.exec(expression.trim());
+    // Use the existing Chip authoring namespace; do not introduce a second
+    // spelling for the same platform variable in document templates.
+    const match = /^(local|chips)\.([A-Za-z][A-Za-z0-9_.-]*)$/.exec(expression.trim());
     if (!match)
-      contentError("INVALID_VALUE", "Variables must use {{local.key}} or {{global.key}}.");
+      contentError("INVALID_VALUE", "Variables must use {{local.key}} or {{chips.key}}.");
     const key = match[2]!;
-    if (match[1] === "global") return global(key);
+    if (match[1] === "chips") return global(key);
     if (!Object.hasOwn(parameters, key))
       contentError("MISSING_VARIABLE", `Local variable ${key} is missing.`);
     return parameters[key]!;

@@ -60,6 +60,9 @@ export function normalizeEntityFields(
     }
     const valueType = field.valueType ?? semantic?.valueType;
     if (!valueType) throw new Error(`${entity.entity}.${field.key}: valueType cannot be inferred from semanticType.`);
+    if (entity.schemaVersion === 3 && semantic && field.valueType && field.valueType !== semantic.valueType) {
+      throw new Error(`${entity.entity}.${field.key}: valueType conflicts with its semanticType ${field.semanticType}.`);
+    }
     const result: Field = { ...field, valueType };
     if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
     const inlineShape = field.shape ?? field.children ?? (semantic?.kind !== "entity" ? semantic?.shape ?? semantic?.children : undefined);
@@ -91,9 +94,6 @@ export function normalizeEntityFields(
     }
     if (entity.schemaVersion !== 3) throw new Error(`${entity.entity}.${field.key}: entity relationship fields require schemaVersion 3.`);
     if (nested) throw new Error(`${entity.entity}.${field.key}: entity references must be relational fields, not IDs inside JSON values.`);
-    if (field.valueType && field.valueType !== semantic.valueType) {
-      throw new Error(`${entity.entity}.${field.key}: valueType conflicts with its entity semanticType.`);
-    }
     const target = semantic.entity!;
     const metadata = field.relationship ?? {};
     if (!collection && metadata.ownership === "owned") {

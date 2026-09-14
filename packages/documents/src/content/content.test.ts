@@ -53,7 +53,7 @@ const metadata: CompiledContentBlockRegistry = {
 
 function text(
   id = "text",
-  body = "Hello {{local.name}} from {{global.brand.name}}.",
+  body = "Hello {{local.name}} from {{chips.brand.name}}.",
 ): ContentBlock {
   return { id, definitionKey: "TextSection", schemaVersion: 3, values: { body }, references: {} };
 }
@@ -332,15 +332,15 @@ describe("template variants and local/global variables", () => {
   test("resolved values are data, not recursively evaluated template expressions", async () => {
     const f = fixture([text("raw", "{{local.name}}")]);
     const snapshot = await materializeTemplateContent(
-      { ...f.request, parameters: { name: "{{global.secret}}" } },
+      { ...f.request, parameters: { name: "{{chips.secret}}" } },
       f.registry,
       f.resolvers,
     );
-    expect(snapshot.blocks[0]!.values.body).toBe("{{global.secret}}");
+    expect(snapshot.blocks[0]!.values.body).toBe("{{chips.secret}}");
     expect(f.calls.global).toBe(0);
   });
 
-  test.each(["{{name}}", "{{local.name", "{{global.x()}}"])(
+  test.each(["{{name}}", "{{local.name", "{{chips.x()}}", "{{global.brand.name}}"])(
     "rejects invalid variable syntax %s",
     async (body) => {
       await rejectsCode(fixture([text("syntax", body)]).run(), "INVALID_VALUE");
@@ -695,7 +695,7 @@ describe("template composition", () => {
   });
 
   test("bounds variable amplification before concatenating oversized text", async () => {
-    const f = fixture([text("large", "{{global.brand.name}}{{global.brand.name}}")]);
+    const f = fixture([text("large", "{{chips.brand.name}}{{chips.brand.name}}")]);
     await rejectsCode(
       materializeTemplateContent(f.request, f.registry, {
         ...f.resolvers,

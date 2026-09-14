@@ -67,7 +67,7 @@ export function resolveStorageColumns(
       validateColumnIdentifier(rel.foreignKey, `belongsTo "${rel.key}" foreignKey`);
       if (!columns.some((c) => c.column === rel.foreignKey)) {
         columns.push({
-          field: rel.key + "Id",
+          field: rel.fieldKey ?? rel.key + "Id",
           column: rel.foreignKey,
           type: "uuid",
           nullable: true,

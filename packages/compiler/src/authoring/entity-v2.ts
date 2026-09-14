@@ -9,7 +9,7 @@ import type {
 } from "./types.js";
 
 export function isCoreEntityV2(entity: CoreEntity): boolean {
-  return entity.schemaVersion === 2;
+  return entity.schemaVersion === 2 || entity.schemaVersion === 3;
 }
 
 export function v2OperationEntries(

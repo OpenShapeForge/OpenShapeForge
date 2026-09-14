@@ -37,7 +37,7 @@ export function resolveModelFields(
 
     const compiled: CompiledField = {
       key: field.key,
-      valueType: field.valueType,
+      valueType: field.valueType ?? semType?.valueType,
       cardinality,
       ...(authoredCardinality && typeof authoredCardinality === "object" &&
         cardinality === "collection"
@@ -81,7 +81,11 @@ export function resolveModelFields(
     if (field.localized) compiled.localized = field.localized;
     if (field.suggestions) compiled.suggestions = field.suggestions;
     // Nested fields (object/array types)
-    const childFields = field.shape ?? field.children ?? semType?.shape ?? semType?.children;
+    // A reference's target schema belongs to the entity registry, not inline
+    // under the UUID field. Expanding it would recurse forever on inverses.
+    const childFields = semType?.kind === "entity"
+      ? undefined
+      : field.shape ?? field.children ?? semType?.shape ?? semType?.children;
     if (childFields) {
       compiled.children = resolveModelFields(childFields, componentCatalog, semanticTypes);
     }

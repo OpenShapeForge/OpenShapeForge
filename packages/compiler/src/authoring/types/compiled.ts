@@ -134,6 +134,12 @@ export interface CompiledField {
 
 export interface CompiledRelationship {
   key: string;
+  fieldKey?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: import("./field-definition.js").FieldDefinitionCardinality;
+  sortable?: boolean;
+  unique?: boolean;
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;
   foreignKey?: string;
@@ -659,7 +665,7 @@ export interface CompiledAuthorization {
 
 export interface CompiledEntityContract {
   workerAccess?: string;
-  authoringVersion: 1 | 2;
+  authoringVersion: 1 | 2 | 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {

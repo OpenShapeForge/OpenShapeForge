@@ -46,6 +46,16 @@ export type GeneratedCrudRelationship = {
   type: string;
   resolve: "belongsTo" | "hasMany";
   foreignKey?: string;
+  fieldKey?: string;
+  kind?: "belongsTo" | "hasMany" | "manyToMany";
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
+  sortable?: boolean;
+  positionColumn?: string;
+  via?: string;
+  viaSchema?: string;
+  mutationSupport?: "unsupported";
 };
 
 export type GeneratedCrudTable = {
@@ -62,7 +72,7 @@ export type GeneratedCrudTable = {
   source?: {
     authoringEntityName?: string;
     /** Present only for strict v2 entity authoring; absence means legacy v1. */
-    authoringVersion?: 2;
+    authoringVersion?: 2 | 3;
     computedFields?: Array<{
       field: string;
       resolver: "labelRules";

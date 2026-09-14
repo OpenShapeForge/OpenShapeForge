@@ -565,12 +565,12 @@ export function renderOpenApiSpec(
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
   const hasCanonicalEntity = [...contractsByEntityName.values()].some(
-    (contract) => contract.authoringVersion === 2,
+    (contract) => contract.authoringVersion >= 2,
   );
   const restEditLeaseOperationIds = [...new Set(
     restTables.flatMap((table) => {
       const contract = contractsByEntityName.get(entitySchemaName(table));
-      if (contract?.authoringVersion !== 2) return [];
+      if (!contract || contract.authoringVersion < 2) return [];
       return (["list", "get", "create", "update", "delete"] as const).flatMap(
         (intent) => {
           const operation = contract.entityOperations[intent];
@@ -988,7 +988,7 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
-    const canonical = contract?.authoringVersion === 2;
+    const canonical = !!contract && contract.authoringVersion >= 2;
     const canonicalOperationId = (
       intent: "list" | "get" | "create" | "update" | "delete",
     ): string => {

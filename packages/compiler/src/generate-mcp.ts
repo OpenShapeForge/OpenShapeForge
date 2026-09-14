@@ -698,7 +698,7 @@ function buildToolsForEntity(
       canonicalOutput?.kind === "json-schema" ? canonicalOutput.schema : output,
     );
   };
-  const v2Contract = contract.authoringVersion === 2;
+  const v2Contract = contract.authoringVersion >= 2;
 
   const idSchema: JsonObject = {
     type: "object",
@@ -738,7 +738,7 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => {
-    if (contract.authoringVersion === 2) {
+    if (contract.authoringVersion >= 2) {
       const canonical = contract.entityOperations[operation];
       const parts = [
         localizedText(canonical?.description) ?? fallback,
@@ -759,7 +759,7 @@ function buildToolsForEntity(
   const titled = (
     operation: McpToolDefinition["operation"],
     fallback: string,
-  ) => contract.authoringVersion === 2
+  ) => contract.authoringVersion >= 2
     ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
     : fallback;
   const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
@@ -1419,7 +1419,7 @@ export function buildMcpCatalog(
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
-          ...(field.relationship
+          ...(field.relationship?.kind && field.relationship.entity
             ? {
                 relationship: {
                   kind: field.relationship.kind,

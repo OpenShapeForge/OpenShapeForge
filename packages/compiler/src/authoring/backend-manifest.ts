@@ -875,6 +875,141 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
   }
 }
 
+/** Resolve field relations only after all tables exist, including cyclic references. */
+function compileFieldRelationStorage(
+  candidates: CompiledCandidate[],
+  tables: TableDefinition[],
+  register: RelationshipRegisterEntry[],
+): void {
+  const byEntity = new Map(candidates.map((candidate, index) => [
+    candidate.contract.entity.name, { candidate, table: tables[index]! },
+  ]));
+  const addIndex = (table: TableDefinition, columns: string[], unique = false) => {
+    const indexes = table.indexes ??= [];
+    if (indexes.some((index) => !index.where &&
+      (!unique || index.unique) && index.columns.length === columns.length &&
+      index.columns.every((column, index) => column === columns[index]))) return;
+    const name = `${table.name}_${columns.join("_")}_${unique ? "key" : "idx"}`;
+    if (indexes.some((index) => index.name === name)) {
+      throw new Error(`Field relationship index collides with ${table.schema}.${name}.`);
+    }
+    indexes.push({
+      name,
+      columns,
+      ...(unique ? { unique: true } : {}),
+    });
+  };
+  const attachReference = (
+    source: TableDefinition,
+    column: ColumnDefinition,
+    target: TableDefinition,
+    unique = false,
+    onDelete?: ReferenceDefinition["onDelete"],
+  ) => {
+    const targetId = target.columns.find((candidate) => candidate.name === "id");
+    if (!targetId || targetId.type !== "uuid" || !targetId.primaryKey) {
+      throw new Error(`Field relationship target ${tableKey(target)} requires a UUID id primary key.`);
+    }
+    if (!source.tenantScoped && target.tenantScoped) {
+      throw new Error(`Global table ${tableKey(source)} cannot reference tenant-scoped ${tableKey(target)} without a tenant identity.`);
+    }
+    const previous = column.references;
+    if (previous && (previous.schema !== target.schema || previous.table !== target.name || previous.column !== "id")) {
+      throw new Error(`Conflicting field relationships for ${tableKey(source)}.${column.name}.`);
+    }
+    column.type = "uuid";
+    const composite = source.tenantScoped && target.tenantScoped;
+    const deleteAction = onDelete ?? previous?.onDelete;
+    column.references = {
+      schema: target.schema, table: target.name, column: "id",
+      ...(composite ? { localColumns: ["tenant_id", column.name], targetColumns: ["tenant_id", "id"] } : {}),
+      ...(deleteAction ? { onDelete: deleteAction } : {}),
+    };
+    if (composite) {
+      for (const table of [source, target]) {
+        const tenant = table.columns.find((candidate) => candidate.name === "tenant_id");
+        if (!tenant || tenant.type !== "uuid" || !tenant.required) {
+          throw new Error(`Field relationships require a non-null UUID tenant_id on ${tableKey(table)}.`);
+        }
+      }
+      addIndex(target, ["tenant_id", "id"], true);
+    }
+    addIndex(source, source.tenantScoped ? ["tenant_id", column.name] : [column.name], unique);
+    if (source.schema !== target.schema && !isRelationshipRegistered(register,
+      { schema: source.schema, table: source.name, column: column.name }, column.references)) {
+      register.push({
+        from: { schema: source.schema, table: source.name, column: column.name },
+        to: { schema: target.schema, table: target.name, column: "id" },
+      });
+    }
+    const emitted = source.source?.relationshipStatus?.emittedReferences;
+    const description = `${column.name}->${tableKey(target)}.id`;
+    if (emitted && !emitted.includes(description)) emitted.push(description);
+  };
+
+  for (const { candidate, table } of byEntity.values()) {
+    if (Number(candidate.contract.authoringVersion) !== 3) continue;
+    for (const relationship of candidate.contract.model.relationships) {
+      const target = byEntity.get(relationship.target);
+      if (!target) {
+        throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} targets missing entity ${relationship.target}. Include its storage in the backend manifest.`);
+      }
+      if (relationship.kind === "belongsTo") {
+        const column = table.columns.find((column) => column.name === relationship.foreignKey);
+        if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
+        attachReference(table, column, target.table, relationship.unique);
+      } else if (relationship.kind === "hasMany") {
+        const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
+        if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
+        attachReference(target.table, column, table, false, relationship.ownership === "owned" ? "CASCADE" : undefined);
+        if (relationship.sortable) {
+          const positionName = `${column.name}_position`;
+          if (Buffer.byteLength(positionName) > 63) throw new Error(`Sortable relationship column exceeds PostgreSQL's identifier limit: ${positionName}.`);
+          const existingPosition = target.table.columns.find((column) => column.name === positionName);
+          if (existingPosition) throw new Error(`Sortable relationship storage collides with ${tableKey(target.table)}.${positionName}.`);
+          target.table.columns.push({ name: positionName, type: "integer", required: true, default: "0" });
+          addIndex(target.table, [...(target.table.tenantScoped ? ["tenant_id"] : []), column.name, positionName]);
+        }
+      } else {
+        if (relationship.ownership === "owned") {
+          throw new Error(`Owned collection ${candidate.contract.entity.name}.${relationship.key} requires an inverse foreign key; junction storage supports references only.`);
+        }
+        const name = relationship.via ?? `${table.name}_${snakeCase(relationship.fieldKey ?? relationship.key)}`;
+        if (!/^[a-z][a-z0-9_]*$/.test(name) || Buffer.byteLength(name) > 63) {
+          throw new Error(`Field relationship junction requires a PostgreSQL identifier of at most 63 bytes: ${name}.`);
+        }
+        if (tables.some((candidate) => candidate.schema === table.schema && candidate.name === name)) {
+          throw new Error(`Field relationship junction collides with ${table.schema}.${name}.`);
+        }
+        const sourceColumn: ColumnDefinition = { name: "source_id", type: "uuid", required: true };
+        const targetColumn: ColumnDefinition = { name: "target_id", type: "uuid", required: true };
+        const junction: TableDefinition = {
+          schema: table.schema, name, tenantScoped: table.tenantScoped,
+          domainInternal: true, generatedCrudEligible: false, generatedCrud: false,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true, required: true, default: "gen_random_uuid()" },
+            ...(table.tenantScoped ? [{ name: "tenant_id", type: "uuid" as const, required: true }] : []),
+            sourceColumn, targetColumn,
+            ...(relationship.sortable ? [{ name: "position", type: "integer" as const, required: true, default: "0" }] : []),
+          ],
+          relationStorage: {
+            sourceEntity: candidate.contract.entity.name,
+            fieldKey: relationship.fieldKey ?? relationship.key,
+            targetEntity: relationship.target,
+            sourceColumn: sourceColumn.name, targetColumn: targetColumn.name,
+            ...(relationship.sortable ? { positionColumn: "position" } : {}),
+          },
+        };
+        attachReference(junction, sourceColumn, table, false, "CASCADE");
+        attachReference(junction, targetColumn, target.table, false, "CASCADE");
+        addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "target_id"], true);
+        if (relationship.sortable) addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "position"]);
+        tables.push(junction);
+      }
+    }
+  }
+}
+
 export function compileAuthoringBackendManifest(
   authoringDir: string,
   options: CompileAuthoringBackendManifestOptions,
@@ -898,7 +1033,7 @@ export function compileAuthoringBackendManifest(
     ),
   );
   const domainInternalEntities = new Set((options.domainInternalEntities ?? []).map(kebabCase));
-  const relationshipRegister = options.relationshipRegister ?? [];
+  const relationshipRegister = [...(options.relationshipRegister ?? [])];
   const schemaByModule = options.schemaByModule ?? { core: "erp" };
   const candidates: CompiledCandidate[] = [
     ...allowlist.map((slug) => compileCoreCandidate(authoringDir, slug, sourcePathPrefix)),
@@ -1043,6 +1178,7 @@ export function compileAuthoringBackendManifest(
 
     const columnsByName = new Map(columns.map((column) => [column.name, column]));
     for (const relationship of candidate.contract.model.relationships) {
+      if (Number(candidate.contract.authoringVersion) === 3) continue;
       if (relationship.kind !== "belongsTo" || !relationship.foreignKey) {
         continue;
       }
@@ -1128,8 +1264,8 @@ export function compileAuthoringBackendManifest(
         path: candidate.path,
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
-        ...(candidate.contract.authoringVersion === 2
-          ? { authoringVersion: 2 as const }
+        ...([2, 3].includes(candidate.contract.authoringVersion)
+          ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
           : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
@@ -1163,15 +1299,26 @@ export function compileAuthoringBackendManifest(
             ? { operations: candidate.contract.graphql.operations }
             : {}),
           relationships: candidate.contract.graphql.relationships
-            .filter((relationship): relationship is typeof relationship & { resolve: "belongsTo" | "hasMany" } =>
-              relationship.resolve === "belongsTo" || relationship.resolve === "hasMany",
-            )
+            .filter((relationship) => relationship.resolve !== "manyToMany" || candidate.contract.authoringVersion === 3)
             .map((relationship) => ({
               name: relationship.name,
               target: relationship.target,
               type: relationship.type,
-              resolve: relationship.resolve,
+              resolve: relationship.resolve === "belongsTo" ? "belongsTo" as const : "hasMany" as const,
               ...(relationship.foreignKey ? { foreignKey: relationship.foreignKey } : {}),
+              ...(() => {
+                const normalized = candidate.contract.model.relationships.find((entry) => entry.key === relationship.name);
+                if (!normalized?.fieldKey) return {};
+                return {
+                  fieldKey: normalized.fieldKey, kind: normalized.kind,
+                  ...(normalized.inverse ? { inverse: normalized.inverse } : {}),
+                  ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
+                  ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
+                  ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),
+                  ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
+                  ...(normalized.kind !== "belongsTo" ? { mutationSupport: "unsupported" as const } : {}),
+                };
+              })(),
             })),
           ...(() => {
             const defaultSort = pickEmbeddedDefaultSort(candidate.contract.views);
@@ -1208,6 +1355,8 @@ export function compileAuthoringBackendManifest(
       },
     };
   });
+
+  compileFieldRelationStorage(candidates, tables, relationshipRegister);
 
   return {
     version: 1,

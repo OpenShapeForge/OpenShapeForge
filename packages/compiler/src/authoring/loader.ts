@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
 import { assertV2Authoring } from "./entity-v2.js";
+import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
 import type {
   CoreEntity,
   EntityProfile,
@@ -204,12 +205,21 @@ export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin:
   }
 }
 
+const parsedYaml = new Map<string, { source: string; value: unknown }>();
+
 function loadYaml<T>(filePath: string): T {
   if (!existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
   }
   const raw = readFileSync(filePath, "utf-8");
-  return parseYaml(raw) as T;
+  let cached = parsedYaml.get(filePath);
+  if (!cached || cached.source !== raw) {
+    cached = { source: raw, value: parseYaml(raw) };
+    parsedYaml.set(filePath, cached);
+  }
+  // The corpus is loaded for multiple projections. Cache parsing by actual
+  // source bytes, not timestamps, and isolate callers from shared mutation.
+  return structuredClone(cached.value) as T;
 }
 
 /**
@@ -296,7 +306,7 @@ export function loadEntity(
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawCoreEntity = loadYaml<CoreEntity>(corePath);
   const baseEntity = loadBaseEntity(authoringDir);
-  const coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
+  let coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
     kind: "core",
     path: corePath,
   });
@@ -340,6 +350,7 @@ export function loadEntity(
 
   // Semantic types (core + context catalogs merged)
   const semanticTypes = loadSemanticTypes(authoringDir);
+  coreEntity = normalizeEntityFields(coreEntity, semanticTypes);
   const retentionPolicies = loadRetentionPolicies(authoringDir);
 
   // View definition (optional)
@@ -475,7 +486,8 @@ export function loadSemanticTypes(authoringDir: string): Record<string, Semantic
   for (const { types } of loadSemanticTypeCatalogSources(authoringDir)) {
     Object.assign(merged, types);
   }
-  return merged;
+  const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
+  return deriveEntitySemanticTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
 }
 
 export interface SemanticTypeCatalogSource {

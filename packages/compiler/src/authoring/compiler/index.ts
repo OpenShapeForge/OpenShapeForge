@@ -20,6 +20,7 @@ import type {
   CompiledViewGroup,
 } from "../types.js";
 import { resolveStorageColumns } from "./storage.js";
+import { normalizeEntityFields } from "../entity-fields.js";
 import { resolveModelFields } from "./model.js";
 import { resolveRelationships } from "./relationships.js";
 import { buildGraphQL } from "./graphql.js";
@@ -91,11 +92,12 @@ export function validateTimelineIncludes(
 }
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
+  artifacts = { ...artifacts, coreEntity: normalizeEntityFields(artifacts.coreEntity, artifacts.semanticTypes) };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
 
-  const columns = resolveStorageColumns(coreEntity.fields, profiles, coreEntity.relationships ?? []);
-  const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const relationships = resolveRelationships(artifacts);
+  const columns = resolveStorageColumns(coreEntity.fields, profiles, relationships);
+  const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
@@ -126,7 +128,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   });
 
   return {
-    authoringVersion: coreEntity.schemaVersion === 2 ? 2 : 1,
+    authoringVersion: coreEntity.schemaVersion,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {

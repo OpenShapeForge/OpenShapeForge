@@ -3,7 +3,9 @@ import {
   elicitedOutputColumn,
   generatedCrudError,
   isElicitedOutputColumn,
+  getGeneratedCrudTables,
 } from "./catalog.js";
+import { collectionManagedFields } from "./collection-policy.js";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
@@ -55,6 +57,7 @@ export function isCallerWritableColumn(
   return (
     isWritableColumn(column, operation) &&
     !isElicitedOutputColumn(table, column) &&
+    !collectionManagedFields(table, getGeneratedCrudTables()).has(column.name) &&
     !isOperationWrittenColumn(column)
   );
 }

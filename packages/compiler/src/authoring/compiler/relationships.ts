@@ -13,9 +13,31 @@
  */
 import type { CompiledRelationship } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { deriveTableName } from "./helpers.js";
 
 export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelationship[] {
   const rels: CompiledRelationship[] = [];
+
+  for (const field of artifacts.coreEntity.fields) {
+    const rel = field.relationship;
+    if (!rel?.target) continue;
+    rels.push({
+      key: field.key,
+      fieldKey: field.key,
+      kind: rel.kind!,
+      target: rel.target,
+      foreignKey: rel.foreignKey,
+      inverse: rel.inverse,
+      ownership: rel.ownership,
+      cardinality: field.cardinality,
+      sortable: field.sortable,
+      unique: rel.unique,
+      ...(rel.kind === "manyToMany" ? {
+        via: `${deriveTableName(artifacts.coreEntity.entity)}_${field.key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()}`,
+      } : {}),
+      label: field.label,
+    });
+  }
 
   if (artifacts.coreEntity.relationships) {
     for (const rel of artifacts.coreEntity.relationships) {

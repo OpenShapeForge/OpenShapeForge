@@ -85,6 +85,8 @@ export const nonManifestManagedTables = new Set<string>([
   "platform.system_bypass_audit",
   // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
   "platform.operation_execution_receipts",
+  // Definition catalog: owned by the preferences plugin's 0001_definition-catalog migration.
+  "platform.preference_definitions",
   // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
   // after the generated step (its FKs point at generated tables).
   "platform.identities",

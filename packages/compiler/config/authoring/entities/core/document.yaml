@@ -464,7 +464,6 @@ interfaces:
       record:
         routes:
           read: /documents/:id
-          edit: /documents/:id/edit
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"

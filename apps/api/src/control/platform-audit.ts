@@ -62,6 +62,9 @@ function decodeCursor(value: string): AuditCursor {
 }
 
 const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = {
+  list_tenant_invitations: /^[a-z][a-z0-9-]*$/,
+  revoke_tenant_invitation: /^[a-z][a-z0-9-]*$/,
+  resend_tenant_invitation: /^[a-z][a-z0-9-]*$/,
   invite_first_tenant_admin: /^[a-z][a-z0-9-]*$/,
   list_tenants: null,
   get_tenant: /^slug="[a-z][a-z0-9-]*"$/,

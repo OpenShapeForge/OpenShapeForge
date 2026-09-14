@@ -64,7 +64,7 @@ describe('first-administrator preflight reads', () => {
 
 type Call = { url: string; init: RequestInit };
 
-function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {
+function stubFetch(admin: (url: string) => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {
   const calls: Call[] = [];
   const fetch = (async (input: unknown, init: RequestInit = {}) => {
     const url = String(input);
@@ -72,7 +72,7 @@ function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; cal
     if (url.includes("/protocol/openid-connect/token")) {
       return Response.json({ access_token: "service-account-token", expires_in: 900 });
     }
-    return admin();
+    return admin(url);
   }) as unknown as typeof globalThis.fetch;
   return { fetch, calls };
 }
@@ -267,7 +267,7 @@ describe("listing pending invitations", () => {
 
     const call = calls[1]!;
     expect(call.url).toBe(
-      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/invitations",
+      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/invitations?first=0&max=100",
     );
     expect(call.init.method).toBe("GET");
     expect((call.init.headers as Record<string, string>).authorization).toBe(
@@ -327,16 +327,28 @@ describe("listing pending invitations", () => {
     });
   });
 
-  it("drops a row without an id, which nothing could cancel or refer to", async () => {
-    const { fetch } = stubFetch(() =>
-      Response.json([{ email: "ghost@example.com" }, invitationRow]),
-    );
-    const invitations = await createKeycloakOrganizationMembersClient(config, {
-      fetch,
-    }).listInvitations("acme");
-    expect(invitations.map((invitation) => invitation.id)).toEqual([
-      "77e9e1af-12ed-44a9-b8fa-485bf12f485e",
-    ]);
+  it("refuses malformed rows instead of returning an incomplete administrative list", async () => {
+    const { fetch } = stubFetch(() => Response.json([{ email: "ghost@example.com" }, invitationRow]));
+    await expect(createKeycloakOrganizationMembersClient(config, { fetch }).listInvitations("acme"))
+      .rejects.toMatchObject({ code: "KEYCLOAK_ADMIN_UNAVAILABLE" });
+  });
+
+  it("reads subsequent invitation pages and omits secret links on every page", async () => {
+    const { fetch, calls } = stubFetch((url) => Response.json(String(url).includes("first=100")
+      ? [{ ...invitationRow, id: "last" }]
+      : Array.from({ length: 100 }, (_, index) => ({ ...invitationRow, id: `invite-${index}` }))));
+    const rows = await createKeycloakOrganizationMembersClient(config, { fetch }).listInvitations("acme");
+    expect(rows).toHaveLength(101);
+    expect(calls).toHaveLength(3);
+    expect(JSON.stringify(rows)).not.toContain("ORGIVT-SECRET");
+  });
+
+  it("uses the native resend endpoint without changing recipient or role", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 204 }));
+    await createKeycloakOrganizationMembersClient(config, { fetch }).resendInvitation!("acme", "invite-1");
+    expect(calls[1]!.url).toEndWith("/organizations/acme/invitations/invite-1/resend");
+    expect(calls[1]!.init.method).toBe("POST");
+    expect(calls[1]!.init.body).toBeUndefined();
   });
 
   it("names the organization as not found on 404", async () => {

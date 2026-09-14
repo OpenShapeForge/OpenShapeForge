@@ -126,6 +126,7 @@ export type KeycloakOrganizationMembersClient = {
    * message here repeats that rather than inventing a different explanation).
    */
   inviteUser(organizationId: string, input: InviteOrganizationMemberInput): Promise<void>;
+  resendInvitation?(organizationId: string, invitationId: string): Promise<void>;
   /**
    * The invitations the organization still has outstanding. An organization
    * with none answers an empty array, not an error.
@@ -327,16 +328,21 @@ export function createKeycloakOrganizationMembersClient(
   async function listInvitations(
     organizationId: string,
   ): Promise<KeycloakOrganizationInvitation[]> {
-    const { body } = await request(
-      invitationsUrl(organizationId),
-      { method: "GET" },
-      "listing the pending invitations",
-      "list_invitations",
-    );
-    const rows = Array.isArray(body) ? body : [];
-    return rows
-      .map(toInvitation)
-      .filter((invitation): invitation is KeycloakOrganizationInvitation => invitation !== null);
+    const invitations: KeycloakOrganizationInvitation[] = [];
+    for (let first = 0; first < 10000; first += 100) {
+      const { body } = await request(
+        `${invitationsUrl(organizationId)}?first=${first}&max=100`,
+        { method: "GET" }, "listing the pending invitations", "list_invitations",
+      );
+      if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid invitation list response.");
+      for (const row of body) {
+        const invitation = toInvitation(row);
+        if (!invitation || !invitation.email) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid invitation response.");
+        invitations.push(invitation);
+      }
+      if (body.length < 100) return invitations;
+    }
+    throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invitation listing exceeds the supported bound; no partial list is returned.");
   }
 
   return {
@@ -378,6 +384,11 @@ export function createKeycloakOrganizationMembersClient(
         "inviting a member",
         "invite_member",
       );
+    },
+
+    async resendInvitation(organizationId, invitationId) {
+      await request(`${invitationsUrl(organizationId)}/${encodeURIComponent(invitationId)}/resend`,
+        { method: "POST" }, "resending an invitation", "resend_invitation");
     },
 
     listInvitations,

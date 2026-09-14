@@ -49,6 +49,9 @@ describe("the tool list", () => {
   it("is exactly the platform surface, every tool with a title, description and closed schema", () => {
     expect(PLATFORM_TOOLS.map((tool) => tool.name)).toEqual([
       "invite_first_tenant_admin",
+      "list_tenant_invitations",
+      "revoke_tenant_invitation",
+      "resend_tenant_invitation",
       "whoami",
       "platform_guide",
       "list_tenants",
@@ -116,6 +119,13 @@ describe("argument validation happens before any elevation", () => {
     }
     expect(errorOf(await callPlatformTool('invite_first_tenant_admin', { slug: 'acme', email: 'invalid' }, untouchable)).code).toBe('INVALID_INPUT');
     expect(errorOf(await callPlatformTool('invite_first_tenant_admin', { slug: 'acme', email: 'admin@example.com' }, untouchable)).code).toBe('INVITATIONS_NOT_CONFIGURED');
+  });
+  it("rejects invitation target injection and missing IDs before elevation", async () => {
+    for (const name of ["list_tenant_invitations", "revoke_tenant_invitation", "resend_tenant_invitation"]) {
+      expect(errorOf(await callPlatformTool(name, { slug: "acme", tenantId: "foreign" }, untouchable)).code).toBe("CONTROL_INVALID_INPUT");
+    }
+    expect(errorOf(await callPlatformTool("resend_tenant_invitation", { slug: "acme", invitationId: "../foreign" }, untouchable)).code).toBe("INVALID_INPUT");
+    expect(errorOf(await callPlatformTool("list_tenant_invitations", { slug: "acme" }, untouchable)).code).toBe("INVITATIONS_NOT_CONFIGURED");
   });
   it("refuses an unknown tool as NOT_FOUND without listing what exists", async () => {
     const error = errorOf(await callPlatformTool("finding_list", {}, untouchable));

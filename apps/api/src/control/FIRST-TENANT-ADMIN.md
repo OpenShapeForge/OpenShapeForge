@@ -56,3 +56,7 @@ It refuses an already populated fixture; discard the disposable database before
 rerunning. Without the explicit proof URL, those database tests are skipped.
 Unit tests require no database. Live recipient acceptance and actual SMTP inbox
 delivery remain deployment acceptance checks, not claims of this test suite.
+
+For conflicting or expired outstanding invitations, use the platform
+[list, revoke and resend operations](./INVITATIONS.md). Repeating bootstrap
+itself still does not resend mail.

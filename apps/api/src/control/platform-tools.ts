@@ -30,6 +30,7 @@ import { assertDisplayName, assertSlug, assertUuid, ControlInputError } from "./
 import { listOrgUnits, parseOrgUnitUpdate, updateOrgUnit } from "./org-unit-registry.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
 import { listPlatformAudit } from "./platform-audit.js";
+import { manageTenantInvitations } from "./tenant-invitations.js";
 import { FirstAdministratorError, inviteFirstTenantAdministrator, type FirstAdministratorClients } from "./first-tenant-administrator.js";
 import { provisionSubOrganization, provisionTenant } from "./provisioning.js";
 import { buildDriftReport, reapplyProjection } from "./reconciliation.js";
@@ -128,7 +129,7 @@ export const PLATFORM_GUIDE = [
   "Use update_tenant for display-name or lifecycle changes. Suspending or deactivating a tenant disables its root Organization and can interrupt access; confirm that consequence first. Use get_tenant_organization_tree before creating or moving a sub-organization, and pass only its opaque org-unit ids — never invent or accept a Keycloak Organization id.",
   "Use get_reconciliation_report to compare the authoritative registry with Keycloak. reapply_reconciliation pushes repairable registry state into Keycloak for one tenant or every affected tenant; it never deletes an unclaimed Organization. Confirm an all-tenant run first.",
   "",
-  "For an existing tenant without an organization administrator, confirm its exact slug and the recipient email, then use invite_first_tenant_admin. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Once an administrator exists, use that tenant administrator's invite_employee workflow. The platform administrator stays outside the tenant.",
+  "For an existing tenant without an organization administrator, confirm its exact slug and the recipient email, then use invite_first_tenant_admin. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Once an administrator exists, use that tenant administrator's invite_employee workflow. The platform administrator stays outside the tenant. Use list_tenant_invitations to inspect outstanding invitations, revoke_tenant_invitation to withdraw one, and resend_tenant_invitation for an explicit resend to the same recipient and role.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",
@@ -154,6 +155,24 @@ export const PLATFORM_TOOLS: readonly Tool[] = [
     description: "Invites the first org_admin by email for ONE existing active tenant. Confirm the exact tenant slug and recipient first. Uses the existing Keycloak organization invitation and acceptance flow; requires working tenant-realm SMTP. Repeating the same request reuses the invitation without resending. Refuses a different first administrator once one exists or is pending. Does not make the platform administrator a tenant member or grant a role before acceptance.",
     inputSchema: { type: "object", properties: { slug: slugProperty, email: { type: "string", format: "email" } }, required: ["slug", "email"], additionalProperties: false },
     annotations: { title: "Invite first tenant administrator", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "list_tenant_invitations", title: "List tenant invitations",
+    description: "Lists outstanding invitations for one tenant with recipient, role, expiry and registry discrepancies. No invitation links or tokens are returned. Use invitationId from this result for revoke or resend.",
+    inputSchema: { type: "object", properties: { slug: slugProperty }, required: ["slug"], additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "revoke_tenant_invitation", title: "Revoke tenant invitation",
+    description: "Withdraws the selected outstanding invitation at Keycloak and cancels its pending role assignment. The old email link stops working; existing members are not removed. Refresh the list before selecting an invitation.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, invitationId: { type: "string", description: "Opaque invitationId from list_tenant_invitations." } }, required: ["slug", "invitationId"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  },
+  {
+    name: "resend_tenant_invitation", title: "Resend tenant invitation",
+    description: "Explicitly resends the selected outstanding invitation to its existing email with its existing role. Replaces the old invitation link. Refresh after success or an uncertain delivery; never automatically retry.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, invitationId: { type: "string", description: "Opaque invitationId from list_tenant_invitations." } }, required: ["slug", "invitationId"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
     name: "whoami",
@@ -754,6 +773,12 @@ export async function callPlatformTool(
       case "invite_first_tenant_admin":
         rejectUnknown(args, ["slug", "email"]);
         return ok(await inviteFirstTenantAdministrator(context, { slug: requireString(args, "slug"), email: requireString(args, "email") }));
+      case "list_tenant_invitations":
+      case "revoke_tenant_invitation":
+      case "resend_tenant_invitation":
+        rejectUnknown(args, name === "list_tenant_invitations" ? ["slug"] : ["slug", "invitationId"]);
+        return ok(await manageTenantInvitations(context, name, { slug: requireString(args, "slug"),
+          ...(name === "list_tenant_invitations" ? {} : { invitationId: requireString(args, "invitationId") }) }));
       case "whoami": {
         rejectUnknown(args, []);
         const tenants = await listPlatformTenantsCount(context);

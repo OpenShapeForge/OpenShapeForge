@@ -44,6 +44,7 @@ function context(webPresent: boolean): PluginGenerateContext {
     manifest: { tables: [] } as unknown as PlatformSchemaManifest,
     entities: [],
     operationCatalog: { version: 1, operations: [] },
+    settingsPolicy: { version: 1, settings: {}, providers: {} },
     fieldSchemas: createFieldSchemaCompiler(
       loadFieldCompilationCatalogs(authoringDir),
     ),

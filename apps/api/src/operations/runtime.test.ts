@@ -300,9 +300,23 @@ describe("canonical operation runtime", () => {
       .toThrow("absent from its compiler contract");
   });
   test("fails closed when the compiler contract has no runtime handler", () => {
-    expect(() => bindCanonicalOperationHandlers([])).toThrow(/has no loaded runtime module/);
-    expect(() => bindCanonicalOperationHandlers([workflowRuntime])).toThrow(/has no loaded runtime module "documents"/);
-    expect(() => bindCanonicalOperationHandlers([documentsRuntime, { name: "workflow" }])).toThrow(/has no runtime handler/);
+    expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);
+    expect(() => bindOperationHandlers([{ name: "unrelated" }, { name: "workflow" }])).toThrow(/has no runtime handler/);
+  });
+  test("a process without any operation module binds native operations and no plugin handlers", () => {
+    const bound = bindCanonicalOperationHandlers([]);
+    expect(bound.has("workflow.instance.webhook-start")).toBe(false);
+    expect(bound.has("entityTypes.list")).toBe(true);
+    expect(
+      [...bound.values()].every(({ operation }) =>
+        operation.implementation?.type === "collection" ||
+        operation.implementation?.type === "entity-type-list"
+      ),
+    ).toBe(true);
+    // Once any operation module is present, every plugin operation must bind.
+    const noOperationModule = { name: "no-operation-module" };
+    expect(() => bindCanonicalOperationHandlers([noOperationModule])).not.toThrow();
+    expect(bindCanonicalOperationHandlers([noOperationModule]).has("workflow.instance.webhook-start")).toBe(false);
   });
 
   test("validates input and handler output against the generated contract", async () => {

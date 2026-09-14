@@ -95,10 +95,13 @@ export function validateTimelineIncludes(
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   artifacts = { ...artifacts, coreEntity: normalizeEntityFields(artifacts.coreEntity, artifacts.semanticTypes) };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
+  const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
 
   const relationships = resolveRelationships(artifacts);
   const columns = resolveStorageColumns(coreEntity.fields, profiles, relationships);
-  const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
+  const modelFields = resolveModelFields(valueDefinition
+    ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.semanticTypes).fields
+    : coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
@@ -142,6 +145,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ...entity,
       module: coreEntity.module,
       title: coreEntity.title,
+      ...(valueDefinition ? { valueDefinition: true } : {}),
       description: coreEntity.description,
       labels: coreEntity.labels,
       domains: [...(coreEntity.domains ?? [])],

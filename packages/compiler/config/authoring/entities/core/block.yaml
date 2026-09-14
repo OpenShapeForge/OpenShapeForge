@@ -31,7 +31,8 @@ fields:
     immutable: true
     persisted: { column: definition_version, storageClass: core }
   - key: values
-    valueType: object
+    semanticType: entityValue
+    entityValue: { definitionField: definitionKey }
     required: true
     label: { en: Values, nl: Waarden }
     persisted: { column: values, storageClass: core }

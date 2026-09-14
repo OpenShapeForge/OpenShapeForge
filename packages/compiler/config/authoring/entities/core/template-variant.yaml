@@ -42,7 +42,24 @@ fields:
     cardinality: collection
     sortable: true
     relationship: { inverse: variant, ownership: owned }
+    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
 operations:
+  insertBlock:
+    name: { en: Add block, nl: Blok toevoegen }
+    description: Insert an allowed block into this variant atomically.
+    implementation: { type: collection, action: insert, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  moveBlock:
+    name: { en: Move block, nl: Blok verplaatsen }
+    description: Move a block within this variant atomically.
+    implementation: { type: collection, action: move, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   list:
     name: List template variant
     description: Read accessible template variant records.

@@ -609,6 +609,39 @@ describe("compiled entity block definitions and typed relationships", () => {
   });
 });
 
+describe("canonical block materialization", () => {
+  test("pins the Operation outcome without mutating it when sources change", async () => {
+    const f = fixture();
+    const value = { title: "First" };
+    const materializeBlock: NonNullable<ContentResolvers["materializeBlock"]> = async (input) => {
+      expect(input.values.body).toBe("Hello Reader from Example.");
+      expect(Object.isFrozen(input.values)).toBe(true);
+      return { operationId: "TextSection.materialize", result: { kind: "block", value } };
+    };
+    const run = () => materializeTemplateContent(f.request, f.registry, { ...f.resolvers, materializeBlock });
+    const first = await run();
+    value.title = "Second";
+    const second = await run();
+    expect(first.blocks[0]!.materialization?.result).toEqual({ kind: "block", value: { title: "First" } });
+    expect(first.compositionHash).not.toBe(second.compositionHash);
+  });
+  test("Operation-driven inclusion uses the same cycle and reference guards", async () => {
+    const f = fixture([include("nested", "child")]);
+    const { composition: _composition, ...definition } = f.registry.TemplateSlot!;
+    f.registry.TemplateSlot = { ...definition, renderers: { document: "fields" } };
+    f.versions.child = version("child", [text("childText", "Child")]);
+    let materializeBlock: NonNullable<ContentResolvers["materializeBlock"]> = async (input) => input.definitionKey === "TemplateSlot"
+      ? { operationId: "TemplateSlot.materialize", result: { kind: "template", referenceField: "version", parameters: {} } }
+      : { operationId: "TextSection.materialize", result: { kind: "block", value: input.values } };
+    const run = () => materializeTemplateContent(f.request, f.registry, { ...f.resolvers, materializeBlock });
+    expect((await run()).blocks[0]!.id).toBe("childText");
+    f.versions.child = version("child", [include("cycle", "root")]);
+    await rejectsCode(run(), "TEMPLATE_CYCLE");
+    materializeBlock = async () => ({ operationId: "TemplateSlot.materialize", result: { kind: "template", referenceField: "untracked", parameters: {} } });
+    await rejectsCode(run(), "DEPENDENCY_INVALID");
+  });
+});
+
 describe("template composition", () => {
   test("expands nested templates in order and pins local/global values and source versions", async () => {
     const f = fixture([

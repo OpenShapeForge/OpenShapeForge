@@ -57,6 +57,8 @@ export type IndexDefinition = {
  * schema migration instead.
  */
 export type TableConstraintDefinition = {
+  /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
+  compilerOwned?: boolean;
   /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
   version: string;
   /** Explicit PostgreSQL constraint name. */
@@ -643,6 +645,7 @@ export type PlatformSchemaManifest = {
   description?: string;
   relationshipRegister?: RelationshipRegisterEntry[];
   tables: TableDefinition[];
+  entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
 };
 
 export type GeneratedArtifact = {

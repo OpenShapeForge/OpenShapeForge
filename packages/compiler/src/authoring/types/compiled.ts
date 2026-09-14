@@ -90,6 +90,8 @@ export interface CompiledField {
   };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
+  entityValue?: { definitionField: string };
+  allowedDefinitions?: string[];
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
@@ -680,6 +682,8 @@ export interface CompiledEntityContract {
     name: string;
     module: string;
     title: string;
+    /** Explicit baseEntity:false with no entity identity; usable only as a value definition. */
+    valueDefinition?: boolean;
     description?: string | LocalizedText;
     labels?: LocalizedText;
     domains: string[];

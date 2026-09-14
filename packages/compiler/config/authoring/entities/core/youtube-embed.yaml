@@ -1,0 +1,57 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: YouTubeEmbed
+title: YouTube embed
+language: en
+labels: { en: YouTube video, nl: YouTube-video }
+domains: [documents]
+baseEntity: false
+displayTemplate: "{{title}}"
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+fields:
+  - key: title
+    valueType: string
+    required: true
+    label: { en: Title, nl: Titel }
+    validation: { minLength: 1, maxLength: 200 }
+  - key: url
+    semanticType: url
+    required: true
+    label: { en: Video URL, nl: Video-URL }
+    # An external URL is content, not a server-side instruction to fetch it.
+    validation:
+      pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0-9_=&%-]*)?$"
+      maxLength: 2000
+  - key: showControls
+    valueType: boolean
+    defaultValue: true
+    label: { en: Show player controls, nl: Spelerbediening tonen }
+operations:
+  materialize:
+    name: Materialize video
+    description: Validate video metadata without fetching external content.
+    implementation: { type: plugin, plugin: documents, handler: materializeFields }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [definitionKey, values]
+        properties:
+          definitionKey: { type: string, const: YouTubeEmbed }
+          values: { type: object }
+    output: { schema: { type: object } }
+    errors: []
+    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      materialize: { method: POST, path: /api/content-blocks/video/materialize }
+  mcp: { tools: generic }

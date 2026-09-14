@@ -913,6 +913,7 @@ function renderManifestJson(
       capabilities: {
         generatedEntities,
       },
+      ...(manifest.entityValues ? { entityValues: manifest.entityValues } : {}),
       tables,
     },
     null,

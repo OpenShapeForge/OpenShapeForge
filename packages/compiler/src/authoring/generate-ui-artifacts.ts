@@ -367,6 +367,7 @@ export async function generateAuthoringUiArtifacts(
   authoringDir: string,
   repoRoot: string,
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
+  referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -505,6 +506,7 @@ export async function generateAuthoringUiArtifacts(
       compiled.map(({ name, contract }) => ({ slug: name, contract })),
       {},
       standalone,
+      referentiedata,
     )),
   );
 

@@ -58,7 +58,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "connector.schema.json": 5,
   // The core ERP catalog under packages/compiler/config/authoring/entities/,
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design.
-  "core-entity.schema.json": 150,
+  "core-entity.schema.json": 153,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP.
   "operation-catalog.schema.json": 1,

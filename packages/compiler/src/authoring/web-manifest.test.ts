@@ -151,6 +151,25 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("preserves entityValue and allowed definitions on fields and collection relationships", () => {
+    const definition = entity("Snippet", "snippet", [field("text")], coreView());
+    definition.contract.entity.valueDefinition = true;
+    definition.contract.entityOperations = {};
+    const placement = entity("Placement", "placement", [field("values", {
+      valueType: "object", semanticType: "entityValue", entityValue: { definitionField: "definitionKey" },
+    })], coreView());
+    const page = entity("Page", "page", [field("placements", {
+      semanticType: "Placement", cardinality: "collection", allowedDefinitions: ["Snippet"],
+    })], coreView(), [{ key: "placements", fieldKey: "placements", kind: "hasMany", target: "Placement", foreignKey: "page_id", ownership: "owned" }]);
+    const output = JSON.parse(renderWebManifest(buildWebManifest([page, placement, definition])));
+    expect(output.entities.Placement.fields.values.entityValue).toEqual({ definitionField: "definitionKey" });
+    expect(output.entities.Page.fields.placements.allowedDefinitions).toEqual(["Snippet"]);
+    expect(output.entities.Page.relationships.placements.allowedDefinitions).toEqual(["Snippet"]);
+    expect(output.entities.Snippet).toBeUndefined();
+    expect(output.entityValueDefinitions.Snippet).toMatchObject({ entityName: "Snippet", fields: [{ id: "Snippet.text", key: "text", supports: { read: true, create: true, update: true } }] });
+    expect(renderWebManifest(buildWebManifest([page, placement, definition]))).toBe(renderWebManifest(buildWebManifest([definition, placement, page])));
+  });
+
   test("schema-3 uses authored relation field keys and exposes junctions read-only", () => {
     const view = coreView();
     view.form!.variants.create!.groups[0]!.fields = ["displayName", "owner", "related"];

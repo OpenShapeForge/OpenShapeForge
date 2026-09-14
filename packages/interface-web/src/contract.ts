@@ -122,6 +122,10 @@ export type WebFieldProjection = {
   description: LocalizedText;
   valueType: string;
   semanticType?: string;
+  /** Logical dynamic form metadata; physical storage stays server-side. */
+  entityValue?: { definitionField: string };
+  allowedDefinitions?: string[];
+  relationship?: { targetEntityId: string };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
   options?: WebFieldOption[];
@@ -175,8 +179,15 @@ export type WebRelationshipProjection = {
   sortable?: boolean;
   positionColumn?: string;
   via?: string;
-  mutationSupport?: "unsupported";
-  operations: { list?: WebOperationRef; get?: WebOperationRef; create?: WebOperationRef };
+  mutationSupport?: "unsupported" | "atomic";
+  allowedDefinitions?: string[];
+  operations: {
+    list?: WebOperationRef;
+    get?: WebOperationRef;
+    create?: WebOperationRef;
+    insert?: WebCustomOperationRef;
+    move?: WebCustomOperationRef;
+  };
   collection?: WebCollectionView;
 };
 
@@ -278,6 +289,13 @@ export type WebManifestV1 = {
   operations?: Record<string, WebStandaloneOperationRef>;
   /** Pages of standalone Operations keyed by page id. */
   pages?: Record<string, WebPage>;
+  /** Normal entity field definitions projected for use inside entityValue fields. */
+  entityValueDefinitions?: Record<string, {
+    entityName: string;
+    label: LocalizedText;
+    fields: WebFieldProjection[];
+    materializeOperationId?: string;
+  }>;
 };
 
 export type WebManifestOptions = {

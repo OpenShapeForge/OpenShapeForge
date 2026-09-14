@@ -27,6 +27,8 @@ export type CompiledContentBlockDefinition = {
   readonly fields: Readonly<Record<string, ContentField>>;
   /** Output-channel to renderer identifier. No renderer code is executed by this engine. */
   readonly renderers: Readonly<Record<string, string>>;
+  /** Exact compiler definition used for validation/presentation, frozen with the result. */
+  readonly source?: JsonObject;
   /** Optional compiled composition metadata, not a special hardcoded block entity. */
   readonly composition?: {
     readonly templateVersionField: string;
@@ -93,6 +95,14 @@ export type ContentResolvedEntity = {
 
 type MaybePromise<T> = T | Promise<T>;
 
+/** A canonical read Operation may materialize values or include an existing FK slot. */
+export type ContentBlockMaterialization = {
+  readonly operationId: string;
+  readonly result:
+    | { readonly kind: "block"; readonly value: JsonObject }
+    | { readonly kind: "template"; readonly referenceField: string; readonly parameters: JsonObject };
+};
+
 /** The adapter must authorize reads with its verified session, then return tenant-scoped data. */
 export type ContentResolvers = {
   readonly resolveTemplateVersion: (
@@ -113,6 +123,13 @@ export type ContentResolvers = {
     values: JsonObject,
   ) => MaybePromise<void>;
   readonly validateBlockValues?: (definitionKey: string, values: JsonObject) => MaybePromise<void>;
+  readonly materializeBlock?: (input: {
+    readonly definitionKey: string;
+    readonly values: JsonObject;
+    readonly references: MaterializedContentBlock["references"];
+    readonly channel: string;
+    readonly locale: string;
+  }) => MaybePromise<ContentBlockMaterialization>;
 };
 
 export type MaterializeTemplateContentInput = {
@@ -133,6 +150,7 @@ export type MaterializedContentBlock = {
   readonly references: Readonly<
     Record<string, ContentResolvedEntity | readonly ContentResolvedEntity[] | null>
   >;
+  readonly materialization?: ContentBlockMaterialization;
 };
 
 export type MaterializedTemplateContent = {
@@ -149,6 +167,7 @@ export type MaterializedTemplateContent = {
     readonly values: JsonObject;
     readonly templateReference: ContentEntityReference;
     readonly references: MaterializedContentBlock["references"];
+    readonly materialization?: ContentBlockMaterialization;
   }[];
   readonly templates: readonly {
     readonly path: readonly string[];

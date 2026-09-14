@@ -37,6 +37,14 @@ fields:
     cardinality: collection
     relationship: { inverse: template, ownership: owned }
 operations:
+  insertVersion:
+    name: { en: Add version, nl: Versie toevoegen }
+    description: Create an owned template version atomically.
+    implementation: { type: collection, action: insert, field: versions }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   list:
     name: List template
     description: Read accessible template records.

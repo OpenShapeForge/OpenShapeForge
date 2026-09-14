@@ -45,6 +45,36 @@ fields:
     cardinality: collection
     relationship: { inverse: version, ownership: owned }
 operations:
+  insertVariant:
+    name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
+    description: Create an owned channel and language variant atomically.
+    implementation: { type: collection, action: insert, field: variants }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  materialize:
+    name: { en: Preview template, nl: Template bekijken }
+    description: Resolve one channel and locale, preserving exact values and source versions without changing any stored content.
+    implementation: { type: plugin, plugin: documents, handler: materializeTemplate }
+    target: { scope: record, inputField: templateVersionId }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [templateVersionId, channel, locale]
+        properties:
+          templateVersionId: { type: string, format: uuid }
+          channel: { type: string, enum: [document, email, whatsapp] }
+          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
+          parameters: { type: object }
+    output: { schema: { type: object } }
+    errors: []
+    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   list:
     name: List template version
     description: Read accessible template version records.
@@ -75,7 +105,9 @@ operations:
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      materialize: { method: POST, path: "/api/template-content/versions/:templateVersionId/materialize" }
   graphql: {}
   mcp: { tools: generic }
   web:
@@ -87,6 +119,7 @@ interfaces:
       record:
         routes: { read: "/template-versions/:id", create: /template-versions/new }
         title: "{{versionNumber}}"
+        actions: [materialize]
         layout:
           tabs:
             - id: parameters

@@ -244,8 +244,11 @@ describe("entity operation runtime", () => {
       "PaymentDetail.update",
       "Relation.update",
     ]);
+    // RelationGroup is a blueprint entity, so its tenant-local reset holds
+    // the same lease as an update for the role that may write it.
     expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.RelationGroups.ReadWrite"] })).toEqual([
       "RelationGroup.delete", "RelationGroup.update", "RelationGroupMembership.delete", "RelationGroupMembership.update",
+      "osf-blueprints.RelationGroup.reset",
     ]);
     expect(
       restEditLeaseOperationIdsForSession({

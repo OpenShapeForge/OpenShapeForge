@@ -64,10 +64,23 @@ operations:
         additionalProperties: false
         required: [templateVersionId, channel, locale]
         properties:
-          templateVersionId: { type: string, format: uuid }
-          channel: { type: string, enum: [document, email, whatsapp] }
-          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
-          parameters: { type: object }
+          templateVersionId:
+            type: string
+            format: uuid
+            x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+          locale:
+            type: string
+            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+          parameters:
+            type: object
+            x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
     auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite] }
@@ -125,6 +138,9 @@ interfaces:
             - id: parameters
               label: { en: Parameters, nl: Parameters }
               groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, parameters] }]
+            - id: variants
+              label: { en: Variants, nl: Varianten }
+              relationship: variants
         modes:
           create:
             title: { en: Create, nl: Toevoegen }

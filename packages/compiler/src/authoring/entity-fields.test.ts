@@ -24,6 +24,16 @@ describe("one relational field contract", () => {
   test("infers scalar types without duplicate authoring", () => {
     expect(normalizeEntityFields(entity("Article", [{ key: "heading", semanticType: "title" }]), catalog()).fields[0]?.valueType).toBe("string");
   });
+  test("rejects conflicting explicit base types for both values and references", () => {
+    for (const semanticType of ["title", "Page"]) {
+      expect(() => normalizeEntityFields(entity("Article", [
+        { key: "content", semanticType, valueType: "integer" },
+      ]), catalog())).toThrow("valueType conflicts");
+    }
+    expect(() => normalizeEntityFields(entity("Article", [
+      { key: "content", valueType: "object", children: [{ key: "heading", semanticType: "title", valueType: "boolean" }] },
+    ]), catalog())).toThrow("valueType conflicts");
+  });
   test("makes a single reference a real required uuid column", () => {
     const normalized = normalizeEntityFields(block, catalog());
     const rels = resolveRelationships({ coreEntity: normalized, profiles: [] } as unknown as LoadedArtifacts);

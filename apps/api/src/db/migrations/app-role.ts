@@ -179,48 +179,13 @@ async function applyAppSchemaGrants(db: OpenShapeForgeDatabase) {
  * the rest take effect.
  */
 export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
-  const appRolePassword = readAppRolePassword();
-
-  // 1. Create the role if absent. The password (operator-owned, must match
-  //    DATABASE_URL) is set ONLY here, at first creation — never force-reset on
-  //    later runs, so a routine migrate can't clobber an operator-chosen
-  //    credential or downgrade it to a known value.
-  //    NOSUPERUSER + NOBYPASSRLS are the load-bearing attributes for RLS.
-  await sql`
-    do $$
-    begin
-      if not exists (select 1 from pg_roles where rolname = ${sql.lit(APP_ROLE)}) then
-        create role ${sql.ref(APP_ROLE)}
-          login password ${sql.lit(appRolePassword)}
-          nosuperuser nobypassrls;
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Repair the load-bearing attributes only when they drift. Besides avoiding
-  // a cluster-wide pg_authid write on every migration, the guard is required
-  // for managed Postgres administrators: they can manage ordinary roles but
-  // PostgreSQL rejects even an idempotent NOSUPERUSER clause unless the caller
-  // is itself a superuser. An already-safe role needs no privileged write.
-  await sql`
-    do $$
-    begin
-      if exists (
-        select 1 from pg_roles
-        where rolname = ${sql.lit(APP_ROLE)}
-          and (not rolcanlogin or rolsuper or rolbypassrls)
-      ) then
-        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(APP_ROLE)});
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Rotate the password ONLY when explicitly requested for this run. This is
-  // the sole path that overwrites an existing role's password; the default
-  // (unset flag) leaves an operator-set credential untouched.
+  // 1. The role itself is part of the declared database role contract
+  //    (db/database-roles.ts): the host provisions it with the admin
+  //    credential and the chain has already verified it exists with LOGIN,
+  //    NOSUPERUSER and NOBYPASSRLS. Nothing cluster-wide is written here.
+  //    Rotating the password stays an explicit, single-run opt-in.
   if (shouldRotateAppRolePassword()) {
+    const appRolePassword = readAppRolePassword();
     await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(appRolePassword)}`.execute(db);
   }
 

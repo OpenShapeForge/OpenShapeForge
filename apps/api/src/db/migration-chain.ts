@@ -10,6 +10,10 @@
  *      first (privileged migrate chain) so RLS is actually enforced against
  *      the app role; the table-grant SWEEP runs last (step 5) once tables
  *      exist.
+ *   0.  role contract         — verify every declared database role exists
+ *      (db/database-roles.ts) with LOGIN/NOSUPERUSER/NOBYPASSRLS as declared
+ *      and that the migrate role is a member of the definer roles. Roles are
+ *      cluster-wide; the host provisions them, the chain never creates one.
  *   0b. worker role           — the SECOND restricted role, the one the
  *      `workerAccess` policies compare `current_user` against. Same position
  *      and same reason as the app role; its grants are enumerated rather than
@@ -62,6 +66,7 @@ import type { Kysely } from "kysely";
 import { fileURLToPath } from "node:url";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { DB } from "../generated/db/types.js";
+import { verifyDatabaseRoles } from "./database-roles.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
@@ -125,6 +130,10 @@ export async function runMigrationChain(
   db: Kysely<DB>,
   options: MigrationChainOptions = {},
 ): Promise<MigrationChainResult> {
+  // Step 0: the declared roles must already exist — the host provisions them,
+  // this chain only verifies. A fresh environment fails here with the exact
+  // administrator statements instead of half-way through the schema.
+  await verifyDatabaseRoles(db);
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);

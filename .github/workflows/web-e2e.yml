@@ -134,6 +134,11 @@ jobs:
             /etc/apt/sources.list.d/google-chrome.sources
           bunx playwright install --with-deps chromium
 
+      - name: Provision database roles
+        env:
+          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+        run: bun run db:provision-roles
+
       - name: Apply migrations
         env:
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev

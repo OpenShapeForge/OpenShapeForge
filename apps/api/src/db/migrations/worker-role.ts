@@ -212,53 +212,11 @@ const MANIFEST_SCHEMAS: readonly string[] = [
  * steps instead, and only the role itself and the CONNECT grant land here.
  */
 export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
-  const workerRolePassword = readWorkerRolePassword();
-
-  // 1. Create the role if absent. Same contract as the app role: the password
-  //    is set ONLY here, at first creation, so a routine migrate cannot clobber
-  //    an operator-chosen credential or downgrade it to a known value.
-  //    NOSUPERUSER + NOBYPASSRLS are load-bearing here too — a worker that
-  //    bypassed RLS would read every tenant's business data, which is the
-  //    outcome `workerAccess` was introduced to avoid.
-  await sql`
-    do $$
-    begin
-      if not exists (select 1 from pg_roles where rolname = ${sql.lit(WORKER_ROLE)}) then
-        create role ${sql.ref(WORKER_ROLE)}
-          login password ${sql.lit(workerRolePassword)}
-          nosuperuser nobypassrls;
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Repair the load-bearing attributes if they have drifted — a tampered or
-  // hand-created role — but only then.
-  //
-  // The app role's equivalent statement is unconditional, and that is a known
-  // source of contention rather than a pattern to copy: `pg_authid` is
-  // CLUSTER-wide, so every migrate against every throwaway scratch database
-  // rewrites the same tuple, and concurrent runs collide with
-  // `tuple concurrently updated`. Adding a second role that did the same would
-  // double the collision surface. Reading `pg_roles` first makes the write
-  // happen on first creation and after tampering, and never on a routine
-  // migrate — so this role contributes no steady-state writes at all. (The app
-  // role's own statement is tracked separately; it is not changed here.)
-  await sql`
-    do $$
-    begin
-      if exists (
-        select 1 from pg_roles
-        where rolname = ${sql.lit(WORKER_ROLE)}
-          and (not rolcanlogin or rolsuper or rolbypassrls)
-      ) then
-        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(WORKER_ROLE)});
-      end if;
-    end
-    $$;
-  `.execute(db);
-
+  // 1. The role is declared in the database role contract and provisioned by
+  //    the host; the chain verified LOGIN, NOSUPERUSER and NOBYPASSRLS before
+  //    this step. No cluster-wide write happens on a routine migrate.
   if (shouldRotateWorkerRolePassword()) {
+    const workerRolePassword = readWorkerRolePassword();
     await sql`alter role ${sql.ref(WORKER_ROLE)} login password ${sql.lit(workerRolePassword)}`.execute(
       db,
     );

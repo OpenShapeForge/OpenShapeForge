@@ -29,6 +29,36 @@ for the DDL itself:
    migration, and the role gets no `ALTER DEFAULT PRIVILEGES` that would widen
    it automatically.
 
+## Database roles: declared, provisioned, verified
+
+Postgres roles are cluster-wide; migrations are per database and run as the
+migrate role, which on a managed instance has neither `SUPERUSER` nor
+`CREATEROLE`. So the chain never creates a role. The compiler declares the
+roles the generated schema depends on in `apps/api/src/generated/db/manifest.json`
+under `databaseRoles` — the runtime login role, the worker login role and the
+`nologin` definer role that owns the cross-tenant blueprint read function — and
+step 0 of the chain (`apps/api/src/db/database-roles.ts`) verifies them:
+each exists, is neither `SUPERUSER` nor `BYPASSRLS`, can or cannot log in as
+declared, and the migrate role is a member of every definer role whose objects
+it hands over. A missing role fails the run *before any schema exists*, with
+the exact administrator statements that satisfy the contract.
+
+Provisioning is the host's step, run once per cluster with an administrator
+connection and repeated harmlessly:
+
+```sh
+OPENSHAPEFORGE_ADMIN_DATABASE_URL=postgres://admin:...@host/db \
+OPENSHAPEFORGE_MIGRATE_DATABASE_URL=postgres://migrator:...@host/db \
+  bun run db:provision-roles          # then: bun run db:migrate
+bun run db:provision-roles -- --print # render the statements for an operator
+```
+
+Login roles are created with `OPENSHAPEFORGE_APP_PASSWORD` and
+`OPENSHAPEFORGE_WORKER_PASSWORD`; existing roles are never altered (rotate a
+password explicitly with the `*_PASSWORD_ROTATE=1` flags on `db:migrate`).
+Locally and in CI the migrate role owns the instance, so the migrate URL
+doubles as the administrator connection when no admin URL is set.
+
 ## The roll-forward additive migrator
 
 `apps/api/src/db/migrations/generated-schema.ts`. The applied

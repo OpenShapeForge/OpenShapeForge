@@ -43,7 +43,7 @@ beforeAll(async () => {
     $$;
     create role ${migratorRole}
       login password '${migratorPassword}'
-      createdb createrole nosuperuser nobypassrls;
+      createdb nocreaterole nosuperuser nobypassrls;
   `);
   await admin.unsafe(`create database ${scratchDatabase} owner ${migratorRole}`);
   managedMigrator = createDatabaseRuntime({ databaseUrl: migratorUrl(), maxConnections: 1 });
@@ -70,7 +70,7 @@ describe("managed Postgres role reconciliation", () => {
         where rolname = ${migratorRole}
       `.execute(managedMigrator.db);
       expect(identity.rows[0]?.superuser).toBe(false);
-      expect(identity.rows[0]?.createRole).toBe(true);
+      expect(identity.rows[0]?.createRole).toBe(false);
     },
     TEST_TIMEOUT,
   );

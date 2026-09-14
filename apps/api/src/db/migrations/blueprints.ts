@@ -7,11 +7,8 @@ import { APP_ROLE } from "./app-role.js";
  * BYPASSRLS and can read only these two bookkeeping tables, never source data. */
 export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
   await sql`
-    do $$ begin
-      if not exists (select 1 from pg_roles where rolname = 'openshapeforge_blueprint_reader') then
-        create role openshapeforge_blueprint_reader nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls;
-      end if;
-    end $$;
+    -- The definer role is declared in the database role contract; the host
+    -- provisions it and the chain verified the migrate role's membership.
     grant usage on schema app, platform to openshapeforge_blueprint_reader;
     grant execute on function app.current_tenant(), app.current_user_id() to openshapeforge_blueprint_reader;
 
@@ -111,8 +108,13 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
       limit greatest(1, least(coalesce($4, 20), 100))
       offset greatest(coalesce($5, 0), 0)
     $fn$;
+    -- Postgres requires the incoming owner to hold CREATE on the schema at the
+    -- moment of the transfer (a superuser migrator skips that check; the
+    -- restricted one does not). Grant it for the transfer only.
+    grant create on schema app to openshapeforge_blueprint_reader;
     alter function app.read_blueprints(text, text, text, integer, integer)
       owner to openshapeforge_blueprint_reader;
+    revoke create on schema app from openshapeforge_blueprint_reader;
     revoke all on function app.read_blueprints(text, text, text, integer, integer) from public;
     grant execute on function app.read_blueprints(text, text, text, integer, integer) to ${sql.id(APP_ROLE)};
   `.execute(db);

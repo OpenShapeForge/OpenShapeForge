@@ -27,6 +27,35 @@ const defaultSource = "packages/compiler/config/platform-schema.yaml";
  * truth exists to make impossible.
  */
 export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
+export const APP_DATABASE_ROLE = "openshapeforge_app";
+export const BLUEPRINT_READER_DATABASE_ROLE = "openshapeforge_blueprint_reader";
+
+/**
+ * One declared database role. Roles are cluster-wide objects, so the
+ * migration chain never creates them: the host provisions them (with the
+ * admin credential the migrate role deliberately lacks) and the chain
+ * verifies the contract before it touches a schema.
+ */
+export type DatabaseRoleContract = {
+  /** Stable key hosts and the runtime address the role by. */
+  key: "app" | "worker" | "blueprintReader";
+  name: string;
+  /** Whether the role authenticates; the definer roles never do. */
+  login: boolean;
+  /** Whether the migrate role must be a member, to transfer object ownership. */
+  migratorMember: boolean;
+  purpose: string;
+};
+
+/** Every role the generated schema and its policies depend on. */
+export const DATABASE_ROLES: readonly DatabaseRoleContract[] = [
+  { key: "app", name: APP_DATABASE_ROLE, login: true, migratorMember: false,
+    purpose: "The RLS-enforced runtime connection." },
+  { key: "worker", name: WORKER_DATABASE_ROLE, login: true, migratorMember: false,
+    purpose: "The background worker connection the workerAccess policies compare current_user against." },
+  { key: "blueprintReader", name: BLUEPRINT_READER_DATABASE_ROLE, login: false, migratorMember: true,
+    purpose: "Definer of the cross-tenant blueprint read function; owns nothing else." },
+];
 
 export type GenerateArtifactsOptions = {
   source?: string;
@@ -818,6 +847,10 @@ function renderManifestJson(
       // `current_user` against. Read by the migrate chain so the role that is
       // provisioned and the role the policies name can never drift apart.
       workerDatabaseRole: WORKER_DATABASE_ROLE,
+      // The complete role contract: what must exist before the chain runs.
+      // Provisioning is a host step (apps/api/src/db/provision-roles.ts);
+      // the chain only verifies.
+      databaseRoles: DATABASE_ROLES,
       capabilities: {
         generatedEntities,
       },

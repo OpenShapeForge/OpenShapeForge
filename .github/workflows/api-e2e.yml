@@ -118,6 +118,11 @@ jobs:
             -v "$PWD/keycloak/openshapeforge-control-realm.json:/opt/keycloak/data/import/openshapeforge-control-realm.json:ro" \
             "$image" start-dev --import-realm
 
+      - name: Provision database roles
+        env:
+          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+        run: bun run db:provision-roles
+
       - name: Apply migrations
         env:
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev

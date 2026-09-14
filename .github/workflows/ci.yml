@@ -358,6 +358,14 @@ jobs:
       # The db tests default to localhost:5434 with the openshapeforge role and
       # a /postgres admin URL — the exact service configured above — so no extra
       # env wiring is needed.
+      # Roles are cluster-wide and provisioned by the host, never by the chain
+      # (apps/api/src/db/database-roles.ts). The service's superuser stands in
+      # for the administrator here.
+      - name: Provision database roles
+        env:
+          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/postgres
+        run: bun run db:provision-roles
+
       - name: Migration + drift tests
         run: cd apps/api && bun test src/db
 

@@ -55,6 +55,8 @@ describe("the tool list", () => {
       "get_tenant",
       "create_tenant",
       "update_tenant",
+      "get_blueprint_library",
+      "assign_blueprint_library",
       "get_tenant_organization_tree",
       "create_tenant_organization",
       "update_tenant_organization",

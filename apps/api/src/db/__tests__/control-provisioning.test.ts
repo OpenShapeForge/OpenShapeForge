@@ -39,6 +39,8 @@ import {
   type ProvisioningDeps,
 } from "../../control/provisioning.js";
 import {
+  assignBlueprintLibrary,
+  readBlueprintLibrary,
   getTenant,
   listTenants,
   updateTenant,
@@ -168,6 +170,34 @@ describe("tenant provisioning", () => {
         if (savedRealm === undefined) delete process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM;
         else process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM = savedRealm;
       }
+    });
+  }, TEST_TIMEOUT);
+
+  test("a platform administrator assigns, reads and clears a tenant's blueprint library", async () => {
+    await migratedScratchDb(async (db) => {
+      const deps = depsFor(db, fakeSpi());
+      await provisionTenant(deps, { slug: "library", name: "Blueprint library" });
+      await provisionTenant(deps, { slug: "customer", name: "Customer" });
+
+      expect(await readBlueprintLibrary(deps, "customer")).toEqual({ tenant: "customer", blueprintTenant: null, changed: false });
+      expect(await assignBlueprintLibrary(deps, "customer", "library"))
+        .toEqual({ tenant: "customer", blueprintTenant: "library", changed: true });
+      expect(await assignBlueprintLibrary(deps, "customer", "library"))
+        .toEqual({ tenant: "customer", blueprintTenant: "library", changed: false });
+      expect(await readBlueprintLibrary(deps, "customer")).toMatchObject({ blueprintTenant: "library" });
+
+      await expect(assignBlueprintLibrary(deps, "customer", "customer")).rejects.toThrow("its own blueprint library");
+      await expect(assignBlueprintLibrary(deps, "customer", "missing")).rejects.toMatchObject({ code: "CONTROL_TENANT_NOT_FOUND" });
+      await updateTenant(deps, "library", { status: "suspended" });
+      await expect(assignBlueprintLibrary(deps, "customer", "library")).resolves.toMatchObject({ changed: false });
+      await provisionTenant(deps, { slug: "other-library", name: "Other" });
+      await updateTenant(deps, "other-library", { status: "inactive" });
+      await expect(assignBlueprintLibrary(deps, "customer", "other-library")).rejects.toThrow("only an active tenant");
+
+      expect(await assignBlueprintLibrary(deps, "customer", null)).toEqual({ tenant: "customer", blueprintTenant: null, changed: true });
+      expect(await assignBlueprintLibrary(deps, "customer", null)).toMatchObject({ changed: false });
+      const rows = (await sql<{ n: number }>`select count(*)::int as n from platform.blueprint_libraries`.execute(db)).rows[0];
+      expect(rows?.n).toBe(0);
     });
   }, TEST_TIMEOUT);
 

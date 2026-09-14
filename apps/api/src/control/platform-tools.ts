@@ -33,7 +33,7 @@ import { listPlatformAudit } from "./platform-audit.js";
 import { FirstAdministratorError, inviteFirstTenantAdministrator, type FirstAdministratorClients } from "./first-tenant-administrator.js";
 import { provisionSubOrganization, provisionTenant } from "./provisioning.js";
 import { buildDriftReport, reapplyProjection } from "./reconciliation.js";
-import { parseTenantUpdate, TENANT_STATUSES, updateTenant, type ControlDeps } from "./tenant-registry.js";
+import { assignBlueprintLibrary, parseTenantUpdate, readBlueprintLibrary, TENANT_STATUSES, updateTenant, type ControlDeps } from "./tenant-registry.js";
 // ---- update notices (control/update-notices-admin.ts) ----
 import {
   listUpdateNotices,
@@ -218,6 +218,20 @@ export const PLATFORM_TOOLS: readonly Tool[] = [
     description: "Renames ONE tenant's display name and/or changes its lifecycle status. The slug stays immutable. Setting inactive or suspended disables the root Keycloak Organization and can interrupt access, so confirm that status change first. Repeating the same state is a no-op.",
     inputSchema: { type: "object", properties: { slug: slugProperty, name: { type: "string" }, status: { type: "string", enum: [...TENANT_STATUSES] } }, required: ["slug"], additionalProperties: false },
     annotations: { title: "Update tenant", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "get_blueprint_library",
+    title: "Get blueprint library",
+    description: "Which tenant's published blueprints ONE tenant may copy from, or null when no library is assigned. Read-only.",
+    inputSchema: { type: "object", properties: { slug: slugProperty }, required: ["slug"], additionalProperties: false },
+    annotations: { title: "Get blueprint library", ...readOnly },
+  },
+  {
+    name: "assign_blueprint_library",
+    title: "Assign blueprint library",
+    description: "Marks ONE active tenant as the blueprint library another tenant copies from: the library's platform operators publish blueprints, the assigned tenant sees them when creating records. Pass null to clear the assignment. Existing copies keep their recorded source; a tenant cannot be its own library.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, blueprintTenantSlug: { anyOf: [{ type: "string", pattern: "^[a-z][a-z0-9-]*$" }, { type: "null" }], description: "The library tenant's slug, or null to clear." } }, required: ["slug", "blueprintTenantSlug"], additionalProperties: false },
+    annotations: { title: "Assign blueprint library", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "get_tenant_organization_tree",
@@ -794,6 +808,22 @@ export async function callPlatformTool(
           ["name", "status"].filter((key) => Object.hasOwn(args, key)).map((key) => [key, args[key]]),
         ));
         return ok(await updateTenant(controlDeps(context, name), slug, update));
+      }
+      case "get_blueprint_library": {
+        rejectUnknown(args, ["slug"]);
+        const slug = requireString(args, "slug");
+        assertSlug(slug, "slug");
+        return ok(await readBlueprintLibrary(controlDeps(context, name), slug));
+      }
+      case "assign_blueprint_library": {
+        rejectUnknown(args, ["slug", "blueprintTenantSlug"]);
+        const slug = requireString(args, "slug");
+        assertSlug(slug, "slug");
+        const library = args.blueprintTenantSlug;
+        if (library !== null && typeof library !== "string") {
+          throw new ControlInputError("blueprintTenantSlug must be a tenant slug or null.");
+        }
+        return ok(await assignBlueprintLibrary(controlDeps(context, name), slug, library));
       }
       case "get_tenant_organization_tree": {
         rejectUnknown(args, ["slug"]);

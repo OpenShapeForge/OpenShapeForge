@@ -65,6 +65,8 @@ import {
   listTenants,
   parseTenantUpdate,
   updateTenant,
+  assignBlueprintLibrary,
+  readBlueprintLibrary,
 } from "./tenant-registry.js";
 
 export const CONTROL_MOUNT_PATH = "/api/control/v1";
@@ -416,6 +418,32 @@ export function registerControlRestRoutes(
    * that happens not to exist. `parseTenantUpdate` owns that answer; see its
    * header for the immutability argument.
    */
+  app.get(`${CONTROL_MOUNT_PATH}/tenants/:tenantSlug/blueprint-library`, async (request, reply) => {
+    try {
+      const deps = await depsFor(request);
+      const { tenantSlug } = request.params as { tenantSlug: string };
+      return reply.status(200).send(await readBlueprintLibrary(deps, tenantSlug));
+    } catch (error) {
+      return handleError(reply, error);
+    }
+  });
+
+  // The library assignment is a whole value: PUT with `{ blueprintTenantSlug }`
+  // or `{ blueprintTenantSlug: null }` to clear.
+  app.put(`${CONTROL_MOUNT_PATH}/tenants/:tenantSlug/blueprint-library`, async (request, reply) => {
+    try {
+      const deps = await depsFor(request);
+      const { tenantSlug } = request.params as { tenantSlug: string };
+      const body = parseJsonBody(request.body);
+      if (!Object.hasOwn(body, "blueprintTenantSlug") || (body.blueprintTenantSlug !== null && typeof body.blueprintTenantSlug !== "string")) {
+        throw new ControlInputError("Send blueprintTenantSlug: a tenant slug, or null to clear.");
+      }
+      return reply.status(200).send(await assignBlueprintLibrary(deps, tenantSlug, body.blueprintTenantSlug as string | null));
+    } catch (error) {
+      return handleError(reply, error);
+    }
+  });
+
   app.patch(`${CONTROL_MOUNT_PATH}/tenants/:tenantSlug`, async (request, reply) => {
     try {
       const deps = await depsFor(request);

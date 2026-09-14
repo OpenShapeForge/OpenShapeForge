@@ -496,3 +496,88 @@ export async function loadTenantBySlug(
   if (!row) throw tenantNotFound(slug);
   return row;
 }
+
+// ── Blueprint libraries ──────────────────────────────────────────────────────
+
+export type BlueprintLibraryResult = {
+  tenant: string;
+  /** The tenant whose published blueprints this tenant may copy; null when none is assigned. */
+  blueprintTenant: string | null;
+  changed: boolean;
+};
+
+/** The single blueprint library a tenant reads from (platform.blueprint_libraries). */
+export async function readBlueprintLibrary(
+  deps: ControlDeps,
+  slug: string,
+): Promise<BlueprintLibraryResult> {
+  assertSlug(slug, "slug");
+  return withSystemSession(
+    deps.db,
+    systemSessionForOperator(deps.operator, `read blueprint library of tenant slug="${slug}"`),
+    async (trx) => {
+      const tenant = await loadTenantBySlug(trx, slug);
+      const library = await sql<{ slug: string }>`
+        select source.slug
+          from platform.blueprint_libraries library
+          join platform.tenants source on source.id = library.blueprint_tenant_id
+         where library.tenant_id = ${tenant.id}::uuid
+      `.execute(trx);
+      return { tenant: slug, blueprintTenant: library.rows[0]?.slug ?? null, changed: false };
+    },
+  );
+}
+
+/**
+ * Assign (or with null, clear) the blueprint library a tenant copies from.
+ * The library tenant is any other active tenant of this host; a tenant never
+ * reads its own drafts as blueprints. Idempotent: re-assigning the same library
+ * writes nothing. Published snapshots are unaffected — a customer's existing
+ * copies keep their recorded source; only future copies and update indicators
+ * follow the new library.
+ */
+export async function assignBlueprintLibrary(
+  deps: ControlDeps,
+  slug: string,
+  blueprintTenantSlug: string | null,
+): Promise<BlueprintLibraryResult> {
+  assertSlug(slug, "slug");
+  if (blueprintTenantSlug !== null) assertSlug(blueprintTenantSlug, "blueprintTenantSlug");
+  if (blueprintTenantSlug === slug) {
+    throw new ControlInputError("A tenant cannot be its own blueprint library.");
+  }
+  const described = blueprintTenantSlug === null
+    ? `clear blueprint library of tenant slug="${slug}"`
+    : `assign blueprint library "${blueprintTenantSlug}" to tenant slug="${slug}"`;
+  return withSystemSession(
+    deps.db,
+    systemSessionForOperator(deps.operator, described),
+    async (trx) => {
+      const tenant = await loadTenantBySlug(trx, slug);
+      const current = await sql<{ blueprint_tenant_id: string }>`
+        select blueprint_tenant_id from platform.blueprint_libraries
+         where tenant_id = ${tenant.id}::uuid for update
+      `.execute(trx);
+      if (blueprintTenantSlug === null) {
+        if (!current.rows[0]) return { tenant: slug, blueprintTenant: null, changed: false };
+        await sql`delete from platform.blueprint_libraries where tenant_id = ${tenant.id}::uuid`.execute(trx);
+        return { tenant: slug, blueprintTenant: null, changed: true };
+      }
+      const source = await loadTenantBySlug(trx, blueprintTenantSlug);
+      if (current.rows[0]?.blueprint_tenant_id === source.id) {
+        // Re-asserting the assignment that already holds writes nothing, whatever
+        // the library's current lifecycle state: that state is changed elsewhere.
+        return { tenant: slug, blueprintTenant: blueprintTenantSlug, changed: false };
+      }
+      if (source.status !== "active") {
+        throw new ControlInputError(`Blueprint library "${blueprintTenantSlug}" is ${source.status}; only an active tenant can serve blueprints.`);
+      }
+      await sql`
+        insert into platform.blueprint_libraries (tenant_id, blueprint_tenant_id)
+        values (${tenant.id}::uuid, ${source.id}::uuid)
+        on conflict (tenant_id) do update set blueprint_tenant_id = excluded.blueprint_tenant_id
+      `.execute(trx);
+      return { tenant: slug, blueprintTenant: blueprintTenantSlug, changed: true };
+    },
+  );
+}

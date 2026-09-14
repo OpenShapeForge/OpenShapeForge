@@ -69,6 +69,9 @@ const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = {
     /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
   update_tenant:
     /^(rename|set status="(active|inactive|suspended)") on tenant slug="[a-z][a-z0-9-]*"$/,
+  get_blueprint_library: /^read blueprint library of tenant slug="[a-z][a-z0-9-]*"$/,
+  assign_blueprint_library:
+    /^(clear blueprint library of tenant slug="[a-z][a-z0-9-]*"|assign blueprint library "[a-z][a-z0-9-]*" to tenant slug="[a-z][a-z0-9-]*")$/,
   get_tenant_organization_tree:
     /^read the sub-organisation tree of tenant slug="[a-z][a-z0-9-]*"$/,
   create_tenant_organization:

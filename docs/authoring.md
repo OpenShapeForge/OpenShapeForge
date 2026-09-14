@@ -537,11 +537,14 @@ create Operation accepts an optional `blueprintId` (the published source record'
 `externalId`); explicit create values override the selected snapshot.
 
 Publication requires a `platform-operator` identity in a blueprint tenant.
-Published versions are immutable snapshots. A privileged operator provisions the
-customer's single library assignment in `platform.blueprint_libraries`; no
-self-service assignment Operation is provided yet. A restricted database function
-can read only assigned published snapshots whose reader roles match the session.
-Ordinary entity RLS remains unchanged.
+Published versions are immutable snapshots. A platform administrator assigns
+the customer's single library — any other active tenant of the host — with the
+control-plane tool `assign_blueprint_library` (REST: `PUT
+/api/control/v1/tenants/{slug}/blueprint-library` with `{ blueprintTenantSlug }`,
+null to clear) and reads it with `get_blueprint_library`. Existing copies keep
+their recorded source. A restricted database function can read only assigned
+published snapshots whose reader roles match the session. Ordinary entity RLS
+remains unchanged.
 
 A local copy records its source and adopted version. New publication only changes
 its update indicator. Reset requires explicit acknowledgement, the expected source

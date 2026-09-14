@@ -17,10 +17,12 @@ indexes:
   - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, version, channel, locale], unique: true }
 fields:
   - key: version
+    label: { en: Template version, nl: Templateversie }
     semanticType: TemplateVersion
     required: true
     immutable: true
   - key: channel
+    label: { en: Channel, nl: Kanaal }
     valueType: string
     required: true
     options:
@@ -38,6 +40,7 @@ fields:
     label: { en: Content language, nl: Inhoudstaal }
     persisted: { column: locale, storageClass: core }
   - key: blocks
+    label: { en: Blocks, nl: Blokken }
     semanticType: Block
     cardinality: collection
     sortable: true

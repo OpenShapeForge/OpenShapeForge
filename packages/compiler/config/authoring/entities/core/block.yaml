@@ -25,6 +25,7 @@ fields:
     label: { en: Block type, nl: Bloktype }
     persisted: { column: definition_key, storageClass: core }
   - key: definitionVersion
+    label: { en: Definition version, nl: Definitieversie }
     valueType: integer
     required: true
     defaultValue: 1
@@ -75,7 +76,7 @@ interfaces:
       collection:
         route: /blocks
         title: { en: Blocks, nl: Blokken }
-        columns: [{ key: definitionKey }, { key: definitionVersion }]
+        columns: [{ key: definitionKey }, { key: values }]
       record:
         routes: { read: "/blocks/:id", create: /blocks/new }
         title: "{{definitionKey}}"

@@ -389,7 +389,6 @@ import {
 // --- end the person's language ---
 import {
   bindOperationHandlers,
-  operationModulesConfigured,
   DeclaredOperationError,
   invokeOperation,
   isMcpProjection,
@@ -3335,11 +3334,10 @@ function buildServer(
     (tool) => schemaUsesArtifactUpload(tool.inputSchema),
   );
   // The same rule REST boot applies (roles/api.ts): with no operation module
-  // in the process there are no operation tools, rather than a 500 on every
-  // request because the catalog names a handler nothing loaded.
-  const operations = operationModulesConfigured(runtimeModules)
-    ? bindOperationHandlers(runtimeModules)
-    : new Map();
+  // in the process there are the core operation tools and no plugin ones,
+  // rather than a 500 on every request because the catalog names a handler
+  // nothing loaded.
+  const operations = bindOperationHandlers(runtimeModules);
   const searchableStaticOperationIds = new Set(
     catalog.operationTools
       .filter((tool) => operations.has(tool.key))

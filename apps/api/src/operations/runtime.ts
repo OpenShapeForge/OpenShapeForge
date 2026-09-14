@@ -528,15 +528,30 @@ export function operationModulesConfigured(
   operations: readonly OperationContract[] = catalog.operations,
 ): boolean {
   const plugins = new Set(operations.map((operation) => operation.plugin));
-  return plugins.has("osf-blueprints") || modules.some((module) => plugins.has(module.name));
+  return modules.some((module) => plugins.has(module.name));
 }
+
+export type BindOperationOptions = {
+  /**
+   * Whether plugin operations must bind. "required" is what a host that
+   * configured an operation module wants — including one whose module failed
+   * to load, so the failure stops boot instead of silently deleting the API.
+   * "absent" is a process without any operation module: the core operations
+   * bind, the plugin ones are absent rather than broken. Defaults to what the
+   * given modules say ({@link operationModulesConfigured}).
+   */
+  pluginOperations?: "required" | "absent";
+};
 
 export function bindOperationHandlers(
   modules: readonly RuntimeModule[],
   operations: readonly OperationContract[] = catalog.operations,
+  options: BindOperationOptions = {},
 ): Map<string, Bound> {
+  const pluginOperations = options.pluginOperations ??
+    (operationModulesConfigured(modules, operations) ? "required" : "absent");
   const usesGeneratedCatalog = operations === catalog.operations;
-  const cached = usesGeneratedCatalog ? bindingCache.get(modules) : undefined;
+  const cached = usesGeneratedCatalog && pluginOperations === "required" ? bindingCache.get(modules) : undefined;
   if (cached) return cached;
   const modulesByName = new Map(modules.map((module) => [module.name, module]));
   const bound = new Map<string, Bound>();
@@ -554,6 +569,7 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
       continue;
     }
+    if (pluginOperations === "absent") continue;
     const module = modulesByName.get(operation.plugin);
     if (!module) {
       throw new Error(`Canonical operation "${operation.key}" has no loaded runtime module "${operation.plugin}".`);
@@ -582,7 +598,7 @@ export function bindOperationHandlers(
     const extraAvailability = Object.keys(module.operationAvailabilityHandlers ?? {}).filter(key => !declared.has(key));
     if (extraAvailability.length > 0) throw new Error(`Runtime module "${module.name}" has availability handlers absent from its compiler contract.`);
   }
-  if (usesGeneratedCatalog) bindingCache.set(modules, bound);
+  if (usesGeneratedCatalog && pluginOperations === "required") bindingCache.set(modules, bound);
   return bound;
 }
 

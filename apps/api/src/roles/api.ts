@@ -376,10 +376,14 @@ export function createApiApp(options: {
       [...modules.loaded, ...modules.failures],
       allOperationContracts,
     );
-    if (operationsConfigured || entityPluginContracts.length > 0) {
+    // The core operations always bind; plugin operations — entity-backed
+    // ones included — are required as soon as any operation module was
+    // configured, loaded or failed. A process without one has none of them.
+    {
       const bindings = bindOperationHandlers(
         initialised.loaded,
         allOperationContracts,
+        { pluginOperations: operationsConfigured ? "required" : "absent" },
       );
       if (databaseRuntime) registerEntityOperationAvailability(databaseRuntime.db, bindings);
       if (databaseRuntime && entityPluginContracts.length > 0) {

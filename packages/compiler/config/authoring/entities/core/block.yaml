@@ -8,7 +8,7 @@ labels: { en: Block, nl: Block }
 domains: [documents]
 authorization:
   roles:
-    read: [General.All.Read, General.All.ReadWrite]
+    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]

@@ -8,7 +8,7 @@ labels: { en: Template version, nl: Template version }
 domains: [documents]
 authorization:
   roles:
-    read: [General.All.Read, General.All.ReadWrite]
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
@@ -83,7 +83,7 @@ operations:
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

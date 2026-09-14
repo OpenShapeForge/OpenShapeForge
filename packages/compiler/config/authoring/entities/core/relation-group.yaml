@@ -7,6 +7,8 @@ description: A group that bundles multiple relations together.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
+blueprint:
+  fields: [name, description, groupType, status]
 labels:
   en: Relation Group
   nl: Relatiegroep

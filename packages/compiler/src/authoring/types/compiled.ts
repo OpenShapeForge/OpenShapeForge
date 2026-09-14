@@ -657,7 +657,14 @@ export interface CompiledAuthorization {
   };
 }
 
+export interface CompiledBlueprint {
+  fields: string[];
+  labelField: string;
+  operations: { list: string; status: string; reset: string; publish: string };
+}
+
 export interface CompiledEntityContract {
+  blueprint?: CompiledBlueprint;
   workerAccess?: string;
   authoringVersion: 1 | 2;
   contractVersion: number;

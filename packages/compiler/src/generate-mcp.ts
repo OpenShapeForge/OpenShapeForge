@@ -18,6 +18,7 @@
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
  */
+import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
   CompiledColumn,
@@ -867,7 +868,7 @@ function buildToolsForEntity(
 
   if (mcp.operations.create) {
     const canonicalCreate = contract.entityOperations.create;
-    const inputSchema = canonicalCreate?.input.kind === "json-schema"
+    const baseInputSchema = canonicalCreate?.input.kind === "json-schema"
       ? canonicalCreate.input.schema
       : withRelationshipKeys(
           compiledObjectSchema(creatable, referentiedata, {
@@ -878,6 +879,7 @@ function buildToolsForEntity(
           relationships,
           true,
         );
+    const inputSchema = withBlueprintCreate(baseInputSchema, contract.blueprint);
     const controls = v2Contract
       ? operationControlSchema(contract.entityOperations.create)
       : { properties: {}, required: [] };

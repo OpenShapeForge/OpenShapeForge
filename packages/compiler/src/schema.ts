@@ -278,6 +278,7 @@ export type LocalizedTextManifest = {
 };
 
 export type TableSourceDefinition = {
+  blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;

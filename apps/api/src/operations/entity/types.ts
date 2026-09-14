@@ -60,6 +60,7 @@ export type GeneratedCrudTable = {
   columns: GeneratedCrudColumn[];
   realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
+    blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
     authoringEntityName?: string;
     /** Present only for strict v2 entity authoring; absence means legacy v1. */
     authoringVersion?: 2;
@@ -187,6 +188,7 @@ export type EntityOperationInput = ListPageInput & {
   /** Plugin-backed CRUD takes its canonical authored input, not forced values. */
   [key: string]: unknown;
   id?: string;
+  blueprintId?: string;
   values?: Record<string, unknown>;
   expectedVersion?: string;
   leaseToken?: string;

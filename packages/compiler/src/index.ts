@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
+import { collectBlueprintOperations } from "./blueprint-operations.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
@@ -338,6 +339,7 @@ export async function collectAllArtifacts(
   const moduleOperationCatalogs = loadOperationCatalogs(authoringDir)
     .map(({ document }) => document);
   const operations = [
+    ...collectBlueprintOperations(entities),
     ...collectPluginOperations(plugins, operationContext),
     ...collectAuthoredEntityPluginOperations(entities, operationContext),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
@@ -352,7 +354,7 @@ export async function collectAllArtifacts(
   }
   const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
-  assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
+  assertOperationRuntimeModules(operations, ["osf-blueprints", ...moduleRegistry.modules.map((module) => module.name)]);
   const operationToolProjection = auditOperationSurfaceCollisions(
     operations,
     manifest,

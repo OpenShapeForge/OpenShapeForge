@@ -671,6 +671,8 @@ export interface OperationCatalogDefinition {
 }
 
 export interface CoreEntity {
+  /** Explicit safe scalar content copied from a published blueprint. */
+  blueprint?: { fields: string[] };
   /** Named cross-tenant worker; enforced together with the dedicated DB role. */
   workerAccess?: string;
   schemaVersion: number;

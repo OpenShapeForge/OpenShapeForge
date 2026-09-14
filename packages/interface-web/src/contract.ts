@@ -215,6 +215,7 @@ export type WebRecordView = {
 export type WebEntityView = WebCollectionView | WebRecordView;
 
 export type WebEntityInterface = {
+  blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
   /** Canonical record label used outside a particular view, including selectors. */
   displayTemplate?: string;
   entityId: string;

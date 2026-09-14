@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { blueprintOperationHandler } from "./entity/blueprints.js";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
@@ -527,7 +528,7 @@ export function operationModulesConfigured(
   operations: readonly OperationContract[] = catalog.operations,
 ): boolean {
   const plugins = new Set(operations.map((operation) => operation.plugin));
-  return modules.some((module) => plugins.has(module.name));
+  return plugins.has("osf-blueprints") || modules.some((module) => plugins.has(module.name));
 }
 
 export function bindOperationHandlers(
@@ -547,6 +548,11 @@ export function bindOperationHandlers(
       throw new Error(
         `Canonical operation id "${operation.key}" is duplicated at runtime.`,
       );
+    }
+    if (operation.plugin === "osf-blueprints") {
+      if (modulesByName.has("osf-blueprints")) throw new Error("The core blueprint runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
+      continue;
     }
     const module = modulesByName.get(operation.plugin);
     if (!module) {

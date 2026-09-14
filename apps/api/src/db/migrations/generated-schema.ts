@@ -82,6 +82,9 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
  */
 export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
+  "platform.blueprint_libraries",
+  "platform.blueprint_versions",
+  "platform.blueprint_copies",
   "platform.system_bypass_audit",
   // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
   "platform.operation_execution_receipts",

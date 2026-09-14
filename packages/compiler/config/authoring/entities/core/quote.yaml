@@ -253,6 +253,9 @@ interfaces:
         subtitle: "{{amountTotal}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [quoteStatus, amountTotal, currencyCode, expiresAt]
+            relationships: [relation, agreement]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

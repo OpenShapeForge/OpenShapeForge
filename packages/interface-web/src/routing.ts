@@ -26,7 +26,10 @@ function matchPattern(pattern: string, pathname: string): Readonly<Record<string
   for (let index = 0; index < expectedParts.length; index += 1) {
     const expected = expectedParts[index]!;
     const actual = actualParts[index]!;
-    if (expected.startsWith(":")) params[expected.slice(1)] = decodeURIComponent(actual);
+    if (expected.startsWith(":")) {
+      try { params[expected.slice(1)] = decodeURIComponent(actual); }
+      catch { return null; }
+    }
     else if (expected !== actual) return null;
   }
   return params;
@@ -52,4 +55,33 @@ export function matchWebRoute(manifest: WebManifestV1, pathname: string): WebRou
     }
   }
   return null;
+}
+
+export type WebLocation = { tenantBase: string; pathname: string; search: string };
+
+/** URL prefixes are navigation only, never evidence of tenant authorization. */
+export function resolveWebLocation(
+  manifest: WebManifestV1,
+  pathname: string,
+  search = "",
+  options: { defaultRoute: string; allowTenantPrefix?: boolean },
+): WebLocation {
+  const cleanPath = pathname.split("?")[0] || "/";
+  if (cleanPath === "/") return { tenantBase: "", pathname: options.defaultRoute, search };
+  if (matchWebRoute(manifest, cleanPath)) return { tenantBase: "", pathname: cleanPath, search };
+  const parts = cleanPath.split("/").filter(Boolean);
+  if (options.allowTenantPrefix && parts.length > 1) {
+    const nestedPath = `/${parts.slice(1).join("/")}`;
+    // Only a recognized route establishes a navigation prefix. Unknown paths
+    // must not invent an organization or silently select the home entity.
+    if (matchWebRoute(manifest, nestedPath)) {
+      return { tenantBase: `/${parts[0]}`, pathname: nestedPath, search };
+    }
+  }
+  return { tenantBase: "", pathname: cleanPath, search };
+}
+
+export function webLocationPath(basePath: string, pathname: string, search = "") {
+  const alreadyScoped = basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`));
+  return `${alreadyScoped ? "" : basePath}${pathname}${search}`;
 }

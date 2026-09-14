@@ -360,6 +360,12 @@ function snakeToCamel(value: string): string {
   return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
 }
 
+function projectedTextLength(field: CompiledField): { maxLength?: number } {
+  const rule = field.validation?.maxLength;
+  const value = typeof rule === "object" ? rule.value : rule;
+  return typeof value === "number" ? { maxLength: value } : {};
+}
+
 function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
@@ -377,6 +383,18 @@ function projectEntity(
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
+  const nestedField = (field: CompiledField, parent: string): WebFieldProjection => ({
+    id: `${parent}.${field.key}`, key: field.key,
+    label: localized(field.label, field.key), description: localized(field.description, ""),
+    valueType: field.valueType, cardinality: field.cardinality === "collection" ? "many" : "one",
+    required: field.required,
+    ...projectedTextLength(field),
+    ...(field.options?.type === "entity" && field.options.source ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
+    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
+    ...(field.children ? { children: field.children.map(child => nestedField(child, `${parent}.${field.key}`)) } : {}),
+    ...(field.item ? { item: nestedField(field.item, `${parent}.${field.key}`) } : {}),
+    supports: { read: true, create: false, update: false },
+  });
   const explicitFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
   const explicitFields = contract.model.fields.map((field) => {
     const projected: WebFieldProjection = {
@@ -385,6 +403,7 @@ function projectEntity(
       label: localized(field.label, field.key),
       description: localized(field.description, ""),
       valueType: field.valueType,
+      ...projectedTextLength(field),
       ...(field.semanticType ? { semanticType: field.semanticType } : {}),
       ...(field.variables ? { variables: field.variables } : {}),
       ...(field.suggestions ? { suggestions: field.suggestions } : {}),
@@ -413,6 +432,8 @@ function projectEntity(
         : {}),
       cardinality: field.cardinality === "collection" ? "many" : "one",
       required: field.required,
+      ...(field.children ? { children: field.children.map(child => nestedField(child, `${entityName}.${field.key}`)) } : {}),
+      ...(field.item ? { item: nestedField(field.item, `${entityName}.${field.key}`) } : {}),
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       supports: {
         read: true,
@@ -486,7 +507,18 @@ function projectEntity(
       ...(relationshipId ? { relationshipId } : {}),
     }];
   });
-  const overview = tabs.find(({ relationshipId }) => !relationshipId);
+  const authoredContext = contract.interfaces?.web?.recordContext;
+  for (const key of authoredContext?.fields ?? []) {
+    if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
+  }
+  for (const key of authoredContext?.relationships ?? []) {
+    if (!contract.model.relationships.some((relationship) => relationship.key === key && (relationship.kind === "belongsTo" || relationship.kind === "hasMany"))) {
+      throw new Error(`${entityName}: context relationship ${key} must reference a belongsTo or hasMany relationship.`);
+    }
+    if (relationships[key]?.kind === "hasMany" && !tabs.some(tab => tab.relationshipId === key)) {
+      throw new Error(`${entityName}: collection context relationship ${key} requires a matching detail tab.`);
+    }
+  }
   const detail = view?.detail;
   const modes: WebViewMode[] = [
     ...(operations.get && detail ? ["read" as const] : []),
@@ -545,10 +577,10 @@ function projectEntity(
     layout: {
       tabs: recordTabs,
       context: {
-        groups: overview?.groups.slice(0, 1) ?? fallbackGroups.slice(0, 1),
-        relationships: Object.values(relationships)
-          .filter(({ kind }) => kind === "belongsTo")
-          .map(({ key }) => key),
+        groups: authoredContext?.fields.length
+          ? [{ id: "summary", title: localized(undefined, "Key facts"), fields: authoredContext.fields }]
+          : [],
+        relationships: authoredContext?.relationships?.filter((key) => relationships[key]) ?? [],
       },
     },
     ...(view?.form?.variableSources?.length

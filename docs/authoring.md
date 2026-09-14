@@ -22,7 +22,7 @@ authoring/
     field-authoring-profiles.yaml  field-editor profiles (web authoring UI)
   authorization.yaml      Keycloak tenant realm: clients/roles/groups/dev users
   authorization.control.yaml  Keycloak control realm (platform operators)
-  appShell.yaml           web app shell + sidebar navigation
+  menu.yaml           web app shell + sidebar navigation
   views/                  optional standalone view YAML (empty here)
   contexts/, mappings/    supported by the loader, unused in this repo
 ```
@@ -437,7 +437,7 @@ be patched. Patching a realm no earlier layer defines is an error (a new
 realm is an `authorizationConfig` under its own filename), as is a patch
 filed anywhere but the layer root. Patches stack across layers in order.
 
-## `appShell.yaml`
+## `menu.yaml`
 
 Shell component + sidebar navigation (labels, icons, `entity:` references).
 Consumed only by web UI generation, so it has no effect in a repo with no `apps/web`.

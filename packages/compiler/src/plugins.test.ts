@@ -205,7 +205,7 @@ describe("compiler plugins", () => {
     // What belongs here is the layer resolution: an appShellPatch from a plugin
     // layer has to survive into the tree the web generator reads.
     const shell = YAML.parse(
-      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "appShell.yaml"), "utf8"),
+      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "menu.yaml"), "utf8"),
     ) as { kind: string; navigation: { sidebarItems: { key: string; route?: unknown }[] } };
 
     expect(shell.kind).toBe("appShell");

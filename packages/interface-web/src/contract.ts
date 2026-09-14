@@ -108,8 +108,12 @@ export type WebFieldProjection = {
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
   required: boolean;
+  maxLength?: number;
   /** Authored literal create default; never replaces an existing record value. */
   defaultValue?: unknown;
+  /** Nested canonical field metadata for read presentation; not a second schema. */
+  children?: WebFieldProjection[];
+  item?: WebFieldProjection;
   /** Static capabilities only. Effective rights arrive in operation offers. */
   supports: { read: boolean; create: boolean; update: boolean };
 };

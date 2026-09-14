@@ -160,10 +160,17 @@ interfaces:
         title: "{{name}}"
         subtitle: "{{code}}"
         layout:
+          context:
+            fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+            relationships: []
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
-              fields: [code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+              groups:
+                - title: { en: Document type, nl: Documenttype }
+                  fields: [code, name, description]
+                - title: { en: Registration and access, nl: Registratie en toegang }
+                  fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
         modes:
           create:
             title: { en: Create document type, nl: Documenttype aanmaken }

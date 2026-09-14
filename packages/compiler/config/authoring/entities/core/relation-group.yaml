@@ -240,6 +240,9 @@ interfaces:
         title: "{{name}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [groupType, status]
+            relationships: [relation, orgUnit]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

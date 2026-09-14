@@ -338,12 +338,21 @@ interfaces:
         subtitle: "{{status}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [isPrimary, isReachable, confidentiality, validUntil]
+            relationships: [relation, relationRole]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Contact information, nl: Contactinformatie }
-                  fields: [type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+                  fields: [type, detailType, value, status]
+                - title: { en: Contact preferences, nl: Contactvoorkeuren }
+                  fields: [isPrimary, preferenceRank, isReachable]
+                - title: { en: Privacy and verification, nl: Privacy en verificatie }
+                  fields: [confidentiality, consentStatus, verifiedAt]
+                - title: { en: Validity, nl: Geldigheid }
+                  fields: [validFrom, validUntil]
         modes:
           create:
             title: { en: Create contact detail, nl: Contactgegeven aanmaken }

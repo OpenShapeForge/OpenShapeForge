@@ -1254,6 +1254,15 @@
               "additionalProperties": false,
               "required": ["tabs"],
               "properties": {
+                "context": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["fields"],
+                  "properties": {
+                    "fields": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+                    "relationships": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+                  }
+                },
                 "tabs": {
                   "type": "array",
                   "items": { "$ref": "#/$defs/webViewGroupV2" }

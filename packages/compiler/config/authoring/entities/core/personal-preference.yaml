@@ -1,0 +1,80 @@
+schemaVersion: 2
+kind: coreEntity
+module: core
+entity: PersonalPreference
+title: Personal preference
+description: A private application preference override owned by the signed-in subject within an organization. Definitions are managed by the composed application, not the user.
+language: en
+displayTemplate: "{{key}}"
+filterField: key
+labels: { en: Personal preference, nl: Persoonlijke voorkeur }
+indexes:
+  - name: personal_preferences_owner_key_uidx
+    fields: [tenantId, ownerUserId, namespace, key]
+    unique: true
+authorization:
+  roles:
+    read: [Preferences.Self.Read]
+    create: [Preferences.Self.Write]
+    update: [Preferences.Self.Write]
+    delete: [Preferences.Self.Write]
+  rowAccess:
+    enabled: true
+    empty: restricted
+    owner: { column: owner_user_id, session: app.current_user_id }
+fields:
+  - key: ownerUserId
+    valueType: string
+    required: true
+    immutable: true
+    validation: { format: uuid }
+    label: { en: Owner, nl: Eigenaar }
+    persisted: { column: owner_user_id, storageClass: core }
+  - key: namespace
+    valueType: string
+    required: true
+    immutable: true
+    validation: { minLength: 1, maxLength: 120 }
+    label: { en: Namespace, nl: Naamruimte }
+    persisted: { column: namespace, storageClass: core }
+  - key: key
+    valueType: string
+    required: true
+    immutable: true
+    validation: { minLength: 1, maxLength: 120 }
+    label: { en: Key, nl: Sleutel }
+    persisted: { column: key, storageClass: core }
+  - key: value
+    valueType: object
+    required: false
+    label: { en: Value, nl: Waarde }
+    description: { en: "JSON storage; the canonical managed FieldDefinition determines and validates the actual value type." }
+    persisted: { column: value, storageClass: core }
+operations:
+  list:
+    name: List own preference overrides
+    description: Returns only the signed-in subject's stored preference overrides.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Get own preference override
+    description: Returns one override owned by the signed-in subject.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  mcp: {}
+  graphql: {}
+  web:
+    views:
+      collection:
+        renderer: preferences.editor
+        route: /preferences
+        title: { en: Settings, nl: Instellingen }
+        columns:
+          - { key: namespace }
+          - { key: key }

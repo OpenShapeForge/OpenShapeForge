@@ -247,6 +247,9 @@ interfaces:
         subtitle: "{{amount}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [status, amount, expectedAt]
+            relationships: [agreement, producedInvoice]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
@@ -255,10 +258,8 @@ interfaces:
                   fields: [description, status]
                 - title: { en: Amounts, nl: Bedragen }
                   fields: [basisAmount, percentOfBasis, amount]
-                - title: { en: Planning, nl: Planning }
-                  fields: [expectedAt]
-                - title: { en: Trigger, nl: Trigger }
-                  fields: [triggeredAt, triggeredBy]
+                - title: { en: Planning and execution, nl: Planning en uitvoering }
+                  fields: [expectedAt, triggeredAt, triggeredBy]
         modes:
           update:
             title: { en: Update agreement milestone, nl: Overeenkomstmijlpaal wijzigen }

@@ -264,6 +264,9 @@ interfaces:
         subtitle: "{{amountTotal}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [lineNumber, quantity, unitPrice, amountTotal]
+            relationships: [quote, agreementComponent, vatRate]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

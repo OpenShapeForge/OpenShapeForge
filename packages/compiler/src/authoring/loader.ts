@@ -335,7 +335,7 @@ export function loadEntity(
   const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
 
   // App shell (optional)
-  const shellPath = join(authoringDir, "appShell.yaml");
+  const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
   // Semantic types (core + context catalogs merged)
@@ -419,7 +419,7 @@ export function loadContextEntity(
   const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
 
   // App shell (optional)
-  const shellPath = join(authoringDir, "appShell.yaml");
+  const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
   // Semantic types

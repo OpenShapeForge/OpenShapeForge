@@ -439,20 +439,28 @@ interfaces:
         subtitle: "{{relationType}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [relationSubType, status, preferredContactChannel, location]
+            relationships: [agreements, groupMemberships, tasks]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Basics, nl: Basisgegevens }
                   fields: [displayName, relationType, relationSubType, preferredContactChannel, status]
-                - title: { en: Source, nl: Herkomst }
-                  fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
                 - title: { en: Location, nl: Locatie }
                   fields: [address, location]
-                - title: { en: Context, nl: Context }
+                - title: { en: Business context, nl: Zakelijke context }
                   fields: [businessContext]
                 - title: { en: Notes, nl: Notities }
                   fields: [notes]
+            - id: source
+              label: { en: Source, nl: Herkomst }
+              groups:
+                - title: { en: Identification, nl: Identificatie }
+                  fields: [externalId, externalCode]
+                - title: { en: Source, nl: Herkomst }
+                  fields: [sourceAuthority, sourceOrganization, sourceAdministration]
             - id: agreements
               label: { en: Agreements, nl: Overeenkomsten }
               relationship: agreements

@@ -95,6 +95,21 @@ describe("rowAccess → rowScope translation (§B.3)", () => {
 });
 
 describe("canonical storage type propagation", () => {
+  it("emits a scalar UUID session owner with strict RLS and no entity foreign key", () => {
+    const manifest = compileFixtures(["rowaccess-scalar-uuid"]);
+    const table = tableByName(manifest, "rowaccess_scalar_uuids");
+    expect(table?.columns.find((column) => column.name === "owner_id")).toMatchObject({ type: "uuid", required: true });
+    expect(table?.columns.find((column) => column.name === "owner_id")?.references).toBeUndefined();
+    expect(table?.rowScope).toEqual({ userColumns: ["owner_id"] });
+    const schema = generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))?.contents;
+    expect(schema).toContain('"owner_id" uuid NOT NULL');
+    expect(schema).toContain('"owner_id" = app.current_user_id()');
+    expect(schema).not.toContain('FOREIGN KEY ("owner_id")');
+  });
+  it("still refuses plain string and UUID-collection owner axes", () => {
+    expect(() => compileFixtures(["rowaccess-scalar-plain"])).toThrow("scalar string with validation.format: uuid");
+    expect(() => compileFixtures(["rowaccess-scalar-collection"])).toThrow("scalar string with validation.format: uuid");
+  });
   it("keeps compiled wide integers intact through the backend manifest and SQL generator", () => {
     const manifest = compileFixtures(["wide-integer"]);
     const table = tableByName(manifest, "wide_integers");

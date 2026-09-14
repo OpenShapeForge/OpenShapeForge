@@ -442,7 +442,14 @@ export type ModuleSeedResult = {
 
 export type ModuleSeedContract<Database, Result> = {
   name: string;
-  apply(db: Database): Promise<Result>;
+  apply(db: Database, context?: ModuleSeedContext): Promise<Result>;
+};
+
+/** Managed seed services; no user identity or additional database authority. */
+export type ModuleSeedContext = {
+  schemas: PluginPlatformServices["schemas"];
+  /** Compiler-collected fixtures from the active composed application. */
+  seedDirectory?: string;
 };
 
 export type ModuleReadinessCheck = {

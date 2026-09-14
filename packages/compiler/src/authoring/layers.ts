@@ -21,11 +21,11 @@
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
  *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
- *     against `appShell.yaml`. This is how a PLUGIN contributes a sidebar
+ *     against `menu.yaml`. This is how a PLUGIN contributes a sidebar
  *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
- *     `appShell.yaml` outright collides.
+ *     `menu.yaml` outright collides.
  *   - patch a realm file with `kind: authorizationPatch` at the SAME path as
  *     the `authorization*.yaml` it targets: rename a client (`renameClient`),
  *     add or amend clients, widen realm-role composites — without forking the
@@ -1045,7 +1045,7 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
  * reads it from exactly here, so a patch has to merge into this path and no
  * other for the result to be the document the generator sees.
  */
-const APP_SHELL_FILENAME = "appShell.yaml";
+const APP_SHELL_FILENAME = "menu.yaml";
 
 function isEntityFile(relativePath: string): boolean {
   return (

@@ -58,6 +58,8 @@
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — CREATE ROLE / GRANT / DDL require it.
  */
 import type { Kysely } from "kysely";
+import { fileURLToPath } from "node:url";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { DB } from "../generated/db/types.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
@@ -164,7 +166,10 @@ export async function runMigrationChain(
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
-    moduleSeeds[seed.name] = await seed.apply(db);
+    moduleSeeds[seed.name] = await seed.apply(db, {
+      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
+      seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
+    });
   }
   return {
     ...generated,

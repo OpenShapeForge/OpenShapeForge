@@ -392,10 +392,22 @@ interfaces:
         title: "{{title}}"
         subtitle: "{{status}}"
         layout:
+          context:
+            fields: [documentType, confidentiality, author, registeredAt]
+            relationships: [relation, caseFile, case, currentVersion]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
-              fields: [code, title, description, documentType, status, confidentiality, source, author, isExternal, registeredAt, receivedAt, publishedAt, currentVersionId]
+              groups:
+                - title: { en: Document, nl: Document }
+                  fields: [code, title, description, documentType, status]
+                - title: { en: Origin and access, nl: Herkomst en toegang }
+                  fields: [author, source, isExternal, confidentiality]
+                - title: { en: Registration and publication, nl: Registratie en publicatie }
+                  fields: [receivedAt, registeredAt, publishedAt]
+            - id: versions
+              label: { en: Versions, nl: Versies }
+              relationship: versions
         modes:
           create:
             title: { en: Create document, nl: Document aanmaken }

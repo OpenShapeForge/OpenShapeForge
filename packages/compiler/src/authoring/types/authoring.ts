@@ -624,7 +624,11 @@ export interface EntityWebViewDefinition {
     title: string;
     subtitle?: string;
     actions?: string[];
-    layout: { tabs: import("./views.js").ViewGroup[] };
+    layout: {
+      tabs: import("./views.js").ViewGroup[];
+      /** Deliberately selected summary, independent of the full record tabs. */
+      context?: { fields: string[]; relationships?: string[] };
+    };
     modes?: {
       create?: { title: LocalizedText; groups: import("./views.js").ViewGroup[] };
       update?: { title: LocalizedText; groups?: import("./views.js").ViewGroup[] };

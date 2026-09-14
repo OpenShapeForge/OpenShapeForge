@@ -127,7 +127,7 @@ host set a maximum exposure policy that an installed package/plugin cannot
 widen.
    Patching a slug no earlier layer defines is an error. Later layers may
    patch the same entity again — patches stack.
-2. **`kind: appShellPatch`** — strategic-merged into `appShell.yaml` from an
+2. **`kind: appShellPatch`** — strategic-merged into `menu.yaml` from an
    earlier layer (path-targeted; there is exactly one app shell).
 3. **`kind: authorizationPatch`** — merged into the realm file at the **same
    path** (`authorization.yaml`, `authorization.<realm>.yaml`) from an
@@ -212,7 +212,7 @@ overlay-added groups flow into `core-by-groep.json` automatically.
 | Same path, plain file, non-catalog | Error ("Layer collision") |
 | Same path, `catalogs/*.yaml` | Strategic merge |
 | Same slug via `kind: entityPatch` | Strategic merge (patch) |
-| `appShell.yaml` via `kind: appShellPatch` | Strategic merge (patch) |
+| `menu.yaml` via `kind: appShellPatch` | Strategic merge (patch) |
 | `authorization*.yaml` via `kind: authorizationPatch` | Rename + strategic merge, role lists union |
 | `authorizationPatch` for a realm file no earlier layer has, or off the layer root | Error |
 | Same slug, plain entity file, different path | Error ("Duplicate entity slug") |

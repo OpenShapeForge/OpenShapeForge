@@ -530,7 +530,7 @@ describe("resolveAuthoringLayers", () => {
 /**
  * The app shell is the one authored document a plugin has to reach without
  * owning: it holds the sidebar, and a plugin that ships a screen needs one
- * entry in it. Before this existed the only way in was to ship `appShell.yaml`
+ * entry in it. Before this existed the only way in was to ship `menu.yaml`
  * itself, which collides — so a plugin could emit a route file and have nothing
  * link to it.
  *
@@ -580,7 +580,7 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
   };
 
   function readShell(resolved: string) {
-    return YAML.parse(readFileSync(join(resolved, "appShell.yaml"), "utf8")) as {
+    return YAML.parse(readFileSync(join(resolved, "menu.yaml"), "utf8")) as {
       kind: string;
       navigation: { sidebarItems: { key: string; route?: unknown }[] };
     };
@@ -588,8 +588,8 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
 
   test("a patch appends a nav entry and leaves the base entries intact", () => {
     const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    writeYaml(root, "plugin/appShell.yaml", {
+    writeYaml(root, "base/menu.yaml", baseShell);
+    writeYaml(root, "plugin/menu.yaml", {
       kind: "appShellPatch",
       navigation: {
         sidebarItems: [
@@ -614,12 +614,12 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
 
   test("two plugins each append, in layer order", () => {
     const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    writeYaml(root, "first/appShell.yaml", {
+    writeYaml(root, "base/menu.yaml", baseShell);
+    writeYaml(root, "first/menu.yaml", {
       kind: "appShellPatch",
       navigation: { sidebarItems: [{ key: "workflow", route: { en: "/workflow" } }] },
     });
-    writeYaml(root, "second/appShell.yaml", {
+    writeYaml(root, "second/menu.yaml", {
       kind: "appShellPatch",
       navigation: { sidebarItems: [{ key: "reports", route: { en: "/reports" } }] },
     });
@@ -633,8 +633,8 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
 
   test("a patch can amend an entry an earlier layer contributed", () => {
     const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    writeYaml(root, "overlay/appShell.yaml", {
+    writeYaml(root, "base/menu.yaml", baseShell);
+    writeYaml(root, "overlay/menu.yaml", {
       kind: "appShellPatch",
       navigation: { sidebarItems: [{ key: "data", label: { en: "Records" } }] },
     });
@@ -654,7 +654,7 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
   test("a patch with no app shell in an earlier layer is rejected", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", { schemaVersion: 1, kind: "coreEntity" });
-    writeYaml(root, "plugin/appShell.yaml", {
+    writeYaml(root, "plugin/menu.yaml", {
       kind: "appShellPatch",
       navigation: { sidebarItems: [{ key: "workflow" }] },
     });
@@ -665,24 +665,24 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
     expect(() => resolveAuthoringLayers(root)).toThrow(/no earlier layer defines an app shell/);
   });
 
-  test("shipping a plain appShell.yaml over an earlier one is still rejected, and says how to patch", () => {
+  test("shipping a plain menu.yaml over an earlier one is still rejected, and says how to patch", () => {
     const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    writeYaml(root, "plugin/appShell.yaml", { ...baseShell, shell: { title: "Hijacked" } });
+    writeYaml(root, "base/menu.yaml", baseShell);
+    writeYaml(root, "plugin/menu.yaml", { ...baseShell, shell: { title: "Hijacked" } });
     configureLayers(root, ["base", "plugin"]);
     expect(() => resolveAuthoringLayers(root)).toThrow(/appShellPatch/);
   });
 
   test("merging is deterministic across runs", () => {
     const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    writeYaml(root, "plugin/appShell.yaml", {
+    writeYaml(root, "base/menu.yaml", baseShell);
+    writeYaml(root, "plugin/menu.yaml", {
       kind: "appShellPatch",
       navigation: { sidebarItems: [{ key: "workflow", route: { en: "/workflow" } }] },
     });
     configureLayers(root, ["base", "plugin"]);
-    const first = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
-    const second = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
+    const first = readFileSync(join(resolveAuthoringLayers(root), "menu.yaml"), "utf8");
+    const second = readFileSync(join(resolveAuthoringLayers(root), "menu.yaml"), "utf8");
     expect(first).toBe(second);
   });
 });

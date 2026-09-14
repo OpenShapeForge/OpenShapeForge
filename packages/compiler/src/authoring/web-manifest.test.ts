@@ -150,6 +150,55 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("does not invent a context summary by copying the first detail group", () => {
+    const example = entity("Example", "example", [field("displayName")], coreView());
+    expect(buildWebManifest([example]).entities.Example!.views.record!.layout.context).toEqual({ groups: [], relationships: [] });
+  });
+  test("projects authored collection context only when its destination tab exists", () => {
+    const target = entity("ContactDetail", "contact-detail", [field("displayName")], coreView());
+    const example = entity("Example", "example", [field("displayName")], coreView(), [{
+      key: "contactDetails", kind: "hasMany", target: "ContactDetail", foreignKey: "relation_id", label: text("Contacts"),
+    }]);
+    example.contract.interfaces = { web: { operations: { list: true, get: true }, recordContext: { fields: [], relationships: ["contactDetails"] } } };
+    expect(buildWebManifest([example, target]).entities.Example!.views.record!.layout.context).toEqual({ groups: [], relationships: ["contactDetails"] });
+    example.contract.views.core!.detail!.groups.items = example.contract.views.core!.detail!.groups.items.filter(tab => !tab.relationship);
+    expect(() => buildWebManifest([example, target])).toThrow("requires a matching detail tab");
+  });
+  test("preserves nested canonical labels and option values for read presentation", () => {
+    const definition = entity("Example", "example", [field("displayName"), field("settings", {
+      valueType: "object", children: [field("state", { label: text("State", "Toestand"), options: { type: "static", items: [{ value: "ready", label: text("Ready", "Gereed") }] } })],
+    }), field("entries", { valueType: "object", cardinality: "collection", item: field("item", { valueType: "object", children: [field("name", { label: text("Name", "Naam") })] }) })], coreView());
+    const projected = buildWebManifest([definition]).entities.Example!.fields;
+    expect(projected.settings!.children![0]!.label.nl).toBe("Toestand");
+    expect(projected.settings!.children![0]!.options![0]!.label.nl).toBe("Gereed");
+    expect(projected.entries!.item!.children![0]!.label.nl).toBe("Naam");
+    expect(projected.entries!.item!.supports.update).toBe(false);
+  });
+  test("projects a deliberately authored summary independently of the first detail group", () => {
+    const example = entity("Example", "example", [field("displayName"), field("status")], coreView());
+    example.contract.interfaces = { web: { operations: { list: true, get: true }, recordContext: { fields: ["status"] } } };
+    const context = buildWebManifest([example]).entities.Example!.views.record!.layout.context;
+    expect(context.groups[0]!.fields).toEqual(["status"]);
+    expect(context.relationships).toEqual([]);
+    example.contract.interfaces.web!.recordContext!.fields = ["unknown"];
+    expect(() => buildWebManifest([example])).toThrow("context field unknown is not readable");
+  });
+
+  test("projects authored text length and nested entity choices for editing", () => {
+    const definition = entity("Example", "example", [field("displayName", { validation: { maxLength: 4000 } }),
+      field("settings", { valueType: "object", children: [field("target", { options: { type: "entity", source: "Example", valueField: "id" }, validation: { maxLength: 200 } })] }),
+    ], coreView());
+    const projected = buildWebManifest([definition]).entities.Example!.fields;
+    expect(projected.displayName!.maxLength).toBe(4000);
+    expect(projected.settings!.children![0]!.maxLength).toBe(200);
+    expect(projected.settings!.children![0]!.optionSource).toEqual({ type: "entity", source: "Example", valueField: "id" });
+  });
+
+  test("projects the numeric value of a localized text-length validation rule", () => {
+    const definition = entity("Example", "example", [field("displayName", { validation: { maxLength: { value: 4000, message: text("Too long") } } })], coreView());
+    expect(buildWebManifest([definition]).entities.Example!.fields.displayName!.maxLength).toBe(4000);
+  });
+
   test("preserves authored defaults including false, zero, null and structured values", () => {
     const defaults = [true, false, 0, "active", null, { mode: "manual" }, []];
     const definition = entity("Sample", "sample", [field("unset"),

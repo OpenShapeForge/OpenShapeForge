@@ -391,6 +391,9 @@ interfaces:
         subtitle: "{{agreementType}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [status, role, startDate, endDate]
+            relationships: [relation, case, parentAgreement]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

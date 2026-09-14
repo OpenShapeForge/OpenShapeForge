@@ -708,6 +708,7 @@ export interface CompiledEntityContract {
     web?: {
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      recordContext?: { fields: string[]; relationships?: string[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {
         collection?: string;

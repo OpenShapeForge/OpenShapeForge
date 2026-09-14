@@ -36,7 +36,7 @@ import type {
   CompiledAuthorizationRole,
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
-import { isCollectionField } from "./helpers.js";
+import { fieldSqlType, isCollectionField } from "./helpers.js";
 
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
@@ -205,17 +205,20 @@ export function buildAuthorization(
             `The ${axis} column must reference either a uuid field's 'persisted.column' or a relationship's 'foreignKey'.`,
         );
       }
-      // A persisted authoring field never has a uuid valueType (the enum has
-      // no uuid member) — uuid columns come from belongsTo foreignKeys, which
-      // take the matchingRelationship path. So a persisted-field axis column is
-      // always rejected here; report the actual authored valueType honestly.
-      // (The belongsTo FK is the only path since no field valueType is uuid.)
-      if (persistedField && persistedField.valueType !== "uuid") {
+      // Session ownership is a subject UUID, not necessarily an entity FK.
+      // Reuse the storage compiler's canonical UUID-format lowering. A plain
+      // string or a UUID collection is still rejected (text/jsonb storage).
+      // Group axes retain their relationship-only contract.
+      const scalarSessionOwner = axis === "owner" && persistedField &&
+        fieldSqlType(persistedField) === "uuid";
+      if (persistedField && !scalarSessionOwner) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +
-            `the persisted field "${col}" has valueType "${persistedField.valueType}", and no field valueType is uuid. ` +
-            `Model the ${axis} as a belongsTo relationship.`,
+            `the persisted field "${col}" has valueType "${persistedField.valueType}". ` +
+            (axis === "owner"
+              ? "A session owner may instead be a scalar string with validation.format: uuid."
+              : "Model the group as a belongsTo relationship."),
         );
       }
       // Relationship FKs are always uuid (storage compiler invariant), no type

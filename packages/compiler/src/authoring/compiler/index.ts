@@ -157,6 +157,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
               ? {
                   web: {
                     operations: v2WebOperationActions(coreEntity)!,
+                    ...(coreEntity.interfaces.web.views.record?.layout.context
+                      ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
+                      : {}),
                     ...(coreEntity.interfaces.web.views.collection.actions?.length
                       ? {
                           collectionActions: [

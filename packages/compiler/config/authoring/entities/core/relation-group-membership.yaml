@@ -198,10 +198,12 @@ interfaces:
         routes:
           read: { en: /relation-group-memberships/:id, nl: /relatiegroepslidmaatschappen/:id }
           create: { en: /relation-group-memberships/new, nl: /relatiegroepslidmaatschappen/nieuw }
-        title: "{{relationId}}"
-        subtitle: "{{relationGroupId}}"
+        title: Group membership
         actions: [update, delete]
         layout:
+          context:
+            fields: [status]
+            relationships: [relation, relationGroup]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

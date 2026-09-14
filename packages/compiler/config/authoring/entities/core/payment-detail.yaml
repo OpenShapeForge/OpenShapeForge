@@ -302,12 +302,17 @@ interfaces:
         subtitle: "{{accountHolder}}"
         actions: [update, delete]
         layout:
+          context:
+            fields: [type, status, isPrimary, validUntil]
+            relationships: [relation]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Payment information, nl: Betaalinformatie }
-                  fields: [type, iban, bic, accountHolder, status, isPrimary, validFrom, validUntil]
+                  fields: [type, iban, bic, accountHolder]
+                - title: { en: Usage and validity, nl: Gebruik en geldigheid }
+                  fields: [status, isPrimary, validFrom, validUntil]
         modes:
           create:
             title: { en: Create payment detail, nl: Betaalgegeven aanmaken }

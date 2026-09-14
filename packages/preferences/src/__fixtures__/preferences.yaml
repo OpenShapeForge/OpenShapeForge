@@ -1,0 +1,15 @@
+kind: preferenceDefinitions
+version: 1
+preferences:
+  - namespace: collection.example
+    field:
+      key: columns
+      valueType: string
+      cardinality: collection
+      label: { en: Visible columns }
+      defaultValue: [name]
+      options:
+        type: static
+        items:
+          - { value: name, label: { en: Name } }
+          - { value: status, label: { en: Status } }

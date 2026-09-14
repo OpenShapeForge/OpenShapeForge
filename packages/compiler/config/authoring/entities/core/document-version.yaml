@@ -296,20 +296,19 @@ interfaces:
         title: "{{versionLabel}}"
         subtitle: "{{status}}"
         layout:
+          context:
+            fields: [isMajorVersion, createdBy, mimeType, byteSize]
+            relationships: [document, account]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
-              fields:
-                - versionLabel
-                - status
-                - createdBy
-                - fileName
-                - mimeType
-                - byteSize
-                - checksum
-                - isMajorVersion
-                - changeSummary
-                - documentId
+              groups:
+                - title: { en: Version, nl: Versie }
+                  fields: [versionLabel, status, isMajorVersion, createdBy, changeSummary]
+                - title: { en: File, nl: Bestand }
+                  fields: [fileName, mimeType, byteSize]
+                - title: { en: File integrity, nl: Bestandsintegriteit }
+                  fields: [checksum]
         modes:
           create:
             title: { en: Add document version, nl: Documentversie toevoegen }

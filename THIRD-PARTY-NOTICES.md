@@ -4,23 +4,23 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 510 packages.
+Regenerate with `bun run notices`. 514 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 394 |
-| Apache-2.0 | 55 |
+| MIT | 395 |
+| Apache-2.0 | 56 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
 | BlueOak-1.0.0 | 5 |
-| MPL-2.0 | 3 |
+| MPL-2.0 | 4 |
+| LGPL-3.0-or-later | 2 |
 | 0BSD | 1 |
 | BSD-2-Clause | 1 |
 | CC-BY-4.0 | 1 |
 | EPL-2.0 | 1 |
-| LGPL-3.0-or-later | 1 |
 | Unlicense | 1 |
 
 ## Packages
@@ -215,12 +215,20 @@ Regenerate with `bun run notices`. 510 packages.
 ### @img/colour@1.1.0
 - License: **MIT** — git+https://github.com/lovell/colour.git
 
-### @img/sharp-darwin-arm64@0.35.3
+### @img/sharp-libvips-linux-arm64@1.3.2
+- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
+### @img/sharp-libvips-linuxmusl-arm64@1.3.2
+- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
+### @img/sharp-linux-arm64@0.35.3
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-libvips-darwin-arm64@1.3.2
-- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
+### @img/sharp-linuxmusl-arm64@0.35.3
+- License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
 ### @ioredis/commands@1.10.0
@@ -267,7 +275,10 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **MIT** — https://github.com/vercel/next.js
 - Author: Next.js Team <support@vercel.com>
 
-### @next/swc-darwin-arm64@16.2.11
+### @next/swc-linux-arm64-gnu@16.2.11
+- License: **MIT** — https://github.com/vercel/next.js
+
+### @next/swc-linux-arm64-musl@16.2.11
 - License: **MIT** — https://github.com/vercel/next.js
 
 ### @opentelemetry/api@1.9.1
@@ -591,7 +602,10 @@ Regenerate with `bun run notices`. 510 packages.
 ### @tailwindcss/oxide@4.3.3
 - License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
 
-### @tailwindcss/oxide-darwin-arm64@4.3.3
+### @tailwindcss/oxide-linux-arm64-gnu@4.3.3
+- License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
+
+### @tailwindcss/oxide-linux-arm64-musl@4.3.3
 - License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
 
 ### @tailwindcss/postcss@4.3.3
@@ -1075,9 +1089,6 @@ Regenerate with `bun run notices`. 510 packages.
 - License: **MIT** — jshttp/fresh
 - Author: TJ Holowaychuk <tj@vision-media.ca> (http://tjholowaychuk.com)
 
-### fsevents@2.3.2
-- License: **MIT** — https://github.com/fsevents/fsevents
-
 ### function-bind@1.1.2
 - License: **MIT** — https://github.com/Raynos/function-bind
 - Author: Raynos <raynos2@gmail.com>
@@ -1243,7 +1254,10 @@ Regenerate with `bun run notices`. 510 packages.
 ### lightningcss@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
-### lightningcss-darwin-arm64@1.32.0
+### lightningcss-linux-arm64-gnu@1.32.0
+- License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
+
+### lightningcss-linux-arm64-musl@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
 ### lodash.camelcase@4.3.0
@@ -2683,7 +2697,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@img/sharp-darwin-arm64@0.35.3, sharp@0.35.3</summary>
+<details><summary>@img/sharp-linux-arm64@0.35.3, @img/sharp-linuxmusl-arm64@0.35.3, sharp@0.35.3</summary>
 
 ```
 Apache License
@@ -4258,7 +4272,7 @@ limitations under the License.
 ```
 </details>
 
-<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-darwin-arm64@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
+<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-linux-arm64-gnu@4.3.3, @tailwindcss/oxide-linux-arm64-musl@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
 
 ```
 MIT License
@@ -7502,34 +7516,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>fsevents@2.3.2</summary>
-
-```
-MIT License
------------
-
-Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis, Elan Shankar, Paul Miller
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-```
-</details>
-
 <details><summary>function-bind@1.1.2</summary>
 
 ```
@@ -8391,7 +8377,7 @@ The complete list of contributors can be found at:
 ```
 </details>
 
-<details><summary>lightningcss@1.32.0, lightningcss-darwin-arm64@1.32.0</summary>
+<details><summary>lightningcss@1.32.0, lightningcss-linux-arm64-gnu@1.32.0, lightningcss-linux-arm64-musl@1.32.0</summary>
 
 ```
 Mozilla Public License Version 2.0

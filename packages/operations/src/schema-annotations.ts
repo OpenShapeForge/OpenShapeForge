@@ -15,3 +15,19 @@ export const operationReferenceKeyword = {
     },
   },
 };
+
+const bilingualText = {
+  type: "object", required: ["en", "nl"], additionalProperties: false,
+  properties: { en: { type: "string", minLength: 1 }, nl: { type: "string", minLength: 1 } },
+};
+/** Translation metadata never changes accepted values or authorization. */
+export const operationI18nKeyword = {
+  keyword: "x-osf-i18n", schemaType: "object" as const, valid: true,
+  metaSchema: {
+    type: "object", additionalProperties: false,
+    properties: {
+      title: bilingualText, description: bilingualText,
+      enum: { type: "object", additionalProperties: bilingualText },
+    },
+  },
+};

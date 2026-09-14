@@ -7,6 +7,7 @@
  * operation adapters; API paths and design-system component names deliberately
  * do not cross this boundary.
  */
+import { missingLocalizedMetadata, missingSchemaUiTranslations, missingUiTranslations } from "@openshapeforge/interface-web";
 import type { CompiledEntityInfo } from "../plugins.js";
 import type {
   CompiledEntityContract,
@@ -623,6 +624,7 @@ export function buildWebManifest(
   options: WebManifestOptions = {},
 ): WebManifestV1 {
   const resolved: Required<WebManifestOptions> = {
+    requireTranslations: options.requireTranslations ?? false,
     locale: options.locale ?? "en",
     context: options.context ?? "core",
     routeLocale: options.routeLocale ?? options.locale ?? "en",
@@ -630,6 +632,15 @@ export function buildWebManifest(
   const projectable = projectableEntities(entities, resolved);
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
   const projected = projectable.map((entity) => projectEntity(entity, byName));
+  const missing = missingUiTranslations(projected);
+  if (resolved.requireTranslations) for (const entity of projectable) {
+    missing.push(...missingLocalizedMetadata(entity.contract, entity.contract.entity.name));
+  }
+  if (resolved.requireTranslations) for (const entity of projected) for (const operation of Object.values(entity.operations)) {
+    if (operation && "input" in operation) missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
+    if (operation && "output" in operation && operation.output?.schema) missing.push(...missingSchemaUiTranslations(operation.output.schema, `${operation.id}.output`));
+  }
+  if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);
   return {
     contract: "openshapeforge.web-manifest",
     version: 1,

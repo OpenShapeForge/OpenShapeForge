@@ -14,13 +14,13 @@ export function resolveEntityInputSources(
   referentiedata: CoreReferentiedataSnapshot,
 ): ObjectSchema {
   const definitions: ObjectSchema = { ...(input.$defs as ObjectSchema | undefined) };
-  const targets = new Map(contracts.map(contract => [contract.entity.name, { label: contract.entity.title ?? contract.entity.name }]));
+  const targets = new Map(contracts.map(contract => [contract.entity.name, { label: contract.entity.title ?? contract.entity.name, labels: contract.entity.labels }]));
   function visit(value: unknown): unknown {
     if (Array.isArray(value)) return value.map(visit);
     if (!value || typeof value !== "object") return value;
     const object = value as ObjectSchema;
     if (!(KEY in object)) return Object.fromEntries(Object.entries(object).map(([key, child]) => [key, visit(child)]));
-    if (Object.keys(object).some(key => ![KEY, "title", "description"].includes(key))) {
+    if (Object.keys(object).some(key => ![KEY, "title", "description", "x-osf-i18n"].includes(key))) {
       throw new Error("Entity input sources cannot override canonical field validation.");
     }
     const source = object[KEY] as { entity?: unknown; fields?: unknown } | null;
@@ -40,6 +40,7 @@ export function resolveEntityInputSources(
       .map(field => ({ ...field, schema: { ...field.schema,
         title: targets.get(field.target)?.label ?? field.target,
         "x-osf-reference": { entity: field.target },
+        ...(targets.get(field.target)?.labels ? { "x-osf-i18n": { title: targets.get(field.target)!.labels } } : {}),
       } }));
     const available = new Set([...fields.map(field => field.key), ...relationships.map(field => field.key)]);
     for (const key of selected) if (!available.has(key)) throw new Error(`Unavailable entity input field ${source.entity}.${key}.`);
@@ -54,6 +55,7 @@ export function resolveEntityInputSources(
       definitions[key] = definition;
     }
     return { ...bundled.schema,
+      ...(object["x-osf-i18n"] !== undefined ? { "x-osf-i18n": object["x-osf-i18n"] } : {}),
       ...(object.title !== undefined ? { title: object.title } : {}),
       ...(object.description !== undefined ? { description: object.description } : {}),
     };

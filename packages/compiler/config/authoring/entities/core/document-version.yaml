@@ -232,37 +232,103 @@ operations:
 
   create:
     name: { en: Add document version, nl: Documentversie toevoegen }
-    description: Adds a logical version, optionally binds a staged artifact, and advances the owning document pointer atomically.
+    description:
+      en: Add a new version to this document. You can attach a file.
+      nl: Voeg een nieuwe versie aan dit document toe. U kunt een bestand bijvoegen.
+
     implementation: { type: plugin, plugin: documents, handler: createDocumentVersion, action: create }
     target: { scope: collection }
     input:
       schema:
         type: object
-        required: [documentId, version, idempotencyKey]
+        required:
+          - documentId
+          - version
+          - idempotencyKey
         additionalProperties: false
         properties:
-          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          idempotencyKey:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n:
+              title:
+                en: Idempotency Key
+                nl: Aanvraagreferentie
           artifact:
             type: object
             x-osf-control: artifact-upload
             description: Optional storage-issued handle; file facts are verified server-side.
-            required: [artifactId, expectedArtifactVersion]
+            required:
+              - artifactId
+              - expectedArtifactVersion
             additionalProperties: false
             properties:
-              artifactId: { type: string, format: uuid }
-              expectedArtifactVersion: { type: integer, minimum: 1, maximum: 9007199254740991 }
-          documentId: { type: string, format: uuid, x-osf-reference: { entity: Document } }
+              artifactId:
+                type: string
+                format: uuid
+                x-osf-i18n:
+                  title:
+                    en: Artifact
+                    nl: Bestand
+              expectedArtifactVersion:
+                type: integer
+                minimum: 1
+                maximum: 9007199254740991
+                x-osf-i18n:
+                  title:
+                    en: Expected Artifact Version
+                    nl: Verwachte bestandsversie
+            x-osf-i18n:
+              title:
+                en: Artifact
+                nl: Bestand
+              description:
+                en: Optionally attach a file to this version.
+                nl: Voeg desgewenst een bestand aan deze versie toe.
+          documentId:
+            type: string
+            format: uuid
+            x-osf-reference:
+              entity: Document
+            x-osf-i18n:
+              title:
+                en: Document
+                nl: Document
           version:
             x-osf-entityInput:
               entity: DocumentVersion
-              fields: [versionLabel, status, isMajorVersion, changeSummary, accountId]
+              fields:
+                - versionLabel
+                - status
+                - isMajorVersion
+                - changeSummary
+                - accountId
+            x-osf-i18n:
+              title:
+                en: Version
+                nl: Versie
     output:
       schema:
         type: object
-        required: [id, documentId]
+        required:
+          - id
+          - documentId
         properties:
-          id: { type: string, format: uuid }
-          documentId: { type: string, format: uuid }
+          id:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Record
+                nl: Record
+          documentId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Document
+                nl: Document
         additionalProperties: true
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }

@@ -18,6 +18,7 @@ indexes:
   - { name: templates_tenant_key_uidx, fields: [tenantId, key], unique: true }
 fields:
   - key: key
+    label: { en: Key, nl: Sleutel }
     valueType: string
     required: true
     validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
@@ -33,6 +34,7 @@ fields:
     label: { en: Description, nl: Omschrijving }
     persisted: { column: description, storageClass: core }
   - key: versions
+    label: { en: Versions, nl: Versies }
     semanticType: TemplateVersion
     cardinality: collection
     relationship: { inverse: template, ownership: owned }

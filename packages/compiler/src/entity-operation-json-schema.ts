@@ -122,6 +122,7 @@ export function writableEntityFields(
   return fields.filter(
     (field) =>
       !SERVER_MANAGED_FIELDS.has(field.key) &&
+      !(field.relationship && field.cardinality === "collection") &&
       field.computed === undefined &&
       !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
       !(operation === "update" && field.immutable === true),

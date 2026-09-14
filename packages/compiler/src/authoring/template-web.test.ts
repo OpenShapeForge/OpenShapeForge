@@ -25,4 +25,9 @@ test("real template Web contracts expose owned collections as navigable editor t
     expect(entity.relationships[relationship!]!.operations.insert).toBeDefined();
     expect(JSON.stringify(entity.views.record)).toContain(`"relationshipId":"${relationship}"`);
   }
+  const insert = manifest.entities.Template!.relationships.versions!.operations.insert!;
+  const values = (insert.input.schema as any).properties.values.properties;
+  expect(values.versionNumber).toBeDefined();
+  expect(values.parameters).toBeDefined();
+  expect(values.variants).toBeUndefined();
 });

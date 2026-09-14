@@ -56,7 +56,13 @@ export const preferenceDefinitionsSeed: ModuleSeed = {
     const directory = context.seedDirectory ?? fileURLToPath(new URL("../authoring/seeds/", import.meta.url));
     const paths = existsSync(directory) ? readdirSync(directory).filter((name) => /\.(json|ya?ml)$/.test(name)).sort().map((name) => join(directory, name)) : [];
     const definitions = loadPreferenceDefinitions(paths, context.schemas.fields);
-    await db.transaction().execute((transaction) => seedPreferenceDefinitions(transaction, definitions));
+    await db.transaction().execute(async (transaction) => {
+      // The migration connection is deliberately not a superuser. Enable the
+      // existing managed-catalog policy only for this atomic seed transaction;
+      // commit and rollback both restore the connection's previous context.
+      await transaction.executeQuery(query("select set_config('app.bypass_rls', 'true', true)"));
+      await seedPreferenceDefinitions(transaction, definitions);
+    });
     return { present: true, skipped: false, rows: definitions.length };
   },
 };

@@ -54,6 +54,12 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
     drop policy if exists blueprint_libraries_reader on platform.blueprint_libraries;
     create policy blueprint_libraries_reader on platform.blueprint_libraries for select
       to openshapeforge_blueprint_reader using (true);
+    -- The assignment itself is platform registry state: only the audited
+    -- control-plane session (assign_blueprint_library, control/tenant-registry.ts)
+    -- reads it across tenants and writes it. A tenant session never passes here.
+    drop policy if exists blueprint_libraries_control on platform.blueprint_libraries;
+    create policy blueprint_libraries_control on platform.blueprint_libraries
+      using (app.bypass_rls()) with check (app.bypass_rls());
     drop policy if exists blueprint_versions_own on platform.blueprint_versions;
     create policy blueprint_versions_own on platform.blueprint_versions for select
       using (tenant_id = app.current_tenant());
@@ -121,10 +127,11 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
 }
 
 /** Reapply after the general app-role grant sweep. RLS independently denies
- * snapshot update/delete and library mutation, even before these revokes. */
+ * snapshot update/delete, and library mutation outside the audited
+ * control-plane bypass, even before these revokes. */
 export async function applyBlueprintsGrants(db: OpenShapeForgeDatabase) {
   await sql`
-    revoke insert, update, delete on platform.blueprint_libraries from ${sql.id(APP_ROLE)};
+    grant select, insert, update, delete on platform.blueprint_libraries to ${sql.id(APP_ROLE)};
     revoke update, delete on platform.blueprint_versions from ${sql.id(APP_ROLE)};
     revoke all on function app.read_blueprints(text, text, text, integer, integer) from public;
   `.execute(db);

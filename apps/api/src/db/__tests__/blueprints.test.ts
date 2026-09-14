@@ -73,7 +73,16 @@ test("published blueprint lookup is scoped, authorized and read-only across tena
     await expect(asApp(bp, 'Example.All.ReadWrite', (db) => publish(db, 3))).rejects.toThrow();
     await expect(asApp(bp, 'platform-operator', (db) => sql`delete from platform.blueprint_versions`.execute(db))).rejects.toThrow();
     await expect(asApp(bp, 'platform-operator', (db) => sql`update platform.blueprint_versions set label = 'changed'`.execute(db))).rejects.toThrow();
-    await expect(asApp(customer, 'platform-operator', (db) => sql`update platform.blueprint_libraries set blueprint_tenant_id = ${stranger}`.execute(db))).rejects.toThrow();
+    // The library assignment is registry state: a tenant session, whatever its
+    // roles, cannot reach the row (RLS filters it, so the update touches nothing),
+    // while the audited control-plane bypass can.
+    expect((await asApp(customer, 'platform-operator', (db) => sql`update platform.blueprint_libraries set blueprint_tenant_id = ${stranger}`.execute(db))).numAffectedRows).toBe(0n);
+    expect((await asApp(customer, 'platform-operator', (db) => sql`delete from platform.blueprint_libraries`.execute(db))).numAffectedRows).toBe(0n);
+    await expect(asApp(customer, 'platform-operator', (db) => sql`insert into platform.blueprint_libraries values (${stranger}, ${bp})`.execute(db))).rejects.toThrow();
+    expect((await asApp(customer, 'platform-operator', async (db) => {
+      await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
+      return sql`update platform.blueprint_libraries set blueprint_tenant_id = ${bp} where tenant_id = ${customer}`.execute(db);
+    })).numAffectedRows).toBe(1n);
     await asApp(customer, 'Example.All.ReadWrite', (db) => sql`
       insert into platform.blueprint_copies values (${customer}, 'Example', ${randomUUID()}, ${bp}, 'standard', 2)
     `.execute(db));

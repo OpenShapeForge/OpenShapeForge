@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -585,6 +585,31 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
       navigation: { sidebarItems: { key: string; route?: unknown }[] };
     };
   }
+
+  test("normalizes a legacy appShell.yaml and retains an older-host read alias", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    configureLayers(root, ["base"]);
+
+    const resolved = resolveAuthoringLayers(root);
+
+    expect(readShell(resolved).navigation.sidebarItems[0]!.key).toBe("data");
+    expect(readFileSync(join(resolved, "appShell.yaml"), "utf8"))
+      .toBe(readFileSync(join(resolved, "menu.yaml"), "utf8"));
+  });
+
+  test("applies a current app shell patch to a legacy appShell.yaml base", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "plugin/menu.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "workflow", route: { en: "/workflow" } }] },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    expect(readShell(resolveAuthoringLayers(root)).navigation.sidebarItems.map((item) => item.key))
+      .toEqual(["data", "workflow"]);
+  });
 
   test("a patch appends a nav entry and leaves the base entries intact", () => {
     const root = makeRepo();

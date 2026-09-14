@@ -56,7 +56,12 @@ export const preferenceDefinitionsSeed: ModuleSeed = {
     const directory = context.seedDirectory ?? fileURLToPath(new URL("../authoring/seeds/", import.meta.url));
     const paths = existsSync(directory) ? readdirSync(directory).filter((name) => /\.(json|ya?ml)$/.test(name)).sort().map((name) => join(directory, name)) : [];
     const definitions = loadPreferenceDefinitions(paths, context.schemas.fields);
-    await db.transaction().execute((transaction) => seedPreferenceDefinitions(transaction, definitions));
+    await db.transaction().execute(async (transaction) => {
+      // FORCE RLS also applies to a managed database's non-superuser owner.
+      // The trusted migration seed owns this context only until commit/rollback.
+      await (transaction as Executor).executeQuery(query("select set_config('app.bypass_rls', 'true', true)"));
+      return seedPreferenceDefinitions(transaction, definitions);
+    });
     return { present: true, skipped: false, rows: definitions.length };
   },
 };

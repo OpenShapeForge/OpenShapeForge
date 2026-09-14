@@ -36,12 +36,13 @@ test("managed seed executes composition atomically and requires canonical servic
   const context: ModuleSeedContext = { schemas: { fields: h.fields, json: { validate: () => ({ valid: true }) } }, seedDirectory: fileURLToPath(new URL("./__fixtures__/", import.meta.url)) };
   expect(await preferenceDefinitionsSeed.apply(db, context)).toEqual({ present: true, skipped: false, rows: 1 });
   expect(transactions).toBe(1);
-  expect(statements).toHaveLength(2);
-  expect(statements[0]).toContain("insert into platform.preference_definitions");
-  expect(statements[1]).toContain("delete from platform.preference_definitions");
-  expect(statements[1]).toContain("jsonb_array_elements_text($1::text::jsonb)");
-  expect(parameters[1]).toEqual(['["collection.example:columns"]']);
-  expect(JSON.parse(String(parameters[0]![2]))).toMatchObject({ key: "columns", valueType: "string" });
+  expect(statements).toHaveLength(3);
+  expect(statements[0]).toBe("select set_config('app.bypass_rls', 'true', true)");
+  expect(statements[1]).toContain("insert into platform.preference_definitions");
+  expect(statements[2]).toContain("delete from platform.preference_definitions");
+  expect(statements[2]).toContain("jsonb_array_elements_text($1::text::jsonb)");
+  expect(parameters[2]).toEqual(['["collection.example:columns"]']);
+  expect(JSON.parse(String(parameters[1]![2]))).toMatchObject({ key: "columns", valueType: "string" });
   await expect(preferenceDefinitionsSeed.apply(db)).rejects.toThrow("canonical");
   // Existing one-argument seed implementations remain compatible.
   const legacy: ModuleSeed = { name: "legacy", async apply(_db) { return { present: true, skipped: false }; } };

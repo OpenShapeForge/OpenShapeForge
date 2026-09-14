@@ -48,7 +48,7 @@ fields:
     valueType: object
     required: false
     label: { en: Value, nl: Waarde }
-    description: { en: "JSON storage; the canonical managed FieldDefinition determines and validates the actual value type." }
+    description: {"en":"JSON storage; the canonical managed FieldDefinition determines and validates the actual value type.","nl":"JSON-opslag; de beheerde velddefinitie bepaalt en valideert het werkelijke waardetype."}
     persisted: { column: value, storageClass: core }
 operations:
   list:

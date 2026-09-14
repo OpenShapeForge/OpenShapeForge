@@ -28,6 +28,8 @@ export type TrustedSessionContext = {
   loginSessionBinding?: string;
   /** Verified tenant-local Relation label; display only, never authorization. */
   userDisplayName?: string | null;
+  /** Display language from verified identity claims; never a permission or client input. */
+  locale?: string;
   roles: string[];
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];

@@ -575,6 +575,7 @@ export async function resolveSessionContext(
         userId: identity.userId,
         ...(loginSessionBinding ? { loginSessionBinding } : {}),
         userDisplayName: relation?.displayName ?? null,
+        ...(typeof claims.locale === "string" && claims.locale.trim() ? { locale: claims.locale.trim() } : {}),
         roles: effectiveRoles,
         oauthScopes: identity.scopes ?? [],
         groups,

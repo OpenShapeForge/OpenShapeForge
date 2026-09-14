@@ -217,6 +217,8 @@ export type WebManifestV1 = {
 };
 
 export type WebManifestOptions = {
+  /** Fail build when visible operation fields or choices lack bilingual UI copy. */
+  requireTranslations?: boolean;
   locale?: "en" | "nl";
   /** Context to prefer when an entity exposes multiple compiled view contexts. */
   context?: string;

@@ -125,6 +125,7 @@ describe("compiled field JSON Schema projection", () => {
         "Lifecycle status. References the StatusDefinition entity. " +
         "Allowed values: active (Active), closed (Closed).",
       default: "active",
+      "x-osf-i18n": { title: { en: "status" }, description: { en: "Lifecycle status." }, enum: { active: { en: "Active", nl: "Actief" }, closed: { en: "Closed", nl: "Gesloten" } } },
     });
   });
 
@@ -198,7 +199,7 @@ describe("compiled field JSON Schema projection", () => {
     expect(schema.items).toEqual({
       allOf: [
         { type: "string", maxLength: 8, enum: ["primary", "backup"] },
-        { type: "string", title: "Code", description: "Code" },
+        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } } },
       ],
     });
     expect(schema.description).toContain("Allowed values: primary (Primary), backup (Backup).");

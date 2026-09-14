@@ -1068,3 +1068,13 @@ describe("authoring.config.local.yaml", () => {
     expect(loadAuthoringConfig(root)).toEqual({ layers: ["base"], plugins: ["./ext.ts"] });
   });
 });
+
+test("a later Dutch override preserves English across entity, operation and nested schema metadata", () => {
+  const base = { label: { en: "Customer", nl: "Klant" }, operations: { compose: { name: { en: "Compose", nl: "Samenstellen" }, input: { schema: { properties: { name: { "x-osf-i18n": { title: { en: "Name", nl: "Naam" } } } } } } } } };
+  const plugin = { operations: { compose: { input: { schema: { properties: { name: { "x-osf-i18n": { title: { nl: "Offertenaam" } } } } } } } } };
+  const host = { label: { nl: "Opdrachtgever" } };
+  const result = strategicMerge(strategicMerge(base, plugin), host) as typeof base;
+  expect(result.label).toEqual({ en: "Customer", nl: "Opdrachtgever" });
+  expect(result.operations.compose.name).toEqual(base.operations.compose.name);
+  expect(result.operations.compose.input.schema.properties.name["x-osf-i18n"].title).toEqual({ en: "Name", nl: "Offertenaam" });
+});

@@ -392,6 +392,7 @@ export type CompiledFieldSchemaOptions = {
 export type CompiledFieldEnumeration = {
   values: string[];
   labels: Map<string, string>;
+  uiLabels?: Record<string, LocalizedText>;
 };
 
 /**
@@ -409,6 +410,7 @@ export function resolveCompiledFieldEnumeration(
   if (options?.type === "static" && options.items && options.items.length > 0) {
     return {
       values: options.items.map((item) => item.value),
+      uiLabels: Object.fromEntries(options.items.filter(item => item.label && typeof item.label === "object").map(item => [item.value, item.label as LocalizedText])),
       labels: new Map(
         options.items.flatMap((item) => {
           const label = localizedText(item.label);
@@ -430,6 +432,7 @@ export function resolveCompiledFieldEnumeration(
   if (items.length === 0) return undefined;
   return {
     values: items.map((item) => item.value),
+    uiLabels: Object.fromEntries(items.map(item => [item.value, item.label])),
     labels: new Map(
       items.flatMap((item) => {
         const label = localizedText(item.label);
@@ -468,6 +471,13 @@ function addCompiledFieldMetadata(
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
   const title = localizedText(field.label);
+  // Preserve authored UI copy separately from transport documentation and validation.
+  const copy: JsonObject = {};
+  if (field.label && typeof field.label === "object") copy.title = field.label;
+  if (enumeration?.uiLabels) copy.enum = enumeration.uiLabels;
+  const help = field.help ?? field.description;
+  if (help && typeof help === "object") copy.description = help;
+  if (Object.keys(copy).length) schema["x-osf-i18n"] = copy;
   if (title) {
     schema.title = title;
   }
@@ -527,6 +537,7 @@ export function compiledFieldSchemaWithoutDefinitions(
   const {
     title,
     description,
+    "x-osf-i18n": uiCopy,
     default: defaultValue,
     ...outerItemSchema
   } = valueSchema;
@@ -539,6 +550,7 @@ export function compiledFieldSchemaWithoutDefinitions(
       }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
+  if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;
   if (defaultValue !== undefined) {

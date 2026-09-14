@@ -717,3 +717,11 @@ describe("web manifest projection", () => {
     expect(JSON.stringify(projected.fields)).not.toContain("\"renderers\"");
   });
 });
+
+test("strict UI coverage rejects original field metadata before fallback duplicates it", () => {
+  const source = entity("Relation", "relation", [field("displayName", { label: { nl: "Naam" } })], coreView());
+  expect(() => buildWebManifest([source], { requireTranslations: true }))
+    .toThrow("Relation.model.fields[0].label.en");
+  source.contract.model.fields[0]!.label = { en: "Name", nl: "Naam" };
+  expect(() => buildWebManifest([source], { requireTranslations: true })).not.toThrow();
+});

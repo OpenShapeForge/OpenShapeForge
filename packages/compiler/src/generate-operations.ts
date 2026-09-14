@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationReferenceKeyword } from "@openshapeforge/operations";
+import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
 import type {
   CompilerPlugin,
   CompiledPluginOperation,
@@ -431,6 +431,7 @@ function operationSchemaValidator() {
     valid: true,
   });
   ajv.addKeyword(operationReferenceKeyword);
+  ajv.addKeyword(operationI18nKeyword);
   return ajv;
 }
 

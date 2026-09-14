@@ -34,6 +34,8 @@ export type PluginSessionContext = {
   /** Opaque host binding to the verified bearer login session, when available. */
   loginSessionBinding?: string;
   userDisplayName?: string | null;
+  /** Display language from verified identity claims; never a permission or client input. */
+  locale?: string;
   roles: string[];
   oauthScopes?: string[];
   groups: string[];

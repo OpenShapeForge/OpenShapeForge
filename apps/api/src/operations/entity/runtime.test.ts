@@ -6,6 +6,7 @@ import {
   executeEntityOperation,
   getEntityOperationContracts,
   getEntityOperationOffers,
+  offerTarget,
   mutationConcurrencyGuard,
   requireCreateOperationConfirmation,
   requireOperationAcknowledgement,
@@ -19,6 +20,14 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("record offers retain the exact storage timestamp before public serialization", () => {
+    const version = "2026-09-14T20:33:26.33546+00:00";
+    const row = { id: "record-367", updated_at: version };
+    expect(offerTarget(row, relation)).toEqual({ id: row.id, version, row });
+    const authored = { id: row.id, updatedAt: version };
+    expect(offerTarget(authored, relation)).toEqual({ id: row.id, version, row: authored });
+    expect(offerTarget({ id: row.id }, relation).version).toBeUndefined();
+  });
   test("uses stable interface-neutral identities for the operations authored by Relation v2", () => {
     expect(entityOperationRef(relation, "list")).toEqual({
       id: "Relation.list",

@@ -672,14 +672,17 @@ export function entityPluginOfferBinding(
   };
 }
 
-function offerTarget(
+export function offerTarget(
   row: Readonly<Record<string, unknown>>,
   table: GeneratedCrudTable,
 ): { id: string; version?: string; row: Readonly<Record<string, unknown>> } {
   const primaryColumn = table.columns.find(({ name }) => name === table.primaryKey);
   const idKey = primaryColumn ? fieldNameForColumn(primaryColumn) : table.primaryKey!;
-  const id = String(row[idKey] ?? "");
-  const version = row.updatedAt;
+  // Native CRUD returns storage keys; plugin results may already use authored
+  // keys. Offers are built before the public result serializer runs.
+  const id = String(row[primaryColumn?.name ?? idKey] ?? row[idKey] ?? "");
+  const versionColumn = table.columns.find((column) => fieldNameForColumn(column) === "updatedAt");
+  const version = row[versionColumn?.name ?? "updatedAt"] ?? row.updatedAt;
   return {
     id,
     row,

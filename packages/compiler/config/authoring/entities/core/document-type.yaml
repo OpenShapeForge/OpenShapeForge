@@ -155,7 +155,6 @@ interfaces:
       record:
         routes:
           read: /document-types/:id
-          edit: /document-types/:id/edit
           create: /document-types/new
         title: "{{name}}"
         subtitle: "{{code}}"

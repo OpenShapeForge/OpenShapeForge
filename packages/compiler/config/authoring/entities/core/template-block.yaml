@@ -10,7 +10,7 @@ baseEntity: false
 displayTemplate: "{{version}}"
 authorization:
   roles:
-    read: [General.All.Read, General.All.ReadWrite]
+    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
   - key: version
     semanticType: TemplateVersion
@@ -39,7 +39,7 @@ operations:
           parametersField: { type: string, const: parameters }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

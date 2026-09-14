@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
+  entityRecordOfferBinding,
   executeEntityOperation,
   getEntityOperationContracts,
   getEntityOperationOffers,
@@ -20,6 +21,13 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("native update and delete offers bind their canonical identity and current version", () => {
+    for (const intent of ["update", "delete"] as const) {
+      const operation = getEntityOperationContracts().find(op => op.entityName === "Relation" && op.intent === intent)!;
+      const target = { id: "record-367", version: "2026-09-14T20:33:26.33546+00:00" };
+      expect(entityRecordOfferBinding(operation, target)).toEqual({ binding: { target: { entityId: operation.entityId, ...target }, input: { id: target.id } } });
+    }
+  });
   test("record offers retain the exact storage timestamp before public serialization", () => {
     const version = "2026-09-14T20:33:26.33546+00:00";
     const row = { id: "record-367", updated_at: version };

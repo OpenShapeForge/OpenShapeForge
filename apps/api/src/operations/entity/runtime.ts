@@ -577,7 +577,7 @@ export function getEntityOperationOffers(
             operation: reference,
             available: true as const,
             ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
-            ...entityPluginOfferBinding(operation, target),
+            ...entityRecordOfferBinding(operation, target),
           };
     });
   const scope = target ? "record" : "collection";
@@ -646,28 +646,30 @@ export async function currentRecordOffers(
   return getEntityOperationOffers(entityName, session, intents, unavailable.get(target.id), target);
 }
 
-/** Bind a plugin-backed record mutation to its authorized target. */
-export function entityPluginOfferBinding(
+/** Bind each record mutation to its canonical identity and current version. */
+export function entityRecordOfferBinding(
   operation: EntityOperationContract,
   target?: { id: string; version?: string },
 ): { binding: OperationTargetBinding } | Record<string, never> {
   if (
     !target ||
-    operation.implementation?.type !== "plugin" ||
-    (operation.intent !== "update" && operation.intent !== "delete") ||
-    operation.target?.scope !== "record" ||
-    !operation.target.inputField
+    (operation.intent !== "update" && operation.intent !== "delete")
   ) {
     return {};
   }
+  const plugin = operation.implementation?.type === "plugin";
+  const inputField = plugin
+    ? operation.target?.scope === "record" ? operation.target.inputField : undefined
+    : typeof operation.input.identityField === "string" ? operation.input.identityField : undefined;
+  if (!inputField) return {};
   return {
     binding: {
       target: {
-        entityId: operation.target.entityId,
+        entityId: plugin ? operation.target!.entityId : operation.entityId,
         id: target.id,
         ...(target.version ? { version: target.version } : {}),
       },
-      input: { [operation.target.inputField]: target.id },
+      input: { [inputField]: target.id },
     },
   };
 }

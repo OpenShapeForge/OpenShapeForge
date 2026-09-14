@@ -37,6 +37,25 @@ test("references cannot override rules or select missing or server-owned fields"
   expect(() => resolveEntityInputSources({ ...reference("Example", ["title"]), additionalProperties: true }, [contract], {})).toThrow("override");
 });
 
+test("input and output sources lower identically in both canonical operation projections", () => {
+  const operation = () => ({ input: { kind: "json-schema", schema: structuredClone(input) }, output: { kind: "json-schema", schema: structuredClone(input) } });
+  const entity = { ...contract, entityOperations: { create: operation() },
+    pluginOperations: [{ definition: { input: { schema: structuredClone(input) }, output: { schema: structuredClone(input) } } }],
+  } as unknown as CompiledEntityContract;
+  const expected = resolveEntityInputSources(input, [entity], {});
+  materializeEntityInputSources([entity], {});
+  const create = entity.entityOperations.create!;
+  const plugin = entity.pluginOperations![0]!.definition;
+  expect(create.input).toEqual({ kind: "json-schema", schema: expected });
+  expect(create.output).toEqual({ kind: "json-schema", schema: expected });
+  expect(plugin.input!.schema).toEqual(expected);
+  expect(plugin.output!.schema).toEqual(expected);
+  const once = JSON.stringify(entity);
+  materializeEntityInputSources([entity], {});
+  expect(JSON.stringify(entity)).toBe(once);
+  expect(once).not.toContain("x-osf-entityInput");
+});
+
 test("managed choices fail closed for missing or incompatible canonical sources", () => {
   const source = (entity: string, valueField?: string) => ({ ...contract,
     entityOperations: {}, model: { ...contract.model, fields: [{ ...fields[0]!,

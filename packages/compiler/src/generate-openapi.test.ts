@@ -1077,7 +1077,7 @@ describe("rich generated REST OpenAPI", () => {
       in: "query",
       description:
         "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
-      schema: { type: "integer", default: 50 },
+      schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
     });
     expect(byName.get("after")?.description).toContain("nextCursor");
     expect(byName.get("sortField")?.schema).toEqual({

@@ -336,7 +336,11 @@ function filterSchemaForColumn(
 function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
+  operation: CompiledEntityOperation | undefined,
 ): JsonObject[] {
+  const pagination = operation?.input?.kind === "collection-query"
+    ? operation.input.pagination
+    : { defaultLimit: 50, maxLimit: 200 };
   const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
     table.source?.mcp?.elicitOnCreate?.into;
   const sortableFields = table.columns
@@ -360,8 +364,14 @@ function listParameters(
       name: "first",
       in: "query",
       description:
-        "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
-      schema: { type: "integer", default: 50 },
+        `Number of records to return. When absent it defaults to ${pagination.defaultLimit}; ` +
+        `supplied values are clamped to 1-${pagination.maxLimit}.`,
+      schema: {
+        type: "integer",
+        minimum: 1,
+        maximum: pagination.maxLimit,
+        default: pagination.defaultLimit,
+      },
     },
     {
       name: "after",
@@ -1220,7 +1230,7 @@ export function renderOpenApiSpec(
           (description ? `${description} ` : "") +
           "Pagination, sorting, and every supported scalar field filter are " +
           "documented below. Unknown filter fields are rejected.",
-        parameters: listParameters(table, fieldsByKey),
+        parameters: listParameters(table, fieldsByKey, contract?.entityOperations.list),
         responses: {
           "200": entityResponse(
             canonical ? `${name}ListResult` : `${name}List`,

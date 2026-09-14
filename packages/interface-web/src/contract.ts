@@ -10,11 +10,31 @@ export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
 export type WebOperationPrerequisite = OperationPrerequisite;
+export type WebCollectionQueryContract = {
+  kind: "collection-query";
+  /** Entity fields accepted by the canonical list Operation as filters. */
+  filterFields: readonly string[];
+  /** Entity fields accepted by the canonical list Operation as sort keys. */
+  sortFields: readonly string[];
+  pagination: {
+    kind: "cursor";
+    defaultLimit: number;
+    maxLimit: number;
+  };
+};
+
+export type WebListOperationRef = OperationReference<"list"> & {
+  /** Interface-neutral list input projected from the canonical Operation. */
+  input: WebCollectionQueryContract;
+};
+
 export type WebBuiltinOperationRef = OperationReference<WebOperationIntent> & {
   /** Canonical server-enforced controls; browsers derive lease timing from this value. */
   concurrency?: OperationConcurrency;
   /** Canonical server-enforced instructions that must be completed first. */
   prerequisites?: readonly WebOperationPrerequisite[];
+  /** Present for list Operations generated from the canonical collection query. */
+  input?: WebCollectionQueryContract;
 };
 
 /** Full JSON-schema contract shared by invoke and plugin-backed CRUD forms. */

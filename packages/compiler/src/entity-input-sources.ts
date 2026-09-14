@@ -90,9 +90,11 @@ export function materializeEntityInputSources(
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
       if (operation?.input.kind === "json-schema") operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
+      if (operation?.output.kind === "json-schema") operation.output.schema = resolveEntityInputSources(operation.output.schema, contracts, referentiedata);
     }
     for (const operation of contract.pluginOperations ?? []) {
       if (operation.definition.input) operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
+      if (operation.definition.output) operation.definition.output.schema = resolveEntityInputSources(operation.definition.output.schema, contracts, referentiedata);
     }
   }
 }

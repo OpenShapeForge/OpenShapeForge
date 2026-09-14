@@ -31,7 +31,8 @@ fields:
     valueType: string
     required: true
     defaultValue: draft
-    options: { type: static, items: [{ value: draft, label: { en: Draft, nl: Concept } }, { value: published, label: { en: Published, nl: Gepubliceerd } }] }
+    # Publication must be an immutable-version Operation, not a writable status.
+    options: { type: static, items: [{ value: draft, label: { en: Draft, nl: Concept } }] }
     persisted: { column: status, storageClass: core }
   - key: parameters
     valueType: object

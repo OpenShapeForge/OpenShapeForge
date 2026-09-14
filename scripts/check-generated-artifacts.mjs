@@ -20,7 +20,8 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // generic CRUD. The stock full-CRUD web UI is intentionally not generated for
 // these entities (isGeneratedCrudUiEnabled requires every operation to be
 // true). The aggregate is instead projected through WebManifest for hosts.
-const expectedGeneratedCrudEntityCount = 112;
+// Strict operation-authored entities use the Web manifest rather than v1 shards.
+const expectedGeneratedCrudEntityCount = 108;
 
 /**
  * The realms this repository authors, by name.

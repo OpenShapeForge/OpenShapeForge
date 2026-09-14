@@ -5,7 +5,7 @@ import type { ControlPlaneConfig } from "./config.js";
 /** Host administration never crosses the configured identity realm. */
 export function assertHostRealm(config: ControlPlaneConfig): void {
   const realm = config.keycloak.tenantRealm;
-  if (!realm || realm === "master" || realm === "." || realm === "..") {
+  if (!realm || realm.toLowerCase() === "master" || !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(realm)) {
     throw new ControlAuthorizationError("FORBIDDEN", "Host realm administration is not configured safely.");
   }
   const expectedIssuer = `${config.keycloak.baseUrl.replace(/\/$/, "")}/realms/${encodeURIComponent(realm)}`;

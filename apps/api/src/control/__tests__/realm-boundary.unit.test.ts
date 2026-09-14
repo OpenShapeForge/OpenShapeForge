@@ -19,7 +19,7 @@ describe("host realm boundary", () => {
     }
   });
   test("never admits master or path aliases", () => {
-    for (const realm of ["master", "", ".", ".."]) expect(() => assertHostRealm(config(realm))).toThrow();
+    for (const realm of ["master", "MASTER", "", ".", "..", "example/other", "example%2Fother"]) expect(() => assertHostRealm(config(realm))).toThrow();
   });
   test("requires the exact built-in client role", () => {
     expect(hasKeycloakRealmAdmin({ resource_access: { "realm-management": { roles: ["realm-admin"] } } })).toBe(true);

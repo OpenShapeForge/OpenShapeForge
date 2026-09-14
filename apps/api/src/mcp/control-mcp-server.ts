@@ -409,7 +409,33 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
     });
 
+    // A hosted client's discovery probe is a bare POST — no body, and a
+    // content-type Fastify has no parser for (aiohttp sends
+    // application/octet-stream). Answer it with the 401 challenge before any
+    // parsing, exactly as the organization resource does: nothing is
+    // authenticated here, the credential is verified by requirePlatformSession.
+    instance.addHook("onRequest", async (request) => {
+      if (request.method !== "POST") return;
+      const authorization = request.headers["authorization"];
+      const value = Array.isArray(authorization) ? authorization[0] : authorization;
+      if (typeof value === "string" && /^bearer\s+\S/i.test(value.trim())) return;
+      throw new HttpError(
+        401,
+        "UNAUTHENTICATED",
+        "The control plane requires an Authorization: Bearer token from the control realm.",
+      );
+    });
+
     instance.setErrorHandler((error, request, reply) => {
+      // A credentialed request under a media type without a parser is the
+      // client's mistake, not a server failure.
+      const fastifyCode = (error as { code?: unknown }).code;
+      if (fastifyCode === "FST_ERR_CTP_INVALID_MEDIA_TYPE") {
+        void reply.status(415).send({
+          error: { code: "UNSUPPORTED_MEDIA_TYPE", message: "JSON-RPC bodies are accepted only as application/json.", retryable: false },
+        });
+        return;
+      }
       const { status, body } = toHttpError(error);
       if (status >= 500) instance.log.error({ err: error }, "Platform MCP request failed.");
       if (status === 401) {

@@ -370,7 +370,9 @@ export function createApiApp(options: {
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
     // A failed module counts as configured for exactly that reason.
-    const entityPluginContracts = entityPluginOperationContracts();
+    // A controlled catalog override is complete: the generated entity-backed
+    // plugin operations belong to the generated catalog it replaces.
+    const entityPluginContracts = options.operationContracts ? [] : entityPluginOperationContracts();
     const allOperationContracts = [...operationContracts, ...entityPluginContracts];
     const operationsConfigured = operationModulesConfigured(
       [...modules.loaded, ...modules.failures],

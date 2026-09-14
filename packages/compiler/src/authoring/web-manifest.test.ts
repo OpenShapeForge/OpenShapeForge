@@ -717,3 +717,18 @@ describe("web manifest projection", () => {
     expect(JSON.stringify(projected.fields)).not.toContain("\"renderers\"");
   });
 });
+
+
+test("blueprint metadata resolves to canonical executable web operations", () => {
+  const definition = entity("Example", "example", [field("name")], coreView());
+  definition.contract.blueprint = { fields: ["name"], labelField: "name", operations: {
+    list: "osf-blueprints.Example.list", status: "osf-blueprints.Example.status", reset: "osf-blueprints.Example.reset", publish: "osf-blueprints.Example.publish",
+  } };
+  const projected = buildWebManifest([definition]).entities.Example!;
+  expect(projected.blueprint).toEqual(definition.contract.blueprint);
+  expect(projected.operations[projected.blueprint!.operations.reset]).toMatchObject({
+    id: "osf-blueprints.Example.reset", intent: "invoke", confirmation: { mode: "acknowledgement" },
+    input: { kind: "json-schema", schema: { required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] } },
+    rest: { method: "POST", path: "/api/blueprints/example/reset" },
+  });
+});

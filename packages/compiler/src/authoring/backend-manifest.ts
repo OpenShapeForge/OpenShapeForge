@@ -1106,6 +1106,9 @@ export function compileAuthoringBackendManifest(
           `or silently degrade to tenant scoping. Add a restriction axis or set empty: public.`,
       );
     }
+    if (candidate.contract.blueprint && !tenantScoped) {
+      throw new Error(`[${candidate.contract.entity.name}] blueprint copying requires a tenant-scoped entity.`);
+    }
     const rowScope = deriveRowScope(
       rowAccess,
       candidate.contract.entity.name,
@@ -1126,6 +1129,7 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
+        ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
         ...(candidate.contract.authoringVersion === 2

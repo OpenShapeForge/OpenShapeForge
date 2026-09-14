@@ -70,6 +70,7 @@ import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitat
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
+import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import {
   applyVersionedMigrations,
@@ -156,8 +157,10 @@ export async function runMigrationChain(
   await applyOnboardingMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
+  await applyBlueprintsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
+  await applyBlueprintsGrants(db);
   // The worker role's grants are enumerated from the manifest rather than
   // swept, and re-evaluated here on every migrate so a table that newly
   // declares (or stops declaring) workerDml is picked up without a bespoke

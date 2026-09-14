@@ -17,6 +17,53 @@
     "profiles"
   ],
   "properties": {
+    "blueprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fields",
+        "labelField",
+        "operations"
+      ],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "labelField": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "list",
+            "status",
+            "reset",
+            "publish"
+          ],
+          "properties": {
+            "list": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "reset": {
+              "type": "string"
+            },
+            "publish": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
     "contractVersion": { "type": "integer", "const": 2 },
     "kind": { "type": "string", "const": "compiledEntityContract" },
     "entity": {

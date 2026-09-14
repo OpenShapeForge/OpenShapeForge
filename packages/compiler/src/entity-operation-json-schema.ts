@@ -413,7 +413,19 @@ export function entityOperationJsonSchemas(
         true,
       );
       const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
-      const inputSchema = controlled({ values }, ["values"]);
+      const blueprint = contract.blueprint;
+      const requiredValues = Array.isArray(values.required) ? values.required as string[] : [];
+      const copyValues = blueprint ? { ...values, required: requiredValues.filter((key) => !blueprint.fields.includes(key)) } : values;
+      const inputSchema = controlled(
+        { values: copyValues, ...(blueprint ? { blueprintId: { type: "string", minLength: 1 } } : {}) },
+        ["values"],
+      );
+      if (blueprint) {
+        inputSchema.allOf = [{
+          if: { not: { required: ["blueprintId"] } },
+          then: { properties: { values: { required: requiredValues } } },
+        }];
+      }
       return {
         inputSchema: {
           ...inputSchema,

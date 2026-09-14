@@ -34,6 +34,7 @@ import {
 } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
 import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
@@ -515,6 +516,7 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerEntityChangeStream(routes, dbOptions);
     registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);

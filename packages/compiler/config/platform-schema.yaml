@@ -143,10 +143,18 @@ tables:
       - { name: event_type, type: text, required: true }
       - { name: payload, type: jsonb, required: true, default: "'{}'::jsonb" }
       - { name: sequence, type: bigint, required: true, generated: identity }
+      # Assigned by the stream projector only after the writer has committed.
+      - { name: delivery_sequence, type: bigint }
       - { name: occurred_at, type: timestamptz, required: true, default: now() }
     indexes:
       - name: entity_events_tenant_sequence_idx
         columns: [tenant_id, sequence]
+      - name: entity_events_tenant_delivery_idx
+        columns: [tenant_id, delivery_sequence]
+        unique: true
+      - name: entity_events_pending_delivery_idx
+        columns: [tenant_id, occurred_at, sequence]
+        where: delivery_sequence IS NULL
       - name: entity_events_tenant_aggregate_sequence_idx
         columns: [tenant_id, aggregate_type, aggregate_id, sequence]
 

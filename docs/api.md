@@ -690,9 +690,29 @@ single-query name (e.g. `relation`), `aggregate_id` = the row id, and payload
 `{ table, schema, operation }`. Reads append nothing; failed cross-tenant
 mutations journal nothing (the e2e suite asserts all of this).
 
-**What does not exist yet:** there are **no consumers** — no outbox enqueue,
-realtime dirty-marker projection, or cross-replica fanout ships in this
-runtime. There is also **no API query**
+**Realtime consumer:** authenticated `GET /api/events` streams committed entity
+changes across API replicas. Each `resource.changed` frame carries a canonical
+`entity`, record `id`, and `change` (`created`, `updated`, `deleted`), with the
+delivery cursor in the SSE `id`. Clients refetch through their existing Operations.
+Bearer credentials belong in request headers, never query parameters. Reconnect
+with `Last-Event-ID`; unavailable or expired cursors (24 hours), and initial
+connections, receive `stream.reset` with `reason: cursor_expired` and a current
+cursor. Refetch active views on reset. Comment heartbeats also carry checkpoints;
+clients retain these even when no visible change was emitted. Streams rotate
+after 55 seconds and revalidate the session while connected.
+
+Generated CRUD writes event and policy-column snapshots in its transaction.
+A short tenant-local projector transaction assigns delivery cursors only to
+committed journal rows. Writer transactions never wait for the projector lock;
+late commits receive later delivery cursors. Live reads enforce entity roles
+and current database RLS; deletion hints evaluate the generated read predicate
+against the retained policy columns with the reader's current session. No titles,
+record bodies, secrets, or mutation instructions are sent. Plugin event append
+joins the active Operation transaction; plugin writers must explicitly append
+events for their own mutations. Dynamic Service dependencies and native browser
+notification presentation are outside this transport.
+
+There is **no general API query**
 over the journal; `listEntityEvents` exists in code and is used by the e2e
 suite reading Postgres directly through the same RLS session layer. The
 journal is append-only by design (`test:perf` runs accumulate rows).

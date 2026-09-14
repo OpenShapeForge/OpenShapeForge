@@ -196,6 +196,7 @@ function insertGeneratedRow(
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "created",
+      row,
     });
     return projectGeneratedEntityRow(table, session, row);
   }).catch((error) => {
@@ -349,6 +350,7 @@ async function applyGeneratedRowUpdate(
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",
+      row,
     });
     return projectGeneratedEntityRow(table, session, row);
   }).catch((error) => {
@@ -439,6 +441,7 @@ export async function deleteGeneratedEntity(
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "deleted",
+      row,
     });
     return true;
   }).catch((error) => {

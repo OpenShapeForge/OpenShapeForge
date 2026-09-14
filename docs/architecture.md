@@ -148,9 +148,9 @@ configs, empty table, nothing reading it.
 
 ## Dormant surfaces (present, intentionally inactive)
 
-- **Entity events have no consumers yet.** Mutations append journal rows in
-  `platform.entity_events`; no outbox/realtime fanout ships in this repo, and
-  no GraphQL query exposes the journal. See
+- **Entity events:** mutations append journal rows in
+  `platform.entity_events`; authenticated `/api/events` projects authorized
+  change hints across replicas. No GraphQL query exposes the journal. See
   [api.md](api.md#the-entity-event-journal).
 - **Entity hooks** (`hooks:` in entity YAML — before/after
   create/update/delete) are parsed and carried on the compiled contract, but

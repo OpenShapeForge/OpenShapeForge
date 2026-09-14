@@ -58,6 +58,7 @@ export type GeneratedCrudTable = {
   generatedCrud: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
+  realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
     authoringEntityName?: string;
     /** Present only for strict v2 entity authoring; absence means legacy v1. */

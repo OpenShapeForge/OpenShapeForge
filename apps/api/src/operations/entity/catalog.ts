@@ -328,6 +328,7 @@ export async function appendGeneratedCrudEvent(
   input: {
     aggregateId: string;
     eventType: "created" | "updated" | "deleted";
+    row: GeneratedEntityRow;
   },
 ) {
   await appendScopedEntityEventInTransaction(trx, {
@@ -338,6 +339,9 @@ export async function appendGeneratedCrudEvent(
       table: table.name,
       schema: table.schema,
       operation: input.eventType,
+      ...(table.realtime ? {
+        visibility: Object.fromEntries(table.realtime.visibilityColumns.map(column => [column, input.row[column] ?? null])) as import("../../generated/db/types.js").Json,
+      } : {}),
     },
   });
 }

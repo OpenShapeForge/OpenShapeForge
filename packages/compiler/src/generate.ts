@@ -709,6 +709,18 @@ function renderManifestJson(
     table: table.name,
     tenantScoped: table.tenantScoped,
     domainInternal: table.domainInternal === true,
+    ...(table.tenantScoped && isGeneratedCrudEligible(table) && !table.domainInternal ? {
+      realtime: {
+        readPredicate: renderRowScopePredicate(table, "") ?? '"tenant_id" = app.current_tenant()',
+        visibilityColumns: [...new Set([
+          "tenant_id",
+          ...(table.rowScope?.group ? [table.rowScope.group.column] : []),
+          ...(table.rowScope?.userColumns ?? []),
+          ...(table.rowScope?.nullVisibleColumns ?? []),
+          ...(table.rowScope?.recordPermissions ? [table.rowScope.recordPermissions.column] : []),
+        ])].sort(),
+      },
+    } : {}),
     generatedCrudEligible: isGeneratedCrudEligible(table),
     // Legacy all-or-nothing marker. Partial policies deliberately keep this
     // false so an older runtime hides them; current runtimes read the explicit

@@ -2,11 +2,7 @@
 /**
  * Durable entity-event append for generated CRUD mutations.
  *
- * Trimmed from the full apps/api service: the event-outbox enqueue, realtime
- * dirty-marker projection, and cross-replica fanout have been removed — this
- * runtime only persists the event row in platform.entity_events inside the
- * mutating transaction. Re-add the outbox/realtime wiring when those workers
- * (and their tables) come back.
+ * The SSE reader projects committed rows as authorized change hints.
  */
 import { sql, type Selectable, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -170,6 +166,7 @@ export async function appendScopedEntityEventInTransaction(
       aggregate_id: normalizeText(input.aggregateId, "aggregateId"),
       event_type: normalizeText(input.eventType, "eventType"),
       payload: input.payload ?? {},
+      occurred_at: sql`clock_timestamp()`,
     })
     .returningAll()
     .executeTakeFirstOrThrow();

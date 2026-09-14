@@ -5,7 +5,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
-import { appendEntityEvent } from "../platform/entity-events.js";
+import { appendEntityEvent, appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
 import type {
@@ -361,6 +361,12 @@ export class ModulePlatformRuntime {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
+          const active = this.#operationTransactionStorage.getStore();
+          if (active) {
+            if (active.session !== session) throw new Error("Module event belongs to another session.");
+            await appendScopedEntityEventInTransaction(active.trx, { ...event, payload: event.payload as Json });
+            return;
+          }
           await appendEntityEvent(this.#db, session, {
             ...event,
             payload: event.payload as Json,

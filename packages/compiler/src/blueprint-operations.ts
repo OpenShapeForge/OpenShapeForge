@@ -5,32 +5,27 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
   return entities.flatMap(({ contract, slug }) => {
     const blueprint = contract.blueprint;
     if (!blueprint) return [];
-    // Every schema property carries both interface languages: hosts that require
-    // complete UI translations reject generated operations without them.
-    const titled = (schema: Record<string, unknown>, en: string, nl: string) => ({ ...schema, "x-osf-i18n": { title: { en, nl } } });
-    const id = titled({ type: "string", format: "uuid" }, "Record", "Record");
-    const version = titled({ type: "integer", minimum: 1 }, "Blueprint version", "Blueprintversie");
-    const blueprintId = titled({ type: "string" }, "Blueprint", "Blueprint");
-    const expectedVersion = titled({ type: "string", format: "date-time" }, "Expected record version", "Verwachte recordversie");
-    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { blueprintId, label: titled({ type: "string" }, "Label", "Label"), version } };
+    const id = { type: "string", format: "uuid" };
+    const version = { type: "integer", minimum: 1 };
+    const source = { type: "object", additionalProperties: false, required: ["blueprintId", "label", "version"], properties: { blueprintId: { type: "string" }, label: { type: "string" }, version } };
     const inputs = {
-      list: { properties: { search: titled({ type: "string", maxLength: 200 }, "Search", "Zoeken"), limit: titled({ type: "integer", minimum: 1, maximum: 100 }, "Limit", "Limiet"), cursor: titled({ type: "string" }, "Cursor", "Cursor") }, required: [] },
+      list: { properties: { search: { type: "string", maxLength: 200 }, limit: { type: "integer", minimum: 1, maximum: 100 }, cursor: { type: "string" } }, required: [] },
       status: { properties: { id }, required: ["id"] },
-      reset: { properties: { id, expectedVersion, blueprintVersion: version, confirmed: { const: true } }, required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] },
-      publish: { properties: { id, expectedVersion }, required: ["id", "expectedVersion"] },
+      reset: { properties: { id, expectedVersion: { type: "string", format: "date-time" }, blueprintVersion: version, confirmed: { const: true } }, required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] },
+      publish: { properties: { id, expectedVersion: { type: "string", format: "date-time" } }, required: ["id", "expectedVersion"] },
     };
     const outputs = {
-      list: { type: "object", additionalProperties: false, required: ["items", "nextCursor"], properties: { items: titled({ type: "array", items: source }, "Blueprints", "Blueprints"), nextCursor: titled({ type: ["string", "null"] }, "Next page", "Volgende pagina") } },
-      status: { type: "object", additionalProperties: false, required: ["source", "updateAvailable"], properties: { source: titled({ anyOf: [{ type: "null" }, { ...source, required: [...source.required, "latestVersion"], properties: { ...source.properties, latestVersion: titled(version, "Latest blueprint version", "Nieuwste blueprintversie") } }] }, "Blueprint source", "Blueprintbron"), updateAvailable: titled({ type: "boolean" }, "Update available", "Update beschikbaar") } },
+      list: { type: "object", additionalProperties: false, required: ["items", "nextCursor"], properties: { items: { type: "array", items: source }, nextCursor: { type: ["string", "null"] } } },
+      status: { type: "object", additionalProperties: false, required: ["source", "updateAvailable"], properties: { source: { anyOf: [{ type: "null" }, { ...source, required: [...source.required, "latestVersion"], properties: { ...source.properties, latestVersion: version } }] }, updateAvailable: { type: "boolean" } } },
       reset: { type: "object", additionalProperties: true },
-      publish: { type: "object", additionalProperties: false, required: ["blueprintId", "version"], properties: { blueprintId, version } },
+      publish: { type: "object", additionalProperties: false, required: ["blueprintId", "version"], properties: { blueprintId: { type: "string" }, version } },
     };
     return (['list', 'status', 'reset', 'publish'] as const).map((action): CompiledPluginOperation => {
       const roles = action === "publish" ? ["platform-operator"] : action === "list" ? [...new Set([...(contract.authorization?.roles.create ?? []), ...(contract.authorization?.roles.update ?? [])])] : contract.authorization?.roles.update ?? [];
       const concurrency = action === "reset" || action === "publish" ? { ...contract.entityOperations.update?.concurrency, version: contract.entityOperations.update?.concurrency?.version ?? { mode: "required" as const, field: "updatedAt" } } : undefined;
       const input = inputs[action];
       const inputSchema = { type: "object", additionalProperties: false, ...input,
-        ...(concurrency?.editLease ? { properties: { ...input.properties, leaseToken: titled({ type: "string", minLength: 1 }, "Edit lease", "Bewerkingslease") }, required: [...input.required, "leaseToken"] } : {}),
+        ...(concurrency?.editLease ? { properties: { ...input.properties, leaseToken: { type: "string", minLength: 1 } }, required: [...input.required, "leaseToken"] } : {}),
       };
       return {
         ...(concurrency ? { concurrency } : {}),

@@ -735,15 +735,6 @@ test("strict UI coverage rejects original field metadata before fallback duplica
   expect(() => buildWebManifest([source], { requireTranslations: true })).not.toThrow();
 });
 
-test("blueprint operations satisfy a host that requires complete UI translations", () => {
-  const definition = entity("Example", "example", [field("name")], coreView());
-  definition.contract.blueprint = { fields: ["name"], labelField: "name", operations: {
-    list: "osf-blueprints.Example.list", status: "osf-blueprints.Example.status", reset: "osf-blueprints.Example.reset", publish: "osf-blueprints.Example.publish",
-  } };
-  definition.contract.entityOperations.update = { ...definition.contract.entityOperations.update, concurrency: { editLease: true } } as never;
-  expect(() => buildWebManifest([definition], { requireTranslations: true })).not.toThrow();
-});
-
 test("blueprint metadata resolves to canonical executable web operations", () => {
   const definition = entity("Example", "example", [field("name")], coreView());
   definition.contract.blueprint = { fields: ["name"], labelField: "name", operations: {

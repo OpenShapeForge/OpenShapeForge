@@ -3,6 +3,9 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
+import { operationFailure } from "@openshapeforge/operations";
+import { collectionMutationError } from "./collection-policy.js";
+import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
   appendGeneratedCrudEvent,
@@ -138,6 +141,8 @@ export async function createGeneratedEntityAfterElicitation(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
+  const unsupported = collectionMutationError(table, "create", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   const column = elicitedOutputColumn(table);
   if (!column || fieldNameForColumn(column) !== input.into) {
     throw generatedCrudError(
@@ -159,6 +164,8 @@ export async function createGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
+  const unsupported = collectionMutationError(table, "create", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
   assertCreateRecordPermissions(table, session, input.values);
@@ -221,6 +228,8 @@ export async function updateGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
+  const unsupported = collectionMutationError(table, "update", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
   assertUpdateRecordPermissions(table, input.values);
@@ -374,6 +383,8 @@ export async function deleteGeneratedEntity(
   },
 ): Promise<boolean> {
   const table = readGeneratedCrudTable(input.table, "delete", session);
+  const unsupported = collectionMutationError(table, "delete", getGeneratedCrudTables());
+  if (unsupported) throw operationFailure(unsupported);
 
   return withDbSession(db, session, async (trx) => {
     if (table.source?.authorization?.recordPermissions) {

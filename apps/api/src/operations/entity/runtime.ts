@@ -11,6 +11,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
 import rawOperationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
+import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
 import {
   generatedCrudError,
   getGeneratedCrudTables,
@@ -90,7 +91,12 @@ const operationCatalog = rawOperationCatalog as unknown as {
     };
   }>;
 };
-const entityOperations = operationCatalog.entityOperations ?? [];
+const entityOperations = (operationCatalog.entityOperations ?? []).map((operation) => {
+  if (operation.implementation?.type === "plugin" || (operation.intent !== "create" && operation.intent !== "update")) return operation;
+  const table = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === operation.entityName);
+  if (!table || !operation.inputSchema) return operation;
+  return { ...operation, inputSchema: withoutCollectionInputs(operation.inputSchema, collectionManagedFields(table, getGeneratedCrudTables())) };
+});
 const pluginOperations = operationCatalog.operations ?? [];
 const entityOperationsById = new Map(
   entityOperations.map((operation) => [operation.id, operation]),
@@ -420,8 +426,8 @@ export function restEditLeaseOperationIdsForSession(
         id: operation.id,
         intent: operation.intent,
       });
-      return table.source?.authoringVersion === 2 &&
-        table.source.rest?.operations[operation.intent] === true;
+      return (table.source?.authoringVersion ?? 1) >= 2 &&
+        table.source?.rest?.operations[operation.intent] === true;
     })
     .map(({ id }) => id);
   return [
@@ -562,7 +568,9 @@ export function getEntityOperationOffers(
         (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
     )
     .map((operation) => {
-      const error = unavailable[operation.id];
+      const operationTable = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entityName);
+      const error = unavailable[operation.id] ?? (operation.implementation?.type !== "plugin" && operationTable
+        ? collectionMutationError(operationTable, operation.intent, getGeneratedCrudTables()) : undefined);
       const reference = { id: operation.id, intent: operation.intent };
       return error
         ? { operation: reference, available: false as const, error }
@@ -750,6 +758,8 @@ export async function executeEntityOperation(
           projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
       };
     }
+    const collectionError = collectionMutationError(table, request.operation.intent, getGeneratedCrudTables(), request.input?.values);
+    if (collectionError) throw operationFailure(collectionError);
     switch (request.operation.intent) {
       case "list": {
         const connection = await listGeneratedEntities(db, session, {

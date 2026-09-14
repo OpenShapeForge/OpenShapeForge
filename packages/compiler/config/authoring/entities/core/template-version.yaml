@@ -1,0 +1,100 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: TemplateVersion
+title: Template version
+language: en
+labels: { en: Template version, nl: Template version }
+domains: [documents]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{versionNumber}}"
+indexes:
+  - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
+fields:
+  - key: template
+    semanticType: Template
+    required: true
+    immutable: true
+  - key: versionNumber
+    valueType: integer
+    required: true
+    immutable: true
+    validation: { min: 1 }
+    label: { en: Version, nl: Versie }
+    persisted: { column: version_number, storageClass: core }
+  - key: status
+    valueType: string
+    required: true
+    defaultValue: draft
+    options: { type: static, items: [{ value: draft, label: { en: Draft, nl: Concept } }, { value: published, label: { en: Published, nl: Gepubliceerd } }] }
+    persisted: { column: status, storageClass: core }
+  - key: parameters
+    valueType: object
+    semanticType: fieldDefinition
+    cardinality: collection
+    label: { en: Local parameters, nl: Lokale parameters }
+    persisted: { column: parameters, storageClass: core }
+  - key: variants
+    semanticType: TemplateVariant
+    cardinality: collection
+    relationship: { inverse: version, ownership: owned }
+operations:
+  list:
+    name: List template version
+    description: Read accessible template version records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read template version
+    description: Read one accessible template version record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create template version
+    description: Create a template version record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update template version
+    description: Update a template version draft.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        route: /template-versions
+        title: { en: Template versions, nl: Templateversies }
+        columns: [{ key: versionNumber }, { key: status }]
+      record:
+        routes: { read: "/template-versions/:id", create: /template-versions/new }
+        title: "{{versionNumber}}"
+        layout:
+          tabs:
+            - id: parameters
+              label: { en: Parameters, nl: Parameters }
+              groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, parameters] }]
+        modes:
+          create:
+            title: { en: Create, nl: Toevoegen }
+            groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, parameters] }]
+          update:
+            title: { en: Edit, nl: Bewerken }
+            groups: [{ title: { en: Parameters, nl: Parameters }, fields: [parameters] }]

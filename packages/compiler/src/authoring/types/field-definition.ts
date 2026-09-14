@@ -42,8 +42,14 @@ export type FieldDefinitionSemanticTypeKind =
 export type FieldDefinitionValidation = FieldValidation;
 
 export interface FieldDefinitionRelationship {
-  kind: "belongsTo" | "hasMany";
-  entity: string;
+  kind?: "belongsTo" | "hasMany" | "manyToMany";
+  entity?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  /** Compiler-derived identity; not authored twice beside semanticType. */
+  target?: string;
+  fieldKey?: string;
+  unique?: boolean;
   foreignKey?: string;
   displayField?: string;
 }
@@ -81,7 +87,7 @@ export interface FieldDefinitionAuthoringMetadata {
  */
 export interface FieldDefinition {
   key: string;
-  valueType: FieldDefinitionValueType;
+  valueType?: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;

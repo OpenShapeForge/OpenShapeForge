@@ -23,6 +23,7 @@ import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
+import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import {
   entityOperationRef,
   entityOperationContract,
@@ -49,7 +50,7 @@ type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
 function usesCanonicalResultEnvelope(table: GeneratedTable): boolean {
-  return table.source?.authoringVersion === 2;
+  return (table.source?.authoringVersion ?? 1) >= 2;
 }
 
 function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
@@ -150,6 +151,8 @@ function assertWritableBody(
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Request body must be a JSON object.");
   }
+  const unsupported = collectionMutationError(table, operation, getGeneratedCrudTables(), body as Record<string, unknown>);
+  if (unsupported) throw new HttpError(400, unsupported.code, unsupported.message);
   const writable = new Set(
     table.columns
       .filter((column) => isCallerWritableColumn(table, column, operation))
@@ -351,9 +354,25 @@ export function registerGeneratedRestRoutes(
 
   // The generated spec is a build artifact of the same manifest that drives
   // these routes; serve it unauthenticated like the health endpoints.
-  app.get(REST_OPENAPI_PATH, async () => openApiSpec);
+  const projectedSpec = structuredClone(openApiSpec);
+  const schemas = projectedSpec.components.schemas as Record<string, Record<string, unknown>>;
+  for (const table of getGeneratedCrudTables()) {
+    const typeName = table.source?.graphql?.typeName;
+    if (!typeName) continue;
+    const managed = collectionManagedFields(table, getGeneratedCrudTables());
+    for (const name of [`${typeName}Input`, `${typeName}UpdateInput`]) {
+      if (schemas[name]) schemas[name] = withoutCollectionInputs(schemas[name], managed);
+    }
+    if (table.source?.rest && collectionMutationError(table, "create", getGeneratedCrudTables()) &&
+      entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") {
+      const paths = projectedSpec.paths as Record<string, Record<string, unknown>>;
+      const path = paths[`${REST_MOUNT_PATH}/${table.source.rest.basePath}`];
+      if (path) delete path.post;
+    }
+  }
+  app.get(REST_OPENAPI_PATH, async () => projectedSpec);
 
-  registerRestDocs(app, openApiSpec);
+  registerRestDocs(app, projectedSpec);
 
   if (restTables.length === 0) {
     return;

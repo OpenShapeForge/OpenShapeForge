@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql } from "kysely";
+import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import {
@@ -184,6 +184,7 @@ async function listGeneratedEntityRowsForTable(
     fixedWhere?: Array<{ column: string; value: unknown }>;
   },
   projectOutput: boolean,
+  relationScope?: { where: RawBuilder<unknown>; orderBy?: RawBuilder<unknown> },
 ): Promise<GeneratedEntityConnection> {
   // This helper intentionally bypasses entity-role checks for trusted runtime
   // projections, but it must not bypass the value-oracle boundary.
@@ -191,8 +192,9 @@ async function listGeneratedEntityRowsForTable(
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
-  const where = buildFilterConditions(table, input.filter, fixedWhere);
-  const orderBy = buildSortExpression(table, input.sort);
+  const ordinaryWhere = buildFilterConditions(table, input.filter, fixedWhere);
+  const where = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
+  const orderBy = relationScope?.orderBy ?? buildSortExpression(table, input.sort);
 
   return withDbSession(db, session, async (trx, resolvedSession) => {
     const result = await sql<{ row: GeneratedEntityRow }>`
@@ -239,8 +241,9 @@ export function listGeneratedEntitiesForTable(
   input: ListPageInput & {
     fixedWhere?: Array<{ column: string; value: unknown }>;
   },
+  relationScope?: { where: RawBuilder<unknown>; orderBy?: RawBuilder<unknown> },
 ): Promise<GeneratedEntityConnection> {
-  return listGeneratedEntityRowsForTable(db, session, table, input, true);
+  return listGeneratedEntityRowsForTable(db, session, table, input, true, relationScope);
 }
 
 /**

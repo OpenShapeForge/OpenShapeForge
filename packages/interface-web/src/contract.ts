@@ -166,8 +166,16 @@ export type WebRelationshipProjection = {
   kind: string;
   targetEntityId: string;
   targetRoute: string;
-  foreignKey: string;
-  recordField: string;
+  foreignKey?: string;
+  recordField?: string;
+  fieldKey?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
+  sortable?: boolean;
+  positionColumn?: string;
+  via?: string;
+  mutationSupport?: "unsupported";
   operations: { list?: WebOperationRef; get?: WebOperationRef; create?: WebOperationRef };
   collection?: WebCollectionView;
 };
@@ -223,6 +231,8 @@ export type WebEntityInterface = {
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
   operations: Record<string, WebOperationRef | WebCustomOperationRef>;
+  /** Authored Operations that cannot be submitted through the generic interface yet. */
+  unsupportedOperations?: Partial<Record<WebOperationIntent, { code: string; message: string }>>;
   views: {
     collection: WebCollectionView;
     record?: WebRecordView;

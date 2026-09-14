@@ -22,7 +22,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // true). The aggregate is instead projected through WebManifest for hosts, as
 // are the other schemaVersion 2 entities (Agreement, Address, AgreementParty);
 // every v1 -> v2 conversion therefore lowers this count by one.
-const expectedGeneratedCrudEntityCount = 108;
+const expectedGeneratedCrudEntityCount = 106;
 
 /**
  * The realms this repository authors, by name.

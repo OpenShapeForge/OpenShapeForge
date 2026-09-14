@@ -131,6 +131,19 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   const parameterFields = new Map<string, readonly Record<string, unknown>[]>();
   const operationDefinitions = await platform.operations.list(session);
   const authorized = (entityName: string, id: string) => platform.records.assertAccess(session, { entityName, id, intent: "get" });
+  // Record access alone does not redact classified fields. All content must
+  // come from the canonical read result, including logical entity-value refs.
+  const read = async (entityName: string, id: string) => {
+    await authorized(entityName, id);
+    const matches = operationDefinitions.filter((operation) => operation.entityName === entityName && operation.intent === "get");
+    if (matches.length !== 1 || matches[0]!.effects.data !== "read" || matches[0]!.effects.external !== "none") refuse("OPERATION_UNAVAILABLE", "A source has no unambiguous canonical read Operation.");
+    const result = await platform.operations.execute(session, { operation: matches[0]!, input: { id } });
+    if ("error" in result) throw operationFailure(result.error);
+    if (result.data == null) return null;
+    const row = object(result.data, "source record");
+    if (row.id !== id || row.tenantId !== tenantId) refuse("DEPENDENCY_INVALID", "The source read returned a different record or tenant.");
+    return row;
+  };
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => materializeTemplateContent({
       tenantId, templateVersionId, channel, locale,
@@ -138,11 +151,13 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
     }, registry, {
       async resolveTemplateVersion(id): Promise<ContentTemplateVersion | null> {
         uuid(id, "template version");
-        await authorized("TemplateVersion", id);
-        const version = (await rows<{ id: string; tenant_id: string; template_id: string; version_number: number; parameters: unknown }>(trx,
-          "select id, tenant_id, template_id, version_number, parameters from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
+        const locked = (await rows<{ id: string }>(trx,
+          "select id from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
+        if (!locked) return null;
+        const version = await read("TemplateVersion", id);
         if (!version) return null;
-        await authorized("Template", version.template_id);
+        const templateId = uuid(version.template, "template");
+        await authorized("Template", templateId);
         const fields = version.parameters ?? [];
         if (!Array.isArray(fields) || !fields.every(isObject)) refuse("INVALID_DEFINITION", "Template parameters are not canonical field definitions.");
         parameterFields.set(id, fields);
@@ -150,43 +165,43 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
         const properties = object(parameterSchema.properties ?? {}, "parameter properties");
         const required = Array.isArray(parameterSchema.required) ? parameterSchema.required : [];
         const parameters = Object.fromEntries(Object.entries(properties).map(([name, schema]) => [name, parameterShape(object(schema, "parameter schema"), required.includes(name))]));
-        const variants = await rows<{ id: string; channel: string; locale: string }>(trx,
-          "select id, channel, locale from erp.template_variants where tenant_id = $1 and version_id = $2 and channel = $3 and locale = $4 for share", [tenantId, id, channel, locale]);
+        const variants = await rows<{ id: string }>(trx,
+          "select id from erp.template_variants where tenant_id = $1 and version_id = $2 and channel = $3 and locale = $4 for share", [tenantId, id, channel, locale]);
         const contentVariants = [];
-        for (const variant of variants) {
-          await authorized("TemplateVariant", variant.id);
-          const stored = await rows<Record<string, unknown>>(trx,
-            `select * from ${identifier(carrier.schema)}.${identifier(carrier.table)} where tenant_id = $1 and variant_id = $2 order by variant_id_position, id for share`, [tenantId, variant.id]);
+        for (const candidate of variants) {
+          const variantId = uuid(candidate.id, "variant id");
+          const variant = await read("TemplateVariant", variantId);
+          if (!variant || variant.version !== id || variant.channel !== channel || variant.locale !== locale) refuse("DEPENDENCY_INVALID", "The selected variant is not available through its canonical read.");
+          const stored = await rows<{ id: string }>(trx,
+            `select id from ${identifier(carrier.schema)}.${identifier(carrier.table)} where tenant_id = $1 and variant_id = $2 order by variant_id_position, id for share`, [tenantId, variantId]);
           const blocks: ContentBlock[] = [];
-          for (const row of stored) {
-            const blockId = uuid(row.id, "block id");
-            await authorized("Block", blockId);
-            const name = text(row[carrier.definitionColumn], "definition key");
+          for (const candidate of stored) {
+            const blockId = uuid(candidate.id, "block id");
+            const row = await read("Block", blockId);
+            if (!row || row.variant !== variantId) refuse("DEPENDENCY_INVALID", "The selected block is not available through its canonical read.");
+            const name = text(row[carrier.definitionField], "definition key");
             const entry = definition(carrier, name);
-            const values = object(row[carrier.valuesColumn], "stored block values");
-            const defaults = Object.fromEntries(entry.fields.filter((field) => field.defaultValue !== undefined && !entry.references.some((ref) => ref.fieldKey === field.key)).map((field) => [text(field.key, "field key"), field.defaultValue]));
-            const references = Object.fromEntries(entry.references.map((reference) => [reference.fieldKey, row[reference.column] == null ? null : { entity: reference.targetEntity, id: uuid(row[reference.column], reference.fieldKey) }]));
-            blocks.push({ id: blockId, definitionKey: name, schemaVersion: Number(row.definition_version), values: immutableContent({ ...defaults, ...values }) as JsonObject, references });
+            const logical = object(row[carrier.fieldKey], "readable block values");
+            const referenceKeys = new Set(entry.references.map((reference) => reference.fieldKey));
+            const values = Object.fromEntries(Object.entries(logical).filter(([key]) => !referenceKeys.has(key)));
+            const references = Object.fromEntries(entry.references.map((reference) => [reference.fieldKey, logical[reference.fieldKey] == null ? null : { entity: reference.targetEntity, id: uuid(logical[reference.fieldKey], reference.fieldKey) }]));
+            blocks.push({ id: blockId, definitionKey: name, schemaVersion: Number(row.definitionVersion), values: immutableContent(values) as JsonObject, references });
           }
-          contentVariants.push({ id: variant.id, channel: variant.channel, locale: variant.locale, blocks, allowedDefinitions: [...collection!.allowedDefinitions] });
+          contentVariants.push({ id: variantId, channel, locale, blocks, allowedDefinitions: [...collection!.allowedDefinitions] });
         }
-        return { id, tenantId: version.tenant_id, templateId: version.template_id, versionNumber: version.version_number, parameters, variants: contentVariants };
+        return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters, variants: contentVariants };
       },
       async resolveGlobalVariable(key) {
-        const found = (await rows<{ id: string; tenant_id: string; value: string; version: string }>(trx,
-          "select id, tenant_id, value, updated_at::text as version from erp.chips where tenant_id = $1 and key = $2 for share", [tenantId, key]))[0];
+        const found = (await rows<{ id: string }>(trx,
+          "select id from erp.chips where tenant_id = $1 and key = $2 for share", [tenantId, key]))[0];
         if (!found) return null;
-        await authorized("Chip", found.id);
-        return { tenantId: found.tenant_id, sourceId: found.id, sourceVersionId: `${found.id}@${found.version}`, value: found.value };
+        const chip = await read("Chip", uuid(found.id, "chip id"));
+        if (!chip || chip.key !== key || typeof chip.value !== "string") return null;
+        return { tenantId, sourceId: found.id, sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`, value: chip.value };
       },
       async resolveEntity(reference) {
-        await authorized(reference.entity, reference.id);
-        const matches = operationDefinitions.filter((operation) => operation.entityName === reference.entity && operation.intent === "get");
-        if (matches.length !== 1) refuse("OPERATION_UNAVAILABLE", "A reference has no unambiguous canonical read Operation.");
-        const result = await platform.operations.execute(session, { operation: matches[0]!, input: { id: reference.id } });
-        if ("error" in result) throw operationFailure(result.error);
-        if (result.data == null) return null;
-        const row = object(result.data, "referenced record");
+        const row = await read(reference.entity, reference.id);
+        if (!row) return null;
         const version = text(row.updatedAt, "referenced record version");
         return { tenantId, entity: reference.entity, id: uuid(row.id, "referenced record"), versionId: version, value: immutableContent(row) as JsonObject };
       },

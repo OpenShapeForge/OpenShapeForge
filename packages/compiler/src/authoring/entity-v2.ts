@@ -22,6 +22,7 @@ export function v2OperationEntries(
 export function v2OperationAction(
   definition: EntityOperationDefinition,
 ): CrudOperationKey | undefined {
+  if (definition.implementation.type === "collection") return undefined;
   return definition.implementation.action;
 }
 
@@ -46,7 +47,7 @@ export function v2OperationByAction(
 export function v2PluginOperations(entity: CoreEntity) {
   if (!isCoreEntityV2(entity)) return [];
   return v2OperationEntries(entity).flatMap(([key, definition]) => {
-    if (definition.implementation.type !== "plugin" || definition.implementation.action) return [];
+    if (definition.implementation.type !== "collection" && (definition.implementation.type !== "plugin" || definition.implementation.action)) return [];
     const projection = (name: "rest" | "graphql" | "mcp" | "web") => {
       const contract = entity.interfaces?.[name];
       if (!contract) return undefined;
@@ -247,6 +248,22 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   }
 
   for (const [operationKey, operation] of v2OperationEntries(entity)) {
+    if (operation.implementation.type === "collection") {
+      const implementation = operation.implementation;
+      if (entity.schemaVersion !== 3 || !["insert", "move"].includes(implementation.action) ||
+        !/^[a-z][A-Za-z0-9]*$/.test(implementation.field) || Object.keys(implementation).some((key) => !["type", "action", "field"].includes(key))) {
+        throw new Error(`${origin} ${operationKey}: collection implementation requires schemaVersion 3, field and action insert|move.`);
+      }
+      if (["input", "output", "target", "auth", "tenancy", "errors", "interaction", "prerequisites"].some((key) => Reflect.get(operation, key) !== undefined)) {
+        throw new Error(`${origin} ${operationKey}: collection schemas, target, auth and tenancy are compiler-derived; custom controls are unsupported.`);
+      }
+      if (operation.effects.data !== "write" || operation.effects.external !== "none" || operation.confirmation.mode !== "none" ||
+        operation.reliability.idempotency.mode !== "none" || Object.keys(operation.reliability.idempotency).some((key) => key !== "mode") ||
+        (operation.concurrency && (operation.concurrency.editLease || operation.concurrency.version?.mode !== "required" || operation.concurrency.version.field !== "updatedAt"))) {
+        throw new Error(`${origin} ${operationKey}: collection Operations require write/no external, idempotency none, confirmation none and required updatedAt without leases.`);
+      }
+      continue;
+    }
     const action = v2OperationAction(operation);
     const operationKind = action ?? "plugin";
     const version = operation.concurrency?.version;

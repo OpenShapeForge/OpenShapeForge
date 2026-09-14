@@ -91,6 +91,10 @@ export interface FieldDefinition {
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
+  /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
+  entityValue?: { definitionField: string };
+  /** Allowed entity-value definitions on this relationship collection. */
+  allowedDefinitions?: string[];
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;

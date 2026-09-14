@@ -73,6 +73,8 @@ export interface ComponentCatalog {
 }
 
 export interface SemanticTypeDefinition {
+  /** Derived from the entity corpus, never authored in the semantic-type catalog. */
+  entityIdentity?: boolean;
   /**
    * Discriminator for entity-ID semantic types. When set to `"entityId"`,
    * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,
@@ -527,6 +529,7 @@ export interface EntityOperationDefinition {
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: OperationPrerequisite[];
   implementation:
+    | { type: "collection"; action: "insert" | "move"; field: string }
     | {
         type: "entity";
         action: EntityOperationAction;

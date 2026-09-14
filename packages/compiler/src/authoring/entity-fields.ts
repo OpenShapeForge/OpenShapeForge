@@ -5,6 +5,17 @@ import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 const slug = (value: string) => snake(value).replaceAll("_", "-");
 
+/** Embedded values need a policy adapter before any protected leaf may be used. */
+export function assertEntityValueFieldPolicies(field: object, path: string, semantic?: object): void {
+  for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {
+    const authored = Reflect.get(field, key);
+    const inherited = semantic ? Reflect.get(semantic, key) : undefined;
+    if (key === "immutable" ? authored === true || inherited === true : authored !== undefined || inherited !== undefined) {
+      throw new Error(`${path}: entityValue definition field policy ${key} requires a canonical embedded-field policy adapter; not supported yet.`);
+    }
+  }
+}
+
 /** Entity types are projections of the loaded entity corpus, never catalog copies. */
 export function deriveEntitySemanticTypes(
   entities: readonly CoreEntity[],
@@ -17,6 +28,7 @@ export function deriveEntitySemanticTypes(
     result[entity.entity] = {
       kind: "entity",
       entity: entity.entity,
+      entityIdentity: entity.baseEntity !== false || entity.fields.some((field) => field.key === "id"),
       valueType: "string",
       validation: { format: "uuid" },
       label: entity.labels ?? { en: entity.title ?? entity.entity },
@@ -24,6 +36,7 @@ export function deriveEntitySemanticTypes(
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
+    if (result[entity.entity]!.entityIdentity === false) continue;
     const route = entity.interfaces?.web?.views?.collection?.route;
     // The identity alias is distinct from a relationship to that entity: an
     // entity's own primary key must never acquire a self-referencing FK.
@@ -51,6 +64,9 @@ export function normalizeEntityFields(
   }
   const normalize = (field: Field, nested = false, ancestry: readonly string[] = []): Field => {
     const semantic = field.semanticType && Object.hasOwn(catalog, field.semanticType) ? catalog[field.semanticType] : undefined;
+    if (entity.baseEntity === false && !entity.fields.some((field) => field.key === "id")) {
+      assertEntityValueFieldPolicies(field, `${entity.entity}.${field.key}`, semantic);
+    }
     if (entity.schemaVersion === 3 && field.semanticType && !semantic) {
       throw new Error(`${entity.entity}.${field.key}: unknown semanticType ${field.semanticType}.`);
     }
@@ -85,6 +101,31 @@ export function normalizeEntityFields(
       if (min > 0) result.required = true;
     }
     const collection = fieldCardinality(result) === "collection";
+    if (field.entityValue || field.allowedDefinitions) {
+      if (entity.schemaVersion !== 3 || nested) throw new Error(`${entity.entity}.${field.key}: entityValue and allowedDefinitions require a top-level schemaVersion 3 field.`);
+    }
+    if (field.entityValue) {
+      if (field.semanticType !== "entityValue" || valueType !== "object" || collection || field.relationship || inlineShape || item) {
+        throw new Error(`${entity.entity}.${field.key}: entityValue requires a single entityValue object without inline fields or a relationship.`);
+      }
+      const discriminator = entity.fields.find((candidate) => candidate.key === field.entityValue!.definitionField);
+      const discriminatorSemantic = discriminator?.semanticType ? catalog[discriminator.semanticType] : undefined;
+      const discriminatorType = discriminator?.valueType ?? discriminatorSemantic?.valueType;
+      if (!discriminator || discriminator === field || discriminatorType !== "string" || !discriminator.required || !discriminator.persisted || fieldCardinality({ cardinality: discriminator.cardinality ?? discriminatorSemantic?.cardinality ?? "single" }) !== "single" || discriminator.relationship || ["entity", "entityId"].includes(discriminatorSemantic?.kind ?? "")) {
+        throw new Error(`${entity.entity}.${field.key}: definitionField must name a required persisted scalar string field.`);
+      }
+      if (!field.persisted) throw new Error(`${entity.entity}.${field.key}: entityValue requires a persisted values column.`);
+    } else if (field.semanticType === "entityValue") {
+      throw new Error(`${entity.entity}.${field.key}: entityValue requires definitionField metadata.`);
+    }
+    if (field.allowedDefinitions) {
+      if (!collection || semantic?.kind !== "entity" || !Array.isArray(field.allowedDefinitions) || !field.allowedDefinitions.length || new Set(field.allowedDefinitions).size !== field.allowedDefinitions.length) {
+        throw new Error(`${entity.entity}.${field.key}: allowedDefinitions requires a nonempty unique definition list on an entity collection.`);
+      }
+      for (const definition of field.allowedDefinitions) {
+        if (!Object.hasOwn(catalog, definition) || catalog[definition]?.kind !== "entity") throw new Error(`${entity.entity}.${field.key}: unknown allowed definition ${definition}.`);
+      }
+    }
     if (field.sortable && !collection) throw new Error(`${entity.entity}.${field.key}: sortable requires a collection.`);
     if (semantic?.kind !== "entity") {
       if (entity.schemaVersion === 3 && field.relationship) {
@@ -93,6 +134,7 @@ export function normalizeEntityFields(
       return result;
     }
     if (entity.schemaVersion !== 3) throw new Error(`${entity.entity}.${field.key}: entity relationship fields require schemaVersion 3.`);
+    if (semantic.entityIdentity === false) throw new Error(`${entity.entity}.${field.key}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${entity.entity}.${field.key}: entity references must be relational fields, not IDs inside JSON values.`);
     const target = semantic.entity!;
     const metadata = field.relationship ?? {};

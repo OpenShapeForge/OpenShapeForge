@@ -262,8 +262,28 @@ export async function materializeTemplateContent(
         } else references[key] = await entity(reference as ContentEntityReference);
       }
       accountExpandedContent(references);
-      if (definition.composition) {
-        const reference = block.references[definition.composition.templateVersionField] as
+      const materialization = resolvers.materializeBlock
+        ? immutableContent(await resolvers.materializeBlock({
+            definitionKey: block.definitionKey, values: immutableContent(values),
+            references: immutableContent(references), channel: request.channel, locale: request.locale,
+          }))
+        : undefined;
+      if (materialization) {
+        assertContentName(materialization.operationId, "materialization Operation");
+        assertContentRecord(materialization.result, "materialization result");
+        accountExpandedContent(materialization);
+        if (materialization.result.kind !== "block" && materialization.result.kind !== "template")
+          contentError("INVALID_VALUE", "Materialization must return block values or a template inclusion.");
+        if (materialization.result.kind === "block") assertContentRecord(materialization.result.value, "materialized block values");
+      }
+      const inclusion = materialization?.result.kind === "template" ? materialization.result : undefined;
+      if (inclusion) assertContentName(inclusion.referenceField, "template reference field");
+      const templateReferenceField = inclusion?.referenceField ?? definition.composition?.templateVersionField;
+      if (templateReferenceField) {
+        if (!Object.hasOwn(definition.fields, templateReferenceField) ||
+            definition.fields[templateReferenceField]?.relationship?.target !== "TemplateVersion")
+          contentError("DEPENDENCY_INVALID", "Template inclusion must select a declared template-version relationship.");
+        const reference = block.references[templateReferenceField] as
           | ContentEntityReference
           | undefined;
         if (!reference || reference.versionId !== undefined)
@@ -271,7 +291,7 @@ export async function materializeTemplateContent(
             "DEPENDENCY_INVALID",
             "Template inclusion must reference an exact template-version entity id, without a second version pointer.",
           );
-        const nestedParameters = definition.composition.parametersField
+        const nestedParameters = inclusion ? inclusion.parameters : definition.composition?.parametersField
           ? (values[definition.composition.parametersField] ?? {})
           : {};
         assertContentRecord(nestedParameters, "nested template parameters");
@@ -282,6 +302,7 @@ export async function materializeTemplateContent(
           values,
           templateReference: reference,
           references,
+          ...(materialization ? { materialization } : {}),
         });
         await visit(reference.id, nestedParameters as JsonObject, blockPath, [...ancestors, id]);
       } else {
@@ -293,6 +314,7 @@ export async function materializeTemplateContent(
           renderer: renderer!,
           values,
           references,
+          ...(materialization ? { materialization } : {}),
         });
       }
     }

@@ -3,6 +3,13 @@ kind: semanticTypeCatalog
 
 # Core semantic types — always available
 types:
+  # A selected entity definition supplies the shape. Its relationship fields
+  # are stored relationally, never embedded in this object's JSON values.
+  entityValue:
+    kind: object
+    label: { en: Typed entity values, nl: Getypeerde entiteitswaarden }
+    valueType: object
+
   multilineText:
     label: { en: Multiline text, nl: Meerregelige tekst }
     valueType: string

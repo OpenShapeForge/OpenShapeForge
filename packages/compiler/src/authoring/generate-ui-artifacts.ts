@@ -366,6 +366,7 @@ function keepGreenfieldSafeArtifacts(files: Map<string, string>): AuthoringUiArt
 export async function generateAuthoringUiArtifacts(
   authoringDir: string,
   repoRoot: string,
+  referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -502,6 +503,8 @@ export async function generateAuthoringUiArtifacts(
     "generated/web/web-manifest.json",
     renderWebManifest(buildWebManifest(
       compiled.map(({ name, contract }) => ({ slug: name, contract })),
+      {},
+      referentiedata,
     )),
   );
 

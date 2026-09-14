@@ -102,7 +102,7 @@ function query(sql: string, parameters: readonly unknown[]): RawQuery {
   };
 }
 
-async function rows<Row>(
+export async function rows<Row>(
   transaction: unknown,
   sql: string,
   parameters: readonly unknown[],
@@ -218,7 +218,7 @@ async function finalizeArtifactBinding(
   return descriptor;
 }
 
-function contextServices(context: ModuleOperationContext): {
+export function contextServices(context: ModuleOperationContext): {
   platform: PluginPlatformServices;
   session: PluginSessionContext;
 } {

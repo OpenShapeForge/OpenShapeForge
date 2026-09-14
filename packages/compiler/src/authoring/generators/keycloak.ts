@@ -1071,6 +1071,9 @@ function aggregateFromEntities(
     }
 
     for (const operation of contract.pluginOperations ?? []) {
+      // Native collection authorization is derived from the owning entity's
+      // update role set, already aggregated above. No separate authored auth.
+      if (operation.definition.implementation.type === "collection") continue;
       pushOperationRoles(operation.id, operation.definition.auth);
     }
   }

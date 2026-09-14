@@ -5,6 +5,8 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
   operationFieldObjectSchema,
+  operationI18nKeyword,
+  operationReferenceKeyword,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
 } from "@openshapeforge/operations";
@@ -21,6 +23,8 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     // No async loader, coercion, removal or defaults: validation never rewrites input.
     const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true });
     addFormats.default(ajv);
+    ajv.addKeyword(operationI18nKeyword);
+    ajv.addKeyword(operationReferenceKeyword);
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

@@ -65,9 +65,12 @@ import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
+import { nativeCollectionHandler } from "./collection-runtime.js";
 
 export type OperationContract = {
   key: string;
+  /** Built-in executor selected only by the compiler, never request input. */
+  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -370,6 +373,7 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     id: entry.operation.key,
     key: entry.operation.key,
     intent: operationIntent(entry.operation),
+    ...(entry.operation.implementation ? { implementation: entry.operation.implementation } : {}),
     name: entry.operation.title,
     description: entry.operation.description,
     ...(entry.operation.target ? { target: entry.operation.target } : {}),
@@ -526,6 +530,7 @@ export function operationModulesConfigured(
   modules: readonly Pick<RuntimeModule, "name">[],
   operations: readonly OperationContract[] = catalog.operations,
 ): boolean {
+  if (operations.some((operation) => operation.implementation?.type === "collection")) return true;
   const plugins = new Set(operations.map((operation) => operation.plugin));
   return modules.some((module) => plugins.has(module.name));
 }
@@ -548,6 +553,10 @@ export function bindOperationHandlers(
         `Canonical operation id "${operation.key}" is duplicated at runtime.`,
       );
     }
+    if (operation.implementation?.type === "collection") {
+      bound.set(operation.key, { operation, handler: nativeCollectionHandler(operation) });
+      continue;
+    }
     const module = modulesByName.get(operation.plugin);
     if (!module) {
       throw new Error(`Canonical operation "${operation.key}" has no loaded runtime module "${operation.plugin}".`);
@@ -566,7 +575,7 @@ export function bindOperationHandlers(
   for (const module of modules) {
     const declared = new Set(
       knownOperations
-        .filter((operation) => operation.plugin === module.name)
+        .filter((operation) => !operation.implementation && operation.plugin === module.name)
         .map((operation) => operation.handler),
     );
     const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
@@ -724,7 +733,9 @@ function customHandlerInput(
   input: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const stripped = { ...input };
-  if (operation.concurrency?.version) delete stripped.expectedVersion;
+  // Native collection execution validates the caller's original version in the
+  // already guarded transaction. Plugin handlers receive no platform controls.
+  if (operation.concurrency?.version && operation.implementation?.type !== "collection") delete stripped.expectedVersion;
   if (operation.concurrency?.editLease) delete stripped.leaseToken;
   if (operation.confirmation?.mode === "acknowledgement") delete stripped.confirmed;
   if (operation.confirmation?.mode === "challenge") {

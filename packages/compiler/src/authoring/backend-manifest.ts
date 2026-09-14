@@ -30,6 +30,10 @@ import type {
 import { isGeneratedCrudEligible } from "../schema.js";
 import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 import { normalizeKeycloakRoleName } from "./role-names.js";
+import { resolveModelFields } from "./compiler/model.js";
+import { normalizeEntityFields } from "./entity-fields.js";
+import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
+import type { EntityValueRegistry } from "./entity-value-types.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -132,6 +136,7 @@ type CompiledCandidate = {
   path: string;
   contract: ReturnType<typeof compile>;
   fieldsByKey: Map<string, Field>;
+  effectiveFields: CompiledField[];
 };
 
 function kebabCase(value: string): string {
@@ -770,6 +775,10 @@ function compileCoreCandidate(
       resolveEntityFilePath(authoringDir, slug),
     )}`,
     contract,
+    effectiveFields: resolveModelFields(normalizeEntityFields({
+      ...artifacts.coreEntity,
+      fields: [...artifacts.coreEntity.fields, ...artifacts.profiles.flatMap((profile) => profile.fields ?? [])],
+    }, artifacts.semanticTypes).fields, artifacts.componentCatalog, artifacts.semanticTypes),
     fieldsByKey: flattenFields([
       ...(artifacts.coreEntity.fields ?? []),
       ...artifacts.profiles.flatMap((profile) => profile.fields ?? []),
@@ -789,6 +798,7 @@ function compileContextCandidate(
     origin: { kind: "contextFull", context: spec.context, name: spec.name },
     path: `${sourcePathPrefix}/contexts/${spec.context}/full/${spec.name}.yaml`,
     contract,
+    effectiveFields: contract.model.fields,
     fieldsByKey: flattenFields(artifacts.coreEntity.fields ?? []),
   };
 }
@@ -880,7 +890,8 @@ function compileFieldRelationStorage(
   candidates: CompiledCandidate[],
   tables: TableDefinition[],
   register: RelationshipRegisterEntry[],
-): void {
+  valueCandidates: CompiledCandidate[],
+): EntityValueRegistry | undefined {
   const byEntity = new Map(candidates.map((candidate, index) => [
     candidate.contract.entity.name, { candidate, table: tables[index]! },
   ]));
@@ -1008,6 +1019,7 @@ function compileFieldRelationStorage(
       }
     }
   }
+  return compileEntityValueStorage(valueCandidates, tables, attachReference);
 }
 
 export function compileAuthoringBackendManifest(
@@ -1055,11 +1067,26 @@ export function compileAuthoringBackendManifest(
 
   detectCandidateCollisions(candidates, schemaByModule);
 
+  const definitionNames = entityValueDefinitionNames(candidates);
+  for (const name of definitionNames) {
+    const definition = candidates.find((candidate) => candidate.contract.entity.name === name);
+    if (!definition) throw new Error(`Allowed entity-value definition ${name} is absent from the compiled entity corpus.`);
+    assertEntityValueDefinition(definition);
+  }
+  const physicalCandidates = candidates.filter((candidate) => {
+    if (!candidate.contract.entity.valueDefinition) return true;
+    if (!definitionNames.has(candidate.contract.entity.name)) {
+      throw new Error(`${candidate.contract.entity.name}: identity-less entities must be used as entityValue definitions.`);
+    }
+    assertEntityValueDefinition(candidate);
+    return false;
+  });
+
   const byEntityName = new Map(
     candidates.map((candidate) => [candidate.contract.entity.name, candidate]),
   );
 
-  const tables: TableDefinition[] = candidates.map((candidate) => {
+  const tables: TableDefinition[] = physicalCandidates.map((candidate) => {
     const schema = schemaByModule[candidate.contract.entity.module] ?? snakeCase(candidate.contract.entity.module);
     const name = candidate.contract.storage.table;
     const candidateCrudKey =
@@ -1356,13 +1383,14 @@ export function compileAuthoringBackendManifest(
     };
   });
 
-  compileFieldRelationStorage(candidates, tables, relationshipRegister);
+  const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
 
   return {
     version: 1,
     description: "Candidate backend manifest compiled from restored authoring catalog.",
     relationshipRegister: filterRelationshipRegisterForTables(tables, relationshipRegister),
     tables: sortTablesByDependencies(tables),
+    ...(entityValues ? { entityValues } : {}),
   };
 }
 

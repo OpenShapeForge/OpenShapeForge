@@ -339,7 +339,7 @@ export async function collectAllArtifacts(
     .map(({ document }) => document);
   const operations = [
     ...collectPluginOperations(plugins, operationContext),
-    ...collectAuthoredEntityPluginOperations(entities, operationContext),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {
@@ -491,13 +491,14 @@ export async function collectAllArtifacts(
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
     ui: [
-      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : []),
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, referentiedata) : []),
       ...(productWebPresent
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
             contents: renderWebManifest(buildWebManifest(
               entities,
               { locale: "nl", routeLocale: "en" },
+              referentiedata,
             )),
           }]
         : []),

@@ -71,8 +71,51 @@ export type RuntimeFieldSchemaCompiler = {
   ): RuntimeSchemaValidationResult;
 };
 
+/** Compiler-owned projection of a dynamically selected normal entity shape. */
+export type RuntimeEntityValueDefinition = {
+  readonly entityName: string;
+  readonly schemaVersion: 1;
+  readonly definitionHash: string;
+  readonly fields: readonly Readonly<Record<string, unknown>>[];
+  readonly valueSchema: Readonly<Record<string, unknown>>;
+  readonly references: readonly {
+    readonly fieldKey: string;
+    readonly targetEntity: string;
+    readonly schema: string;
+    readonly table: string;
+    readonly column: string;
+    readonly required: boolean;
+  }[];
+  readonly materializeOperationId?: string;
+};
+
+export type RuntimeEntityValueCarrier = {
+  readonly entityName: string;
+  readonly fieldKey: string;
+  readonly definitionField: string;
+  readonly schema: string;
+  readonly table: string;
+  readonly valuesColumn: string;
+  readonly definitionColumn: string;
+  readonly definitions: Readonly<Record<string, RuntimeEntityValueDefinition>>;
+};
+
+/** Metadata only. Possessing a definition grants no record or Operation access. */
+export type RuntimeEntityValueRegistry = {
+  get(entityName: string, fieldKey: string): RuntimeEntityValueCarrier | undefined;
+  collection(entityName: string, fieldKey: string): Readonly<{
+    targetEntity: string;
+    allowedDefinitions: readonly string[];
+  }> | undefined;
+};
+
 export type RuntimeOperationDefinition = OperationReference & {
   key?: string;
+  /** Native field binding is part of execution identity, without physical storage names. */
+  implementation?:
+    | { type: "entity" }
+    | { type: "plugin"; plugin: string; handler: string }
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
   entityId?: string;
   entityName?: string;
   name: string | Readonly<Record<string, string>>;
@@ -219,6 +262,8 @@ export type PluginPlatformServices = {
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
+    /** Absent on hosts without entity-value support; callers must fail closed. */
+    entityValues?: RuntimeEntityValueRegistry;
   };
   events: {
     append(

@@ -19,6 +19,7 @@
       "pattern": "^[a-z][a-z0-9._-]*$",
       "description": "Named worker allowed across tenants for this entity, only through the dedicated worker database identity."
     },
+    "baseEntity": { "type": "boolean" },
     "schemaVersion": {
       "type": "integer",
       "enum": [1, 2, 3]
@@ -678,6 +679,15 @@
         "implementation": {
           "oneOf": [
             {
+              "type": "object", "additionalProperties": false,
+              "required": ["type", "action", "field"],
+              "properties": {
+                "type": { "const": "collection" },
+                "action": { "enum": ["insert", "move"] },
+                "field": { "$ref": "#/$defs/fieldKey" }
+              }
+            },
+            {
               "type": "object",
               "additionalProperties": false,
               "required": ["type", "action"],
@@ -759,7 +769,7 @@
           "if": {
             "properties": {
               "implementation": {
-                "properties": { "type": { "const": "entity" } },
+                "properties": { "type": { "enum": ["entity", "collection"] } },
                 "required": ["type"]
               }
             },

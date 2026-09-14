@@ -7,6 +7,8 @@ import {
 } from "./catalog.js";
 import { collectionManagedFields } from "./collection-policy.js";
 import { fieldNameForColumn } from "./columns.js";
+import { assertEntityValueInput, entityValuePhysicalColumns } from "./entity-value-io.js";
+import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
 /**
@@ -57,6 +59,7 @@ export function isCallerWritableColumn(
   return (
     isWritableColumn(column, operation) &&
     !isElicitedOutputColumn(table, column) &&
+    !entityValuePhysicalColumns(table).has(column.name) &&
     !collectionManagedFields(table, getGeneratedCrudTables()).has(column.name) &&
     !isOperationWrittenColumn(column)
   );
@@ -156,7 +159,9 @@ export function normalizeWritableValues(
   table: GeneratedCrudTable,
   input: Record<string, unknown>,
   operation: "create" | "update",
+  entityValues = generatedEntityValues,
 ) {
+  assertEntityValueInput(table, input, operation, entityValues);
   const writable = writableColumnMap(table, operation);
   const values = new Map<GeneratedCrudColumn, unknown>();
   for (const [field, value] of Object.entries(input)) {

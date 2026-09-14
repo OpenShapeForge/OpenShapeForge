@@ -22,6 +22,10 @@ import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts
 import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { materializeCollectionOperations } from "./authoring/collection-operations.js";
+
+const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
+const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
 import {
   SEARCHABLE_OPERATION_TOOL_NAMES,
   selectOperationToolProjection,
@@ -587,6 +591,7 @@ function collectOperationContracts(
       ? plugin.operations(context)
       : plugin.operations ?? [];
     for (const operation of declared) {
+      if (Object.hasOwn(operation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
       validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
@@ -625,12 +630,18 @@ function collectOperationContracts(
       if (operation.transports.mcp.enabled) mcp.add(operation.transports.mcp.name);
       if (graphqlKey) graphql.add(graphqlKey);
       if (typescriptKey) typescript.add(typescriptKey);
-      operations.push({
+      const compiled: CompiledPluginOperation = {
         ...operation,
         plugin: plugin.name,
         id: operation.key,
         intent: "invoke",
-      });
+      };
+      const native = authored ? nativeBindings.get(operation) : undefined;
+      if (native) {
+        compiled.implementation = { ...native };
+        verifiedNativeOperations.set(compiled, JSON.stringify(native));
+      }
+      operations.push(compiled);
     }
   }
   return operations.sort((left, right) => left.key.localeCompare(right.key));
@@ -670,12 +681,16 @@ function lowerCamel(value: string): string {
 export function collectAuthoredEntityPluginOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
   context: PluginBaseContext,
+  referentiedata: CoreReferentiedataSnapshot = {},
 ): CompiledPluginOperation[] {
+  materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
   for (const { contract } of entities) {
     for (const authored of contract.pluginOperations ?? []) {
       const definition = authored.definition;
-      if (definition.implementation.type !== "plugin") continue;
+      if (definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") continue;
+      const implementation = definition.implementation;
+      const pluginName = implementation.type === "collection" ? "core" : implementation.plugin;
       const restProjection = authored.interfaces.rest;
       if (restProjection === undefined || restProjection === false) {
         throw new Error(
@@ -697,7 +712,7 @@ export function collectAuthoredEntityPluginOperations(
         key: authored.id,
         title: authoredText(definition.name),
         description: authoredText(definition.description),
-        handler: definition.implementation.handler,
+        handler: implementation.type === "collection" ? "collectionMutation" : implementation.handler,
         target: {
           entityId: authored.entityId,
           entityName: authored.entityName,
@@ -727,7 +742,7 @@ export function collectAuthoredEntityPluginOperations(
           rest: {
             method: restMethod,
             path: restProjection.path ??
-              `/api/${definition.implementation.plugin}/${kebab(authored.entityName)}` +
+              `/api/${pluginName}/${kebab(authored.entityName)}` +
                 `${targetSegment}/${kebab(authored.key)}`,
             response: restProjection.response ?? { kind: "json" },
           },
@@ -762,9 +777,12 @@ export function collectAuthoredEntityPluginOperations(
           },
         },
       };
-      const current = byPlugin.get(definition.implementation.plugin) ?? [];
+      if (implementation.type === "collection") nativeBindings.set(operation, {
+        type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
+      });
+      const current = byPlugin.get(pluginName) ?? [];
       current.push(operation);
-      byPlugin.set(definition.implementation.plugin, current);
+      byPlugin.set(pluginName, current);
     }
   }
   const synthetic = [...byPlugin.entries()].map(([name, operations]) => ({
@@ -958,8 +976,14 @@ export function assertOperationRuntimeModules(
   runtimeModuleNames: Iterable<string>,
 ): void {
   const available = new Set(runtimeModuleNames);
+  for (const operation of operations) {
+    if (operation.implementation && (operation.plugin !== "core" || operation.handler !== "collectionMutation" ||
+      verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
+      throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
+    }
+  }
   const missing = [...new Set(
-    operations.filter((operation) => !available.has(operation.plugin)).map((operation) => operation.plugin),
+    operations.filter((operation) => !operation.implementation && !available.has(operation.plugin)).map((operation) => operation.plugin),
   )].sort();
   if (missing.length > 0) {
     throw new Error(

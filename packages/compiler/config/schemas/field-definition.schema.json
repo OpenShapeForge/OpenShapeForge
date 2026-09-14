@@ -18,7 +18,7 @@
       "additionalProperties": false,
       "required": ["value"],
       "properties": {
-        "value": { "type": ["number", "string", "boolean"] },
+        "value": { "anyOf": [{ "type": "number" }, { "type": "string" }, { "type": "boolean" }] },
         "message": { "$ref": "#/$defs/localizedText" }
       }
     },
@@ -133,8 +133,8 @@
             }
           },
           "anyOf": [
-            { "required": ["min"] },
-            { "required": ["max"] }
+            { "properties": { "min": {} }, "required": ["min"] },
+            { "properties": { "max": {} }, "required": ["max"] }
           ]
         }
       ]
@@ -164,6 +164,7 @@
       }
     },
     "fieldDefinition": {
+      "type": "object",
       "description": "The canonical closed FieldDefinition shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
       "allOf": [{ "$ref": "#/$defs/fieldDefinitionProperties" }],
       "unevaluatedProperties": false
@@ -172,7 +173,10 @@
       "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
       "type": "object",
       "required": ["key"],
-      "anyOf": [{ "required": ["valueType"] }, { "required": ["semanticType"] }],
+      "anyOf": [
+        { "properties": { "valueType": {} }, "required": ["valueType"] },
+        { "properties": { "semanticType": {} }, "required": ["semanticType"] }
+      ],
       "properties": {
         "key": { "type": "string", "minLength": 1 },
         "valueType": {
@@ -180,6 +184,14 @@
           "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"]
         },
         "cardinality": { "$ref": "#/$defs/cardinality" },
+        "entityValue": {
+          "type": "object", "additionalProperties": false, "required": ["definitionField"],
+          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" } }
+        },
+        "allowedDefinitions": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+        },
         "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
         "suggestions": {
           "type": "object",
@@ -326,16 +338,17 @@
           },
           "then": {
             "anyOf": [
-              { "required": ["item"] },
-              { "required": ["shape"] },
-              { "required": ["semanticType"] },
-              { "required": ["relationship"] }
+              { "properties": { "item": {} }, "required": ["item"] },
+              { "properties": { "shape": {} }, "required": ["shape"] },
+              { "properties": { "semanticType": {} }, "required": ["semanticType"] },
+              { "properties": { "relationship": {} }, "required": ["relationship"] }
             ]
           }
         },
         {
-          "if": { "required": ["sortable"] },
+          "if": { "properties": { "sortable": {} }, "required": ["sortable"] },
           "then": {
+            "properties": { "cardinality": {} },
             "required": ["cardinality"],
             "anyOf": [
               {
@@ -373,8 +386,8 @@
           "then": {
             "not": {
               "anyOf": [
-                { "required": ["children"] },
-                { "required": ["item"] }
+                { "properties": { "children": {} }, "required": ["children"] },
+                { "properties": { "item": {} }, "required": ["item"] }
               ]
             }
           }
@@ -383,16 +396,16 @@
           "if": {
             "properties": {
               "semanticType": { "const": "fieldDefinition" },
-              "authoring": { "required": ["profile"] }
+              "authoring": { "type": "object", "properties": { "profile": {} }, "required": ["profile"] }
             },
             "required": ["semanticType", "authoring"]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "required": ["required"] },
-                { "required": ["children"] },
-                { "required": ["item"] }
+                { "properties": { "required": {} }, "required": ["required"] },
+                { "properties": { "children": {} }, "required": ["children"] },
+                { "properties": { "item": {} }, "required": ["item"] }
               ]
             }
           }

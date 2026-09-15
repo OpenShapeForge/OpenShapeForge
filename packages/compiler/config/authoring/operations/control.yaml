@@ -276,7 +276,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -343,7 +342,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -474,7 +472,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -525,7 +522,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -627,7 +623,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -687,7 +682,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none
@@ -761,7 +755,6 @@ operations:
     auth:
       mode: control
       roles:
-      - platform_admin
       - platform-operator
     tenancy:
       mode: none

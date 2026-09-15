@@ -1625,9 +1625,15 @@ export function registerRuntimeOperationRestRoutes(
     // credential stays on the tenant path. A control token that does not
     // verify gets the same 401 as any other stranger.
     const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
-    const session = control && bearerIssuerOf(headers) === control.operator.issuer
+    const controlSession = control && bearerIssuerOf(headers) === control.operator.issuer
       ? await resolveControlSession(headers, control).catch(() => undefined)
-      : await resolveSessionContext(headers, { db: runtime.db });
+      : undefined;
+    // Host-organization deployments intentionally use one issuer for both
+    // control and tenant tokens. A same-issuer token that is not a control
+    // credential must therefore still get the ordinary tenant verifier; the
+    // resulting tenant session cannot invoke control Operations because their
+    // credential mode remains `control`.
+    const session = controlSession ?? await resolveSessionContext(headers, { db: runtime.db });
     if (!session || !session.userId || session.credential === "none") {
       throw new HttpError(
         401,

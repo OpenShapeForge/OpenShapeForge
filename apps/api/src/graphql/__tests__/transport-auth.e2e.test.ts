@@ -4,9 +4,15 @@
  * health query, fail-closed bearer verification, and a real Keycloak
  * password-grant token driving the CRUD path (skipped when Keycloak is
  * not reachable).
+ *
+ * The entities are chosen by the token's grants and by shape, never by
+ * position: each bearer spec runs once per entity shape the token can drive,
+ * so the JWT → roles → Operation path is proven for v1 and canonical entities
+ * alike (through e2e/gql-shapes.ts, lease and confirmation included).
  */
 import { beforeAll, expect } from "bun:test";
 import {
+  createdRows,
   describe,
   ensureKeycloakTokenPeople,
   getKeycloakToken,
@@ -14,16 +20,27 @@ import {
   keycloakTokenFor,
   gql,
   registerSuiteLifecycle,
-  seed,
   test,
+  type GeneratedTable,
+  type Identity,
 } from "./e2e/harness.js";
 import {
-  fieldName,
+  columnInput,
   foreignKeyTargets,
-  isMutableColumn,
-  sampleValue,
   graphqlTables as tables,
+  untrackRow,
 } from "./e2e/entity-factory.js";
+import {
+  collectionOf,
+  createDoc,
+  expectDeleted,
+  expectOperationError,
+  fetchRecord,
+  getDoc,
+  listDoc,
+  recordOf,
+} from "./e2e/gql-shapes.js";
+import { isCanonical, isEntityBackedCreate } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 const keycloakToken = await getKeycloakToken();
@@ -41,14 +58,20 @@ beforeAll(() =>
   ]),
 );
 
+type TokenClaims = {
+  tid?: string;
+  sub?: string;
+  realm_access?: { roles?: string[] };
+  resource_access?: Record<string, { roles?: string[] }>;
+};
+
+function claimsOf(token: string): TokenClaims {
+  return JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as TokenClaims;
+}
+
 /** Every role a bearer token carries, realm and client alike. */
 function tokenRoles(token: string): Set<string> {
-  const payload = JSON.parse(
-    Buffer.from(token.split(".")[1]!, "base64url").toString(),
-  ) as {
-    realm_access?: { roles?: string[] };
-    resource_access?: Record<string, { roles?: string[] }>;
-  };
+  const payload = claimsOf(token);
   return new Set([
     ...(payload.realm_access?.roles ?? []),
     ...Object.values(payload.resource_access ?? {}).flatMap((client) => client.roles ?? []),
@@ -56,20 +79,62 @@ function tokenRoles(token: string): Set<string> {
 }
 
 /**
- * A table the token's roles can create AND read. tables[0] is whatever sorts
- * first in the manifest — since the complete catalog contains entities the
- * focused test role can only read, the cross-tenant spec must pick its entity
- * by the token's actual grants instead of by position.
+ * The harness identity a token stands for, so a row the bearer created is
+ * cleaned up by the run like any other fixture — the token itself may hold
+ * no delete grant, and cleanup is not what these specs measure.
  */
-function tableWritableWith(token: string) {
+function trackBearerRow(table: GeneratedTable, id: string, token: string) {
+  const claims = claimsOf(token);
+  const identity: Identity = {
+    tenantId: claims.tid ?? "",
+    userId: claims.sub ?? "",
+    roles: [...tokenRoles(token)],
+  };
+  createdRows.push({ table, id, identity });
+}
+
+const SHAPES = [
+  { shape: "v1", matches: (table: GeneratedTable) => !isCanonical(table) },
+  { shape: "canonical", matches: isCanonical },
+] as const;
+
+/**
+ * One table per shape that the token's roles may drive through every
+ * operation in `grants`, and whose row the bearer can build on its own (no
+ * required parent rows: a bearer session cannot borrow the harness
+ * identities to create dependencies). tables[0] is whatever sorts first in
+ * the manifest — since the complete catalog contains entities the focused
+ * test role can only read, a spec must pick its entity by the token's actual
+ * grants instead of by position.
+ */
+function tablesWritableWith(
+  token: string | null,
+  grants: readonly ("read" | "create" | "delete")[],
+): { shape: string; table: GeneratedTable }[] {
+  if (!token) return [];
   const roles = tokenRoles(token);
-  return tables.find((candidate) => {
-    const allow = candidate.source?.authorization?.roles;
-    return (
-      (allow?.create ?? []).some((role) => roles.has(role)) &&
-      (allow?.read ?? []).some((role) => roles.has(role))
-    );
+  return SHAPES.flatMap(({ shape, matches }) => {
+    const table = tables.find((candidate) => {
+      const allow = candidate.source?.authorization?.roles;
+      const parents = foreignKeyTargets(candidate);
+      return (
+        matches(candidate) &&
+        isEntityBackedCreate(candidate) &&
+        candidate.columns.every((column) => !column.required || !parents.has(column.name)) &&
+        grants.every((grant) => (allow?.[grant] ?? []).some((role) => roles.has(role)))
+      );
+    });
+    return table ? [{ shape, table }] : [];
   });
+}
+
+/**
+ * A bearer-only create input: the required scalar columns, sampled. The
+ * tables above have no required parents, so columnInput creates nothing on
+ * the way; the identity it is handed is therefore never used.
+ */
+function bearerInput(table: GeneratedTable) {
+  return columnInput(table, { tenantId: "", userId: "", roles: [] });
 }
 
 describe("transport and authentication", () => {
@@ -80,61 +145,38 @@ describe("transport and authentication", () => {
   });
 
   test("an invalid bearer token fails closed", async () => {
-    const graphql = tables[0]!.source!.graphql!;
+    // Any entity will do: the token is refused before the field is resolved.
+    const table = tables[0]!;
     const result = await gql(
       null,
-      `{ ${graphql.listQueryName}(first: 1) { totalCount } }`,
+      listDoc(table, { args: "first: 1", totalCount: true }),
       undefined,
       { bearer: "not-a-real-token" },
     );
     expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED");
   });
 
-  test.skipIf(!keycloakToken)(
-    "a real Keycloak bearer token drives the full CRUD path",
-    async () => {
-      const table = tables[0]!;
-      const graphql = table.source!.graphql!;
-      const input: Record<string, unknown> = {};
-      for (const column of table.columns) {
-        if (
-          isMutableColumn(column) &&
-          column.required &&
-          !foreignKeyTargets(table).has(column.name)
-        ) {
-          input[fieldName(column)] = sampleValue(column, `bearer-${seed}`);
-        }
-      }
+  const writable = tablesWritableWith(keycloakToken, ["read", "create", "delete"]);
+  test.skipIf(!keycloakToken)("the full-access token can drive at least one entity", () => {
+    expect(writable.length).toBeGreaterThan(0);
+  });
+
+  for (const { shape, table } of writable) {
+    const graphql = table.source!.graphql!;
+    test(`a real Keycloak bearer token drives the full CRUD path (${graphql.typeName}, ${shape})`, async () => {
       const bearer = keycloakToken!;
-      const created = await gql(
-        null,
-        `mutation($input: Create${graphql.typeName}Input!) {
-           ${graphql.createMutationName}(input: $input) { id }
-         }`,
-        { input },
-        { bearer },
-      );
-      expect(created.errors ?? []).toEqual([]);
-      const id = created.data?.[graphql.createMutationName]?.id as string;
+      const created = await gql(null, createDoc(table), { input: await bearerInput(table) }, { bearer });
+      const id = recordOf(table, created, graphql.createMutationName)?.id as string;
       expect(id).toBeTruthy();
+      trackBearerRow(table, id, bearer);
 
-      const fetched = await gql(
-        null,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id },
-        { bearer },
-      );
-      expect(fetched.data?.[graphql.singleQueryName]?.id).toBe(id);
+      const fetched = await fetchRecord(null, table, id, "id", { bearer });
+      expect(fetched?.id).toBe(id);
 
-      const deleted = await gql(
-        null,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-        { bearer },
-      );
-      expect(deleted.data?.[graphql.deleteMutationName]).toBe(true);
-    },
-  );
+      await expectDeleted(null, table, id, { bearer });
+      untrackRow(id);
+    });
+  }
 
   // The counterpart to the test above, and the one that gives it meaning.
   //
@@ -147,44 +189,28 @@ describe("transport and authentication", () => {
   // The identity comes from Keycloak rather than a synthetic trusted-context
   // header on purpose: the code path under test is the one that maps roles out
   // of a JWT, which trusted-context headers bypass entirely.
-  test.skipIf(!rolelessToken)(
-    "a real Keycloak token with no realm roles is refused every operation",
-    async () => {
-      const table = tables[0]!;
-      const graphql = table.source!.graphql!;
+  for (const { shape, table } of rolelessToken ? SHAPES.flatMap(({ shape, matches }) => {
+    const candidate = tables.find((entry) => matches(entry) && isEntityBackedCreate(entry));
+    return candidate ? [{ shape, table: candidate }] : [];
+  }) : []) {
+    const graphql = table.source!.graphql!;
+    test(`a real Keycloak token with no realm roles is refused every operation (${graphql.typeName}, ${shape})`, async () => {
       const bearer = rolelessToken!;
 
       const read = await gql(
         null,
-        `{ ${graphql.listQueryName}(first: 1) { totalCount } }`,
+        listDoc(table, { args: "first: 1", totalCount: true }),
         undefined,
         { bearer },
       );
-      expect(read.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+      expectOperationError(table, read, graphql.listQueryName, "FORBIDDEN");
 
-      const input: Record<string, unknown> = {};
-      for (const column of table.columns) {
-        if (
-          isMutableColumn(column) &&
-          column.required &&
-          !foreignKeyTargets(table).has(column.name)
-        ) {
-          input[fieldName(column)] = sampleValue(column, `noaccess-${seed}`);
-        }
-      }
-      const created = await gql(
-        null,
-        `mutation($input: Create${graphql.typeName}Input!) {
-           ${graphql.createMutationName}(input: $input) { id }
-         }`,
-        { input },
-        { bearer },
-      );
-      expect(created.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
-      // Nothing may be written on a refused mutation.
-      expect(created.data?.[graphql.createMutationName]).toBeFalsy();
-    },
-  );
+      // Nothing may be written on a refused mutation: the reader checks the
+      // payload is empty at either shape.
+      const created = await gql(null, createDoc(table), { input: await bearerInput(table) }, { bearer });
+      expectOperationError(table, created, graphql.createMutationName, "FORBIDDEN");
+    });
+  }
 
   // Tenant isolation, driven entirely by real Keycloak identities.
   //
@@ -194,77 +220,52 @@ describe("transport and authentication", () => {
   // tenant separation. The assertions below therefore insist the refusal is NOT
   // a FORBIDDEN — a role rejection would be the wrong mechanism, and would mask
   // an RLS policy that had stopped filtering.
-  test.skipIf(!tenantAToken || !tenantBToken)(
-    "a token from another tenant cannot see this tenant's row",
-    async () => {
-      const table = tableWritableWith(tenantAToken!)!;
-      expect(table).toBeTruthy();
-      const graphql = table.source!.graphql!;
+  // Deleting is not this spec's subject; a token that may not delete leaves
+  // the row to the run's cleanup.
+  const tenantWritable = tenantBToken ? tablesWritableWith(tenantAToken, ["read", "create"]) : [];
+  test.skipIf(!tenantAToken || !tenantBToken)("the tenant token can drive at least one entity", () => {
+    expect(tenantWritable.length).toBeGreaterThan(0);
+  });
 
-      const input: Record<string, unknown> = {};
-      for (const column of table.columns) {
-        if (
-          isMutableColumn(column) &&
-          column.required &&
-          !foreignKeyTargets(table).has(column.name)
-        ) {
-          input[fieldName(column)] = sampleValue(column, `tenant-${seed}`);
-        }
-      }
+  for (const { shape, table } of tenantWritable) {
+    const graphql = table.source!.graphql!;
+    test(`a token from another tenant cannot see this tenant's row (${graphql.typeName}, ${shape})`, async () => {
       const created = await gql(
         null,
-        `mutation($input: Create${graphql.typeName}Input!) {
-           ${graphql.createMutationName}(input: $input) { id }
-         }`,
-        { input },
+        createDoc(table),
+        { input: await bearerInput(table) },
         { bearer: tenantAToken! },
       );
-      expect(created.errors ?? []).toEqual([]);
-      const id = created.data?.[graphql.createMutationName]?.id as string;
+      const id = recordOf(table, created, graphql.createMutationName)?.id as string;
       expect(id).toBeTruthy();
+      trackBearerRow(table, id, tenantAToken!);
 
-      try {
+      {
         // The other tenant may ask — its role permits reads — and must get
         // nothing back.
-        const crossRead = await gql(
-          null,
-          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-          { id },
-          { bearer: tenantBToken! },
-        );
+        const crossRead = await gql(null, getDoc(table), { id }, { bearer: tenantBToken! });
         expect(crossRead.errors?.[0]?.extensions?.code).not.toBe("FORBIDDEN");
-        expect(crossRead.data?.[graphql.singleQueryName]).toBeNull();
+        expect(recordOf(table, crossRead, graphql.singleQueryName)).toBeNull();
 
         // And the row must not surface through a list either, which would be a
-        // leak that a by-id lookup alone would miss.
+        // leak that a by-id lookup alone would miss. The list is a real page
+        // of records, so an empty answer means "not visible", not "no field".
         const crossList = await gql(
           null,
-          `{ ${graphql.listQueryName}(first: 100) { nodes { id } } }`,
+          listDoc(table, { args: "first: 100", selection: "id" }),
           undefined,
           { bearer: tenantBToken! },
         );
-        const ids = (crossList.data?.[graphql.listQueryName]?.nodes ?? []).map(
-          (n: { id: string }) => n.id,
+        const ids = collectionOf(table, crossList, graphql.listQueryName).items.map(
+          (row: { id: string }) => row.id,
         );
         expect(ids).not.toContain(id);
 
         // Sanity: the owning tenant still sees it, so the assertions above are
         // about isolation rather than the row having failed to persist.
-        const ownRead = await gql(
-          null,
-          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-          { id },
-          { bearer: tenantAToken! },
-        );
-        expect(ownRead.data?.[graphql.singleQueryName]?.id).toBe(id);
-      } finally {
-        await gql(
-          null,
-          `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-          { id },
-          { bearer: tenantAToken! },
-        ).catch(() => {});
+        const ownRead = await fetchRecord(null, table, id, "id", { bearer: tenantAToken! });
+        expect(ownRead?.id).toBe(id);
       }
-    },
-  );
+    });
+  }
 });

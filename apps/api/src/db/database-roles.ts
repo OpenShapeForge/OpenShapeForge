@@ -64,7 +64,7 @@ export function renderProvisioningSql(options: { migratorRole?: string } = {}): 
         `then create role ${name} ${attributes}; end if; end $$;`,
     );
     if (role.migratorMember && options.migratorRole) {
-      lines.push(`grant ${name} to ${identifier(options.migratorRole)};`);
+      lines.push(`grant ${name} to ${identifier(options.migratorRole)} with inherit true, set true;`);
     }
   }
   return lines.join("\n");
@@ -75,7 +75,8 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
   if (names.length === 0) return new Map();
   const result = await sql<RoleRow>`
     select rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreaterole,
-      pg_has_role(current_user, rolname, 'USAGE') as member
+      (pg_has_role(current_user, rolname, 'USAGE')
+        and pg_has_role(current_user, rolname, 'SET')) as member
     from pg_roles
     where rolname in (${sql.join(names)})
   `.execute(db);
@@ -172,12 +173,16 @@ export async function provisionDatabaseRoles(
     if (role.migratorMember && options.migratorRole) {
       const migrator = identifier(options.migratorRole);
       const membership = await sql<{ member: boolean; superuser: boolean }>`
-        select pg_has_role(${migrator}, ${name}, 'USAGE') as member,
+        select (pg_has_role(${migrator}, ${name}, 'USAGE')
+          and pg_has_role(${migrator}, ${name}, 'SET')) as member,
           (select rolsuper from pg_roles where rolname = ${migrator}) as superuser
       `.execute(admin);
       const row = membership.rows[0];
       if (row && !row.member && !row.superuser) {
-        await sql`grant ${sql.ref(name)} to ${sql.ref(migrator)}`.execute(admin);
+        await sql`
+          grant ${sql.ref(name)} to ${sql.ref(migrator)}
+          with inherit true, set true
+        `.execute(admin);
         result.granted.push(`${name} -> ${migrator}`);
       }
     }

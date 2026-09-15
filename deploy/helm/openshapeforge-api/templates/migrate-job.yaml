@@ -33,14 +33,25 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          # Build an empty database from the compiled manifest, or roll a
-          # built one forward and re-apply the invariants. Runs as the
-          # privileged role.
+          # Provision the declared roles first, then build an empty database
+          # from the compiled manifest or roll a built one forward. The
+          # provisioner uses the optional administrator URL and otherwise the
+          # chart's already-privileged migrate URL.
           # This pod carries the privileged DB URL; enable networkPolicy (see
           # values.yaml) to scope its egress to Postgres and isolate it.
-          command: ["bun", "apps/api/src/db/migrate.ts"]
+          command: ["sh", "-ec"]
+          args:
+            - >-
+              bun apps/api/src/db/provision-roles.ts &&
+              exec bun apps/api/src/db/migrate.ts
           env:
             {{- include "openshapeforge-api.commonEnv" . | nindent 12 }}
+            - name: OPENSHAPEFORGE_ADMIN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openshapeforge-api.secretName" . }}
+                  key: OPENSHAPEFORGE_ADMIN_DATABASE_URL
+                  optional: true
             - name: OPENSHAPEFORGE_MIGRATE_DATABASE_URL
               valueFrom:
                 secretKeyRef:

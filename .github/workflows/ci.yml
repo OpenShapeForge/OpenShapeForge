@@ -216,12 +216,17 @@ jobs:
       # These are not real secrets and are never deployed.
       - name: Helm template
         run: |
+          set -o pipefail
           helm template ./deploy/helm/openshapeforge-api \
             --set database.url="postgres://app:app@db:5432/app" \
             --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
             --set database.appPassword="ci-template-only" \
             --set database.workerPassword="ci-template-only-worker" \
-            --set auth.internalContextSecret="ci-template-only"
+            --set auth.internalContextSecret="ci-template-only" \
+            > /tmp/openshapeforge-chart.yaml
+          grep -q 'bun apps/api/src/db/provision-roles.ts &&' /tmp/openshapeforge-chart.yaml
+          grep -q 'exec bun apps/api/src/db/migrate.ts' /tmp/openshapeforge-chart.yaml
+          grep -A6 'name: OPENSHAPEFORGE_ADMIN_DATABASE_URL' /tmp/openshapeforge-chart.yaml | grep -q 'optional: true'
 
       # The Keycloak subchart is disabled by default, so the render above never
       # touches it. Template it explicitly, otherwise a broken subchart would

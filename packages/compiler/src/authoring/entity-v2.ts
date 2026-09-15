@@ -222,7 +222,7 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
       };
     }
     if (Object.keys(variants).length > 0) {
-      presentations.form = { type: "form", variants };
+      presentations.form = { type: "form", variants, ...(record.variableSources ? { variableSources: record.variableSources } : {}) };
     }
   }
 

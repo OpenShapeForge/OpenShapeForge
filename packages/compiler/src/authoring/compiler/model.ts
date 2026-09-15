@@ -77,7 +77,7 @@ export function resolveModelFields(
     if (field.visibility) compiled.visibility = field.visibility;
     if (field.computed) compiled.computed = field.computed;
     if (field.graphqlType) compiled.graphqlType = field.graphqlType;
-    const fieldOptions = resolveFieldOptions(field);
+    const fieldOptions = resolveFieldOptions(field) ?? semType?.options;
     if (fieldOptions) compiled.options = fieldOptions;
     if (field.layoutFraction) compiled.layoutFraction = field.layoutFraction;
     if (field.localized) compiled.localized = field.localized;

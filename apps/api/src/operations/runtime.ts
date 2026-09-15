@@ -73,12 +73,13 @@ import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
+import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 
 export type OperationContract = {
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
-  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
+  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" } | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -587,6 +588,10 @@ export function bindOperationHandlers(
     if (operation.plugin === CONTROL_PLUGIN) {
       if (modulesByName.has(CONTROL_PLUGIN)) throw new Error("The core control runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "entity-type-list") {
+      bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "collection") {

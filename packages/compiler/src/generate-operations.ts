@@ -822,7 +822,33 @@ export function collectAuthoredEntityPluginOperations(
     name,
     operations,
   } satisfies CompilerPlugin));
-  return collectOperationContracts(synthetic, context, true);
+  return [...collectOperationContracts(synthetic, context, true), ...(entities.some(({ contract }) => contract.model.fields.some((field) => field.options?.type === "dynamic" && field.options.source === "entityTypes.list")) ? collectEntityTypeListOperation(context, entities) : [])];
+}
+
+/** Built-in model discovery follows canonical Operation authentication and transport. */
+function collectEntityTypeListOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
+  const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
+  const operation: PluginOperationContract = {
+    key: "entityTypes.list", title: "List entity types", description: "Search entity types readable by the current user.",
+    handler: "listEntityTypes", auth: { mode: "session" }, tenancy: { mode: "required" },
+    idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      locale: { ...title("Language", "Taal"), type: "string", enum: ["en", "nl"] }, search: { ...title("Search", "Zoeken"), type: "string", maxLength: 500 }, first: { ...title("Page size", "Paginagrootte"), type: "integer", minimum: 1, maximum: 100 }, after: { ...title("Cursor", "Cursor"), type: "string" },
+    } },
+    outputSchema: { type: "object", required: ["items", "pageInfo"], properties: {
+      items: { ...title("Entity types", "Entiteitstypen"), type: "array", items: { type: "object", required: ["value", "label"], properties: { value: { ...title("Value", "Waarde"), type: "string" }, label: { ...title("Label", "Label"), type: "string" } } } },
+      pageInfo: { ...title("Pagination", "Paginering"), type: "object", required: ["hasNextPage", "endCursor"], properties: { hasNextPage: { ...title("More results", "Meer resultaten"), type: "boolean" }, endCursor: { ...title("Next cursor", "Volgende cursor"), type: ["string", "null"] } } },
+    } },
+    errors: [],
+    transports: {
+      rest: { method: "GET", path: "/api/core/entity-types", response: { kind: "json" } },
+      mcp: { enabled: true, name: "entity_types_list" },
+      graphql: { enabled: true, kind: "query", field: "entityTypesList" },
+      typescript: { enabled: true, functionName: "entityTypesList" },
+    },
+  };
+  nativeBindings.set(operation, { type: "entity-type-list", labels: Object.fromEntries(entities.map(({ contract }) => [contract.entity.name, { en: contract.entity.labels?.en ?? contract.entity.title, nl: contract.entity.labels?.nl ?? contract.entity.title }])) });
+  return collectOperationContracts([{ name: "core", operations: [operation] }], context, true);
 }
 
 /** Lower module/global YAML Operations through the same static registry. */
@@ -1010,7 +1036,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || operation.handler !== "collectionMutation" ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }

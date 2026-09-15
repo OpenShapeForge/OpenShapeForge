@@ -97,3 +97,17 @@ describe("semantic renderer mapping", () => {
     });
   });
 });
+
+test("inherits semantic choices recursively while explicit options win", () => {
+  const options = { type: "static" as const, items: [{ value: "first", label: { en: "First" } }] };
+  const fields = resolveModelFields([
+    { key: "choice", semanticType: "choice", valueType: "string" },
+    { key: "override", semanticType: "choice", valueType: "string", options: { type: "static", items: [] } },
+    { key: "nested", valueType: "object", children: [{ key: "choice", semanticType: "choice", valueType: "string" }] },
+    { key: "items", valueType: "string", cardinality: "collection", item: { key: "choice", semanticType: "choice", valueType: "string" } },
+  ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
+  expect(fields[0]!.options).toEqual(options);
+  expect(fields[1]!.options?.items).toEqual([]);
+  expect(fields[2]!.children?.[0]?.options).toEqual(options);
+  expect(fields[3]!.item?.options).toEqual(options);
+});

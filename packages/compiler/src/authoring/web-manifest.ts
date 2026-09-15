@@ -446,6 +446,7 @@ function projectField(
     ...(field.relationship?.target ? { relationship: { targetEntityId: field.relationship.target } } : {}),
     ...(field.variables ? { variables: field.variables } : {}),
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
+    ...(field.visibility ? { visibility: field.visibility } : {}),
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),

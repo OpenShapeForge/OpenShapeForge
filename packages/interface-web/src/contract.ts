@@ -130,6 +130,10 @@ export type WebFieldProjection = {
   relationship?: { targetEntityId: string };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
+  visibility?: {
+    conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
+    logic?: "and" | "or";
+  };
   options?: WebFieldOption[];
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";

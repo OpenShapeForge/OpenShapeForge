@@ -1321,6 +1321,19 @@
             },
             "title": { "type": "string", "minLength": 1 },
             "subtitle": { "type": "string", "minLength": 1 },
+            "variableSources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["key", "resolver"],
+                "properties": {
+                  "key": { "type": "string", "minLength": 1 },
+                  "resolver": { "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"] },
+                  "params": { "type": "object" }
+                }
+              }
+            },
             "actions": {
               "type": "array",
               "uniqueItems": true,

@@ -11,8 +11,8 @@ types:
     valueType: object
 
   # Entity type identity, distinct from an individual record ID.
-  # The read-authorized entity-type list must be implemented before a lookup is wired.
   entityTypeName:
+    options: { type: dynamic, source: entityTypes.list }
     label: { en: Entity type, nl: Entiteitstype }
     valueType: string
     validation:

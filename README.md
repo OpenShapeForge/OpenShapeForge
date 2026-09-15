@@ -57,7 +57,7 @@ Requests need a Keycloak bearer token or signed trusted-context headers — see
 | [docs/api.md](docs/api.md) | CRUD engine, RLS, auth, event journal, local stack |
 | [docs/mcp.md](docs/mcp.md) | Generated MCP server: tools from field definitions, authorization |
 | [docs/testing.md](docs/testing.md) | Proof gates, e2e suite, reports, k6 |
-| [docs/migrations.md](docs/migrations.md) | Roll-forward + versioned migrations, drift signals |
+| [docs/migrations.md](docs/migrations.md) | The reset model: build from the manifest, db:reset, drift signals |
 | [docs/consuming.md](docs/consuming.md) | Using the compiler from a host repo |
 | [docs/README.md](docs/README.md) | Index of the above |
 

@@ -2,7 +2,7 @@
 /**
  * §D.2 / §F — closure trigger proof. The trigger on platform.org_unit maintains
  * platform.org_unit_closure atomically with each org_unit write. We run the full
- * migration chain (which installs the versioned trigger migration
+ * migration chain (which installs the closure trigger as a core invariant
  * 0002_org-unit-closure-trigger) against a throwaway SCRATCH database, then, as
  * the PRIVILEGED role (so the tenant-isolated closure table is fully visible for
  * assertions), prove:
@@ -82,7 +82,7 @@ describe("org_unit closure trigger", () => {
     "insert maintains self+inherited paths; reparent corrects; RESTRICT blocks parent delete",
     async () => {
       await withScratchDb(async (name) => {
-        // Provision: full chain (installs the versioned trigger migration).
+        // Provision: full chain (installs the closure trigger, core-invariants.ts).
         await withDb(scratchAdminUrl(name), async (db) => {
           await db.connection().execute((conn) => runMigrationChain(conn));
 

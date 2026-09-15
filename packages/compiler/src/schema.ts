@@ -8,7 +8,16 @@ export type ScalarType =
   | "numeric"
   | "date"
   | "timestamptz"
-  | "jsonb";
+  | "jsonb"
+  /**
+   * A text array, spelled the way Postgres spells it because the manifest
+   * type doubles as the SQL type token (the roll-forward migrator renders
+   * `ADD COLUMN` from it verbatim). Platform bookkeeping only: no authoring
+   * field maps onto it, so no generated CRUD, GraphQL or MCP surface has to
+   * render one — the runtime tables that hold a role list or a read-guides
+   * list are the reason it exists.
+   */
+  | "text[]";
 
 export type ReferenceDefinition = {
   schema: string;
@@ -239,6 +248,15 @@ export type ColumnSensitivity = "confidential" | "pii" | "bsn";
 export type ColumnDefinition = {
   name: string;
   type: ScalarType;
+  /**
+   * Part of the table's primary key. One column gives the ordinary inline
+   * `PRIMARY KEY`; more than one gives a composite key over those columns in
+   * declaration order, rendered as a table constraint. A composite key is a
+   * platform-bookkeeping shape (a link row keyed by both ends, a version row
+   * keyed by its coordinates) — generated CRUD addresses rows by a single
+   * column, so `manifest.primaryKey` is null for such a table and it can never
+   * be CRUD-eligible.
+   */
   primaryKey?: boolean;
   required?: boolean;
   default?: string;

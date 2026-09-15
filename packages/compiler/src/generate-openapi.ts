@@ -149,6 +149,8 @@ function schemaForScalar(type: ScalarType): JsonObject {
       return { type: "string", format: "date-time" };
     case "jsonb":
       return {};
+    case "text[]":
+      return { type: "array", items: { type: "string" } };
     case "text":
     default:
       return { type: "string" };

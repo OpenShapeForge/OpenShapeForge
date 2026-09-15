@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { applyEmployeeInvitationsMigration } from "../../db/migrations/employee-invitations.js";
-import { applySystemBypassAuditMigration } from "../../db/migrations/system-bypass-audit.js";
+import { applyGeneratedTables } from "../../db/__tests__/__fixtures__/generated-tables.js";
 import { inviteEmployee } from "../../auth/employee-invitations.js";
 import {
   invitationDeliveryUnconfirmed,
@@ -75,7 +75,12 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       keycloak_realm text, keycloak_organization_id text
     )`.execute(owner.db);
     await applyAppHelpersMigration(owner.db);
-    await applySystemBypassAuditMigration(owner.db);
+    // Both tables come from the manifest; the invitations migration file owns
+    // only the checks, the pending-address index and the policy.
+    await applyGeneratedTables(owner.db, [
+      "platform.system_bypass_audit",
+      "platform.employee_invitations",
+    ]);
     await applyEmployeeInvitationsMigration(owner.db);
     await sql`create role bootstrap_runtime login;
       grant usage on schema platform, app to bootstrap_runtime;

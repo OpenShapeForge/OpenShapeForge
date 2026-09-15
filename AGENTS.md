@@ -79,10 +79,13 @@ issues, pull requests, and review comments. Act accordingly.
   byte-identical across runs: no timestamps, no randomness, no
   environment-dependent output. `bun run check:generated` runs everything
   twice and fails on drift.
-- **Applied migrations are immutable** (checksum-verified). Additive schema
-  changes roll forward automatically via `bun run db:migrate`; anything
-  non-additive requires `bun run db:migration:new <name>`. Never edit a
-  migration that has been applied.
+- **The schema is versioned by git, not by a migration history.** A database
+  is built from the compiled manifest (`bun run db:migrate` on an empty one,
+  or the API's own first-start bootstrap); additive schema changes roll
+  forward automatically, and anything non-additive means rebuilding the
+  database with `bun run db:reset`. There are no hand-written migration files
+  to scaffold or keep immutable — what the manifest cannot express lives in
+  idempotent invariant DDL under `apps/api/src/db/migrations/`.
 - **New entities**: add YAML under
   `packages/compiler/config/authoring/entities/`, bump
   `expectedGeneratedCrudEntityCount` in

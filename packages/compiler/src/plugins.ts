@@ -134,12 +134,12 @@ export type PluginSchemaMigration = {
   /** Plugin-local immutable migration version, e.g. `0100_install-triggers`. */
   version: string;
   /**
-   * Ownership cutovers may have to remove non-additive drift before the
-   * generated manifest is compared with the live database. Omission retains
-   * the historical post-generated invariant phase.
+   * PostgreSQL DDL applied after the generated tables exist: the invariants
+   * the manifest cannot express on a contributed table. A database is built
+   * from the manifest, so there is no earlier phase in which legacy ownership
+   * could be transformed — a contributed table's shape is declared, not
+   * migrated to.
    */
-  phase?: "beforeGenerated" | "afterGenerated";
-  /** PostgreSQL DDL applied in the selected migration phase. */
   sql: string;
 };
 

@@ -337,20 +337,18 @@ deterministically sorted and covered by the compiler's stale, orphan, and
 double-generation gates. With no contributions the file is absent, preserving
 the existing generated output byte-for-byte.
 
-`db:migrate` applies `beforeGenerated` entries after host migrations but before
-generated-schema drift is evaluated. This phase is reserved for versioned,
-data-preserving ownership cutovers that make the live schema compatible with
-the new generated manifest. Entries with omitted phase (and explicit
-`afterGenerated`) retain the historical position after generated tables and
-before the grant sweep. Each migration and its ledger write run in one
-transaction under `plugin:<plugin>:<version>` in `platform.schema_migrations`.
-The ledger stores the exact SQL checksum; `beforeGenerated` additionally binds
-its phase into that checksum. A rerun skips an identical entry; changing its
-phase, SQL or checksum fails migration and readiness. Legacy post-generated
-checksums remain byte-compatible. Ledger entries absent from an older
-registry are reported as unexpected but tolerated so an image rollback remains
-serviceable. Applied contributions are still immutable: retain old entries in
-forward builds and add a new version for an additive roll-forward.
+`db:migrate` applies every entry after the generated tables exist and before
+the grant sweep. A database is built from the manifest, so there is no earlier
+phase in which legacy ownership could be transformed: a contributed table's
+shape is declared, not migrated to. Each migration and its ledger write run in
+one transaction under `plugin:<plugin>:<version>` in
+`platform.schema_migrations`. The ledger stores the exact SQL checksum; a
+rerun skips an identical entry, and changing the SQL of an applied entry fails
+migration. Ledger entries absent from an older registry are tolerated so an
+image rollback remains serviceable. Applied contributions are still immutable:
+retain old entries in forward builds and add a new version for an additive
+roll-forward — or, in the reset model, rebuild the database with
+`bun run db:reset`.
 
 ### `ownedPaths` and the gates
 

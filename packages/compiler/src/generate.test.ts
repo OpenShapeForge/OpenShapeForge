@@ -2069,3 +2069,158 @@ describe("writtenBy columns", () => {
     ).toThrow(/no.*compiled operation has that key/i);
   });
 });
+
+/**
+ * The shapes platform bookkeeping tables need and authored entities never do:
+ * a composite primary key, a text array, and a reference into a table that
+ * another layer promotes into the manifest later. Each exists so a runtime-
+ * owned table can be declared in platform-schema.yaml rather than in a
+ * hand-written migration next to it.
+ */
+describe("platform bookkeeping shapes", () => {
+  const linkManifest: PlatformSchemaManifest = {
+    version: 1,
+    tables: [
+      {
+        schema: "platform",
+        name: "identity_links",
+        tenantScoped: false,
+        domainInternal: true,
+        generatedCrud: false,
+        columns: [
+          { name: "identity_id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", primaryKey: true },
+          { name: "guides_read", type: "text[]", required: true, default: "'{}'" },
+          { name: "linked_at", type: "timestamptz" },
+        ],
+      },
+    ],
+  };
+
+  it("renders a composite primary key once, as a table constraint", () => {
+    const artifacts = generateArtifacts(linkManifest);
+    const sql = artifacts.find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
+
+    expect(sql).toContain(
+      [
+        'CREATE TABLE IF NOT EXISTS "platform"."identity_links" (',
+        '  "identity_id" uuid NOT NULL,',
+        '  "tenant_id" uuid NOT NULL,',
+        "  \"guides_read\" text[] NOT NULL DEFAULT '{}',",
+        '  "linked_at" timestamptz,',
+        '  PRIMARY KEY ("identity_id", "tenant_id")',
+        ");",
+      ].join("\n"),
+    );
+    // Neither member carries an inline key of its own.
+    expect(sql).not.toContain('"identity_id" uuid PRIMARY KEY');
+
+    const manifestJson = JSON.parse(
+      artifacts.find((artifact) => artifact.path.endsWith("manifest.json"))!.contents,
+    );
+    // Generated CRUD addresses a row by ONE column; a composite key has none.
+    expect(manifestJson.tables[0].primaryKey).toBeNull();
+    expect(
+      manifestJson.tables[0].columns.map((column: { name: string; primaryKey: boolean }) => [
+        column.name,
+        column.primaryKey,
+      ]),
+    ).toEqual([
+      ["identity_id", true],
+      ["tenant_id", true],
+      ["guides_read", false],
+      ["linked_at", false],
+    ]);
+
+    const types = artifacts.find((artifact) => artifact.path.endsWith("types.ts"))!.contents;
+    expect(types).toContain("  identity_id: string;");
+    expect(types).toContain("  tenant_id: string;");
+    expect(types).toContain("  guides_read: Generated<string[]>;");
+  });
+
+  it("keeps the inline PRIMARY KEY for a single-column key", () => {
+    const sql = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )!.contents;
+    expect(sql).toContain('"id" uuid PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()');
+    expect(sql).not.toContain("  PRIMARY KEY (");
+  });
+
+  it("defers a registered cross-module reference to the merged manifest", async () => {
+    // The base platform schema links a tenant to its Relation, a table the
+    // authoring layer promotes into the manifest later. The loader accepts
+    // the registered reference; rendering the merged manifest checks it.
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+relationshipRegister:
+  - from: { schema: platform, table: tenants, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+`,
+      "utf8",
+    );
+
+    try {
+      const loaded = await loadManifest(path);
+      expect(() => generateArtifacts(loaded)).toThrow(
+        /platform\.tenants\.relation_id references unknown table erp\.relations/,
+      );
+
+      const relations: TableDefinition = {
+        schema: "erp",
+        name: "relations",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+        ],
+      };
+      const sql = generateArtifacts({ ...loaded, tables: [...loaded.tables, relations] }).find(
+        (artifact) => artifact.path.endsWith("schema.sql"),
+      )!.contents;
+      expect(sql).toContain(
+        'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("relation_id")',
+      );
+      expect(sql).toContain('REFERENCES "erp"."relations"("id") ON DELETE SET NULL;');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses an unregistered or same-schema reference to an unknown table", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: parent_id, type: uuid, references: { schema: platform, table: organizations, column: id } }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /platform\.tenants\.parent_id references unknown table platform\.organizations/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

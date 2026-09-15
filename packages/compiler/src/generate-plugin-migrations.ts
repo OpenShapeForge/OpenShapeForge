@@ -17,7 +17,6 @@ export const PLUGIN_MIGRATION_REGISTRY_PATH =
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
-  phase?: "beforeGenerated" | "afterGenerated";
   checksum: string;
   sql: string;
 };
@@ -38,18 +37,6 @@ function quoteIdent(value: string): string {
 
 function checksum(sql: string): string {
   return createHash("sha256").update(sql).digest("hex");
-}
-
-function migrationChecksum(
-  sql: string,
-  phase: PluginSchemaMigration["phase"],
-): string {
-  // Keep historical after-generated checksums byte-for-byte stable. A pre
-  // migration binds its phase into the immutable checksum so it cannot later
-  // move across the generated drift gate without being detected.
-  return phase === "beforeGenerated"
-    ? checksum(`beforeGenerated\0${sql}`)
-    : checksum(sql);
 }
 
 function nonEmptySql(sql: string, label: string): string {
@@ -243,8 +230,11 @@ function assertConstraintRelations(manifest: PlatformSchemaManifest): void {
   }
   for (const table of manifest.tables) {
     const schema = relationNames.get(table.schema)!;
+    // Column-level primaryKey flags form ONE key however many columns carry
+    // them (a composite key, see generate.ts); a constraint-level key on top
+    // of that is the second key Postgres refuses.
     const tablePrimaryKeys =
-      table.columns.filter((column) => column.primaryKey === true).length +
+      (table.columns.some((column) => column.primaryKey === true) ? 1 : 0) +
       (table.constraints ?? []).filter(
         (constraint) => constraint.kind === "primaryKey",
       ).length;
@@ -289,12 +279,15 @@ function assertForeignKeyTargets(manifest: PlatformSchemaManifest): void {
           );
         }
       }
+      // The column-level key is unique only as a whole: one member of a
+      // composite key does not identify a row on its own.
       const immediatelyUnique =
-        (constraint.references.columns.length === 1 &&
-          target.columns.some(
-            (column) =>
-              column.name === constraint.references.columns[0] && column.primaryKey === true,
-          )) ||
+        sameColumns(
+          target.columns
+            .filter((column) => column.primaryKey === true)
+            .map((column) => column.name),
+          constraint.references.columns,
+        ) ||
         (target.indexes ?? []).some(
           (index) =>
             index.unique === true &&
@@ -338,8 +331,7 @@ function migrationEntry(
   return {
     plugin,
     version: migration.version,
-    ...(migration.phase === "beforeGenerated" ? { phase: migration.phase } : {}),
-    checksum: migrationChecksum(sql, migration.phase),
+    checksum: checksum(sql),
     sql,
   };
 }

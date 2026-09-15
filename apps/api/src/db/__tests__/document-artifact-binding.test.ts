@@ -17,7 +17,7 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../migrations/app-role.js";
-import artifactBindingMigration from "../migrations/versioned/0014_document-artifact-binding.js";
+import { applyCoreInvariants } from "../migrations/core-invariants.js";
 import { DEV_WORKER_ROLE_PASSWORD_DEFAULT, WORKER_ROLE } from "../migrations/worker-role.js";
 import { type DbSessionInput, withDbSession } from "../session.js";
 
@@ -111,8 +111,10 @@ beforeAll(async () => {
   await admin.unsafe(`create database "${scratchName}"`);
   privileged = createDatabaseRuntime({ databaseUrl: scratchUrl(), maxConnections: 4 });
   await privileged.db.connection().execute((conn) => runMigrationChain(conn));
-  await artifactBindingMigration.up(privileged.db);
-  await artifactBindingMigration.up(privileged.db);
+  // The binding is a core invariant, idempotent on every migrate: a rerun
+  // must leave the functions, the deferred guard and the checks as they are.
+  await applyCoreInvariants(privileged.db);
+  await applyCoreInvariants(privileged.db);
   restricted = createDatabaseRuntime({
     databaseUrl: scratchUrl({
       username: APP_ROLE,

@@ -5,7 +5,6 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createPluginMigrationLedgerVerifier,
   loadGeneratedPluginMigrations,
   pluginMigrationLedgerVersion,
 } from "../migrations/generated-plugin-migrations.js";
@@ -34,32 +33,6 @@ describe("generated plugin migration registry", () => {
     );
   });
 
-  test("loads a phase-bound pre-generated migration and rejects a phase edit", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
-    const sql = "ALTER TABLE workflow.definitions RENAME TO workflow_definitions;\n";
-    const migration = {
-      plugin: "workflow",
-      version: "0001_move-definition-owner",
-      phase: "beforeGenerated" as const,
-      checksum: createHash("sha256").update(`beforeGenerated\0${sql}`).digest("hex"),
-      sql,
-    };
-    const path = join(dir, "registry.json");
-    await writeFile(path, JSON.stringify({ version: 1, migrations: [migration] }));
-    expect(await loadGeneratedPluginMigrations(path)).toEqual([migration]);
-
-    await writeFile(
-      path,
-      JSON.stringify({
-        version: 1,
-        migrations: [{ ...migration, phase: "afterGenerated" }],
-      }),
-    );
-    await expect(loadGeneratedPluginMigrations(path)).rejects.toThrow(
-      /Regenerate artifacts/,
-    );
-  });
-
   test("accepts the compiler tuple order when one plugin name prefixes another", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
     const migrations = ["cpq", "cpq-extra"].map((plugin) => {
@@ -76,14 +49,7 @@ describe("generated plugin migration registry", () => {
     expect(await loadGeneratedPluginMigrations(path)).toEqual(migrations);
   });
 
-  test("loads lazily and names malformed registry files", async () => {
-    let loads = 0;
-    createPluginMigrationLedgerVerifier(async () => {
-      loads += 1;
-      throw new Error("not reached");
-    });
-    expect(loads).toBe(0);
-
+  test("names malformed registry files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
     const path = join(dir, "registry.json");
     await writeFile(path, "{");

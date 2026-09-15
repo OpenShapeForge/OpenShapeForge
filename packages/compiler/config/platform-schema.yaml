@@ -1,7 +1,18 @@
 version: 1
 description: "Greenfield platform schema foundation for apps/api."
 
-relationshipRegister: []
+# Cross-module references the base platform schema is allowed to make. The
+# targets are authoring entities (erp.*) that active-manifest.ts promotes into
+# the merged manifest AFTER this file is loaded, so the loader accepts each
+# reference on the strength of its entry here and generateArtifacts checks
+# that the merged manifest really declares the target.
+relationshipRegister:
+  - from: { schema: platform, table: tenants, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+  - from: { schema: platform, table: identity_relations, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+  - from: { schema: platform, table: identity_relations, column: candidate_relation_id }
+    to: { schema: erp, table: relations, column: id }
 
 tables:
   - schema: platform
@@ -77,6 +88,17 @@ tables:
       - { name: keycloak_realm, type: text }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
+      # The tenant's own organization Relation (auth/organization-relation.ts),
+      # so an assistant can read `Relation.businessContext` for "what does this
+      # company do" without a human pasting a description into a prompt. The
+      # target is an authoring entity promoted into the manifest after this
+      # file; the relationshipRegister entry at the top is what admits the
+      # reference. Unlike every other mutable column here it is a tenant's own
+      # self-service link, not a control-plane fact, so
+      # db/migrations/organization-relation-link.ts adds the permissive UPDATE
+      # policy the generated registry policy (WITH CHECK app.bypass_rls() only)
+      # would otherwise refuse.
+      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
     indexes:
       - name: tenants_slug_uidx
         columns: [slug]
@@ -236,7 +258,8 @@ tables:
       - { name: tenant_id, type: uuid, required: true }
       # Nullable → roots. Self-referential FK to platform.org_unit(id); RESTRICT
       # so a parent cannot be deleted while children reference it (the closure
-      # trigger relies on reparent/remove-first — see the versioned migration).
+      # trigger relies on reparent/remove-first — see
+      # apps/api/src/db/migrations/core-invariants.ts).
       - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
       - { name: name, type: text, required: true }
       # This unit's segment of the Keycloak Organization path: the SPI's
@@ -280,8 +303,9 @@ tables:
         unique: true
         where: '"keycloak_organization_id" IS NOT NULL'
 
-  # Transitive-closure table maintained by the org_unit trigger (versioned
-  # migration). Self-row (u,u,0) per unit; (a,d,k) for every ancestor a of d at
+  # Transitive-closure table maintained by the org_unit trigger (a core
+  # invariant, apps/api/src/db/migrations/core-invariants.ts). Self-row (u,u,0)
+  # per unit; (a,d,k) for every ancestor a of d at
   # distance k. descendants(x) = SELECT descendant_id WHERE ancestor_id = x;
   # ancestors(x) = SELECT ancestor_id WHERE descendant_id = x.
   - schema: platform
@@ -603,3 +627,329 @@ tables:
         unique: true
       - name: mcp_handoffs_expires_idx
         columns: [expires_at]
+
+  # ---------------------------------------------------------------------------
+  # Runtime bookkeeping
+  #
+  # The tables below are written by the API runtime rather than authored as
+  # entities, and none surfaces on the generated CRUD. They are declared here
+  # so this manifest is the ONE source of truth for their shape — a database
+  # is created from schema.sql and nothing else — and so drift detection holds
+  # them to it like every other table. What the manifest cannot express stays
+  # in the migration file named on each table, applied after the generated
+  # step as idempotent DDL: check constraints, expression indexes, functions,
+  # triggers, SECURITY DEFINER ownership, and every bespoke RLS policy.
+  #
+  # A table with a bespoke policy is therefore tenantScoped:false EVEN WHEN it
+  # carries a tenant_id. tenantScoped:true would emit the generic
+  # tenant-isolation policy under the same name the bespoke one uses, and two
+  # definitions of one policy would be settled by whichever step ran last; the
+  # migration file enables row-level security and owns the policy instead. The
+  # tenant fence those policies enforce is the same one every other platform.*
+  # row gets — they only narrow the WITH CHECK half.
+  #
+  # Indexes read newest-first (an audit trail, published notices) are declared
+  # ascending: a btree serves `order by ... desc` by a backward scan, so the
+  # index needs no direction of its own and the manifest need not express one.
+  # ---------------------------------------------------------------------------
+
+  # Audit log for every `withSystemSession` invocation — the break-glass path
+  # that runs with app.bypass_rls = true (db/session.ts). Two rows per
+  # invocation in the happy path: one when the bypass session starts, one
+  # updating it with ended_at + succeeded = true when the callback returns; on
+  # error the finally block inserts a single row with succeeded = false.
+  #
+  # Not tenant-scoped: bypass sessions can span tenants by design, and every
+  # bypass must be recorded even when no app.tenant_id was set. No RLS policy
+  # either — the bypass session itself is the only writer. Retention is
+  # handled out of band: these rows are operationally sensitive and belong in
+  # a long-term store (SIEM / log pipeline), not aged out of the OLTP database.
+  # Add an explicit compliance review before changing that.
+  - schema: platform
+    name: system_bypass_audit
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: actor_subject, type: text, required: true }
+      - { name: reason, type: text, required: true }
+      - { name: tenant_id, type: uuid }
+      - { name: started_at, type: timestamptz, required: true }
+      - { name: ended_at, type: timestamptz }
+      - { name: succeeded, type: boolean, required: true, default: "false" }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: system_bypass_audit_actor_idx
+        columns: [actor_subject, started_at]
+      - name: system_bypass_audit_recent_idx
+        columns: [started_at]
+
+  # One row per login at the identity provider, (issuer, subject). Platform-
+  # level rather than per tenant because the same person signs in to several
+  # tenants with the same account; identity_relations below is the per-tenant
+  # half. Row-level security, the `identities_visibility` policy (a session
+  # sees its OWN row and the identities linked or pending in its tenant, so an
+  # administrator cannot enumerate people who never signed in to their
+  # organization), the `lower(email)` lookup index and `app.identity_subject()`
+  # are owned by db/migrations/identity-link.ts.
+  - schema: platform
+    name: identities
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: issuer, type: text, required: true }
+      - { name: subject, type: text, required: true }
+      - { name: email, type: text }
+      - { name: display_name, type: text }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      # The upsert key of the just-in-time sign-in path:
+      # `on conflict (issuer, subject)` (auth/identity-link.ts).
+      - name: identities_issuer_subject_uidx
+        columns: [issuer, subject]
+        unique: true
+
+  # One row per (identity, tenant): either LINKED to a Relation in that tenant
+  # or PENDING with the Relation the person probably is (an e-mail match) but
+  # that nobody has confirmed yet. Keyed by both ends, hence the composite
+  # primary key. The two Relation references target an authoring entity
+  # promoted into this manifest later — see relationshipRegister at the top.
+  #
+  # `status` is held to linked | pending_confirmation and the columns each
+  # status requires (relation_id + linked_at + linked_by when linked, no
+  # relation_id when pending) by check constraints in identity-link.ts, which
+  # also owns the tenant-fenced policy: reads are tenant-wide, writes require
+  # the acting session to BE the identity or to hold Organization.All.ReadWrite.
+  #
+  # needs_role_assignment is true only for a Relation the just-in-time path
+  # CREATED: while set, auth/identity.ts overrides the session's roles to a
+  # minimal working set because no admin API grant can reach that very first
+  # token. Cleared by set_member_role.
+  #
+  # The onboarding_* columns are first-use onboarding state (mcp/onboarding.ts),
+  # kept on this row because they have the same lifetime and owner — one
+  # person, in one organization: when complete_onboarding last succeeded, the
+  # ONBOARDING_VERSION it completed under (a bumped constant re-opens it),
+  # whether the preferences step was skipped, and the role guides the person
+  # had read when they completed so a later session still counts that step.
+  - schema: platform
+    name: identity_relations
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: identity_id, type: uuid, primaryKey: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: CASCADE } }
+      - { name: status, type: text, required: true }
+      - { name: candidate_relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - { name: linked_at, type: timestamptz }
+      # 'jit' for the just-in-time path, otherwise the platform.identities id
+      # of whoever linked: the person (confirm_my_link) or an administrator.
+      - { name: linked_by, type: text }
+      - { name: needs_role_assignment, type: boolean, required: true, default: "false" }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+      - { name: onboarding_completed_at, type: timestamptz }
+      - { name: onboarding_version, type: integer }
+      - { name: onboarding_preferences_skipped, type: boolean, required: true, default: "false" }
+      - { name: onboarding_guides_read, type: "text[]", required: true, default: "'{}'" }
+    indexes:
+      - name: identity_relations_tenant_relation_idx
+        columns: [tenant_id, relation_id]
+      - name: identity_relations_pending_role_idx
+        columns: [tenant_id]
+        where: '"needs_role_assignment"'
+
+  # The pending-role side of an organization administrator inviting a
+  # colleague (auth/employee-invitations.ts). identity_relations only ever
+  # gets a row once a person has SIGNED IN; an invitation happens strictly
+  # before that, and Keycloak exposes no admin-API resource for an unaccepted
+  # invite, so this table is the one thing the deployment can hold onto
+  # between "an admin invited someone" and that person's first sign-in: the
+  # e-mail, the role meant for them, and who invited them. It is a memory of
+  # an intent, matched by e-mail at first sign-in, not a queue of Keycloak
+  # state to reconcile against.
+  #
+  # `role` is held to the two composite client roles an invitation may name
+  # (org_admin, org_employee) and `status` to pending | revoked | accepted —
+  # with the timestamps each status requires — by check constraints in
+  # db/migrations/employee-invitations.ts. The same file owns the ONE-PENDING-
+  # PER-ADDRESS rule, a partial unique index over lower(email) that the
+  # manifest cannot spell, and the tenant-fenced policy whose writes require
+  # Organization.All.ReadWrite. `invited_by` carries the same shape as
+  # identity_relations.linked_by.
+  - schema: platform
+    name: employee_invitations
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: email, type: text, required: true }
+      - { name: role, type: text, required: true }
+      - { name: first_name, type: text }
+      - { name: last_name, type: text }
+      - { name: status, type: text, required: true, default: "'pending'::text" }
+      - { name: invited_by, type: text, required: true }
+      - { name: invited_at, type: timestamptz, required: true, default: now() }
+      - { name: revoked_at, type: timestamptz }
+      - { name: revoked_by, type: text }
+      - { name: accepted_at, type: timestamptz }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: employee_invitations_tenant_status_idx
+        columns: [tenant_id, status]
+
+  # What changed in this deployment since a person last connected. One row
+  # per published notice; NO tenant column because a notice is platform-wide,
+  # the way a catalog publish is. Readable by every session and writable by
+  # none under RLS (db/migrations/update-notices.ts), so the only way in is a
+  # system session — the platform administrator's audited elevation.
+  # Provenance in published_by_* is written from the verified control-realm
+  # token, never from the notice body. A withdrawn notice is kept, not
+  # deleted, so an acknowledgement never points at nothing.
+  - schema: platform
+    name: update_notices
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: key, type: text, primaryKey: true }
+      - { name: title, type: text, required: true }
+      # What changed, in the deployment's own words.
+      - { name: changed, type: text, required: true }
+      # What an assistant now does differently: an array of sentences.
+      - { name: assistant_changes, type: jsonb, required: true, default: "'[]'::jsonb" }
+      # What only the PERSON can do: [{action, why}]. A separate column, not a
+      # flag inside a sentence, so an assistant cannot mistake one for a step
+      # it may take itself.
+      - { name: user_actions, type: jsonb, required: true, default: "'[]'::jsonb" }
+      # Catalog keys of the Services whose definition changed, and per key
+      # what changed on it: {"day-start": "..."}.
+      - { name: service_changes, type: jsonb, required: true, default: "'{}'::jsonb" }
+      - { name: published_at, type: timestamptz, required: true, default: now() }
+      - { name: published_by_subject, type: text, required: true }
+      - { name: published_by_issuer, type: text, required: true }
+      - { name: published_by_name, type: text }
+      - { name: withdrawn_at, type: timestamptz }
+    indexes:
+      - name: update_notices_published_idx
+        columns: [published_at]
+
+  # The durable record that one person was told: one row per (tenant, user,
+  # notice). Keyed on the session's user rather than the identity link
+  # because an acknowledgement needs exactly "this signed-in person, in this
+  # organization", which every authenticated session carries — including the
+  # ones with no link row. Its policy (update-notices.ts) is the tenant fence
+  # plus "only the person themselves may write their own acknowledgement":
+  # an administrator cannot mark a colleague as brought up to date.
+  - schema: platform
+    name: user_update_notices
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      # The signed-in subject, as app.current_user_id() reports it.
+      - { name: user_id, type: uuid, primaryKey: true }
+      - { name: notice_key, type: text, primaryKey: true, references: { schema: platform, table: update_notices, column: key, onDelete: CASCADE } }
+      - { name: acknowledged_at, type: timestamptz, required: true, default: now() }
+      # The assistant states it PASSED ON the notice's user-only actions. It
+      # can never state it performed them: there is no column for that.
+      - { name: user_actions_passed_on, type: boolean, required: true, default: "false" }
+      # [{instructionId, decision}] — what the person decided about each
+      # personal instruction on a changed Service. The change itself, if any,
+      # is made elsewhere; this table has no write path into an instruction.
+      - { name: instruction_decisions, type: jsonb, required: true, default: "'[]'::jsonb" }
+
+  # Durable receipts for canonical keyed Operation execution — the actor-
+  # scoped idempotency ledger. The raw key and request are deliberately
+  # absent: only namespaced hashes are retained. A caller can only see or
+  # mutate its own actor-bound rows under the current tenant
+  # (`operation_execution_receipts_actor_scope`, db/migrations/
+  # operation-execution-receipts.ts), which also holds the hash shapes and
+  # the running | completed | outcome_unknown state machine as checks.
+  # Tenant deletion owns cleanup through the cascading tenant reference.
+  - schema: platform
+    name: operation_execution_receipts
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: actor_id, type: uuid, primaryKey: true }
+      - { name: operation_id, type: text, primaryKey: true }
+      - { name: operation_intent, type: text, primaryKey: true }
+      - { name: key_hash, type: text, primaryKey: true }
+      - { name: request_fingerprint, type: text, required: true }
+      - { name: contract_fingerprint, type: text, required: true }
+      - { name: state, type: text, required: true }
+      - { name: response, type: jsonb }
+      - { name: retry_at, type: timestamptz }
+      - { name: started_at, type: timestamptz, required: true, default: clock_timestamp() }
+      - { name: updated_at, type: timestamptz, required: true, default: clock_timestamp() }
+      - { name: completed_at, type: timestamptz }
+
+  # Blueprints: published record snapshots a blueprint tenant offers and other
+  # tenants copy. The only cross-tenant read surface in the model, and it is
+  # read through one SECURITY DEFINER function, `app.read_blueprints`, owned
+  # by the definer role declared in the database role contract. That
+  # function, its ownership transfer, the policies, the reader grants and the
+  # check constraints are owned by db/migrations/blueprints.ts.
+  #
+  # blueprint_libraries: which blueprint tenant a tenant reads from — platform
+  # registry state, written only by the audited control-plane session. The
+  # two tenants must differ (a check in blueprints.ts).
+  - schema: platform
+    name: blueprint_libraries
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: blueprint_tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id } }
+
+  # blueprint_versions: immutable published snapshots, keyed by their
+  # coordinates (tenant, entity, blueprint, version). Insert-only for the
+  # runtime role — update and delete are revoked after the grant sweep, and
+  # the publish policy admits only a platform-operator session in a tenant
+  # whose kind is blueprint. reader_roles is what a reader must hold one of.
+  - schema: platform
+    name: blueprint_versions
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id } }
+      - { name: entity_name, type: text, primaryKey: true }
+      - { name: blueprint_id, type: text, primaryKey: true }
+      - { name: version, type: integer, primaryKey: true }
+      - { name: source_record_id, type: uuid, required: true }
+      - { name: label, type: text, required: true }
+      - { name: reader_roles, type: "text[]", required: true }
+      - { name: values_json, type: jsonb, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+
+  # blueprint_copies: provenance of a record a tenant created from a
+  # blueprint — which version, from which blueprint tenant. The composite
+  # reference into blueprint_versions and the two-tenants-differ check are
+  # in blueprints.ts; the manifest expresses single-column references only.
+  - schema: platform
+    name: blueprint_copies
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: entity_name, type: text, primaryKey: true }
+      - { name: record_id, type: uuid, primaryKey: true }
+      - { name: blueprint_tenant_id, type: uuid, required: true }
+      - { name: blueprint_id, type: text, required: true }
+      - { name: source_version, type: integer, required: true }

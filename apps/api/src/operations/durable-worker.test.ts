@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BUSL-1.1
+
 import { expect, test } from "bun:test";
 import type { RuntimeOperationDefinition, RuntimeResolvedOperationWork } from "@openshapeforge/plugin-runtime";
 import { createDurableWorkerBroker } from "./durable-worker.js";

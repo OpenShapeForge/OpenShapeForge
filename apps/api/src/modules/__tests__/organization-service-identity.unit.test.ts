@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BUSL-1.1
+
 import { expect, test } from "bun:test";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { ModulePlatformRuntime } from "../platform.js";

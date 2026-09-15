@@ -7365,6 +7365,22 @@ function buildServer(
               : { allowed: true, fieldAllowlist };
           }
           if (current) return { allowed: true };
+          // Searchable projection keeps tools/list bounded, while an authored
+          // direct Operation name remains callable for integrated clients.
+          // Authorization must apply the same live handler and role checks as
+          // callTool, otherwise the platform denies a tool it will execute.
+          if (operationToolProjection.mode === "searchable") {
+            const direct = catalog.operationTools.find(
+              (tool) => tool.name === subject.name,
+            );
+            if (
+              direct &&
+              operations.has(direct.key) &&
+              operationMayInvoke(direct, session)
+            ) {
+              return { allowed: true };
+            }
+          }
           const internal = await derivedDefinition(subject.name, false);
           if (!internal) return { allowed: false, code: "NOT_FOUND" };
           const fieldAllowlist = derivedToolOutputFieldAllowlist(

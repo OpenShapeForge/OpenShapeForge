@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: InvoiceSequence
 title: Invoice Sequence
-description: Atomic counter for invoice numbering, keyed by (tenant, kind, fiscal year). Provisioned, not user-facing — incremented in the same transaction as the invoice insert.
+description: Atomic counter for invoice numbering, keyed by (tenant, kind, fiscal year). Provisioned, not user-facing —
+  incremented in the same transaction as the invoice insert.
 language: en
 displayTemplate: "{{kind}} {{fiscalYearCode}}: {{lastNumber}}"
 filterField: kind
@@ -25,11 +26,10 @@ fields:
     persisted:
       column: kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: INVOICEKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: INVOICEKIND
+    semanticType: referenceDataCode
   - key: fiscalYearCode
     valueType: string
     required: true
@@ -37,8 +37,10 @@ fields:
       en: Fiscal year code
       nl: Boekjaarcode
     description:
-      en: Fiscal year code that scopes this sequence (e.g. "2026"). Stored as string so the sequence can be bootstrapped before the fiscal-year row exists.
-      nl: Boekjaarcode die deze reeks afbakent (bijv. "2026"). Wordt als tekst opgeslagen zodat de reeks geïnitialiseerd kan worden voordat het boekjaarrecord bestaat.
+      en: Fiscal year code that scopes this sequence (e.g. "2026"). Stored as string so the sequence can be bootstrapped
+        before the fiscal-year row exists.
+      nl: Boekjaarcode die deze reeks afbakent (bijv. "2026"). Wordt als tekst opgeslagen zodat de reeks geïnitialiseerd kan
+        worden voordat het boekjaarrecord bestaat.
     validation:
       minLength: 1
       maxLength: 20
@@ -72,9 +74,6 @@ fields:
     persisted:
       column: last_issued_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: format
     valueType: string
     required: false
@@ -82,8 +81,10 @@ fields:
       en: Format
       nl: Notatie
     description:
-      en: printf-style format string applied to (fiscalYearCode, lastNumber) when rendering the invoice number (e.g. "%s-%05d").
-      nl: printf-stijl notatie toegepast op (boekjaarcode, laatste nummer) bij het weergeven van het factuurnummer (bijv. "%s-%05d").
+      en: printf-style format string applied to (fiscalYearCode, lastNumber) when rendering the invoice number (e.g.
+        "%s-%05d").
+      nl: printf-stijl notatie toegepast op (boekjaarcode, laatste nummer) bij het weergeven van het factuurnummer (bijv.
+        "%s-%05d").
     defaultValue: "%s-%05d"
     validation:
       maxLength: 50
@@ -118,127 +119,6 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-ui:
-  routes:
-    list:
-      en: /invoice-sequences
-      nl: /factuurreeksen
-    detail:
-      en: /invoice-sequences/:id
-      nl: /factuurreeksen/:id
-    create:
-      en: /invoice-sequences/create
-      nl: /factuurreeksen/aanmaken
-    edit:
-      en: /invoice-sequences/:id/edit
-      nl: /factuurreeksen/:id/bewerken
-    delete:
-      en: /invoice-sequences/:id/delete
-      nl: /factuurreeksen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Invoice sequences
-        nl: Factuurreeksen
-      columns:
-        - key: kind
-          sortable: true
-        - key: fiscalYearCode
-          sortable: true
-        - key: lastNumber
-          sortable: true
-        - key: lastIssuedAt
-          sortable: true
-      defaultSort:
-        key: fiscalYearCode
-        direction: desc
-      rowLink:
-        en: /invoice-sequences/:id
-        nl: /factuurreeksen/:id
-    detail:
-      header:
-        title: "{{kind}} {{fiscalYearCode}}"
-        subtitle: "{{lastNumber}}"
-        badges:
-          - kind
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Sequence details
-                nl: Reeksgegevens
-              fields:
-                - kind
-                - fiscalYearCode
-                - lastNumber
-                - lastIssuedAt
-                - format
-                - resetPolicy
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create invoice sequence
-            nl: Factuurreeks aanmaken
-          groups:
-            - title:
-                en: Sequence details
-                nl: Reeksgegevens
-              fields:
-                - kind
-                - fiscalYearCode
-                - lastNumber
-                - lastIssuedAt
-                - format
-                - resetPolicy
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit invoice sequence
-            nl: Factuurreeks bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
 authorization:
   roles:
     read:
@@ -253,3 +133,192 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Invoice Sequence
+    description: List InvoiceSequence records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Invoice Sequence
+    description: Get InvoiceSequence records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Invoice Sequence
+    description: Create InvoiceSequence records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update InvoiceSequence records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /invoice-sequences
+          nl: /factuurreeksen
+        columns:
+          - key: kind
+            sortable: true
+          - key: fiscalYearCode
+            sortable: true
+          - key: lastNumber
+            sortable: true
+          - key: lastIssuedAt
+            sortable: true
+        title:
+          en: Invoice sequences
+          nl: Factuurreeksen
+        defaultSort:
+          key: fiscalYearCode
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /invoice-sequences/:id
+            nl: /factuurreeksen/:id
+          create:
+            en: /invoice-sequences/create
+            nl: /factuurreeksen/aanmaken
+        title: "{{kind}} {{fiscalYearCode}}"
+        subtitle: "{{lastNumber}}"
+        badges:
+          - kind
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Sequence details
+                    nl: Reeksgegevens
+                  fields:
+                    - kind
+                    - fiscalYearCode
+                    - lastNumber
+                    - lastIssuedAt
+                    - format
+                    - resetPolicy
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create invoice sequence
+              nl: Factuurreeks aanmaken
+            groups:
+              - title:
+                  en: Sequence details
+                  nl: Reeksgegevens
+                fields:
+                  - kind
+                  - fiscalYearCode
+                  - lastNumber
+                  - lastIssuedAt
+                  - format
+                  - resetPolicy
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit invoice sequence
+              nl: Factuurreeks bewerken
+    fields:
+      kind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: INVOICEKIND
+            clearable: false
+      lastIssuedAt:
+        render:
+          component: DateTimePicker
+          props: {}

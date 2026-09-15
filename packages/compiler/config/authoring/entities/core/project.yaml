@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Project
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: false
@@ -74,11 +70,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROJECTPHASESTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: PROJECTPHASESTATUS
+    semanticType: referenceDataCode
   - key: startDate
     valueType: date
     required: false
@@ -91,9 +86,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -106,9 +98,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: currencyCode
     valueType: string
     required: true
@@ -152,172 +141,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentProject
-    kind: belongsTo
-    target: Project
-    foreignKey: parent_project_id
+  - key: parentProjectId
     label:
       en: Parent project
       nl: Bovenliggend project
-  - key: costDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: cost_dimension_id
+    persisted:
+      column: parent_project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
+  - key: costDimensionId
     label:
       en: Cost dimension
       nl: Kostendimensie
-ui:
-  routes:
-    list:
-      en: /projects
-      nl: /projecten
-    detail:
-      en: /projects/:id
-      nl: /projecten/:id
-    create:
-      en: /projects/create
-      nl: /projecten/aanmaken
-    edit:
-      en: /projects/:id/edit
-      nl: /projecten/:id/bewerken
-    delete:
-      en: /projects/:id/delete
-      nl: /projecten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Projects
-        nl: Projecten
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /projects/:id
-        nl: /projecten/:id
-    detail:
-      header:
-        title: "{{name}}"
-        subtitle: "{{code}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Project details
-                nl: Projectgegevens
-              fields:
-                - code
-                - name
-                - status
-            - title:
-                en: Period
-                nl: Periode
-              fields:
-                - startDate
-                - endDate
-            - title:
-                en: Budget
-                nl: Budget
-              fields:
-                - currencyCode
-                - budgetTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create project
-            nl: Project aanmaken
-          groups:
-            - title:
-                en: Project details
-                nl: Projectgegevens
-              fields:
-                - code
-                - name
-                - status
-            - title:
-                en: Period
-                nl: Periode
-              fields:
-                - startDate
-                - endDate
-            - title:
-                en: Budget
-                nl: Budget
-              fields:
-                - currencyCode
-                - budgetTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit project
-            nl: Project bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -332,3 +175,232 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project
+    description: List Project records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project
+    description: Get Project records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project
+    description: Create Project records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Project records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /projects
+          nl: /projecten
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        title:
+          en: Projects
+          nl: Projecten
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /projects/:id
+            nl: /projecten/:id
+          create:
+            en: /projects/create
+            nl: /projecten/aanmaken
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Project details
+                    nl: Projectgegevens
+                  fields:
+                    - code
+                    - name
+                    - status
+                - title:
+                    en: Period
+                    nl: Periode
+                  fields:
+                    - startDate
+                    - endDate
+                - title:
+                    en: Budget
+                    nl: Budget
+                  fields:
+                    - currencyCode
+                    - budgetTotal
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create project
+              nl: Project aanmaken
+            groups:
+              - title:
+                  en: Project details
+                  nl: Projectgegevens
+                fields:
+                  - code
+                  - name
+                  - status
+              - title:
+                  en: Period
+                  nl: Periode
+                fields:
+                  - startDate
+                  - endDate
+              - title:
+                  en: Budget
+                  nl: Budget
+                fields:
+                  - currencyCode
+                  - budgetTotal
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit project
+              nl: Project bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROJECTPHASESTATUS
+            clearable: true
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}

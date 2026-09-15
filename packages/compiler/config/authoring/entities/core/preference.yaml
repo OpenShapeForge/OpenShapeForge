@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Preference
@@ -58,11 +58,7 @@ fields:
     persisted:
       column: owner_scope
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PREFERENCEOWNERSCOPE
-        clearable: false
+    semanticType: referenceDataCode
   - key: namespace
     valueType: string
     required: true
@@ -105,10 +101,6 @@ fields:
     persisted:
       column: value_json
       storageClass: core
-    render:
-      component: JsonFieldEditor
-      props:
-        rows: 10
   - key: description
     valueType: string
     required: false
@@ -123,122 +115,198 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
-relationships:
-  - key: account
-    kind: belongsTo
-    target: Account
-    foreignKey: account_id
+    semanticType: multilineText
+  - key: accountId
     label:
       en: Account
       nl: Account
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-ui:
-  routes:
-    list:
-      en: /preferences
-      nl: /voorkeuren
-    detail:
-      en: /preferences/:id
-      nl: /voorkeuren/:id
-    create:
-      en: /preferences/create
-      nl: /voorkeuren/aanmaken
-    edit:
-      en: /preferences/:id/edit
-      nl: /voorkeuren/:id/bewerken
-    delete:
-      en: /preferences/:id/delete
-      nl: /voorkeuren/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Preferences
-        nl: Voorkeuren
-      columns:
-        - key: ownerScope
-          sortable: true
-        - key: namespace
-          sortable: true
-        - key: key
-          sortable: true
-      defaultSort:
-        key: namespace
-        direction: asc
-      rowLink:
-        en: /preferences/:id
-        nl: /voorkeuren/:id
-    detail:
-      header:
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Preference
+    description: List Preference records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Preference
+    description: Get Preference records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Preference
+    description: Create Preference records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Preference records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /preferences
+          nl: /voorkeuren
+        columns:
+          - key: ownerScope
+            sortable: true
+          - key: namespace
+            sortable: true
+          - key: key
+            sortable: true
+        title:
+          en: Preferences
+          nl: Voorkeuren
+        defaultSort:
+          key: namespace
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /preferences/:id
+            nl: /voorkeuren/:id
+          create:
+            en: /preferences/create
+            nl: /voorkeuren/aanmaken
         title: "{{key}}"
         subtitle: "{{namespace}}"
         badges:
           - ownerScope
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Preference details
-                nl: Voorkeurgegevens
-              fields:
-                - ownerScope
-                - namespace
-                - key
-                - valueJson
-                - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create preference
-            nl: Voorkeur aanmaken
-          groups:
-            - title:
-                en: Preference details
-                nl: Voorkeurgegevens
-              fields:
-                - ownerScope
-                - namespace
-                - key
-                - valueJson
-                - description
-        edit:
-          extends: create
-          title:
-            en: Edit preference
-            nl: Voorkeur bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Preference details
+                    nl: Voorkeurgegevens
+                  fields:
+                    - ownerScope
+                    - namespace
+                    - key
+                    - valueJson
+                    - description
+        modes:
+          create:
+            title:
+              en: Create preference
+              nl: Voorkeur aanmaken
+            groups:
+              - title:
+                  en: Preference details
+                  nl: Voorkeurgegevens
+                fields:
+                  - ownerScope
+                  - namespace
+                  - key
+                  - valueJson
+                  - description
+          update:
+            title:
+              en: Edit preference
+              nl: Voorkeur bewerken
+    fields:
+      ownerScope:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PREFERENCEOWNERSCOPE
+            clearable: false
+      valueJson:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 10
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500

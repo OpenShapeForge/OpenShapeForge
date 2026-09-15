@@ -62,3 +62,33 @@ test("runtime fields use the host semantic and reference-data registries", () =>
     },
   });
 });
+
+test("entity semantic types project an identity reference without recursively inlining their shape", () => {
+  const schema = operationFieldObjectSchema([{
+    key: "record",
+    valueType: "string",
+    semanticType: "ExampleRecord",
+    required: true,
+  }], {
+    semanticTypes: {
+      ExampleRecord: {
+        kind: "entity",
+        entity: "ExampleRecord",
+        valueType: "string",
+        validation: { format: "uuid" },
+        shape: [{ key: "parent", valueType: "string", semanticType: "ExampleRecord" }],
+      },
+    },
+  });
+
+  expect(schema).toMatchObject({
+    required: ["record"],
+    properties: {
+      record: {
+        type: "string",
+        format: "uuid",
+        "x-osf-reference": { entity: "ExampleRecord" },
+      },
+    },
+  });
+});

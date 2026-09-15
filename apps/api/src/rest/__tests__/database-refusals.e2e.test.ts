@@ -40,7 +40,10 @@ import {
   textColumnFor,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import { createDoc, expectOperationError } from "../../graphql/__tests__/e2e/gql-shapes.js";
-import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
+import {
+  isCanonical,
+  isEntityBackedCreate,
+} from "../../graphql/__tests__/e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -202,7 +205,7 @@ describe("a trigger's refusal", () => {
     );
     expect(response.status).toBe(409);
     expect(response.body).toEqual({
-      error: table!.source?.authoringVersion === 2
+      error: isCanonical(table!)
         ? CANONICAL_REFUSED
         : LEGACY_REFUSED,
     });
@@ -223,7 +226,7 @@ describe("a trigger's refusal", () => {
     );
     expect(refused.message).toBe(RULE_MESSAGE);
     expect(refused.data).toMatchObject({ hint: RULE_HINT });
-    if (table!.source?.authoringVersion === 2) {
+    if (isCanonical(table!)) {
       expect(response.errors).toBeUndefined();
     } else {
       // v1-only: the thrown error is the whole answer.

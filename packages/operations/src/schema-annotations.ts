@@ -1,4 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
+/** Form fields from an authorized record; execution still validates its canonical definition. */
+export const operationInputFieldsKeyword = {
+  keyword: "x-osf-inputFields",
+  schemaType: "string" as const,
+  valid: true,
+  metaSchema: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+};
+
 /** Presentation metadata only: reading a choice never grants authority to use it. */
 export const operationReferenceKeyword = {
   keyword: "x-osf-reference",

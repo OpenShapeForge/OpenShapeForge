@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RestEnabled
@@ -11,7 +11,6 @@ labels:
   en: Rest Enabled
 domains:
   - relations
-rest: true
 authorization:
   roles:
     read:
@@ -31,3 +30,77 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List Rest Enabled
+    description: List RestEnabled records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Rest Enabled
+    description: Get RestEnabled records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Rest Enabled
+    description: Create RestEnabled records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Rest Enabled
+    description: Update RestEnabled records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Rest Enabled
+    description: Delete RestEnabled records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  rest: {}

@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Alert
 title: Alert
-description: Generic CRM alert or signal indicating that something needs attention on a relation, agreement, case, asset, or other subject.
+description: Generic CRM alert or signal indicating that something needs attention on a relation, agreement, case,
+  asset, or other subject.
 language: en
 displayTemplate: "{{code}} {{title}}"
 filterField: code
@@ -58,11 +59,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: severity
     valueType: string
     required: true
@@ -75,11 +72,10 @@ fields:
     persisted:
       column: severity
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ALERTSEVERITY
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ALERTSEVERITY
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -92,11 +88,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ALERTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ALERTSTATUS
+    semanticType: referenceDataCode
   - key: raisedAt
     valueType: datetime
     required: true
@@ -109,9 +104,6 @@ fields:
     persisted:
       column: raised_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: resolvedAt
     valueType: datetime
     required: false
@@ -124,9 +116,6 @@ fields:
     persisted:
       column: resolved_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueDate
     valueType: date
     required: false
@@ -139,9 +128,6 @@ fields:
     persisted:
       column: due_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: subjectType
     valueType: string
     required: false
@@ -150,7 +136,8 @@ fields:
       nl: Type onderwerp
     description:
       en: Discriminator describing what kind of entity the alert refers to (e.g. relation, agreement, case, asset, invoice).
-      nl: Discriminator die aangeeft op welk soort entiteit de melding betrekking heeft (bijv. relatie, overeenkomst, zaak, object, factuur).
+      nl: Discriminator die aangeeft op welk soort entiteit de melding betrekking heeft (bijv. relatie, overeenkomst, zaak,
+        object, factuur).
     validation:
       maxLength: 100
     persisted:
@@ -184,179 +171,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: assignedTo
-    kind: belongsTo
-    target: Relation
-    foreignKey: assigned_to_relation_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assignedToId
     label:
       en: Assigned to
       nl: Toegewezen aan
-ui:
-  routes:
-    list:
-      en: /alerts
-      nl: /meldingen
-    detail:
-      en: /alerts/:id
-      nl: /meldingen/:id
-    create:
-      en: /alerts/create
-      nl: /meldingen/aanmaken
-    edit:
-      en: /alerts/:id/edit
-      nl: /meldingen/:id/bewerken
-    delete:
-      en: /alerts/:id/delete
-      nl: /meldingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Alerts
-        nl: Meldingen
-      columns:
-        - key: code
-          sortable: true
-        - key: title
-          sortable: true
-        - key: severity
-          sortable: true
-        - key: status
-          sortable: true
-        - key: raisedAt
-          sortable: true
-        - key: dueDate
-          sortable: true
-      defaultSort:
-        key: raisedAt
-        direction: desc
-      rowLink:
-        en: /alerts/:id
-        nl: /meldingen/:id
-    detail:
-      header:
-        title: "{{code}} {{title}}"
-        subtitle: "{{severity}}"
-        badges:
-          - severity
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Alert details
-                nl: Meldinggegevens
-              fields:
-                - code
-                - title
-                - severity
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Timing
-                nl: Tijdlijn
-              fields:
-                - raisedAt
-                - dueDate
-                - resolvedAt
-            - title:
-                en: Subject
-                nl: Onderwerp
-              fields:
-                - subjectType
-                - subjectId
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create alert
-            nl: Melding aanmaken
-          groups:
-            - title:
-                en: Alert details
-                nl: Meldinggegevens
-              fields:
-                - code
-                - title
-                - severity
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Timing
-                nl: Tijdlijn
-              fields:
-                - raisedAt
-                - dueDate
-                - resolvedAt
-            - title:
-                en: Subject
-                nl: Onderwerp
-              fields:
-                - subjectType
-                - subjectId
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit alert
-            nl: Melding bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: assigned_to_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -371,3 +205,249 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Alert
+    description: List Alert records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Alert
+    description: Get Alert records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Alert
+    description: Create Alert records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Alert records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /alerts
+          nl: /meldingen
+        columns:
+          - key: code
+            sortable: true
+          - key: title
+            sortable: true
+          - key: severity
+            sortable: true
+          - key: status
+            sortable: true
+          - key: raisedAt
+            sortable: true
+          - key: dueDate
+            sortable: true
+        title:
+          en: Alerts
+          nl: Meldingen
+        defaultSort:
+          key: raisedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /alerts/:id
+            nl: /meldingen/:id
+          create:
+            en: /alerts/create
+            nl: /meldingen/aanmaken
+        title: "{{code}} {{title}}"
+        subtitle: "{{severity}}"
+        badges:
+          - severity
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Alert details
+                    nl: Meldinggegevens
+                  fields:
+                    - code
+                    - title
+                    - severity
+                    - status
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Timing
+                    nl: Tijdlijn
+                  fields:
+                    - raisedAt
+                    - dueDate
+                    - resolvedAt
+                - title:
+                    en: Subject
+                    nl: Onderwerp
+                  fields:
+                    - subjectType
+                    - subjectId
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create alert
+              nl: Melding aanmaken
+            groups:
+              - title:
+                  en: Alert details
+                  nl: Meldinggegevens
+                fields:
+                  - code
+                  - title
+                  - severity
+                  - status
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Timing
+                  nl: Tijdlijn
+                fields:
+                  - raisedAt
+                  - dueDate
+                  - resolvedAt
+              - title:
+                  en: Subject
+                  nl: Onderwerp
+                fields:
+                  - subjectType
+                  - subjectId
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit alert
+              nl: Melding bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      severity:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ALERTSEVERITY
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ALERTSTATUS
+            clearable: false
+      raisedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      resolvedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueDate:
+        render:
+          component: DatePicker
+          props: {}

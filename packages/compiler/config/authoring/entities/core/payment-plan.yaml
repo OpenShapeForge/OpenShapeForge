@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PaymentPlan
@@ -40,11 +40,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PAYMENTPLANSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PAYMENTPLANSTATUS
+    semanticType: referenceDataCode
   - key: startDate
     valueType: date
     required: true
@@ -57,9 +56,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -72,9 +68,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: totalAmount
     valueType: number
     required: false
@@ -102,11 +95,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -121,145 +110,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-ui:
-  routes:
-    list:
-      en: /payment-plans
-      nl: /betalingsregelingen
-    detail:
-      en: /payment-plans/:id
-      nl: /betalingsregelingen/:id
-    create:
-      en: /payment-plans/create
-      nl: /betalingsregelingen/aanmaken
-    edit:
-      en: /payment-plans/:id/edit
-      nl: /betalingsregelingen/:id/bewerken
-    delete:
-      en: /payment-plans/:id/delete
-      nl: /betalingsregelingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Payment plans
-        nl: Betalingsregelingen
-      columns:
-        - key: code
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-        - key: totalAmount
-          sortable: true
-      defaultSort:
-        key: startDate
-        direction: desc
-      rowLink:
-        en: /payment-plans/:id
-        nl: /betalingsregelingen/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{totalAmount}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Plan details
-                nl: Regelinggegevens
-              fields:
-                - code
-                - status
-                - startDate
-                - endDate
-                - totalAmount
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create payment plan
-            nl: Betalingsregeling aanmaken
-          groups:
-            - title:
-                en: Plan details
-                nl: Regelinggegevens
-              fields:
-                - code
-                - status
-                - startDate
-                - endDate
-                - totalAmount
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit payment plan
-            nl: Betalingsregeling bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -274,3 +134,212 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Payment Plan
+    description: List PaymentPlan records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Payment Plan
+    description: Get PaymentPlan records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Payment Plan
+    description: Create PaymentPlan records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update PaymentPlan records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /payment-plans
+          nl: /betalingsregelingen
+        columns:
+          - key: code
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+          - key: totalAmount
+            sortable: true
+        title:
+          en: Payment plans
+          nl: Betalingsregelingen
+        defaultSort:
+          key: startDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /payment-plans/:id
+            nl: /betalingsregelingen/:id
+          create:
+            en: /payment-plans/create
+            nl: /betalingsregelingen/aanmaken
+        title: "{{code}}"
+        subtitle: "{{totalAmount}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Plan details
+                    nl: Regelinggegevens
+                  fields:
+                    - code
+                    - status
+                    - startDate
+                    - endDate
+                    - totalAmount
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create payment plan
+              nl: Betalingsregeling aanmaken
+            groups:
+              - title:
+                  en: Plan details
+                  nl: Regelinggegevens
+                fields:
+                  - code
+                  - status
+                  - startDate
+                  - endDate
+                  - totalAmount
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit payment plan
+              nl: Betalingsregeling bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PAYMENTPLANSTATUS
+            clearable: false
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000

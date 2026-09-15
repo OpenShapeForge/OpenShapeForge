@@ -200,7 +200,9 @@ export function buildAuthorization(
       );
       const matchingRelationship = (coreEntity.relationships ?? []).find(
         (r) => r.kind === "belongsTo" && r.foreignKey === col,
-      );
+      ) ?? allAuthoringFields.find((field) => field.persisted?.column === col &&
+        field.relationship?.kind === "belongsTo" && field.relationship.target &&
+        fieldSqlType(field) === "uuid")?.relationship;
       if (!persistedField && !matchingRelationship) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
@@ -214,7 +216,7 @@ export function buildAuthorization(
       // Group axes retain their relationship-only contract.
       const scalarSessionOwner = axis === "owner" && persistedField &&
         fieldSqlType(persistedField) === "uuid";
-      if (persistedField && !scalarSessionOwner) {
+      if (persistedField && !scalarSessionOwner && !(matchingRelationship && fieldSqlType(persistedField) === "uuid")) {
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +

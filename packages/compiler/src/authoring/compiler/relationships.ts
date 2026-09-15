@@ -28,6 +28,7 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
       target: rel.target,
       foreignKey: rel.foreignKey,
       inverse: rel.inverse,
+      ...(rel.through ? { through: rel.through } : {}),
       ownership: rel.ownership,
       cardinality: field.cardinality,
       sortable: field.sortable,

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RowAccessRecordPermissions
@@ -51,3 +51,76 @@ fields:
     persisted:
       column: authorization
       storageClass: core
+operations:
+  list:
+    name: List Row Access Record Permissions
+    description: List RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Row Access Record Permissions
+    description: Get RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Row Access Record Permissions
+    description: Create RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Row Access Record Permissions
+    description: Update RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Row Access Record Permissions
+    description: Delete RowAccessRecordPermissions records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

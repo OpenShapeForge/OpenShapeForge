@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SecureInputV2
@@ -13,10 +13,10 @@ domains:
   - relations
 authorization:
   roles:
-    read: [Relations.All.Read]
-    create: [Relations.All.ReadWrite]
-    update: [Relations.All.ReadWrite]
-    delete: [Relations.All.ReadWrite]
+    read: [ Relations.All.Read ]
+    create: [ Relations.All.ReadWrite ]
+    update: [ Relations.All.ReadWrite ]
+    delete: [ Relations.All.ReadWrite ]
 fields:
   - key: name
     valueType: string

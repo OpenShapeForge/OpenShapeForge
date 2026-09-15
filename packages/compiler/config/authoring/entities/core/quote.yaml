@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Quote
@@ -152,25 +152,34 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List quotes, nl: Offertes tonen }
-    description: { en: Returns a filtered and sorted page of quotes., nl: Geeft een gefilterde en gesorteerde pagina met offertes terug. }
+    description:
+      {
+        en: Returns a filtered and sorted page of quotes.,
+        nl: Geeft een gefilterde en gesorteerde pagina met offertes terug.
+      }
     implementation: { type: entity, action: list }
     effects: { data: read, external: none }
     reliability:
@@ -186,7 +195,11 @@ operations:
     confirmation: { mode: none }
   create:
     name: { en: Create quote, nl: Offerte aanmaken }
-    description: { en: Creates one quote after validating its canonical fields., nl: Maakt één offerte aan na validatie van de canonieke velden. }
+    description:
+      {
+        en: Creates one quote after validating its canonical fields.,
+        nl: Maakt één offerte aan na validatie van de canonieke velden.
+      }
     implementation: { type: entity, action: create }
     effects: { data: write, external: none }
     reliability:
@@ -194,7 +207,11 @@ operations:
     confirmation: { mode: none }
   update:
     name: { en: Update quote, nl: Offerte wijzigen }
-    description: { en: Updates one quote while holding its server-issued edit lease and current version., nl: Wijzigt één offerte met de server-uitgegeven bewerkingslease en actuele versie. }
+    description:
+      {
+        en: Updates one quote while holding its server-issued edit lease and current version.,
+        nl: Wijzigt één offerte met de server-uitgegeven bewerkingslease en actuele versie.
+      }
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability:
@@ -205,7 +222,11 @@ operations:
     confirmation: { mode: none }
   delete:
     name: { en: Delete quote, nl: Offerte verwijderen }
-    description: { en: Permanently deletes one quote after a server-issued version-bound confirmation challenge., nl: Verwijdert één offerte definitief na een server-uitgegeven versiegebonden bevestigingsvraag. }
+    description:
+      {
+        en: Permanently deletes one quote after a server-issued version-bound confirmation challenge.,
+        nl: Verwijdert één offerte definitief na een server-uitgegeven versiegebonden bevestigingsvraag.
+      }
     implementation: { type: entity, action: delete }
     effects: { data: delete, external: none }
     reliability:
@@ -219,7 +240,7 @@ operations:
         kind: type-current-field
         field: quoteNumber
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -251,46 +272,46 @@ interfaces:
           create: { en: /quotes/new, nl: /offertes/nieuw }
         title: "{{quoteNumber}}"
         subtitle: "{{amountTotal}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [quoteStatus, amountTotal, currencyCode, expiresAt]
-            relationships: [relation, agreement]
+            fields: [ quoteStatus, amountTotal, currencyCode, expiresAt ]
+            relationships: [ relationId, agreementId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Quote details, nl: Offertegegevens }
-                  fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+                  fields: [ quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode ]
                 - title: { en: Amounts, nl: Bedragen }
-                  fields: [amountBase, amountVat, amountTotal]
+                  fields: [ amountBase, amountVat, amountTotal ]
                 - title: { en: Description, nl: Omschrijving }
-                  fields: [description]
+                  fields: [ description ]
                 - title: { en: Source, nl: Herkomst }
-                  fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                  fields: [ externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration ]
         modes:
           create:
             title: { en: Create quote, nl: Offerte aanmaken }
             groups:
               - title: { en: Quote details, nl: Offertegegevens }
-                fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+                fields: [ quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode ]
               - title: { en: Amounts, nl: Bedragen }
-                fields: [amountBase, amountVat, amountTotal]
+                fields: [ amountBase, amountVat, amountTotal ]
               - title: { en: Description, nl: Omschrijving }
-                fields: [description]
+                fields: [ description ]
               - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                fields: [ externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration ]
           update:
             title: { en: Update quote, nl: Offerte wijzigen }
             groups:
               - title: { en: Quote details, nl: Offertegegevens }
-                fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+                fields: [ quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode ]
               - title: { en: Amounts, nl: Bedragen }
-                fields: [amountBase, amountVat, amountTotal]
+                fields: [ amountBase, amountVat, amountTotal ]
               - title: { en: Description, nl: Omschrijving }
-                fields: [description]
+                fields: [ description ]
               - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                fields: [ externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration ]
 # Finance.Quotes.Read / Finance.Quotes.ReadWrite are the per-entity roles the realm already
 # emits; listing them here is what makes them mean something. A caller that
 # writes quotes without being all of Finance — a host-authored role or a plugin

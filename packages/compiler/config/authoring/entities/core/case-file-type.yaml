@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseFileType
@@ -63,11 +63,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: defaultConfidentiality
     valueType: string
     required: false
@@ -77,11 +73,10 @@ fields:
     persisted:
       column: default_confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILECONFIDENTIALITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILECONFIDENTIALITY
+    semanticType: referenceDataCode
   - key: archiveProfile
     valueType: string
     required: false
@@ -102,11 +97,98 @@ fields:
     persisted:
       column: retention_years
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: List Case file type
+    description: List CaseFileType records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case file type
+    description: Get CaseFileType records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case file type
+    description: Create CaseFileType records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case file type
+    description: Update CaseFileType records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case file type
+    description: Delete CaseFileType records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      defaultConfidentiality:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILECONFIDENTIALITY
+            clearable: true

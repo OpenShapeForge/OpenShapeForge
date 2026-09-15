@@ -47,6 +47,7 @@ import {
   withClassifiedColumn,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import {
+  acknowledgementRequired,
   challengeAnswerFor,
   isCanonical,
   isEntityBackedCreate,
@@ -171,7 +172,10 @@ async function restDelete(
 ): Promise<RestResponse> {
   const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
   const lease = await acquireLease(table, identity, id, "delete");
-  const first = await rest(identity, "DELETE", `${base}/${id}`, lease);
+  const first = await rest(identity, "DELETE", `${base}/${id}`, {
+    ...lease,
+    ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
+  });
   if (first.status !== 428) return first;
   expect(first.body.error.code).toBe("CONFIRMATION_REQUIRED");
   expect(first.body.error.retryAt).toBeUndefined();

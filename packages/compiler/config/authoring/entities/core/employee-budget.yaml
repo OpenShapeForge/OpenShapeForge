@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: EmployeeBudget
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: amount
     valueType: number
     required: true
@@ -101,9 +97,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
     valueType: date
     required: false
@@ -116,9 +109,6 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -133,145 +123,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: employee
-    kind: belongsTo
-    target: Employee
-    foreignKey: employee_id
+  - key: employeeId
     label:
       en: Employee
       nl: Medewerker
-ui:
-  routes:
-    list:
-      en: /employee-budgets
-      nl: /medewerkerbudgetten
-    detail:
-      en: /employee-budgets/:id
-      nl: /medewerkerbudgetten/:id
-    create:
-      en: /employee-budgets/create
-      nl: /medewerkerbudgetten/aanmaken
-    edit:
-      en: /employee-budgets/:id/edit
-      nl: /medewerkerbudgetten/:id/bewerken
-    delete:
-      en: /employee-budgets/:id/delete
-      nl: /medewerkerbudgetten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Employee budgets
-        nl: Medewerkerbudgetten
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: validFrom
-          sortable: true
-        - key: validTo
-          sortable: true
-      defaultSort:
-        key: validFrom
-        direction: desc
-      rowLink:
-        en: /employee-budgets/:id
-        nl: /medewerkerbudgetten/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{amount}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Budget details
-                nl: Budgetgegevens
-              fields:
-                - code
-                - name
-                - amount
-                - currencyCode
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create employee budget
-            nl: Medewerkerbudget aanmaken
-          groups:
-            - title:
-                en: Budget details
-                nl: Budgetgegevens
-              fields:
-                - code
-                - name
-                - amount
-                - currencyCode
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit employee budget
-            nl: Medewerkerbudget bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: employee_id
+      storageClass: core
+    semanticType: Employee
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -286,3 +147,206 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Employee Budget
+    description: List EmployeeBudget records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Employee Budget
+    description: Get EmployeeBudget records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Employee Budget
+    description: Create EmployeeBudget records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update EmployeeBudget records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /employee-budgets
+          nl: /medewerkerbudgetten
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: validFrom
+            sortable: true
+          - key: validTo
+            sortable: true
+        title:
+          en: Employee budgets
+          nl: Medewerkerbudgetten
+        defaultSort:
+          key: validFrom
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /employee-budgets/:id
+            nl: /medewerkerbudgetten/:id
+          create:
+            en: /employee-budgets/create
+            nl: /medewerkerbudgetten/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{amount}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Budget details
+                    nl: Budgetgegevens
+                  fields:
+                    - code
+                    - name
+                    - amount
+                    - currencyCode
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create employee budget
+              nl: Medewerkerbudget aanmaken
+            groups:
+              - title:
+                  en: Budget details
+                  nl: Budgetgegevens
+                fields:
+                  - code
+                  - name
+                  - amount
+                  - currencyCode
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit employee budget
+              nl: Medewerkerbudget bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

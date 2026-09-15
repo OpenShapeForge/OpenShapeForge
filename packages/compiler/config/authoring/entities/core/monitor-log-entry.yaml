@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MonitorLogEntry
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: logged_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: level
     valueType: string
     required: false
@@ -57,112 +54,17 @@ fields:
     persisted:
       column: message
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 1000
-relationships:
-  - key: monitorLog
-    kind: belongsTo
-    target: MonitorLog
-    foreignKey: monitor_log_id
+    semanticType: multilineText
+  - key: monitorLogId
     label:
       en: Monitor log
       nl: Monitorlog
-ui:
-  routes:
-    list:
-      en: /monitor-log-entries
-      nl: /monitorlogregels
-    detail:
-      en: /monitor-log-entries/:id
-      nl: /monitorlogregels/:id
-    create:
-      en: /monitor-log-entries/create
-      nl: /monitorlogregels/aanmaken
-    edit:
-      en: /monitor-log-entries/:id/edit
-      nl: /monitorlogregels/:id/bewerken
-    delete:
-      en: /monitor-log-entries/:id/delete
-      nl: /monitorlogregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Monitor log entries
-        nl: Monitorlogregels
-      columns:
-        - key: loggedAt
-          sortable: true
-        - key: level
-          sortable: true
-        - key: message
-          sortable: true
-      defaultSort:
-        key: loggedAt
-        direction: desc
-      rowLink:
-        en: /monitor-log-entries/:id
-        nl: /monitorlogregels/:id
-    detail:
-      header:
-        title: "{{loggedAt}}"
-        subtitle: "{{level}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Entry details
-                nl: Regelgegevens
-              fields:
-                - loggedAt
-                - level
-                - message
-    form:
-      variants:
-        create:
-          title:
-            en: Create monitor log entry
-            nl: Monitorlogregel aanmaken
-          groups:
-            - title:
-                en: Entry details
-                nl: Regelgegevens
-              fields:
-                - loggedAt
-                - level
-                - message
-        edit:
-          extends: create
-          title:
-            en: Edit monitor log entry
-            nl: Monitorlogregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: monitor_log_id
+      storageClass: core
+    semanticType: MonitorLog
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -177,3 +79,164 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Monitor Log Entry
+    description: List MonitorLogEntry records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Monitor Log Entry
+    description: Get MonitorLogEntry records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Monitor Log Entry
+    description: Create MonitorLogEntry records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MonitorLogEntry records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /monitor-log-entries
+          nl: /monitorlogregels
+        columns:
+          - key: loggedAt
+            sortable: true
+          - key: level
+            sortable: true
+          - key: message
+            sortable: true
+        title:
+          en: Monitor log entries
+          nl: Monitorlogregels
+        defaultSort:
+          key: loggedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /monitor-log-entries/:id
+            nl: /monitorlogregels/:id
+          create:
+            en: /monitor-log-entries/create
+            nl: /monitorlogregels/aanmaken
+        title: "{{loggedAt}}"
+        subtitle: "{{level}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Entry details
+                    nl: Regelgegevens
+                  fields:
+                    - loggedAt
+                    - level
+                    - message
+        modes:
+          create:
+            title:
+              en: Create monitor log entry
+              nl: Monitorlogregel aanmaken
+            groups:
+              - title:
+                  en: Entry details
+                  nl: Regelgegevens
+                fields:
+                  - loggedAt
+                  - level
+                  - message
+          update:
+            title:
+              en: Edit monitor log entry
+              nl: Monitorlogregel bewerken
+    fields:
+      loggedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      message:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 1000
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

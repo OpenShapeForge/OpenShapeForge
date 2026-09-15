@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AssetCondition
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: assessed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: score
     valueType: number
     required: false
@@ -52,11 +49,10 @@ fields:
     persisted:
       column: score_scale
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ASSESSMENTSCALE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ASSESSMENTSCALE
+    semanticType: referenceDataCode
   - key: notes
     valueType: string
     required: false
@@ -71,11 +67,7 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -90,142 +82,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_id
+  - key: assetId
     label:
       en: Asset
       nl: Object
-  - key: assessedBy
-    kind: belongsTo
-    target: Relation
-    foreignKey: assessed_by_relation_id
+    persisted:
+      column: asset_id
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
+  - key: assessedById
     label:
       en: Assessed by
       nl: Beoordeeld door
-ui:
-  routes:
-    list:
-      en: /asset-conditions
-      nl: /condities
-    detail:
-      en: /asset-conditions/:id
-      nl: /condities/:id
-    create:
-      en: /asset-conditions/create
-      nl: /condities/aanmaken
-    edit:
-      en: /asset-conditions/:id/edit
-      nl: /condities/:id/bewerken
-    delete:
-      en: /asset-conditions/:id/delete
-      nl: /condities/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Asset conditions
-        nl: Condities
-      columns:
-        - key: assessedAt
-          sortable: true
-        - key: score
-          sortable: true
-        - key: scoreScale
-          sortable: true
-      defaultSort:
-        key: assessedAt
-        direction: desc
-      rowLink:
-        en: /asset-conditions/:id
-        nl: /condities/:id
-    detail:
-      header:
-        title: "{{assessedAt}}"
-        subtitle: "{{score}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Condition details
-                nl: Conditiegegevens
-              fields:
-                - assessedAt
-                - score
-                - scoreScale
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create asset condition
-            nl: Conditie aanmaken
-          groups:
-            - title:
-                en: Condition details
-                nl: Conditiegegevens
-              fields:
-                - assessedAt
-                - score
-                - scoreScale
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit asset condition
-            nl: Conditie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: assessed_by_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -240,3 +116,198 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Asset Condition
+    description: List AssetCondition records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Asset Condition
+    description: Get AssetCondition records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Asset Condition
+    description: Create AssetCondition records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AssetCondition records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /asset-conditions
+          nl: /condities
+        columns:
+          - key: assessedAt
+            sortable: true
+          - key: score
+            sortable: true
+          - key: scoreScale
+            sortable: true
+        title:
+          en: Asset conditions
+          nl: Condities
+        defaultSort:
+          key: assessedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /asset-conditions/:id
+            nl: /condities/:id
+          create:
+            en: /asset-conditions/create
+            nl: /condities/aanmaken
+        title: "{{assessedAt}}"
+        subtitle: "{{score}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Condition details
+                    nl: Conditiegegevens
+                  fields:
+                    - assessedAt
+                    - score
+                    - scoreScale
+                - title:
+                    en: Notes
+                    nl: Notities
+                  fields:
+                    - notes
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create asset condition
+              nl: Conditie aanmaken
+            groups:
+              - title:
+                  en: Condition details
+                  nl: Conditiegegevens
+                fields:
+                  - assessedAt
+                  - score
+                  - scoreScale
+              - title:
+                  en: Notes
+                  nl: Notities
+                fields:
+                  - notes
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit asset condition
+              nl: Conditie bewerken
+    fields:
+      assessedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      scoreScale:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ASSESSMENTSCALE
+            clearable: true
+      notes:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

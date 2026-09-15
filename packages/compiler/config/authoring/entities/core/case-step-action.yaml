@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseStepAction
@@ -13,9 +13,6 @@ labels:
 domains:
   - cases
   - workflow
-# Runtime scheduler rows are created and advanced by case/workflow services.
-# Generic transports and workflow entity nodes must never mutate them.
-crud: false
 authorization:
   roles:
     read:
@@ -39,7 +36,6 @@ indexes:
       - id
 fields:
   - key: processId
-    valueType: string
     required: true
     readOnly: true
     label:
@@ -53,8 +49,10 @@ fields:
     persisted:
       column: process_id
       storageClass: core
+    semanticType: Process
+    relationship:
+      ownership: reference
   - key: processStepId
-    valueType: string
     required: false
     readOnly: true
     label:
@@ -68,6 +66,9 @@ fields:
     persisted:
       column: process_step_id
       storageClass: core
+    semanticType: ProcessStep
+    relationship:
+      ownership: reference
   - key: actionKey
     valueType: string
     required: true
@@ -98,11 +99,10 @@ fields:
     persisted:
       column: kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONKIND
+    semanticType: referenceDataCode
   - key: required
     valueType: boolean
     required: true
@@ -123,11 +123,10 @@ fields:
     persisted:
       column: start_mode
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONSTARTMODE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONSTARTMODE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -138,11 +137,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTEPACTIONSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTEPACTIONSTATUS
+    semanticType: referenceDataCode
   - key: workflowDefinitionId
     valueType: string
     required: false
@@ -176,8 +174,6 @@ fields:
     persisted:
       column: task_template
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: result
     valueType: object
     required: false
@@ -187,8 +183,6 @@ fields:
     persisted:
       column: result
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: failureDetails
     valueType: object
     required: false
@@ -198,8 +192,6 @@ fields:
     persisted:
       column: failure_details
       storageClass: core
-    render:
-      component: JsonFieldEditor
   - key: activatedAt
     valueType: datetime
     required: false
@@ -227,32 +219,55 @@ fields:
     persisted:
       column: cancelled_at
       storageClass: core
-relationships:
-  - key: process
-    kind: belongsTo
-    target: Process
-    foreignKey: process_id
-    label:
-      en: Case step
-      nl: Zaakstap
-  - key: processStep
-    kind: belongsTo
-    target: ProcessStep
-    foreignKey: process_step_id
-    label:
-      en: Legacy process step
-      nl: Legacy processtap
-  - key: caseStepTemplate
-    kind: belongsTo
-    target: CaseStepTemplate
-    foreignKey: case_step_template_id
+  - key: caseStepTemplateId
     label:
       en: Case step template
       nl: Zaakstapsjabloon
-  - key: task
-    kind: belongsTo
-    target: Task
-    foreignKey: task_id
+    persisted:
+      column: case_step_template_id
+      storageClass: core
+    semanticType: CaseStepTemplate
+    relationship:
+      ownership: reference
+  - key: taskId
     label:
       en: Task
       nl: Taak
+    persisted:
+      column: task_id
+      storageClass: core
+    semanticType: Task
+    relationship:
+      ownership: reference
+operations: {}
+interfaces:
+  graphql: {}
+  web:
+    fields:
+      kind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONKIND
+            clearable: false
+      startMode:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONSTARTMODE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTEPACTIONSTATUS
+            clearable: false
+      taskTemplate:
+        render:
+          component: JsonFieldEditor
+      result:
+        render:
+          component: JsonFieldEditor
+      failureDetails:
+        render:
+          component: JsonFieldEditor

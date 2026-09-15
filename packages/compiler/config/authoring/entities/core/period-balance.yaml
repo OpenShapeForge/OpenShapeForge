@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PeriodBalance
 title: Period Balance
-description: Materialised opening/closing balance per (period, account, dimensions). Projection populated by the audit/timeline service from posting events; UIs must never write directly.
+description: Materialised opening/closing balance per (period, account, dimensions). Projection populated by the
+  audit/timeline service from posting events; UIs must never write directly.
 language: en
 displayTemplate: "{{ledgerAccount.code}}"
 filterField: dimensionsHash
@@ -21,7 +22,8 @@ fields:
       nl: Dimensiehash
     description:
       en: Sha256 hex of the dimension tuple, used to make (fiscal_period, ledger_account, dimensions) uniquely identifiable.
-      nl: Sha256 hex van het dimensietupel, gebruikt om (boekjaarperiode, grootboekrekening, dimensies) uniek te identificeren.
+      nl: Sha256 hex van het dimensietupel, gebruikt om (boekjaarperiode, grootboekrekening, dimensies) uniek te
+        identificeren.
     validation:
       maxLength: 64
     persisted:
@@ -66,118 +68,26 @@ fields:
     persisted:
       column: closing_balance
       storageClass: core
-relationships:
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    semanticType: FiscalPeriod
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-ui:
-  routes:
-    list:
-      en: /period-balances
-      nl: /periodesaldi
-    detail:
-      en: /period-balances/:id
-      nl: /periodesaldi/:id
-    create:
-      en: /period-balances/create
-      nl: /periodesaldi/aanmaken
-    edit:
-      en: /period-balances/:id/edit
-      nl: /periodesaldi/:id/bewerken
-    delete:
-      en: /period-balances/:id/delete
-      nl: /periodesaldi/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Period balances
-        nl: Periodesaldi
-      columns:
-        - key: dimensionsHash
-          sortable: true
-        - key: debitTotal
-          sortable: true
-        - key: creditTotal
-          sortable: true
-        - key: closingBalance
-          sortable: true
-      defaultSort:
-        key: dimensionsHash
-        direction: asc
-      rowLink:
-        en: /period-balances/:id
-        nl: /periodesaldi/:id
-    detail:
-      header:
-        title: "{{dimensionsHash}}"
-        subtitle: "{{closingBalance}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Balance details
-                nl: Saldogegevens
-              fields:
-                - dimensionsHash
-                - debitTotal
-                - creditTotal
-                - closingBalance
-    form:
-      variants:
-        create:
-          title:
-            en: Create period balance
-            nl: Periodesaldo aanmaken
-          groups:
-            - title:
-                en: Balance details
-                nl: Saldogegevens
-              fields:
-                - dimensionsHash
-                - debitTotal
-                - creditTotal
-                - closingBalance
-        edit:
-          extends: create
-          title:
-            en: Edit period balance
-            nl: Periodesaldo bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -192,3 +102,157 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Period Balance
+    description: List PeriodBalance records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Period Balance
+    description: Get PeriodBalance records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Period Balance
+    description: Create PeriodBalance records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update PeriodBalance records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /period-balances
+          nl: /periodesaldi
+        columns:
+          - key: dimensionsHash
+            sortable: true
+          - key: debitTotal
+            sortable: true
+          - key: creditTotal
+            sortable: true
+          - key: closingBalance
+            sortable: true
+        title:
+          en: Period balances
+          nl: Periodesaldi
+        defaultSort:
+          key: dimensionsHash
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /period-balances/:id
+            nl: /periodesaldi/:id
+          create:
+            en: /period-balances/create
+            nl: /periodesaldi/aanmaken
+        title: "{{dimensionsHash}}"
+        subtitle: "{{closingBalance}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Balance details
+                    nl: Saldogegevens
+                  fields:
+                    - dimensionsHash
+                    - debitTotal
+                    - creditTotal
+                    - closingBalance
+        modes:
+          create:
+            title:
+              en: Create period balance
+              nl: Periodesaldo aanmaken
+            groups:
+              - title:
+                  en: Balance details
+                  nl: Saldogegevens
+                fields:
+                  - dimensionsHash
+                  - debitTotal
+                  - creditTotal
+                  - closingBalance
+          update:
+            title:
+              en: Edit period balance
+              nl: Periodesaldo bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

@@ -206,6 +206,13 @@ export function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["cont
   return Object.values(contract.crud.operations).every(Boolean);
 }
 
+export function resolveGeneratedCrudRoutes(
+  legacyRoutes: ViewDefinition["routes"] | undefined,
+  compiledRoutes: ViewDefinition["routes"] | undefined,
+): ViewDefinition["routes"] | undefined {
+  return legacyRoutes ?? compiledRoutes;
+}
+
 function isGeneratedCrudUiEnabledForEntityName(
   entityName: string | undefined,
   contractByName: Map<string, CompiledAuthoringEntity["contract"]>,
@@ -374,11 +381,15 @@ export async function generateAuthoringUiArtifacts(
 
   for (const entityName of entityNames) {
     const loaded = loadEntity(authoringDir, entityName);
+    const contract = compile(loaded);
     compiled.push({
       name: entityName,
-      contract: compile(loaded),
+      contract,
       appShell: loaded.appShell,
-      routes: loaded.coreEntity.ui?.routes,
+      routes: resolveGeneratedCrudRoutes(
+        loaded.coreEntity.ui?.routes,
+        contract.views.core?.routes,
+      ),
     });
   }
 

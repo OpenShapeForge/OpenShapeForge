@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BankReconciliation
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: matched_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: matchedBy
     valueType: string
     required: false
@@ -42,117 +39,36 @@ fields:
     persisted:
       column: matched_by
       storageClass: core
-relationships:
-  - key: bankStatementLine
-    kind: belongsTo
-    target: BankStatementLine
-    foreignKey: bank_statement_line_id
+  - key: bankStatementLineId
     label:
       en: Bank statement line
       nl: Bankafschriftregel
-  - key: invoicePayment
-    kind: belongsTo
-    target: InvoicePayment
-    foreignKey: invoice_payment_id
+    persisted:
+      column: bank_statement_line_id
+      storageClass: core
+    semanticType: BankStatementLine
+    relationship:
+      ownership: reference
+  - key: invoicePaymentId
     label:
       en: Invoice payment
       nl: Factuurbetaling
-  - key: ledgerPostingLine
-    kind: belongsTo
-    target: LedgerPostingLine
-    foreignKey: ledger_posting_line_id
+    persisted:
+      column: invoice_payment_id
+      storageClass: core
+    semanticType: InvoicePayment
+    relationship:
+      ownership: reference
+  - key: ledgerPostingLineId
     label:
       en: Ledger posting line
       nl: Boekingsregel
-ui:
-  routes:
-    list:
-      en: /bank-reconciliations
-      nl: /afletteringen
-    detail:
-      en: /bank-reconciliations/:id
-      nl: /afletteringen/:id
-    create:
-      en: /bank-reconciliations/create
-      nl: /afletteringen/aanmaken
-    edit:
-      en: /bank-reconciliations/:id/edit
-      nl: /afletteringen/:id/bewerken
-    delete:
-      en: /bank-reconciliations/:id/delete
-      nl: /afletteringen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Bank reconciliations
-        nl: Afletteringen
-      columns:
-        - key: matchedAt
-          sortable: true
-        - key: matchedBy
-          sortable: true
-      defaultSort:
-        key: matchedAt
-        direction: desc
-      rowLink:
-        en: /bank-reconciliations/:id
-        nl: /afletteringen/:id
-    detail:
-      header:
-        title: "{{matchedAt}}"
-        subtitle: "{{matchedBy}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Match details
-                nl: Afletteringsgegevens
-              fields:
-                - matchedAt
-                - matchedBy
-    form:
-      variants:
-        create:
-          title:
-            en: Create bank reconciliation
-            nl: Aflettering aanmaken
-          groups:
-            - title:
-                en: Match details
-                nl: Afletteringsgegevens
-              fields:
-                - matchedAt
-                - matchedBy
-        edit:
-          extends: create
-          title:
-            en: Edit bank reconciliation
-            nl: Aflettering bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: ledger_posting_line_id
+      storageClass: core
+    semanticType: LedgerPostingLine
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -167,3 +83,154 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Bank Reconciliation
+    description: List BankReconciliation records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Bank Reconciliation
+    description: Get BankReconciliation records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Bank Reconciliation
+    description: Create BankReconciliation records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BankReconciliation records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /bank-reconciliations
+          nl: /afletteringen
+        columns:
+          - key: matchedAt
+            sortable: true
+          - key: matchedBy
+            sortable: true
+        title:
+          en: Bank reconciliations
+          nl: Afletteringen
+        defaultSort:
+          key: matchedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /bank-reconciliations/:id
+            nl: /afletteringen/:id
+          create:
+            en: /bank-reconciliations/create
+            nl: /afletteringen/aanmaken
+        title: "{{matchedAt}}"
+        subtitle: "{{matchedBy}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Match details
+                    nl: Afletteringsgegevens
+                  fields:
+                    - matchedAt
+                    - matchedBy
+        modes:
+          create:
+            title:
+              en: Create bank reconciliation
+              nl: Aflettering aanmaken
+            groups:
+              - title:
+                  en: Match details
+                  nl: Afletteringsgegevens
+                fields:
+                  - matchedAt
+                  - matchedBy
+          update:
+            title:
+              en: Edit bank reconciliation
+              nl: Aflettering bewerken
+    fields:
+      matchedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

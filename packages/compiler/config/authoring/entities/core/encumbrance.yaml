@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Encumbrance
@@ -25,11 +25,10 @@ fields:
     persisted:
       column: encumbrance_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ENCUMBRANCEKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ENCUMBRANCEKIND
+    semanticType: referenceDataCode
   - key: code
     valueType: string
     required: true
@@ -59,11 +58,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: amount
     valueType: number
     required: false
@@ -105,9 +100,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
     valueType: date
     required: false
@@ -120,9 +112,6 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -137,154 +126,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_id
+  - key: assetId
     label:
       en: Asset
       nl: Object
-  - key: holder
-    kind: belongsTo
-    target: Relation
-    foreignKey: holder_relation_id
+    persisted:
+      column: asset_id
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
+  - key: holderId
     label:
       en: Holder
       nl: Houder
-ui:
-  routes:
-    list:
-      en: /encumbrances
-      nl: /zekerheden
-    detail:
-      en: /encumbrances/:id
-      nl: /zekerheden/:id
-    create:
-      en: /encumbrances/create
-      nl: /zekerheden/aanmaken
-    edit:
-      en: /encumbrances/:id/edit
-      nl: /zekerheden/:id/bewerken
-    delete:
-      en: /encumbrances/:id/delete
-      nl: /zekerheden/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Encumbrances
-        nl: Zekerheden
-      columns:
-        - key: code
-          sortable: true
-        - key: encumbranceKind
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: validFrom
-          sortable: true
-        - key: validTo
-          sortable: true
-      defaultSort:
-        key: validFrom
-        direction: desc
-      rowLink:
-        en: /encumbrances/:id
-        nl: /zekerheden/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{encumbranceKind}}"
-        badges:
-          - encumbranceKind
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Encumbrance details
-                nl: Zekerheidgegevens
-              fields:
-                - code
-                - encumbranceKind
-                - amount
-                - currencyCode
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create encumbrance
-            nl: Zekerheid aanmaken
-          groups:
-            - title:
-                en: Encumbrance details
-                nl: Zekerheidgegevens
-              fields:
-                - code
-                - encumbranceKind
-                - amount
-                - currencyCode
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit encumbrance
-            nl: Zekerheid bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: holder_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -299,3 +160,214 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Encumbrance
+    description: List Encumbrance records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Encumbrance
+    description: Get Encumbrance records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Encumbrance
+    description: Create Encumbrance records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Encumbrance records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /encumbrances
+          nl: /zekerheden
+        columns:
+          - key: code
+            sortable: true
+          - key: encumbranceKind
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: validFrom
+            sortable: true
+          - key: validTo
+            sortable: true
+        title:
+          en: Encumbrances
+          nl: Zekerheden
+        defaultSort:
+          key: validFrom
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /encumbrances/:id
+            nl: /zekerheden/:id
+          create:
+            en: /encumbrances/create
+            nl: /zekerheden/aanmaken
+        title: "{{code}}"
+        subtitle: "{{encumbranceKind}}"
+        badges:
+          - encumbranceKind
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Encumbrance details
+                    nl: Zekerheidgegevens
+                  fields:
+                    - code
+                    - encumbranceKind
+                    - amount
+                    - currencyCode
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create encumbrance
+              nl: Zekerheid aanmaken
+            groups:
+              - title:
+                  en: Encumbrance details
+                  nl: Zekerheidgegevens
+                fields:
+                  - code
+                  - encumbranceKind
+                  - amount
+                  - currencyCode
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit encumbrance
+              nl: Zekerheid bewerken
+    fields:
+      encumbranceKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ENCUMBRANCEKIND
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}

@@ -348,7 +348,7 @@ function collectionFor(
     columns: columnKeys.map((key) => ({
       fieldId: `${entityName}.${key}`,
       key,
-      label: localized(fieldByKey.get(key)?.label, key),
+      label: localized(list?.columns.find(column => column.key === key)?.label ?? fieldByKey.get(key)?.label, key),
     })),
     ...(list?.defaultSort ? { defaultSort: list.defaultSort } : {}),
   };
@@ -481,9 +481,11 @@ function unsupportedGenericCreate(source: ProjectableEntity, all: ReadonlyMap<st
   const { contract } = source;
   if (contract.entityOperations.create?.implementation.type !== "entity") return false;
   if (contract.model.relationships.some((relationship) => relationship.fieldKey && relationship.kind !== "belongsTo" &&
+    relationship.ownership === "owned" &&
     typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0)) return true;
   return [...all.values()].some((owner) => owner.contract.model.relationships.some((relationship) =>
-    relationship.fieldKey && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
+    relationship.fieldKey && !relationship.through && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
+    relationship.ownership === "owned" &&
     (relationship.sortable || contract.storage.columns.some((column) => column.column === relationship.foreignKey && !column.nullable))));
 }
 
@@ -515,7 +517,8 @@ function projectEntity(
   }
   for (const owner of all.values()) {
     for (const relationship of owner.contract.model.relationships) {
-      if (!relationship.fieldKey || relationship.kind !== "hasMany" || relationship.target !== entityName) continue;
+      if (!relationship.fieldKey || relationship.through || relationship.kind !== "hasMany" ||
+        relationship.target !== entityName || relationship.ownership !== "owned") continue;
       const inverse = contract.storage.columns.find((column) => column.column === relationship.foreignKey);
       if (inverse) serverOwnedFields.add(inverse.field);
     }
@@ -601,6 +604,7 @@ function projectEntity(
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
       ...(relationship.sortable ? { sortable: true, positionColumn: relationship.kind === "manyToMany" ? "position" : `${relationship.foreignKey}_position` } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),
+      ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
       operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create && !relationship.fieldKey ? { create } : {}), ...nativeOperations },
       ...(list ? { collection: { ...target.collection,
@@ -688,6 +692,7 @@ function projectEntity(
     },
     titleTemplate: detail?.header.title ?? `{{${source.collection.displayField}}}`,
     ...(detail?.header.subtitle ? { subtitleTemplate: detail.header.subtitle } : {}),
+    ...(detail?.header.badges?.items.length ? { badges: detail.header.badges.items } : {}),
     layout: {
       tabs: recordTabs,
       context: {
@@ -908,7 +913,7 @@ export function buildWebManifest(
       entityName: name,
       label: localized(definition.entity.labels, definition.entity.title ?? name),
       // These supports describe editing inside a carrier value, not CRUD.
-      fields: definition.model.fields.map((field) => projectField(field, name, { read: true, create: true, update: true }, true)),
+      fields: definition.model.fields.map((field) => projectField(field, name, { read: true, create: true, update: true }, true, definition.interfaces?.web?.fields)),
       ...(materialize ? { materializeOperationId: materialize.id } : {}),
     }];
   }));

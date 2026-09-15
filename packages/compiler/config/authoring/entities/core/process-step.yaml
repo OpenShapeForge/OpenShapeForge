@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProcessStep
 title: Process Step
-description: A business-visible process step within the current technical process-step table, separate from technical workflow nodes.
+description: A business-visible process step within the current technical process-step table, separate from technical
+  workflow nodes.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
@@ -63,11 +64,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: stepType
     valueType: string
     required: true
@@ -77,11 +74,10 @@ fields:
     persisted:
       column: step_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTEPTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTEPTYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -91,11 +87,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTEPSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTEPSTATUS
+    semanticType: referenceDataCode
   - key: sequenceNumber
     valueType: integer
     required: false
@@ -205,8 +200,6 @@ fields:
     persisted:
       column: required_input
       storageClass: core
-    render:
-      component: JsonEditor
   - key: startedAt
     valueType: datetime
     required: false
@@ -216,9 +209,6 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
     valueType: datetime
     required: false
@@ -228,9 +218,6 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
     valueType: datetime
     required: false
@@ -240,13 +227,10 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedByAccountId
     valueType: string
     required: false
-    semanticType: accountId
+    semanticType: Account
     label:
       en: Completed by
       nl: Afgerond door
@@ -258,6 +242,9 @@ fields:
     persisted:
       column: completed_by_account_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
   - key: completionApprovalComment
     valueType: string
     required: false
@@ -269,11 +256,7 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    semanticType: multilineText
   - key: waitReason
     valueType: string
     required: false
@@ -307,11 +290,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: isAdHoc
     valueType: boolean
     required: true
@@ -339,55 +318,190 @@ fields:
     persisted:
       column: template_step_key
       storageClass: core
-relationships:
-  - key: process
-    kind: belongsTo
-    target: Process
-    foreignKey: process_id
+  - key: processId
     label:
       en: Process
       nl: Proces
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: process_id
+      storageClass: core
+    semanticType: Process
+    relationship:
+      ownership: reference
+  - key: ownerId
     label:
       en: Owner
       nl: Eigenaar
-  - key: assignedGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: assigned_group_id
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: assignedGroupId
     label:
       en: Assigned group
       nl: Toegewezen groep
-  - key: predecessorStep
-    kind: belongsTo
-    target: ProcessStep
-    foreignKey: predecessor_step_id
+    persisted:
+      column: assigned_group_id
+      storageClass: core
+    semanticType: RelationGroup
+    relationship:
+      ownership: reference
+  - key: predecessorStepId
     label:
       en: Predecessor step
       nl: Vorige stap
+    persisted:
+      column: predecessor_step_id
+      storageClass: core
+    semanticType: ProcessStep
+    relationship:
+      ownership: reference
   - key: nextSteps
-    kind: hasMany
-    target: ProcessStep
-    foreignKey: predecessor_step_id
     label:
       en: Next steps
       nl: Vervolgstappen
+    semanticType: ProcessStep
+    cardinality: collection
+    relationship:
+      inverse: predecessorStepId
+      ownership: reference
   - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: case_step_id
     label:
       en: Tasks
       nl: Taken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: caseStepId
+      ownership: reference
+operations:
+  list:
+    name: List Process Step
+    description: List ProcessStep records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Process Step
+    description: Get ProcessStep records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Process Step
+    description: Create ProcessStep records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Process Step
+    description: Update ProcessStep records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Process Step
+    description: Delete ProcessStep records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      stepType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTEPTYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTEPSTATUS
+            clearable: false
+      requiredInput:
+        render:
+          component: JsonEditor
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completionApprovalComment:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000

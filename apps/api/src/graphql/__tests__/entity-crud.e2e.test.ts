@@ -234,13 +234,22 @@ for (const table of tables) {
       // create owns the value (a document's current version). The update
       // refusal is the schema's and holds either way.
       const offeredOnCreate = isEntityBackedCreate(table);
-      const read = (id: string) => fetchRecord(tenantA, table, id, `id ${immutableField}`);
+      const relationshipField = table.source?.graphql?.relationships?.some(
+        (relationship) => relationship.fieldKey === immutableField,
+      ) === true;
+      const read = (id: string) => fetchRecord(
+        tenantA,
+        table,
+        id,
+        `id ${immutableField}${relationshipField ? " { id }" : ""}`,
+      );
 
       test(`${offeredOnCreate ? `create accepts ${immutableField}; ` : ""}update naming ${immutableField} is refused`, async () => {
         const id = offeredOnCreate
           ? await createRow(table, tenantA, { [immutableField]: await valueFor() })
           : await createRow(table, tenantA);
-        const value = (await read(id))[immutableField];
+        const firstValue = (await read(id))[immutableField];
+        const value = relationshipField ? firstValue?.id : firstValue;
         if (offeredOnCreate) expect(value).toBeTruthy();
 
         // Re-pointing the record at a different parent is the integrity gap.
@@ -257,7 +266,8 @@ for (const table of tables) {
           `Field \\"${immutableField}\\" is not defined by type \\"Update${typeName}Input\\"`,
         );
 
-        expect((await read(id))[immutableField]).toBe(value);
+        const retained = (await read(id))[immutableField];
+        expect(relationshipField ? retained?.id : retained).toBe(value);
       });
     }
   });

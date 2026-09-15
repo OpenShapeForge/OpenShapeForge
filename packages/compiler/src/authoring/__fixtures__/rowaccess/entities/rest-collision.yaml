@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RestCollision
 title: Rest Collision
-description: "Test fixture — claims the same REST base path as rest-custom to exercise the collision audit. Not part of the shipped slice."
+description: "Test fixture — claims the same REST base path as rest-custom to exercise the collision audit. Not part of
+  the shipped slice."
 language: en
 displayTemplate: "{{name}}"
 filterField: name
@@ -11,8 +12,6 @@ labels:
   en: Rest Collision
 domains:
   - relations
-rest:
-  basePath: custom-things
 authorization:
   roles:
     read:
@@ -32,3 +31,78 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List Rest Collision
+    description: List RestCollision records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Rest Collision
+    description: Get RestCollision records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Rest Collision
+    description: Create RestCollision records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Rest Collision
+    description: Update RestCollision records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Rest Collision
+    description: Delete RestCollision records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  rest:
+    basePath: custom-things

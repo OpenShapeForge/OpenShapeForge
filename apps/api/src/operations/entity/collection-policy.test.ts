@@ -35,6 +35,13 @@ describe("unsupported collection mutation boundary", () => {
     expect(collectionMutationError(parent, "update", [parent, child], { title: "Safe scalar update" })).toBeUndefined();
     expect(collectionMutationError(parent, "get", [parent, child])).toBeUndefined();
   });
+  test("reference collections do not take ownership of standalone child mutations", () => {
+    const referenceParent = structuredClone(parent);
+    referenceParent.source!.graphql!.relationships![0]!.ownership = "reference";
+    expect([...collectionManagedFields(child, [referenceParent, child])]).toEqual([]);
+    expect(collectionMutationError(child, "create", [referenceParent, child])).toBeUndefined();
+    expect(collectionMutationError(child, "delete", [referenceParent, child])).toBeUndefined();
+  });
   test("transport projection removes unsupported properties and required entries without mutating input", () => {
     const schema = { type: "object", properties: { values: { type: "object", properties: { blocks: { type: "array" }, title: { type: "string" } }, required: ["blocks", "title"], additionalProperties: false } } };
     const result = withoutCollectionInputs(schema, new Set(["blocks"]));

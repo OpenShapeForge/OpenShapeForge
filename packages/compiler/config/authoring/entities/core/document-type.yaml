@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DocumentType
@@ -15,10 +15,10 @@ domains:
   - governance
 indexes:
   - name: document_types_tenant_code_uidx
-    fields: [tenantId, code]
+    fields: [ tenantId, code ]
     unique: true
   - name: document_types_tenant_identity_uidx
-    fields: [tenantId, id]
+    fields: [ tenantId, id ]
     unique: true
 authorization:
   roles:
@@ -160,19 +160,19 @@ interfaces:
         subtitle: "{{code}}"
         layout:
           context:
-            fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+            fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
             relationships: []
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Document type, nl: Documenttype }
-                  fields: [code, name, description]
+                  fields: [ code, name, description ]
                 - title: { en: Registration and access, nl: Registratie en toegang }
-                  fields: [defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+                  fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
         modes:
           create:
             title: { en: Create document type, nl: Documenttype aanmaken }
             groups:
               - title: { en: Document type, nl: Documenttype }
-                fields: [code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+                fields: [ code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication ]

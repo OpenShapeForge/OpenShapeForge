@@ -382,7 +382,7 @@ describe("generated schema migration", () => {
         const message = await expectRejects(runChain(url));
         expect(message).toContain("erp.relations");
         expect(message).toContain("legacy_extra");
-        expect(message).toContain("db:migration:new");
+        expect(message).toContain("db:reset");
 
         // The failed run must not roll the checksum forward.
         await withDb(url, async (db) => {
@@ -455,7 +455,7 @@ describe("generated schema migration", () => {
         const message = await expectRejects(runChain(url));
         expect(message).toContain("erp.relations.created_at");
         expect(message.toLowerCase()).toContain("default mismatch");
-        expect(message).toContain("db:migration:new");
+        expect(message).toContain("db:reset");
 
         // The failed run must not roll the checksum forward.
         await withDb(url, async (db) => {

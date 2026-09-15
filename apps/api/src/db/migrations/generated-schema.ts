@@ -16,8 +16,8 @@
  *   FKs), then the recorded checksum is rolled forward. NON-additive drift
  *   (dropped/renamed/retyped columns, tables no longer in the manifest,
  *   required no-default columns on populated tables) hard-errors with an
- *   exact listing — write a versioned migration (bun run db:migration:new)
- *   that transforms the schema, then rerun db:migrate.
+ *   exact listing — in the reset model that database is rebuilt from the
+ *   manifest (bun run db:reset), not transformed in place.
  *
  * The generated schema.sql itself stays idempotent (CREATE ... IF NOT EXISTS
  * throughout; RLS policies DROP IF EXISTS + CREATE), so re-applying it during
@@ -688,7 +688,7 @@ function nonAdditiveDriftError(
       "Non-additive differences:",
       ...drift.map((line) => `  - ${line}`),
       "",
-      "Remediation: write a versioned migration (bun run db:migration:new <name>) that transforms the schema so the remaining diff is additive, then rerun bun run db:migrate. Alternatively, reset the database volume (destroys all data).",
+      "Remediation: the schema is versioned by git and a database is built from the manifest, so rebuild it — `bun run db:reset` drops and recreates the database (destroying every row) and runs this chain on the empty result.",
     ].join("\n"),
   );
 }

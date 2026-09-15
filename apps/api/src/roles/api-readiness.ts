@@ -2,14 +2,18 @@
 import type { ReadinessCheck } from "@openshapeforge/observability";
 import type { FastifyBaseLogger } from "fastify";
 import { sql } from "kysely";
-import type {
-  DatabaseRuntime,
-  OpenShapeForgeDatabase,
+import {
+  createDatabaseRuntime,
+  type DatabaseRuntime,
+  type OpenShapeForgeDatabase,
 } from "../db/connection.js";
+import { bootstrapIfEmpty } from "../db/bootstrap.js";
 import {
   checkGeneratedSchemaDrift,
+  databaseNameFromUrl,
   type GeneratedSchemaDriftResult,
 } from "../db/schema-drift.js";
+import type { ModuleSeed } from "../modules/contract.js";
 import type { ModuleRegistry } from "../modules/registry.js";
 import { createVersionedMigrationLedgerVerifier } from "../db/migrations/versioned-runner.js";
 import { versionedMigrations } from "../db/migrations/versioned/index.js";
@@ -76,10 +80,81 @@ function driftBanner(drift: GeneratedSchemaDriftResult): string {
   ].join("\n");
 }
 
+export type SchemaFreshnessOptions = {
+  /**
+   * The runtime connection string. An empty database is only bootstrapped
+   * when the migrate URL names the SAME database, so a migrate URL left over
+   * from another setup can never build into somewhere else.
+   */
+  databaseUrl?: string;
+  /** Seeds the loaded runtime modules contribute, applied by the bootstrap. */
+  moduleSeeds?: readonly ModuleSeed[];
+  /** The environment the migrate URL is read from; process.env by default. */
+  env?: NodeJS.ProcessEnv;
+};
+
+/**
+ * Build an empty development database on first start, the way `db:migrate`
+ * would (db/bootstrap.ts): the privileged migrate connection runs the chain
+ * under the migration lock, so a second replica starting at the same moment
+ * waits and then finds the database built. Never in production, where the
+ * schema is the deploy's responsibility and an unmigrated database refuses to
+ * serve. Returns whether the database is now built.
+ */
+async function bootstrapEmptyDatabase(
+  log: FastifyBaseLogger,
+  options: SchemaFreshnessOptions,
+): Promise<boolean> {
+  const env = options.env ?? process.env;
+  const migrateUrl = env.OPENSHAPEFORGE_MIGRATE_DATABASE_URL;
+  if (!migrateUrl) {
+    log.warn(
+      "The database is empty and OPENSHAPEFORGE_MIGRATE_DATABASE_URL is not set; not bootstrapping it. Run `bun run db:migrate`.",
+    );
+    return false;
+  }
+  const target = databaseNameFromUrl(migrateUrl);
+  const own = databaseNameFromUrl(options.databaseUrl);
+  if (own !== null && target !== own) {
+    log.warn(
+      { migrateDatabase: target, database: own },
+      "The database is empty but OPENSHAPEFORGE_MIGRATE_DATABASE_URL names a different database; not bootstrapping it.",
+    );
+    return false;
+  }
+
+  const migrator = createDatabaseRuntime({ databaseUrl: migrateUrl, maxConnections: 2 });
+  try {
+    const outcome = await bootstrapIfEmpty(migrator.db, {
+      ...(options.moduleSeeds ? { moduleSeeds: options.moduleSeeds } : {}),
+    });
+    if (outcome.bootstrapped) {
+      log.info(
+        { database: target, checksum: outcome.result.checksum },
+        "Empty database bootstrapped from the bundled manifest.",
+      );
+      return true;
+    }
+    // "migrated" here means another replica built it while this one probed.
+    if (outcome.reason === "migrated") return true;
+    log.warn(
+      { database: target, reason: outcome.reason, ...(outcome.undeclared ? { undeclared: outcome.undeclared } : {}) },
+      "The database is not empty; not bootstrapping it.",
+    );
+    return false;
+  } catch (error) {
+    log.error({ err: error }, "Bootstrapping the empty database failed; continuing without a schema.");
+    return false;
+  } finally {
+    await migrator.close();
+  }
+}
+
 /** Verify generated schema freshness once before Fastify serves traffic. */
 export async function enforceGeneratedSchemaFreshness(
   log: FastifyBaseLogger,
   db: OpenShapeForgeDatabase,
+  options: SchemaFreshnessOptions = {},
 ): Promise<void> {
   const production = process.env.NODE_ENV === "production";
   let drift: GeneratedSchemaDriftResult;
@@ -110,6 +185,9 @@ export async function enforceGeneratedSchemaFreshness(
     return;
   }
   if (production) throw new Error(driftBanner(drift));
+  if (drift.status === "unmigrated" && (await bootstrapEmptyDatabase(log, options))) {
+    return;
+  }
   log.warn(driftBanner(drift));
 }
 

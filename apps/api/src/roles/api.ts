@@ -295,8 +295,14 @@ export function createApiApp(options: {
     });
 
     const runtime = databaseRuntime;
+    const databaseUrl = options.databaseUrl;
     app.addHook("onReady", async () => {
-      await enforceGeneratedSchemaFreshness(app.log, runtime.db);
+      // Runs after the module plugin below has initialised, so the seeds an
+      // empty-database bootstrap applies are the ones this process loaded.
+      await enforceGeneratedSchemaFreshness(app.log, runtime.db, {
+        databaseUrl,
+        moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
+      });
     });
   } else {
     app.log.warn("DATABASE_URL is not set; GraphQL runs without a database.");

@@ -299,11 +299,9 @@ export function describeGeneratedSchemaDrift(
         "already have, without echoing them here):",
         ...SCRATCH_DATABASE_RECIPE,
         "",
-        "Or recreate the shared database, destroying its data — and only until the",
-        "next worktree migrates it:",
-        '  ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"; DB="${DATABASE_URL##*/}"',
-        '  psql "${ADMIN%/*}/postgres" -c "drop database \\"$DB\\" with (force)" -c "create database \\"$DB\\""',
-        "  bun run db:migrate",
+        "Or rebuild the shared database from this branch's manifest, destroying its",
+        "data — and only until the next worktree migrates it:",
+        '  OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
       ].join("\n"),
     };
   }

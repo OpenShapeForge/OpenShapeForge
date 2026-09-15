@@ -8,19 +8,17 @@ import { ControlApiError } from "../../control-api-error";
 import { TenantLifecycleControls, TenantRenameForm } from "./tenant-controls";
 
 /**
- * One tenant: the registry row, the Keycloak Organization it projects onto, and
- * the operations that move them together.
+ * One tenant: the registry's platform view of it, and the operations that
+ * change it.
  *
- * ── Both sides, and the Keycloak side read back rather than assumed ──────────
+ * ── What the Operation answers ──────────────────────────────────────────────
  *
- * The registry is the system of record and the Organization is its projection,
- * which means the interesting failure is DRIFT — a suspended tenant whose
- * Organization is still enabled, or a link pointing at an Organization that no
- * longer exists. Rendering `keycloakOrganizationId` from the row would show
- * what the registry BELIEVES; the detail read asks Keycloak, so this page shows
- * what is actually true on both sides. When Keycloak cannot be reached the row
- * still renders and the reason is stated, because an operator must be able to
- * look at a tenant while an upstream is down.
+ * `control.get-tenant` projects the tenant the way the platform sees it: the
+ * lifecycle status, the Keycloak Organization alias once provisioning linked
+ * one (the slug, by construction), and the Service catalog counts. Whether the
+ * Organization's `enabled` flag actually follows the status is the
+ * reconciliation report's question — it reads Keycloak back for every tenant
+ * at once — so this page links there rather than asking Keycloak itself.
  *
  * ── The URL key is the slug ─────────────────────────────────────────────────
  *
@@ -71,11 +69,7 @@ export default async function TenantDetailPage({ params, searchParams }: PagePro
     );
   }
 
-  const { tenant, organization, organizationError } = result;
-  // The projection rule, stated once here so the page can say when it does not
-  // hold rather than leaving an operator to compare two fields by eye.
-  const expectedEnabled = tenant.status === "active";
-  const drifted = organization !== null && organization.enabled !== expectedEnabled;
+  const tenant = result;
 
   return (
     <div className="space-y-6" data-testid="tenant-detail-page" data-slug={tenant.slug}>
@@ -119,20 +113,15 @@ export default async function TenantDetailPage({ params, searchParams }: PagePro
               permanent — the Organization alias and URL key
             </span>
           </Field>
-          <Field label="Tenant id">
-            <span className="font-mono text-[12px]" data-testid="tenant-id">
-              {tenant.id}
-            </span>
-            <span className="ml-2 text-[12px] text-[var(--color-foreground-muted)]">
-              the <code className="font-mono">tid</code> claim
+          <Field label="Keycloak organization">
+            <span className="font-mono text-[13px]" data-testid="tenant-organization-alias">
+              {tenant.organizationAlias ?? "not provisioned"}
             </span>
           </Field>
-          <Field label="Created">
-            <span className="font-mono text-[12px]">{tenant.createdAt}</span>
-          </Field>
-          <Field label="Updated">
-            <span className="font-mono text-[12px]" data-testid="tenant-updated-at">
-              {tenant.updatedAt}
+          <Field label="Service catalog">
+            <span data-testid="tenant-catalog-counts">
+              {tenant.installedEntries} installed, {tenant.overriddenEntries} overridden,{" "}
+              {tenant.updatesAvailable} with an update pending
             </span>
           </Field>
         </dl>
@@ -141,62 +130,26 @@ export default async function TenantDetailPage({ params, searchParams }: PagePro
 
       <section className="space-y-3">
         <h3 className="text-sm font-semibold">Keycloak</h3>
-        {organizationError ? (
-          <p
-            role="alert"
-            data-testid="tenant-organization-error"
-            className="rounded-[var(--radius-medium)] border border-[var(--color-functional-red-40)] bg-[var(--color-functional-red-5)] p-3 text-sm"
-          >
-            {organizationError}
-          </p>
-        ) : null}
-
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <Field label="Realm">
-            <span className="font-mono text-[13px]">{tenant.keycloakRealm ?? "—"}</span>
-          </Field>
-          <Field label="Organization id">
-            <span className="font-mono text-[12px]" data-testid="tenant-organization-id">
-              {tenant.keycloakOrganizationId ?? "not provisioned"}
-            </span>
-          </Field>
-          <Field label="Organization alias">
-            <span className="font-mono text-[13px]">{organization?.alias ?? "—"}</span>
-          </Field>
-          <Field label="Organization enabled">
-            {organization ? (
-              <span
-                data-testid="organization-enabled"
-                data-enabled={String(organization.enabled)}
-                className="font-mono text-[13px]"
-              >
-                {String(organization.enabled)}
-              </span>
-            ) : (
-              <span className="text-[var(--color-foreground-muted)]">—</span>
-            )}
-          </Field>
-        </dl>
-
-        {tenant.keycloakOrganizationId === null ? (
+        {tenant.organizationAlias === null ? (
           <p className="text-sm text-[var(--color-functional-orange-100)]">
             This tenant has no Keycloak Organization. Provisioning is DB-first, so this is
             a recoverable half-applied state rather than a corruption: re-submitting the
             same slug and name on the create form finds the row, creates the Organization,
             and stamps the link.
           </p>
-        ) : null}
-
-        {drifted ? (
-          <p
-            data-testid="tenant-drift"
-            className="text-sm text-[var(--color-functional-orange-100)]"
-          >
-            The Organization is {organization?.enabled ? "enabled" : "disabled"} while the
-            tenant is <code className="font-mono">{tenant.status}</code>. Re-applying the
-            status reconciles it.
+        ) : (
+          <p className="max-w-3xl text-sm text-[var(--color-foreground-muted)]">
+            The Organization <code className="font-mono">{tenant.organizationAlias}</code> is
+            linked. Whether it is enabled exactly when the tenant is active is what the{" "}
+            <Link
+              href="/reconciliation"
+              className="text-[var(--color-brand-indigo-100)] underline-offset-2 hover:underline"
+            >
+              reconciliation report
+            </Link>{" "}
+            checks, for every tenant at once, by reading Keycloak back.
           </p>
-        ) : null}
+        )}
       </section>
 
       <section className="space-y-3">

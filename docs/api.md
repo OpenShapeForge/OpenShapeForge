@@ -187,15 +187,33 @@ creating the first version rolls back the document too.
 
 ## The tenant control surface
 
-| Route | Does |
+The platform's own administration is a catalog of canonical Operations
+(`osf-control`, authored in `packages/compiler/config/authoring/operations/
+control.yaml`, handlers in `src/control/operations.ts`), served here by the
+same operations runtime that serves every other Operation and, as tools, by
+the platform administrator MCP. The routes are the Operations' REST
+projections:
+
+| Route | Operation |
 | --- | --- |
-| `GET /api/control/v1/tenants` | The registry, ordered by slug, capped with a `truncated` flag. |
-| `GET /api/control/v1/tenants/{slug}` | One tenant, plus the Keycloak Organization read back as it actually is. |
-| `POST /api/control/v1/tenants` | Provision a tenant. `201` on create, `200` with `"created": false` on replay. |
-| `PATCH /api/control/v1/tenants/{slug}` | Change `status` and/or `name`. Nothing else is mutable. |
+| `GET /api/control/v1/whoami`, `GET /api/control/v1/guide` | The signed-in operator; the administration guide. |
+| `GET /api/control/v1/tenants` | `{ tenants: [...] }` — slug, name, status, Organization alias, catalog counts. |
+| `GET /api/control/v1/tenants/{slug}` | One tenant, the same projection. |
+| `POST /api/control/v1/tenants` | Provision a tenant; `201` with `"created": false` on an idempotent replay. |
+| `PATCH /api/control/v1/tenants/{slug}` | Change `status` and/or `name`, with `confirmed: true`. Nothing else is mutable. |
+| `GET`/`PUT /api/control/v1/tenants/{slug}/blueprint-library` | Read or assign (`{ blueprintTenantSlug }`, null to clear) the tenant's blueprint library. |
+| `POST /api/control/v1/tenants/{slug}/first-administrator` | Invite the first `org_admin` by email, with `confirmed: true`. |
 | `GET /api/control/v1/tenants/{slug}/organizations` | The tenant's sub-organisation tree, nested, in one query off `org_unit` + `org_unit_closure`. |
-| `POST /api/control/v1/tenants/{slug}/organizations` | Provision a sub-organisation. |
-| `PATCH /api/control/v1/tenants/{slug}/organizations/{orgUnitId}` | Rename and/or reparent one. `parentOrgUnitId: null` means the top level; the slug is refused. |
+| `POST /api/control/v1/tenants/{tenantSlug}/organizations` | Provision a sub-organisation. |
+| `PATCH /api/control/v1/tenants/{tenantSlug}/organizations/{orgUnitId}` | Rename and/or reparent one, with `confirmed: true`. `parentOrgUnitId: null` means the top level; the slug is refused. |
+| `GET /api/control/v1/reconciliation`, `POST …/reconciliation/reapply` | The drift report; the repair, with `confirmed: true`. |
+| `GET /api/control/v1/audit` | The platform audit projection, filtered by actor, action (an Operation key), result and window. |
+| `GET`/`POST /api/control/v1/catalog…`, `…/notices…` | The Service catalog and the update notices — `platform_admin` only. |
+
+Errors come in the Operations' declared vocabulary (`VALIDATION`,
+`NOT_FOUND`, `CONFLICT`, `IDENTITY_PROVIDER_ERROR`,
+`CONTROL_PLANE_NOT_CONFIGURED`, …) with the control plane's finer code kept in
+`error.detail` (`CONTROL_TENANT_NOT_FOUND`, `KEYCLOAK_ADMIN_UNAVAILABLE`, …).
 
 Everything about this surface is deliberately unlike the three above, because it
 is the one surface that is **not** per-tenant.
@@ -206,10 +224,13 @@ is the one surface that is **not** per-tenant.
   control plane off a public ingress is a path rule rather than an exception
   list.
 - **Its own realm.** Operators authenticate against `openshapeforge-control`,
-  never the tenant realm, and must hold the `platform-operator` realm role. The
-  pin is on `azp` rather than `aud`: the control realm has no resource-server
-  client, so operator tokens carry no audience, and without the pin a token from
-  Keycloak's built-in public `admin-cli` client would be accepted.
+  never the tenant realm (`src/control/control-session.ts`), and each
+  Operation names the realm roles that may invoke it: `platform-operator`
+  holds the tenant lifecycle, `platform_admin` the catalog and the audit, and
+  both may read the registry. The pin is on `azp` rather than `aud`: the
+  control realm has no resource-server client, so operator tokens carry no
+  audience, and without the pin a token from Keycloak's built-in public
+  `admin-cli` client would be accepted.
 - **DB-first, Keycloak-second, link-third.** The row is written, then the
   Organization is created through the identity-configuration SPI, then
   `keycloak_organization_id` is stamped back. A failure between steps leaves a
@@ -218,7 +239,8 @@ is the one surface that is **not** per-tenant.
   that answers `200` with `"created": false` instead of `201`.
 - **Audited — reads included.** Every database access runs inside
   `withSystemSession`, so each one leaves a `platform.system_bypass_audit` row
-  naming the operation, its target, and the issuer-qualified operator. Reads go
+  naming the Operation by its canonical key, its target, and the
+  issuer-qualified operator. Reads go
   through it for two reasons: `platform.tenants` carries
   `USING (app.bypass_rls() OR id = app.current_tenant())`, so a session with no
   tenant sees nothing at all without the bypass; and a cross-tenant *read* of
@@ -292,7 +314,7 @@ no tenant.
   get, publish, retire, apply for one tenant, installation counts) and
   `src/control/platform-catalog.ts` calls it with the cross-tenant session,
   mapping tenant ids to slugs so no id reaches a client.
-- **Tenant and organisation tools** (`src/control/platform-tools.ts`):
+- **Tenant and organisation tools** (`src/control/operations.ts`):
   `list_tenants`, `get_tenant`, `create_tenant`, `update_tenant` (name and
   lifecycle state), `get_tenant_organization_tree`,
   `create_tenant_organization`, and `update_tenant_organization` (rename or

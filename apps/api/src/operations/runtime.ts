@@ -596,11 +596,14 @@ export function bindOperationHandlers(
     bound.set(operation.key, { operation, handler, ...(availability ? { availability } : {}) });
   }
   for (const module of modules) {
-    const declared = new Set(
-      knownOperations
-        .filter((operation) => !operation.implementation && operation.plugin === module.name)
-        .map((operation) => operation.handler),
+    const moduleOperations = knownOperations.filter(
+      (operation) => !operation.implementation && operation.plugin === module.name,
     );
+    // An explicit embedded/test catalog only defines the modules represented
+    // in that catalog. The generated production catalog still validates every
+    // configured runtime module fail-closed.
+    if (!usesGeneratedCatalog && moduleOperations.length === 0) continue;
+    const declared = new Set(moduleOperations.map((operation) => operation.handler));
     const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
     if (extras.length > 0) {
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);

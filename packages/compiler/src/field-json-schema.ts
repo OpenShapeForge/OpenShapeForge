@@ -490,6 +490,8 @@ function addCompiledFieldMetadata(
       entity: field.options.source,
       valueField: field.options.valueField ?? "id",
     };
+  } else if (field.relationship?.target && field.cardinality !== "collection") {
+    schema["x-osf-reference"] = { entity: field.relationship.target };
   }
 
   const descriptionParts: string[] = [];

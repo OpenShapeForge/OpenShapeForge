@@ -249,13 +249,6 @@ fields:
           value:
             - temporary
             - conditional
-  - key: tenantId
-    semanticType: Tenant
-    readOnly: true
-    required: false
-    label: { en: Tenant, nl: Tenant }
-    persisted: { column: tenant_id, storageClass: core }
-    relationship: { ownership: reference }
 operations:
   list:
     name: List label rule

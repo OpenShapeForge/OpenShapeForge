@@ -419,9 +419,11 @@ function unsupportedGenericCreate(source: ProjectableEntity, all: ReadonlyMap<st
   const { contract } = source;
   if (contract.entityOperations.create?.implementation.type !== "entity") return false;
   if (contract.model.relationships.some((relationship) => relationship.fieldKey && relationship.kind !== "belongsTo" &&
+    relationship.ownership === "owned" &&
     typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0)) return true;
   return [...all.values()].some((owner) => owner.contract.model.relationships.some((relationship) =>
     relationship.fieldKey && !relationship.through && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
+    relationship.ownership === "owned" &&
     (relationship.sortable || contract.storage.columns.some((column) => column.column === relationship.foreignKey && !column.nullable))));
 }
 
@@ -453,7 +455,8 @@ function projectEntity(
   }
   for (const owner of all.values()) {
     for (const relationship of owner.contract.model.relationships) {
-      if (!relationship.fieldKey || relationship.through || relationship.kind !== "hasMany" || relationship.target !== entityName) continue;
+      if (!relationship.fieldKey || relationship.through || relationship.kind !== "hasMany" ||
+        relationship.target !== entityName || relationship.ownership !== "owned") continue;
       const inverse = contract.storage.columns.find((column) => column.column === relationship.foreignKey);
       if (inverse) serverOwnedFields.add(inverse.field);
     }

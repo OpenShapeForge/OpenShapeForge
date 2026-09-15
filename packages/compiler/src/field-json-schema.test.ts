@@ -71,6 +71,24 @@ describe("compiled field JSON Schema projection", () => {
       .toEqual({ entity: "Category", valueField: "id" });
     expect(() => compiledFieldSchema(field({ key: "category", options: { type: "entity" } }))).toThrow("require a source");
   });
+
+  it("projects a field-owned entity relationship as a live reference", () => {
+    const schema = compiledFieldSchema(field({
+      key: "accountId",
+      semanticType: "Account",
+      relationship: {
+        kind: "belongsTo",
+        entity: "account",
+        target: "Account",
+        fieldKey: "accountId",
+        ownership: "reference",
+        foreignKey: "account_id",
+      },
+    }));
+
+    expect(schema["x-osf-reference"]).toEqual({ entity: "Account" });
+  });
+
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
       $ref: "https://example.test/schema#/$defs/value",

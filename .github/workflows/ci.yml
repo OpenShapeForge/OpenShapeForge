@@ -225,6 +225,7 @@ jobs:
             --set auth.internalContextSecret="ci-template-only" \
             > /tmp/openshapeforge-chart.yaml
           grep -q 'bun apps/api/src/db/provision-roles.ts &&' /tmp/openshapeforge-chart.yaml
+          grep -q 'unset OPENSHAPEFORGE_APP_PASSWORD_ROTATE OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE &&' /tmp/openshapeforge-chart.yaml
           grep -q 'exec bun apps/api/src/db/migrate.ts' /tmp/openshapeforge-chart.yaml
           grep -A6 'name: OPENSHAPEFORGE_ADMIN_DATABASE_URL' /tmp/openshapeforge-chart.yaml | grep -q 'optional: true'
 

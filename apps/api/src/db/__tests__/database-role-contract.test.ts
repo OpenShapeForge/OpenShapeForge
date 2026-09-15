@@ -102,6 +102,45 @@ describe("database role contract", () => {
       provisionDatabaseRoles(db, { passwords: {}, migratorRole }),
     );
     expect(again.created).toEqual([]);
+    expect(again.rotated).toEqual([]);
     expect(again.granted).toEqual([]);
+  }, TEST_TIMEOUT);
+
+  test("explicit password rotation uses the administrator connection", async () => {
+    const rotatedAppPassword = `app-${suffix}`;
+    const rotatedWorkerPassword = `worker-${suffix}`;
+    try {
+      const rotated = await adminRuntime.db.connection().execute((db) =>
+        provisionDatabaseRoles(db, {
+          passwords: { app: rotatedAppPassword, worker: rotatedWorkerPassword },
+          rotatePasswords: { app: true, worker: true },
+          migratorRole,
+        }),
+      );
+      expect(rotated.rotated.sort()).toEqual([
+        databaseRole("app").name,
+        databaseRole("worker").name,
+      ].sort());
+
+      for (const [role, password] of [
+        [databaseRole("app").name, rotatedAppPassword],
+        [databaseRole("worker").name, rotatedWorkerPassword],
+      ] as const) {
+        const connection = new SQL(url(role, password), { max: 1 });
+        try {
+          expect((await connection`select current_user as "user"`)[0]?.user).toBe(role);
+        } finally {
+          await connection.close();
+        }
+      }
+    } finally {
+      await adminRuntime.db.connection().execute((db) =>
+        provisionDatabaseRoles(db, {
+          passwords: { app: "openshapeforge_app", worker: "openshapeforge_worker" },
+          rotatePasswords: { app: true, worker: true },
+          migratorRole,
+        }),
+      );
+    }
   }, TEST_TIMEOUT);
 });

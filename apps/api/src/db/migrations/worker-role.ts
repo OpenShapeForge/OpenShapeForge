@@ -112,7 +112,7 @@ export function readWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): st
  * password is set only at role creation, so an operator-chosen credential is
  * never clobbered by a routine `helm upgrade`.
  */
-function shouldRotateWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
+export function shouldRotateWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env.OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE;
   return flag === "1" || flag === "true";
 }

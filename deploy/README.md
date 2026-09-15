@@ -274,7 +274,9 @@ Security posture it encodes (see `../SECURITY.md`):
   is copied into `OPENSHAPEFORGE_WORKER_DATABASE_URL`;
 - the migration Job first provisions both restricted roles through the optional
   **administrator** connection (`database.adminUrl`), falling back to the
-  privileged `database.migrateUrl`, and then applies DDL. The worker role gets
+  privileged `database.migrateUrl`; explicit password rotations also happen in
+  this administrator phase. The Job then removes the one-shot rotation flags
+  before applying DDL as the migrate role. The worker role gets
   DML on only the tables a worker touches, never the platform control plane
   (`platform.connector_secrets`, `platform.api_keys`, `platform.tenants`, …);
 - `NODE_ENV=production` is always set, so the API refuses to start unless a

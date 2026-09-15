@@ -107,7 +107,7 @@ export function readAppRolePassword(env: NodeJS.ProcessEnv = process.env): strin
  * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 (with the new OPENSHAPEFORGE_APP_PASSWORD,
  * and DATABASE_URL updated in lockstep) for a single run to rotate.
  */
-function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
+export function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env.OPENSHAPEFORGE_APP_PASSWORD_ROTATE;
   return flag === "1" || flag === "true";
 }

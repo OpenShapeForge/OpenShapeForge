@@ -43,6 +43,7 @@ spec:
           args:
             - >-
               bun apps/api/src/db/provision-roles.ts &&
+              unset OPENSHAPEFORGE_APP_PASSWORD_ROTATE OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE &&
               exec bun apps/api/src/db/migrate.ts
           env:
             {{- include "openshapeforge-api.commonEnv" . | nindent 12 }}
@@ -73,8 +74,8 @@ spec:
                   name: {{ include "openshapeforge-api.secretName" . }}
                   key: OPENSHAPEFORGE_APP_PASSWORD
             {{- if .Values.database.appPasswordRotate }}
-            # One-shot rotation: set database.appPasswordRotate=true for a single
-            # upgrade to reset the existing role's password to the value above.
+            # One-shot rotation: the administrator provisioning phase resets
+            # the existing role before this flag is removed for migrate.ts.
             - name: OPENSHAPEFORGE_APP_PASSWORD_ROTATE
               value: "1"
             {{- end }}
@@ -91,8 +92,8 @@ spec:
                   name: {{ include "openshapeforge-api.secretName" . }}
                   key: OPENSHAPEFORGE_WORKER_PASSWORD
             {{- if .Values.database.workerPasswordRotate }}
-            # One-shot rotation, exactly as above. Update database.workerUrl in
-            # lockstep or every worker pod loses its connection.
+            # One-shot administrator rotation, exactly as above. Update
+            # database.workerUrl in lockstep or every worker pod loses access.
             - name: OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE
               value: "1"
             {{- end }}

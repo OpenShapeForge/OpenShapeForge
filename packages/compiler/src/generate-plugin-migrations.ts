@@ -243,8 +243,11 @@ function assertConstraintRelations(manifest: PlatformSchemaManifest): void {
   }
   for (const table of manifest.tables) {
     const schema = relationNames.get(table.schema)!;
+    // Column-level primaryKey flags form ONE key however many columns carry
+    // them (a composite key, see generate.ts); a constraint-level key on top
+    // of that is the second key Postgres refuses.
     const tablePrimaryKeys =
-      table.columns.filter((column) => column.primaryKey === true).length +
+      (table.columns.some((column) => column.primaryKey === true) ? 1 : 0) +
       (table.constraints ?? []).filter(
         (constraint) => constraint.kind === "primaryKey",
       ).length;
@@ -289,12 +292,15 @@ function assertForeignKeyTargets(manifest: PlatformSchemaManifest): void {
           );
         }
       }
+      // The column-level key is unique only as a whole: one member of a
+      // composite key does not identify a row on its own.
       const immediatelyUnique =
-        (constraint.references.columns.length === 1 &&
-          target.columns.some(
-            (column) =>
-              column.name === constraint.references.columns[0] && column.primaryKey === true,
-          )) ||
+        sameColumns(
+          target.columns
+            .filter((column) => column.primaryKey === true)
+            .map((column) => column.name),
+          constraint.references.columns,
+        ) ||
         (target.indexes ?? []).some(
           (index) =>
             index.unique === true &&

@@ -318,3 +318,64 @@ describe("plugin schema migrations", () => {
     );
   });
 });
+
+describe("composite column-level keys", () => {
+  const versionTable = table("versions", {
+    columns: [
+      { name: "tenant_id", type: "uuid", primaryKey: true },
+      { name: "blueprint_id", type: "text", primaryKey: true },
+      { name: "version", type: "integer", primaryKey: true },
+    ],
+  });
+
+  test("a composite column key is one key, and unique only as a whole", () => {
+    // Three primaryKey flags form one key: no "multiple primary keys".
+    expect(() => registry([versionTable])).not.toThrow();
+
+    expect(() =>
+      registry([
+        versionTable,
+        table("copies", {
+          columns: [
+            idColumn,
+            { name: "blueprint_tenant_id", type: "uuid", required: true },
+            { name: "blueprint_id", type: "text", required: true },
+            { name: "source_version", type: "integer", required: true },
+          ],
+          constraints: [
+            {
+              version: "0001_copies-source-fk",
+              name: "copies_source_fk",
+              kind: "foreignKey",
+              columns: ["blueprint_tenant_id", "blueprint_id", "source_version"],
+              references: {
+                schema: "cpq",
+                table: "versions",
+                columns: ["tenant_id", "blueprint_id", "version"],
+              },
+            },
+          ],
+        }),
+      ]),
+    ).not.toThrow();
+
+    // One member of the composite key does not identify a row.
+    expect(() =>
+      registry([
+        versionTable,
+        table("copies", {
+          columns: [idColumn, { name: "blueprint_id", type: "text", required: true }],
+          constraints: [
+            {
+              version: "0001_copies-source-fk",
+              name: "copies_source_fk",
+              kind: "foreignKey",
+              columns: ["blueprint_id"],
+              references: { schema: "cpq", table: "versions", columns: ["blueprint_id"] },
+            },
+          ],
+        }),
+      ]),
+    ).toThrow(/no matching primary key or unique constraint/);
+  });
+});

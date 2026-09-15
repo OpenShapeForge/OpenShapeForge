@@ -42,6 +42,7 @@ fields:
       storageClass: core
   - key: entityType
     valueType: string
+    semanticType: entityTypeName
     required: true
     label:
       en: Entity type
@@ -52,58 +53,9 @@ fields:
     validation:
       minLength: 1
       maxLength: 120
-    options:
-      type: static
-      items:
-        - value: Relation
-          label:
-            en: Relation
-            nl: Relatie
-        - value: NaturalPerson
-          label:
-            en: Natural person
-            nl: Natuurlijk persoon
-        - value: LegalEntity
-          label:
-            en: Legal entity
-            nl: Rechtspersoon
-        - value: Case
-          label:
-            en: Case
-            nl: Zaak
-        - value: Task
-          label:
-            en: Task
-            nl: Taak
-        - value: CaseFile
-          label:
-            en: Case file
-            nl: Dossier
-        - value: Document
-          label:
-            en: Document
-            nl: Document
-        - value: Agreement
-          label:
-            en: Agreement
-            nl: Overeenkomst
-        - value: Account
-          label:
-            en: Account
-            nl: Account
-        - value: ContactMoment
-          label:
-            en: Contact moment
-            nl: Contactmoment
-        - value: Address
-          label:
-            en: Address
-            nl: Adres
     persisted:
       column: entity_type
       storageClass: core
-    render:
-      component: ListSelect
   - key: label
     valueType: string
     required: true
@@ -121,6 +73,7 @@ fields:
       storageClass: core
   - key: variant
     valueType: string
+    semanticType: badgeVariant
     required: true
     label:
       en: Variant
@@ -132,30 +85,9 @@ fields:
     validation:
       minLength: 1
       maxLength: 40
-    options:
-      type: static
-      items:
-        - value: default
-          label:
-            en: Default
-            nl: Standaard
-        - value: secondary
-          label:
-            en: Secondary
-            nl: Secundair
-        - value: destructive
-          label:
-            en: Destructive
-            nl: Destructief
-        - value: outline
-          label:
-            en: Outline
-            nl: Omlijning
     persisted:
       column: variant
       storageClass: core
-    render:
-      component: ListSelect
   - key: key
     valueType: string
     required: true
@@ -174,6 +106,7 @@ fields:
       storageClass: core
   - key: outputType
     valueType: string
+    semanticType: labelOutputType
     required: true
     label:
       en: Output type
@@ -182,26 +115,9 @@ fields:
       en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`, `numberValue`, or `stringValue`) and how the variable is typed downstream.
       nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`, `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
     defaultValue: boolean
-    options:
-      type: static
-      items:
-        - value: boolean
-          label:
-            en: Boolean
-            nl: Boolean
-        - value: number
-          label:
-            en: Number
-            nl: Getal
-        - value: string
-          label:
-            en: String
-            nl: Tekst
     persisted:
       column: output_type
       storageClass: core
-    render:
-      component: ListSelect
   - key: expression
     valueType: object
     required: true
@@ -271,6 +187,7 @@ fields:
       storageClass: core
   - key: validity
     valueType: string
+    semanticType: labelValidity
     required: true
     label:
       en: Validity
@@ -279,26 +196,9 @@ fields:
       en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional` honors the dates plus any context-specific conditions (e.g. tenant or process state).
       nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate; `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
     defaultValue: permanent
-    options:
-      type: static
-      items:
-        - value: permanent
-          label:
-            en: Permanent
-            nl: Permanent
-        - value: temporary
-          label:
-            en: Temporary
-            nl: Tijdelijk
-        - value: conditional
-          label:
-            en: Conditional
-            nl: Voorwaardelijk
     persisted:
       column: validity
       storageClass: core
-    render:
-      component: ListSelect
   - key: startDate
     valueType: datetime
     required: false
@@ -317,7 +217,8 @@ fields:
     visibility:
       conditions:
         - field: validity
-          operator: isNotEmpty
+          operator: in
+          value: [temporary, conditional]
   - key: endDate
     valueType: datetime
     required: false
@@ -336,7 +237,8 @@ fields:
     visibility:
       conditions:
         - field: validity
-          operator: isNotEmpty
+          operator: in
+          value: [temporary, conditional]
 relationships:
   - key: tenant
     kind: belongsTo

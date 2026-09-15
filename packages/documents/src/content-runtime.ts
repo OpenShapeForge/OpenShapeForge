@@ -104,6 +104,7 @@ function parameterShape(schema: Record<string, unknown>, required: boolean): Tem
   const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
   return {
     valueType: valueType as ContentValueShape["valueType"], required,
+    ...(isObject(schema["x-osf-reference"]) && typeof schema["x-osf-reference"].entity === "string" ? { relationship: { target: schema["x-osf-reference"].entity } } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum as JsonValue[] } : {}),
     ...(isObject(schema.properties) ? { fields: Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => [name, parameterShape(object(child, "parameter"), requiredKeys.includes(name))])) } : {}),
     ...(schema.default !== undefined ? { defaultValue: schema.default as JsonValue } : {}),
@@ -190,7 +191,14 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
             const logical = object(row[carrier.fieldKey], "readable block values");
             const referenceKeys = new Set(entry.references.map((reference) => reference.fieldKey));
             const values = Object.fromEntries(Object.entries(logical).filter(([key]) => !referenceKeys.has(key)));
-            const references = Object.fromEntries(entry.references.map((reference) => [reference.fieldKey, logical[reference.fieldKey] == null ? null : { entity: reference.targetEntity, id: uuid(logical[reference.fieldKey], reference.fieldKey) }]));
+            const references = Object.fromEntries(entry.references.map((reference) => {
+              const value = logical[reference.fieldKey];
+              if (isObject(value)) {
+                if (!reference.parameterColumn || Object.keys(value).length !== 1 || typeof value.parameter !== "string" || !/^[a-z][A-Za-z0-9]{0,127}$/.test(value.parameter)) refuse("INVALID_DEFINITION", "The block parameter binding is invalid.");
+                return [reference.fieldKey, { parameter: value.parameter as string }];
+              }
+              return [reference.fieldKey, value == null ? null : { entity: reference.targetEntity, id: uuid(value, reference.fieldKey) }];
+            }));
             blocks.push({ id: blockId, definitionKey: name, schemaVersion: Number(row.definitionVersion), values: immutableContent(values) as JsonObject, references });
           }
           contentVariants.push({ id: variantId, channel, locale, blocks, allowedDefinitions: [...collection!.allowedDefinitions] });

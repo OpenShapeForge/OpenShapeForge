@@ -92,7 +92,7 @@ export interface FieldDefinition {
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
   /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   required?: boolean;

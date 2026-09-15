@@ -91,7 +91,7 @@ export interface CompiledField {
   };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   required: boolean;
   /** Presentation only — picks the display component over the input one. */

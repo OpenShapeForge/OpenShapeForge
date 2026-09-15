@@ -131,7 +131,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       try {
         // $ref values are rooted in the authored operation, not its values
         // subtree. Preserve the bundled definitions when validating that part.
-        valid = ajv.compile({ ...schema, ...(createOp.inputSchema?.$defs ? { $defs: createOp.inputSchema.$defs } : {}) })(insertValues);
+        valid = ajv.compile({ ...(schema as Record<string, unknown>), ...(createOp.inputSchema?.$defs ? { $defs: createOp.inputSchema.$defs } : {}) })(insertValues);
       } catch { unsupported("The child create-values schema cannot be validated safely."); }
       if (!valid) invalid("Child values do not satisfy the authored create schema.");
     }

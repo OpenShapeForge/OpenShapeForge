@@ -49,6 +49,7 @@ export type ContentEntityReference = {
 
 export type ContentReferenceValue =
   | ContentEntityReference
+  | { readonly parameter: string }
   | readonly ContentEntityReference[]
   | null;
 
@@ -60,7 +61,7 @@ export type ContentBlock = {
   readonly references: Readonly<Record<string, ContentReferenceValue>>;
 };
 
-export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue };
+export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
 
 export type ContentTemplateVariant = {
   readonly id: string;

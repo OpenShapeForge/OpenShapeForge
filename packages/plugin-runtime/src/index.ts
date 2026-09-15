@@ -84,6 +84,7 @@ export type RuntimeEntityValueDefinition = {
     readonly schema: string;
     readonly table: string;
     readonly column: string;
+    readonly parameterColumn?: string;
     readonly required: boolean;
   }[];
   readonly materializeOperationId?: string;

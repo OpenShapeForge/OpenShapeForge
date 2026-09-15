@@ -9,6 +9,8 @@ export type EntityValueReferenceDescriptor = {
   table: string;
   /** Physical column on the carrier, never a key inside its values JSON. */
   column: string;
+  /** Symbolic local argument name, never a stored entity identifier. */
+  parameterColumn?: string;
   required: boolean;
   cardinality: "single";
 };

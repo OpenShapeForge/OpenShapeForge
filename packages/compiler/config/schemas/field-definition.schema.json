@@ -186,7 +186,7 @@
         "cardinality": { "$ref": "#/$defs/cardinality" },
         "entityValue": {
           "type": "object", "additionalProperties": false, "required": ["definitionField"],
-          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" } }
+          "properties": { "definitionField": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }, "parameterBindings": { "type": "boolean" } }
         },
         "allowedDefinitions": {
           "type": "array", "minItems": 1, "uniqueItems": true,

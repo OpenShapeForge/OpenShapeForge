@@ -18,6 +18,18 @@ const carrier: RuntimeEntityValueCarrier = {
 const id = "10000000-0000-4000-8000-000000000001";
 
 describe("logical entity-value storage boundary", () => {
+  test("stores symbolic arguments separately from fixed relational IDs", () => {
+    const bindable = { ...carrier, definitions: { Example: { ...carrier.definitions.Example!, references: [{ ...carrier.definitions.Example!.references[0]!, parameterColumn: "example_document_parameter" }] } } };
+    const result = splitEntityValueInput(bindable, "Example", { document: { parameter: "document" } }, runtimeJsonSchemas);
+    expect(result).toEqual({ values: { caption: "Example" }, columns: { example_document_id: null, example_document_parameter: "document" }, references: [] });
+    expect(projectEntityValue(bindable, { definition_key: "Example", values: result.values, ...result.columns })).toEqual({ caption: "Example", document: { parameter: "document" } });
+    expect(splitEntityValueInput(bindable, "Example", { document: id }, runtimeJsonSchemas).columns).toEqual({ example_document_id: id, example_document_parameter: null });
+    for (const document of [{ parameter: "" }, { parameter: "a.b" }, { parameter: "document", id }, { parameter: 3 }]) {
+      expect(() => splitEntityValueInput(bindable, "Example", { document }, runtimeJsonSchemas)).toThrow();
+    }
+    expect(() => splitEntityValueInput(carrier, "Example", { document: { parameter: "document" } }, runtimeJsonSchemas)).toThrow();
+    expect(() => projectEntityValue(bindable, { definition_key: "Example", values: {}, example_document_id: id, example_document_parameter: "document" })).toThrow();
+  });
   test("splits a logical relationship into an FK and returns exact authorization targets", () => {
     expect(splitEntityValueInput(carrier, "Example", { document: id }, runtimeJsonSchemas)).toEqual({
       values: { caption: "Example" }, columns: { example_document_id: id },

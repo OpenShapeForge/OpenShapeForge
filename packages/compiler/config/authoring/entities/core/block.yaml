@@ -33,7 +33,7 @@ fields:
     persisted: { column: definition_version, storageClass: core }
   - key: values
     semanticType: entityValue
-    entityValue: { definitionField: definitionKey }
+    entityValue: { definitionField: definitionKey, parameterBindings: true }
     required: true
     label: { en: Values, nl: Waarden }
     persisted: { column: values, storageClass: core }

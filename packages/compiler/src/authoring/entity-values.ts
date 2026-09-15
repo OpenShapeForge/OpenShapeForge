@@ -152,10 +152,16 @@ export function compileEntityValueStorage(
         };
         table.columns.push(column);
         attachReference(table, column, target);
-        addCheck(table, [field.key, name, reference.key], reference.required
+        const parameterColumn = field.entityValue!.parameterBindings ? entityValueStorageName("ev", field.key, name, reference.key, "parameter") : undefined;
+        if (parameterColumn) {
+          if (table.columns.some(candidate => candidate.name === parameterColumn)) throw new Error(`Entity value parameter column collision: ${parameterColumn}.`);
+          table.columns.push({ name: parameterColumn, type: "text" });
+          addCheck(table, [field.key, name, reference.key, "parameter_name"], `${ident(parameterColumn)} IS NULL OR ${ident(parameterColumn)} ~ '^[a-z][A-Za-z0-9]{0,127}$'`);
+          addCheck(table, [field.key, name, reference.key], `CASE WHEN ${ident(discriminator.name)} = ${literal(name)} THEN num_nonnulls(${ident(columnName)}, ${ident(parameterColumn)}) ${reference.required ? "=" : "<="} 1 ELSE ${ident(columnName)} IS NULL AND ${ident(parameterColumn)} IS NULL END`);
+        } else addCheck(table, [field.key, name, reference.key], reference.required
           ? `CASE WHEN ${ident(discriminator.name)} = ${literal(name)} THEN ${ident(columnName)} IS NOT NULL ELSE ${ident(columnName)} IS NULL END`
           : `${ident(discriminator.name)} = ${literal(name)} OR ${ident(columnName)} IS NULL`);
-        entry.references.push({ fieldKey: reference.key, targetEntity: targetName, schema: target.schema, table: target.name, column: columnName, required: reference.required, cardinality: "single" });
+        entry.references.push({ fieldKey: reference.key, targetEntity: targetName, schema: target.schema, table: target.name, column: columnName, ...(parameterColumn ? { parameterColumn } : {}), required: reference.required, cardinality: "single" });
       }
       entry.definitionHash = createHash("sha256").update(stableJson({
         ...entry, definitionHash: undefined,

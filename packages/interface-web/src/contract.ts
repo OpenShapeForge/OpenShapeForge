@@ -105,7 +105,7 @@ export type WebFieldProjection = {
   valueType: string;
   semanticType?: string;
   /** Logical dynamic form metadata; physical storage stays server-side. */
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   relationship?: { targetEntityId: string };
   variables?: "none" | "whole" | "template" | "both";

@@ -796,9 +796,10 @@ export function collectAuthoredEntityPluginOperations(
 /** Built-in model discovery follows canonical Operation authentication and transport. */
 function collectEntityTypeListOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
   const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
+  const readRoles = [...new Set(entities.flatMap(({ contract }) => contract.authorization.roles.read))].sort();
   const operation: PluginOperationContract = {
     key: "entityTypes.list", title: "List entity types", description: "Search entity types readable by the current user.",
-    handler: "listEntityTypes", auth: { mode: "session" }, tenancy: { mode: "required" },
+    handler: "listEntityTypes", auth: { mode: "session", roles: readRoles }, tenancy: { mode: "required" },
     idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
     inputSchema: { type: "object", additionalProperties: false, properties: {
       locale: { ...title("Language", "Taal"), type: "string", enum: ["en", "nl"] }, search: { ...title("Search", "Zoeken"), type: "string", maxLength: 500 }, first: { ...title("Page size", "Paginagrootte"), type: "integer", minimum: 1, maximum: 100 }, after: { ...title("Cursor", "Cursor"), type: "string" },

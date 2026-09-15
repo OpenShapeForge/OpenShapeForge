@@ -4,8 +4,8 @@ module: core
 entity: RelationGroupMembership
 title: Relation Group Membership
 description:
-  en: Explicit membership of one relation in one typed relation group.
-  nl: Expliciet lidmaatschap van een relatie in een getypeerde relatiegroep.
+  en: Explicit, dated membership of one relation in one typed relation group. A relation can hold several memberships in the same group over time, each with its own role and period.
+  nl: Expliciet, gedateerd lidmaatschap van een relatie in een getypeerde relatiegroep. Een relatie kan in dezelfde groep meerdere lidmaatschappen na elkaar hebben, elk met een eigen rol en periode.
 language: en
 displayTemplate: "{{relationId}} - {{relationGroupId}}"
 filterField: status
@@ -15,11 +15,15 @@ labels:
 domains:
   - relations
 indexes:
-  - name: relation_group_memberships_tenant_relation_group_uidx
+  # One membership per relation, group and start date: the same pair may
+  # recur over time (a rejoined committee, a second term), so the period is
+  # part of the identity rather than the pair alone.
+  - name: relation_group_memberships_tenant_relation_group_period_uidx
     fields:
       - tenantId
       - relationId
       - relationGroupId
+      - startDate
     unique: true
 authorization:
   roles:
@@ -85,6 +89,71 @@ fields:
     options:
       type: referentiedata
       referentieGroep: RELATIONGROUPSTATUS
+  - key: role
+    valueType: string
+    required: false
+    label:
+      en: Role in group
+      nl: Rol in groep
+    description:
+      en: Functional role the relation holds within this group, such as chair, member or secretary.
+      nl: Functionele rol van de relatie binnen deze groep, zoals voorzitter, lid of secretaris.
+    validation:
+      maxLength: 100
+    persisted:
+      column: role
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Begindatum
+    description:
+      en: First date on which the membership is valid. Part of the membership's identity, so the same relation can rejoin the same group for a later period.
+      nl: Eerste datum waarop het lidmaatschap geldig is. Maakt deel uit van de identiteit van het lidmaatschap, zodat dezelfde relatie later opnieuw lid van dezelfde groep kan worden.
+    persisted:
+      column: start_date
+      storageClass: core
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Last date on which the membership is valid; empty while the membership is open-ended.
+      nl: Laatste datum waarop het lidmaatschap geldig is; leeg zolang het lidmaatschap doorloopt.
+    persisted:
+      column: end_date
+      storageClass: core
+  - key: isPrimary
+    valueType: boolean
+    required: true
+    defaultValue: false
+    label:
+      en: Primary
+      nl: Primair
+    description:
+      en: Whether this is the relation's primary membership for its role, when it holds several memberships in the same group.
+      nl: Of dit het primaire lidmaatschap van de relatie voor deze rol is, wanneer zij meerdere lidmaatschappen in dezelfde groep heeft.
+    persisted:
+      column: is_primary
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Stable code of the membership in an external source or sector context.
+      nl: Stabiele code van het lidmaatschap in een externe bron of sectorcontext.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
 relationships:
   - key: relation
     kind: belongsTo
@@ -124,8 +193,8 @@ operations:
   create:
     name: { en: Create relation group membership, nl: Relatiegroepslidmaatschap aanmaken }
     description:
-      en: Adds one relation to one relation group.
-      nl: Voegt één relatie toe aan één relatiegroep.
+      en: Adds one relation to one relation group for a role and period.
+      nl: Voegt één relatie voor een rol en periode toe aan één relatiegroep.
     implementation: { type: entity, action: create }
     effects: { data: write, external: none }
     reliability:
@@ -134,8 +203,8 @@ operations:
   update:
     name: { en: Update relation group membership, nl: Relatiegroepslidmaatschap wijzigen }
     description:
-      en: Changes the membership status while holding its server-issued edit lease and current version.
-      nl: Wijzigt de lidmaatschapsstatus met de server-uitgegeven bewerkingslease en actuele versie.
+      en: Changes the membership's role, period, primacy or status while holding its server-issued edit lease and current version.
+      nl: Wijzigt rol, periode, primair-markering of status van het lidmaatschap met de server-uitgegeven bewerkingslease en actuele versie.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability:
@@ -192,32 +261,48 @@ interfaces:
         columns:
           - { key: relationId, sortable: true }
           - { key: relationGroupId, sortable: true }
+          - { key: role, sortable: true }
           - { key: status, sortable: true }
+          - { key: startDate, sortable: true }
+          - { key: endDate, sortable: true }
         defaultSort: { key: relationGroupId, direction: asc }
       record:
         routes:
           read: { en: /relation-group-memberships/:id, nl: /relatiegroepslidmaatschappen/:id }
           create: { en: /relation-group-memberships/new, nl: /relatiegroepslidmaatschappen/nieuw }
-        title: Group membership
+        title: "{{relationId}}"
+        subtitle: "{{relationGroupId}}"
         actions: [update, delete]
         layout:
           context:
-            fields: [status]
+            fields: [status, isPrimary]
             relationships: [relation, relationGroup]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Membership, nl: Lidmaatschap }
-                  fields: [relationId, relationGroupId, status]
+                  fields: [relationId, relationGroupId, role, status, isPrimary]
+                - title: { en: Period, nl: Periode }
+                  fields: [startDate, endDate]
+                - title: { en: Source, nl: Herkomst }
+                  fields: [externalCode]
         modes:
           create:
             title: { en: Add relation to group, nl: Relatie aan groep toevoegen }
             groups:
               - title: { en: Membership, nl: Lidmaatschap }
-                fields: [relationId, relationGroupId, status]
+                fields: [relationId, relationGroupId, role, status, isPrimary]
+              - title: { en: Period, nl: Periode }
+                fields: [startDate, endDate]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalCode]
           update:
             title: { en: Update membership, nl: Lidmaatschap wijzigen }
             groups:
-              - title: { en: Status, nl: Status }
-                fields: [status]
+              - title: { en: Membership, nl: Lidmaatschap }
+                fields: [role, status, isPrimary]
+              - title: { en: Period, nl: Periode }
+                fields: [startDate, endDate]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalCode]

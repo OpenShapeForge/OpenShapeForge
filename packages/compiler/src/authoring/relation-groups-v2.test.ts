@@ -165,9 +165,11 @@ describe("typed RelationGroups and many-relation memberships", () => {
       schema === "erp" && name === "relation_group_memberships"
     );
     expect(table).toBeDefined();
+    // Dated memberships: the same relation may rejoin the same group for a
+    // later period, so the start date is part of the unique identity.
     expect(table?.indexes).toEqual([{
-      name: "relation_group_memberships_tenant_relation_group_uidx",
-      columns: ["tenant_id", "relation_id", "relation_group_id"],
+      name: "relation_group_memberships_tenant_relation_group_period_uidx",
+      columns: ["tenant_id", "relation_id", "relation_group_id", "start_date"],
       unique: true,
     }]);
     expect(table?.columns.find(({ name }) => name === "relation_id")).toMatchObject({

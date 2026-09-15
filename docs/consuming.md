@@ -28,13 +28,17 @@ then install by name (Bun and npm both read `.npmrc`):
 bun add @openshapeforge/compiler
 ```
 
-Alternatively, every workflow run — including pull requests touching
-`packages/compiler` — also uploads the tarball as a run artifact named
-`openshapeforge-compiler-npm-<sha>` (90-day retention). Download it from the
-run's Artifacts section (or `gh run download`) and install from the file:
+Alternatively, every workflow run — including pull requests touching the
+compiler or either public runtime contract package — uploads all three tarballs
+as one run artifact named `openshapeforge-compiler-npm-<sha>` (90-day
+retention). Download it from the run's Artifacts section (or `gh run
+download`) and install the dependency tarballs together:
 
 ```sh
-bun add ./openshapeforge-compiler-0.1.0.tgz
+npm install \
+  ./openshapeforge-operations-0.1.0.tgz \
+  ./openshapeforge-interface-web-0.1.0.tgz \
+  ./openshapeforge-compiler-0.1.7.tgz
 ```
 
 Either way the content is proven before it ships: CI installs the tarball into

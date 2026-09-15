@@ -383,7 +383,9 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     id: entry.operation.key,
     key: entry.operation.key,
     intent: operationIntent(entry.operation),
-    ...(entry.operation.implementation ? { implementation: entry.operation.implementation } : {}),
+    ...(entry.operation.implementation?.type === "collection"
+      ? { implementation: entry.operation.implementation }
+      : {}),
     name: entry.operation.title,
     description: entry.operation.description,
     ...(entry.operation.target ? { target: entry.operation.target } : {}),

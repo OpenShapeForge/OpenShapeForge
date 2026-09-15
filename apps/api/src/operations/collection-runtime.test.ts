@@ -5,7 +5,11 @@ import { bindOperationHandlers, operationModulesConfigured, runtimeStaticOperati
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 
-function fixture(): OperationContract {
+type CollectionOperationContract = OperationContract & {
+  implementation: Extract<NonNullable<OperationContract["implementation"]>, { type: "collection" }>;
+};
+
+function fixture(): CollectionOperationContract {
   return {
     key: "Page.insertSection", plugin: "core", handler: "collectionMutation",
     title: "Insert section", description: "Insert an owned section.",
@@ -36,7 +40,7 @@ describe("native canonical collection Operations", () => {
   });
 
   test("rejects unguarded, mismatched or unsupported compiler contracts at boot", () => {
-    const changes: Array<(op: OperationContract) => void> = [
+    const changes: Array<(op: CollectionOperationContract) => void> = [
       (op) => { op.target!.entityName = "Other"; },
       (op) => { op.plugin = "arbitrary-plugin"; },
       (op) => { op.handler = "arbitraryHandler"; },
@@ -58,7 +62,7 @@ describe("native canonical collection Operations", () => {
 
   test("retains duplicate-Operation and missing plugin-handler boot checks", () => {
     expect(() => bindOperationHandlers([], [fixture(), fixture()])).toThrow("duplicated");
-    const ordinary = fixture(); delete ordinary.implementation;
+    const ordinary: OperationContract = { ...fixture() }; delete ordinary.implementation;
     expect(() => bindOperationHandlers([], [ordinary])).toThrow("no loaded runtime module");
   });
 

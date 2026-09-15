@@ -38,6 +38,14 @@ export type GeneratedCrudColumn = {
     rest: string;
     mcp?: string;
   }[];
+  deriveOnCreate?: {
+    sourceField: string;
+    sourceColumn: string;
+    transform: "slug";
+    onConflict: "suffix";
+    conflictColumns: string[];
+    maxLength?: number;
+  };
 };
 
 export type GeneratedCrudRelationship = {

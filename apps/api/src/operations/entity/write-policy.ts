@@ -10,6 +10,7 @@ import { fieldNameForColumn } from "./columns.js";
 import { assertEntityValueInput, entityValuePhysicalColumns } from "./entity-value-io.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
+import { assertNoDerivedOnCreateValues } from "./derive-on-create.js";
 
 /**
  * The single storage-writability rule shared by generated CRUD. Caller-facing
@@ -42,6 +43,7 @@ export function isWritableColumn(
     column.name !== "tenant_id" &&
     column.name !== "created_at" &&
     column.name !== "updated_at" &&
+    column.deriveOnCreate === undefined &&
     !(operation === "update" && column.immutable === true)
   );
 }
@@ -161,6 +163,7 @@ export function normalizeWritableValues(
   operation: "create" | "update",
   entityValues = generatedEntityValues,
 ) {
+  assertNoDerivedOnCreateValues(table, input);
   assertEntityValueInput(table, input, operation, entityValues);
   const writable = writableColumnMap(table, operation);
   const values = new Map<GeneratedCrudColumn, unknown>();

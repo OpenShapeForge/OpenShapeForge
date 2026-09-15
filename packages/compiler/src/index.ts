@@ -72,6 +72,7 @@ export type {
   FieldDefinition,
   FieldDefinitionAuthoringMetadata,
   FieldDefinitionCardinality,
+  FieldDefinitionDeriveOnCreate,
   FieldDefinitionRelationship,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSemanticType,

@@ -34,6 +34,7 @@ import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
 import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
+import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import {
   isCoreEntityV2,
   v2PluginOperations,
@@ -135,6 +136,14 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     model: { fields: modelFields, relationships },
     graphql,
     views,
+  });
+
+  resolveDerivedOnCreateBindings({
+    entityName: coreEntity.entity,
+    fields: modelFields,
+    columns,
+    ...(coreEntity.indexes ? { indexes: coreEntity.indexes } : {}),
+    tenantScoped: coreEntity.authorization !== undefined,
   });
 
   return {

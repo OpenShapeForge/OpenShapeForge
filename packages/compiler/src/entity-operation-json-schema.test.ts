@@ -79,6 +79,10 @@ const contract = {
         validation: { minLength: 2, maxLength: 80 },
       }),
       field("stableCode", { immutable: true }),
+      field("generatedKey", {
+        required: true,
+        deriveOnCreate: { from: "title", transform: "slug", onConflict: "suffix" },
+      }),
       field("reviewedAt", { writtenBy: ["example.work-item.review"] }),
       field("secretValues", { valueType: "object" }),
     ],
@@ -93,6 +97,7 @@ const contract = {
     columns: [
       { field: "title", column: "title", type: "text", nullable: false, storageClass: "core" },
       { field: "stableCode", column: "stable_code", type: "text", nullable: true, storageClass: "core" },
+      { field: "generatedKey", column: "generated_key", type: "text", nullable: false, storageClass: "core" },
       { field: "reviewedAt", column: "reviewed_at", type: "timestamptz", nullable: true, storageClass: "core" },
       { field: "secretValues", column: "secret_values", type: "jsonb", nullable: true, storageClass: "core" },
       { field: "projectId", column: "project_id", type: "uuid", nullable: false, storageClass: "core" },

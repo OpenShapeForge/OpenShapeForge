@@ -77,6 +77,11 @@ const contract = {
         },
       }),
       field({
+        key: "generatedKey",
+        required: true,
+        deriveOnCreate: { from: "displayName", transform: "slug", onConflict: "suffix" },
+      }),
+      field({
         key: "iban",
         label: { en: "IBAN" },
         description: { en: "International bank account number." },
@@ -169,6 +174,19 @@ const manifest: PlatformSchemaManifest = {
           type: "text",
           sourceField: "externalId",
           immutable: true,
+        },
+        {
+          name: "generated_key",
+          type: "text",
+          required: true,
+          sourceField: "generatedKey",
+          deriveOnCreate: {
+            sourceField: "displayName",
+            sourceColumn: "display_name",
+            transform: "slug",
+            onConflict: "suffix",
+            conflictColumns: ["tenant_id", "generated_key"],
+          },
         },
         { name: "iban", type: "text", sourceField: "iban" },
         { name: "business_first", type: "text", sourceField: "first" },
@@ -686,6 +704,7 @@ describe("rich generated REST OpenAPI", () => {
 
     expect(create.required).toEqual(["relationType"]);
     expect(create.properties.externalId).toBeDefined();
+    expect(create.properties.generatedKey).toBeUndefined();
     expect(create.properties.displayName).toMatchObject({
       type: "string",
       title: "Display name",
@@ -713,6 +732,7 @@ describe("rich generated REST OpenAPI", () => {
       minLength: 1,
     });
     expect(update.properties.externalId).toBeUndefined();
+    expect(update.properties.generatedKey).toBeUndefined();
     expect(update.properties.displayName?.default).toBeUndefined();
     expect(create.properties.metadata).toBeUndefined();
     expect(update.properties.metadata).toBeUndefined();
@@ -1087,6 +1107,7 @@ describe("rich generated REST OpenAPI", () => {
         "displayName",
         "relationType",
         "externalId",
+        "generatedKey",
         "first",
         "status",
         "statusIn",

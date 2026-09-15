@@ -840,6 +840,9 @@ function renderManifestJson(
       ...(column.writtenBy === undefined
         ? {}
         : { writtenBy: resolveColumnWriters(table, column, operations) }),
+      ...(column.deriveOnCreate === undefined
+        ? {}
+        : { deriveOnCreate: column.deriveOnCreate }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted
@@ -893,6 +896,9 @@ function renderManifestJson(
         // Already resolved on the rendered table above; republished here so the
         // runtime's generated-entity view carries the same one fact.
         ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
+        ...(column.deriveOnCreate === undefined
+          ? {}
+          : { deriveOnCreate: column.deriveOnCreate }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));

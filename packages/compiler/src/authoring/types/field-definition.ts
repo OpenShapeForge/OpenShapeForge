@@ -83,6 +83,19 @@ export interface FieldDefinitionSuggestions {
   sourceKey?: string;
 }
 
+/**
+ * A persisted value owned by the entity runtime rather than by callers.
+ *
+ * The deliberately small vocabulary keeps this declarative: the source is
+ * another field on the same entity, `slug` is the only transformation, and a
+ * conflicting value is resolved under a compiler-verified unique index.
+ */
+export interface FieldDefinitionDeriveOnCreate {
+  from: string;
+  transform: "slug";
+  onConflict: "suffix";
+}
+
 export interface FieldDefinitionRuntimeMetadata {
   aliases?: string[];
   required?: boolean;
@@ -138,6 +151,8 @@ export interface FieldDefinition {
    * A name that matches no compiled operation fails the build.
    */
   writtenBy?: string[];
+  /** Server-owned, persisted value derived once when the entity is created. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label?: LocalizedText;
   description?: LocalizedText;
   placeholder?: LocalizedText;

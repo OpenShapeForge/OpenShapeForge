@@ -434,14 +434,17 @@ function projectField(
   parent: string,
   supports: WebFieldProjection["supports"],
   editNested = false,
+  presentations: Record<string, { render: NonNullable<WebFieldProjection["presentation"]> }> = {},
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
+  const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     valueType: field.valueType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
+    ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
     ...(field.semanticType ? { semanticType: field.semanticType } : {}),
     ...(field.relationship?.target ? { relationship: {
@@ -464,9 +467,13 @@ function projectField(
       ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
     ...((field.options?.type === "remote" || field.options?.type === "dynamic") && (field.options.remoteUrl || field.options.source)
       ? { optionSource: { type: field.options.type, source: field.options.remoteUrl ?? field.options.source! } } : {}),
-    ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested)) } : {}),
-    ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested) } : {}),
-    supports: { read: supports.read, create: supports.create && !field.readOnly, update: supports.update && !field.readOnly && !field.immutable },
+    ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
+    ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
+    supports: {
+      read: supports.read,
+      create: supports.create && !field.readOnly && !field.deriveOnCreate,
+      update: supports.update && !field.readOnly && !field.immutable && !field.deriveOnCreate,
+    },
   };
 }
 
@@ -500,6 +507,9 @@ function projectEntity(
       ? [contract.entityOperations.create.interaction.secureInput.into]
       : [],
   );
+  for (const field of contract.model.fields) {
+    if (field.deriveOnCreate) serverOwnedFields.add(field.key);
+  }
   for (const relationship of contract.model.relationships) {
     if (relationship.fieldKey && relationship.kind !== "belongsTo") serverOwnedFields.add(relationship.fieldKey);
   }
@@ -519,9 +529,9 @@ function projectEntity(
   const explicitFields = contract.model.fields.map((field) => {
     const projected = projectField(field, entityName, {
         read: true,
-        create: !field.readOnly && createFields.has(field.key),
-        update: !field.readOnly && !field.immutable && updateFields.has(field.key),
-    });
+        create: !field.readOnly && !field.deriveOnCreate && createFields.has(field.key),
+        update: !field.readOnly && !field.immutable && !field.deriveOnCreate && updateFields.has(field.key),
+    }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
   });
   const implicitRelationshipFields = contract.model.relationships.flatMap((relationship) => {

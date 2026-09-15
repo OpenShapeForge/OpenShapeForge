@@ -59,14 +59,19 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.Read"],
       }),
     ).not.toThrow();
-    // The write role also satisfies delete. (The authored-vs-normalized
-    // vocabulary union is covered by the compiler's backend-manifest tests;
-    // since #403 the shipped catalog is authored in English, so the manifest
-    // carries a single spelling per role.)
+    // A role on the delete allow-list satisfies delete. Read from the manifest
+    // rather than spelled out: the entity authors its delete list separately
+    // from its write list (Relations.All.Delete today), and the guard's job is
+    // to honour whatever the list says. (The authored-vs-normalized vocabulary
+    // union is covered by the compiler's backend-manifest tests; since #403
+    // the shipped catalog is authored in English, so the manifest carries a
+    // single spelling per role.)
+    const deleteRole = table.source?.authorization?.roles?.delete?.[0];
+    expect(deleteRole).toBeTruthy();
     expect(() =>
       requireEntityOperation(table, "delete", {
         ...noRoleSession,
-        roles: ["Relations.All.ReadWrite"],
+        roles: [deleteRole!],
       }),
     ).not.toThrow();
   });

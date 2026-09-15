@@ -5,12 +5,17 @@
  * platform.entity_events), reads append nothing, and sequences increase
  * monotonically. Journal state is read through the same RLS session layer
  * the API uses and shown in the HTML report.
+ *
+ * Shape-aware through e2e/gql-shapes.ts: a canonical update or delete goes
+ * through its lease and confirmation controls, which journal their own
+ * events under the Operation's aggregate — not the entity's — so the CRUD
+ * lifecycle read here is the same for both generations.
  */
 import { expect } from "bun:test";
 import {
   describe,
   eventsFor,
-  expectData,
+  gql,
   registerSuiteLifecycle,
   seed,
   tenantA,
@@ -23,6 +28,15 @@ import {
   textColumnFor,
   untrackRow,
 } from "./e2e/entity-factory.js";
+import {
+  collectionOf,
+  expectDeleted,
+  fetchRecord,
+  listDoc,
+  recordOf,
+  updateRecord,
+} from "./e2e/gql-shapes.js";
+import { isEntityBackedCreate } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -31,52 +45,68 @@ for (const table of tables) {
   const typeName = graphql.typeName;
 
   describe(`${typeName} (${table.name}) events`, () => {
+    // The journal is the generic CRUD core's: a plugin-backed create runs its
+    // own command and appends nothing under the entity's aggregate, so its
+    // lifecycle here starts empty and picks up at the first core mutation.
+    const created = isEntityBackedCreate(table) ? ["created"] : [];
+
     test("mutations append entity events; reads append none", async () => {
       const id = await createRow(table, tenantA);
       const afterCreate = await eventsFor(tenantA, table, id);
-      expect(afterCreate.map((event) => event.eventType)).toEqual(["created"]);
-      expect(afterCreate[0]!.payload).toEqual({
-        table: table.name,
-        schema: table.schema,
-        operation: "created",
-      });
+      expect(afterCreate.map((event) => event.eventType)).toEqual(created);
+      // A realtime-projected entity also journals the columns its channel
+      // filters on; the manifest says which, so the assertion follows it.
+      if (created.length > 0) {
+        expect(afterCreate[0]!.payload).toEqual({
+          table: table.name,
+          schema: table.schema,
+          operation: "created",
+          ...(table.realtime
+            ? {
+                visibility: Object.fromEntries(
+                  table.realtime.visibilityColumns.map((column) => [column, expect.anything()]),
+                ),
+              }
+            : {}),
+        });
+      }
 
-      await expectData(
-        tenantA,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id },
+      expect((await fetchRecord(tenantA, table, id))?.id).toBe(id);
+      const listed = collectionOf(
+        table,
+        await gql(
+          tenantA,
+          listDoc(table, { variables: ["filter"], args: "first: 1", totalCount: true }),
+          { filter: { id } },
+        ),
+        graphql.listQueryName,
       );
-      await expectData(
-        tenantA,
-        `query($filter: ${typeName}Filter) {
-           ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
-         }`,
-        { filter: { id } },
-      );
-      expect((await eventsFor(tenantA, table, id)).length).toBe(1);
+      expect(listed.totalCount).toBe(1);
+      expect((await eventsFor(tenantA, table, id)).length).toBe(created.length);
 
       const updateColumn = textColumnFor(table);
       if (updateColumn) {
-        await expectData(
-          tenantA,
-          `mutation($input: Update${typeName}Input!) {
-             ${graphql.updateMutationName}(input: $input) { id }
-           }`,
-          { input: { id, [fieldName(updateColumn)]: `e2e-evented-${seed}` } },
-        );
+        const updated = await updateRecord(tenantA, table, id, {
+          [fieldName(updateColumn)]: `e2e-evented-${seed}`,
+        });
+        expect(recordOf(table, updated, graphql.updateMutationName)?.id).toBe(id);
       }
 
-      await expectData(
-        tenantA,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-      );
-      untrackRow(id);
+      // A plugin-created row keeps the companion records its create made, and
+      // the entity delete is authored to refuse while they exist — so its
+      // lifecycle here ends at the update; entity-crud pins that refusal.
+      const deletable = isEntityBackedCreate(table);
+      if (deletable) {
+        await expectDeleted(tenantA, table, id);
+        untrackRow(id);
+      }
 
       const lifecycle = await eventsFor(tenantA, table, id);
-      expect(lifecycle.map((event) => event.eventType)).toEqual(
-        updateColumn ? ["created", "updated", "deleted"] : ["created", "deleted"],
-      );
+      expect(lifecycle.map((event) => event.eventType)).toEqual([
+        ...created,
+        ...(updateColumn ? ["updated"] : []),
+        ...(deletable ? ["deleted"] : []),
+      ]);
       const sequences = lifecycle.map((event) => BigInt(event.sequence));
       expect([...sequences].sort((a, b) => (a < b ? -1 : 1))).toEqual(sequences);
     });

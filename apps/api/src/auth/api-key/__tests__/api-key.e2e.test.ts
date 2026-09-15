@@ -80,7 +80,8 @@ const { __resetSessionResolverForTests } = await import("../../identity.js");
 const { __resetExchangeCacheForTests } = await import("../exchange.js");
 const { KeycloakAdmin } = await import("../keycloak-admin.js");
 const { REST_MOUNT_PATH } = await import("../../../rest/rest-paths.js");
-const { createDatabaseRuntime } = await import("../../../db/connection.js");
+const { createDatabaseRuntime, readMigrateDatabaseUrl } = await import("../../../db/connection.js");
+const { seedKeycloakTokenPeople } = await import("../../../graphql/__tests__/e2e/keycloak.js");
 const { sql } = await import("kysely");
 
 type App = Awaited<ReturnType<typeof createApiApp>>;
@@ -301,6 +302,19 @@ const ready = await (async () => {
 
 beforeAll(async () => {
   if (!ready) return;
+  // Own the tenant-membership precondition instead of depending on whichever
+  // GraphQL E2E file Bun happens to execute first in the combined CI process.
+  const seedRuntime = createDatabaseRuntime({
+    databaseUrl: readMigrateDatabaseUrl(),
+  });
+  try {
+    await seedKeycloakTokenPeople(seedRuntime.db, [
+      adminToken,
+      await userToken("tenant-a-user"),
+    ]);
+  } finally {
+    await seedRuntime.close();
+  }
   __resetSessionResolverForTests();
   __resetExchangeCacheForTests();
   app = createApiApp({ cors: false, databaseUrl: DATABASE_URL });

@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Relation
@@ -40,7 +40,8 @@ fields:
       nl: Labels
     description:
       en: Runtime-resolved label rule outputs for this relation. Not persisted; computed per request from label_rules.
-      nl: Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op basis van label_rules.
+      nl: Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op
+        basis van label_rules.
   - key: displayName
     valueType: string
     required: true
@@ -185,8 +186,10 @@ fields:
       en: Business context
       nl: Bedrijfscontext
     description:
-      en: Free-text business context for this organization or person, meant to help an assistant understand what it does — visible to anyone who can read this record, unlike the internal `notes` field.
-      nl: Vrije tekst bedrijfscontext voor deze organisatie of persoon, bedoeld om een assistent te helpen begrijpen wat het doet — zichtbaar voor iedereen die dit record mag lezen, in tegenstelling tot het interne `notes`-veld.
+      en: Free-text business context for this organization or person, meant to help an assistant understand what it does —
+        visible to anyone who can read this record, unlike the internal `notes` field.
+      nl: Vrije tekst bedrijfscontext voor deze organisatie of persoon, bedoeld om een assistent te helpen begrijpen wat het
+        doet — zichtbaar voor iedereen die dit record mag lezen, in tegenstelling tot het interne `notes`-veld.
     validation:
       maxLength: 4000
     persisted:
@@ -197,138 +200,175 @@ fields:
     required: false
     readOnly: true
     immutable: true
-    semanticType: relationGroupId
+    semanticType: RelationGroup
     label:
       en: Legacy relation group ID
       nl: Legacy relatiegroep-ID
     description:
       en: Retained legacy single-group reference. New and updated memberships use RelationGroupMembership instead.
-      nl: Behouden verouderde verwijzing naar één relatiegroep. Nieuwe en gewijzigde lidmaatschappen gebruiken RelationGroupMembership.
+      nl: Behouden verouderde verwijzing naar één relatiegroep. Nieuwe en gewijzigde lidmaatschappen gebruiken
+        RelationGroupMembership.
     validation:
       format: uuid
     persisted:
       column: relation_group_id
       storageClass: core
-relationships:
+    classification:
+      sensitivity: internal
+      category: workflow
   - key: groupMemberships
-    kind: hasMany
-    target: RelationGroupMembership
-    foreignKey: relation_id
     label:
       en: Group memberships
       nl: Groepslidmaatschappen
+    semanticType: RelationGroupMembership
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: roles
-    kind: hasMany
-    target: RelationRole
-    foreignKey: relation_id
     label:
       en: Roles
       nl: Rollen
+    semanticType: RelationRole
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: addresses
-    kind: hasMany
-    target: Address
-    foreignKey: relation_id
     label:
       en: Addresses
       nl: Adressen
+    semanticType: Address
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: addressAssignments
-    kind: hasMany
-    target: AddressAssignment
-    foreignKey: relation_id
     label:
       en: Address assignments
       nl: Adrestoewijzingen
+    semanticType: AddressAssignment
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: contactDetails
-    kind: hasMany
-    target: ContactDetail
-    foreignKey: relation_id
     label:
       en: Contact details
       nl: Contactgegevens
+    semanticType: ContactDetail
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: communicationPreferences
-    kind: hasMany
-    target: CommunicationPreference
-    foreignKey: relation_id
     label:
       en: Communication preferences
       nl: Communicatievoorkeuren
+    semanticType: CommunicationPreference
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: paymentDetails
-    kind: hasMany
-    target: PaymentDetail
-    foreignKey: relation_id
     label:
       en: Payment details
       nl: Betaalgegevens
+    semanticType: PaymentDetail
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: contactMoments
-    kind: hasMany
-    target: ContactMoment
-    foreignKey: relation_id
     label:
       en: Contact moments
       nl: Contactmomenten
+    semanticType: ContactMoment
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: accounts
-    kind: hasMany
-    target: Account
-    foreignKey: relation_id
     label:
       en: Accounts
       nl: Accounts
+    semanticType: Account
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: relation_id
     label:
       en: Tasks
       nl: Taken
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: agreements
-    kind: hasMany
-    target: Agreement
-    foreignKey: relation_id
     label:
       en: Agreements
       nl: Overeenkomsten
+    semanticType: Agreement
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: cases
-    kind: hasMany
-    target: Case
-    foreignKey: relation_id
     label:
       en: Cases
       nl: Zaken
+    semanticType: Case
+    cardinality: collection
+    relationship:
+      inverse: primaryRelationId
+      ownership: reference
   - key: caseFiles
-    kind: hasMany
-    target: CaseFile
-    foreignKey: relation_id
     label:
       en: Case files
       nl: Dossiers
+    semanticType: CaseFile
+    cardinality: collection
+    relationship:
+      inverse: primaryRelationId
+      ownership: reference
   - key: documents
-    kind: hasMany
-    target: Document
-    foreignKey: relation_id
     label:
       en: Documents
       nl: Documenten
+    semanticType: Document
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: associations
-    kind: hasMany
-    target: RelationAssociation
-    foreignKey: relation_id
     label:
       en: Associations
       nl: Koppelingen
+    semanticType: RelationAssociation
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
   - key: relatedAssociations
-    kind: hasMany
-    target: RelationAssociation
-    foreignKey: related_relation_id
     label:
       en: Related associations
       nl: Gerelateerde koppelingen
+    semanticType: RelationAssociation
+    cardinality: collection
+    relationship:
+      inverse: relatedRelationId
+      ownership: reference
   - key: contextAssociations
-    kind: hasMany
-    target: RelationAssociation
-    foreignKey: context_relation_id
     label:
       en: Context associations
       nl: Contextkoppelingen
+    semanticType: RelationAssociation
+    cardinality: collection
+    relationship:
+      inverse: contextRelationId
+      ownership: reference
 operations:
   list:
     name: { en: List relations, nl: Relaties tonen }
@@ -395,7 +435,7 @@ operations:
         kind: type-current-field
         field: displayName
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -414,8 +454,10 @@ interfaces:
           nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
       delete:
         instructions:
-          en: First acquire an edit lease and submit id, expectedVersion, and leaseToken to request a challenge; then retry with the same controls, its token, and the exact requested current display name.
-          nl: Vraag eerst een bewerkingslease aan en stuur id, expectedVersion en leaseToken om een bevestigingsvraag te krijgen; herhaal daarna met dezelfde controles, het bevestigingstoken en exact de gevraagde actuele weergavenaam.
+          en: First acquire an edit lease and submit id, expectedVersion, and leaseToken to request a challenge; then retry with
+            the same controls, its token, and the exact requested current display name.
+          nl: Vraag eerst een bewerkingslease aan en stuur id, expectedVersion en leaseToken om een bevestigingsvraag te krijgen;
+            herhaal daarna met dezelfde controles, het bevestigingstoken en exact de gevraagde actuele weergavenaam.
     resource:
       uri: app://relations
       name: Relations
@@ -437,30 +479,30 @@ interfaces:
           create: { en: /relations/new, nl: /relaties/nieuw }
         title: "{{displayName}}"
         subtitle: "{{relationType}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [relationSubType, status, preferredContactChannel, location]
-            relationships: [agreements, groupMemberships, tasks]
+            fields: [ relationSubType, status, preferredContactChannel, location ]
+            relationships: [ agreements, groupMemberships, tasks ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Basics, nl: Basisgegevens }
-                  fields: [displayName, relationType, relationSubType, preferredContactChannel, status]
+                  fields: [ displayName, relationType, relationSubType, preferredContactChannel, status ]
                 - title: { en: Location, nl: Locatie }
-                  fields: [address, location]
+                  fields: [ address, location ]
                 - title: { en: Business context, nl: Zakelijke context }
-                  fields: [businessContext]
+                  fields: [ businessContext ]
                 - title: { en: Notes, nl: Notities }
-                  fields: [notes]
+                  fields: [ notes ]
             - id: source
               label: { en: Source, nl: Herkomst }
               groups:
                 - title: { en: Identification, nl: Identificatie }
-                  fields: [externalId, externalCode]
+                  fields: [ externalId, externalCode ]
                 - title: { en: Source, nl: Herkomst }
-                  fields: [sourceAuthority, sourceOrganization, sourceAdministration]
+                  fields: [ sourceAuthority, sourceOrganization, sourceAdministration ]
             - id: agreements
               label: { en: Agreements, nl: Overeenkomsten }
               relationship: agreements
@@ -475,14 +517,14 @@ interfaces:
             title: { en: Create relation, nl: Relatie aanmaken }
             groups:
               - title: { en: Basics, nl: Basisgegevens }
-                fields: [displayName, relationType, relationSubType, preferredContactChannel, status]
+                fields: [ displayName, relationType, relationSubType, preferredContactChannel, status ]
               - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                fields: [ externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration ]
               - title: { en: Location, nl: Locatie }
-                fields: [address, location]
+                fields: [ address, location ]
               - title: { en: Context, nl: Context }
-                fields: [businessContext]
+                fields: [ businessContext ]
               - title: { en: Notes, nl: Notities }
-                fields: [notes]
+                fields: [ notes ]
           update:
             title: { en: Update relation, nl: Relatie wijzigen }

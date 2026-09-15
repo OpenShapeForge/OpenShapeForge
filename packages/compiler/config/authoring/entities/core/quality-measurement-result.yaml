@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: QualityMeasurementResult
@@ -62,11 +62,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 4000
+    semanticType: multilineText
   - key: assessmentScale
     valueType: string
     required: false
@@ -79,11 +75,10 @@ fields:
     persisted:
       column: assessment_scale
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ASSESSMENTSCALE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ASSESSMENTSCALE
+    semanticType: referenceDataCode
   - key: assessmentValue
     valueType: string
     required: false
@@ -110,9 +105,6 @@ fields:
     persisted:
       column: response_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: responseStatus
     valueType: string
     required: false
@@ -125,11 +117,10 @@ fields:
     persisted:
       column: response_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RESULTRESPONSE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: RESULTRESPONSE
+    semanticType: referenceDataCode
   - key: assessmentExplanation
     valueType: string
     required: false
@@ -144,11 +135,7 @@ fields:
     persisted:
       column: assessment_explanation
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 4000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -163,26 +150,134 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: measurementRequest
-    kind: belongsTo
-    target: QualityMeasurementRequest
-    foreignKey: measurement_request_id
+  - key: measurementRequestId
     label:
       en: Measurement request
       nl: Metingsverzoek
-  - key: researchAssignment
-    kind: belongsTo
-    target: ResearchAssignment
-    foreignKey: research_assignment_id
+    persisted:
+      column: measurement_request_id
+      storageClass: core
+    semanticType: QualityMeasurementRequest
+    relationship:
+      ownership: reference
+  - key: researchAssignmentId
     label:
       en: Research assignment
       nl: Onderzoeksopdracht
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: research_assignment_id
+      storageClass: core
+    semanticType: ResearchAssignment
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Quality Measurement Result
+    description: List QualityMeasurementResult records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Quality Measurement Result
+    description: Get QualityMeasurementResult records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Quality Measurement Result
+    description: Create QualityMeasurementResult records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Quality Measurement Result
+    description: Update QualityMeasurementResult records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Quality Measurement Result
+    description: Delete QualityMeasurementResult records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000
+      assessmentScale:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ASSESSMENTSCALE
+            clearable: true
+      responseDate:
+        render:
+          component: DatePicker
+          props: {}
+      responseStatus:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RESULTRESPONSE
+            clearable: true
+      assessmentExplanation:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000

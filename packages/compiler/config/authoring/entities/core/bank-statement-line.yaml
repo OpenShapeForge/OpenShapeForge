@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BankStatementLine
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: value_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: amount
     valueType: number
     required: true
@@ -53,11 +50,10 @@ fields:
     persisted:
       column: direction
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: LEDGERSIDE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: LEDGERSIDE
+    semanticType: referenceDataCode
   - key: counterpartyName
     valueType: string
     required: false
@@ -100,11 +96,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 1000
+    semanticType: multilineText
   - key: endToEndId
     valueType: string
     required: false
@@ -131,145 +123,20 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BANKSTATEMENTLINESTATUS
-        clearable: false
-relationships:
-  - key: bankStatement
-    kind: belongsTo
-    target: BankStatement
-    foreignKey: bank_statement_id
+    options:
+      type: referentiedata
+      referentieGroep: BANKSTATEMENTLINESTATUS
+    semanticType: referenceDataCode
+  - key: bankStatementId
     label:
       en: Bank statement
       nl: Bankafschrift
-ui:
-  routes:
-    list:
-      en: /bank-statement-lines
-      nl: /bankafschriftregels
-    detail:
-      en: /bank-statement-lines/:id
-      nl: /bankafschriftregels/:id
-    create:
-      en: /bank-statement-lines/create
-      nl: /bankafschriftregels/aanmaken
-    edit:
-      en: /bank-statement-lines/:id/edit
-      nl: /bankafschriftregels/:id/bewerken
-    delete:
-      en: /bank-statement-lines/:id/delete
-      nl: /bankafschriftregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Bank statement lines
-        nl: Bankafschriftregels
-      columns:
-        - key: valueDate
-          sortable: true
-        - key: counterpartyName
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: direction
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: valueDate
-        direction: desc
-      rowLink:
-        en: /bank-statement-lines/:id
-        nl: /bankafschriftregels/:id
-    detail:
-      header:
-        title: "{{counterpartyName}}: {{amount}}"
-        subtitle: "{{valueDate}}"
-        badges:
-          - direction
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Movement
-                nl: Mutatie
-              fields:
-                - valueDate
-                - amount
-                - direction
-                - status
-            - title:
-                en: Counterparty
-                nl: Tegenpartij
-              fields:
-                - counterpartyName
-                - counterpartyIban
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-                - endToEndId
-    form:
-      variants:
-        create:
-          title:
-            en: Create bank statement line
-            nl: Bankafschriftregel aanmaken
-          groups:
-            - title:
-                en: Movement
-                nl: Mutatie
-              fields:
-                - valueDate
-                - amount
-                - direction
-                - status
-            - title:
-                en: Counterparty
-                nl: Tegenpartij
-              fields:
-                - counterpartyName
-                - counterpartyIban
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-                - endToEndId
-        edit:
-          extends: create
-          title:
-            en: Edit bank statement line
-            nl: Bankafschriftregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: bank_statement_id
+      storageClass: core
+    semanticType: BankStatement
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -284,3 +151,209 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Bank Statement Line
+    description: List BankStatementLine records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Bank Statement Line
+    description: Get BankStatementLine records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Bank Statement Line
+    description: Create BankStatementLine records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BankStatementLine records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /bank-statement-lines
+          nl: /bankafschriftregels
+        columns:
+          - key: valueDate
+            sortable: true
+          - key: counterpartyName
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: direction
+            sortable: true
+          - key: status
+            sortable: true
+        title:
+          en: Bank statement lines
+          nl: Bankafschriftregels
+        defaultSort:
+          key: valueDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /bank-statement-lines/:id
+            nl: /bankafschriftregels/:id
+          create:
+            en: /bank-statement-lines/create
+            nl: /bankafschriftregels/aanmaken
+        title: "{{counterpartyName}}: {{amount}}"
+        subtitle: "{{valueDate}}"
+        badges:
+          - direction
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Movement
+                    nl: Mutatie
+                  fields:
+                    - valueDate
+                    - amount
+                    - direction
+                    - status
+                - title:
+                    en: Counterparty
+                    nl: Tegenpartij
+                  fields:
+                    - counterpartyName
+                    - counterpartyIban
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                    - endToEndId
+        modes:
+          create:
+            title:
+              en: Create bank statement line
+              nl: Bankafschriftregel aanmaken
+            groups:
+              - title:
+                  en: Movement
+                  nl: Mutatie
+                fields:
+                  - valueDate
+                  - amount
+                  - direction
+                  - status
+              - title:
+                  en: Counterparty
+                  nl: Tegenpartij
+                fields:
+                  - counterpartyName
+                  - counterpartyIban
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+                  - endToEndId
+          update:
+            title:
+              en: Edit bank statement line
+              nl: Bankafschriftregel bewerken
+    fields:
+      valueDate:
+        render:
+          component: DatePicker
+          props: {}
+      direction:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: LEDGERSIDE
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 1000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BANKSTATEMENTLINESTATUS
+            clearable: false

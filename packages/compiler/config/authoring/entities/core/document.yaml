@@ -1,9 +1,10 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Document
 title: Document
-description: A governed document container linked to a case file, optionally a case, and optionally a relation; version and artifact facts live on DocumentVersion.
+description: A governed document container linked to a case file, optionally a case, and optionally a relation; version
+  and artifact facts live on DocumentVersion.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -113,7 +114,10 @@ fields:
     persisted:
       column: document_type
       storageClass: core
-    options: { type: entity, source: DocumentType, valueField: code }
+    options:
+      type: entity
+      source: DocumentType
+      valueField: code
   - key: status
     valueType: string
     semanticType: referenceDataCode
@@ -130,7 +134,9 @@ fields:
     persisted:
       column: status
       storageClass: core
-    options: { type: referentiedata, referentieGroep: DOCUMENTSTATUS }
+    options:
+      type: referentiedata
+      referentieGroep: DOCUMENTSTATUS
   - key: confidentiality
     valueType: string
     semanticType: referenceDataCode
@@ -147,7 +153,9 @@ fields:
     persisted:
       column: confidentiality
       storageClass: core
-    options: { type: referentiedata, referentieGroep: DOCUMENTCONFIDENTIALITY }
+    options:
+      type: referentiedata
+      referentieGroep: DOCUMENTCONFIDENTIALITY
   - key: source
     valueType: string
     required: false
@@ -244,7 +252,6 @@ fields:
       column: published_at
       storageClass: core
   - key: currentVersionId
-    valueType: string
     required: false
     readOnly: true
     immutable: true
@@ -259,42 +266,48 @@ fields:
     persisted:
       column: current_version_id
       storageClass: core
-relationships:
-  - key: caseFile
-    kind: belongsTo
-    target: CaseFile
-    foreignKey: case_file_id
+    semanticType: DocumentVersion
+    relationship:
+      ownership: reference
+  - key: caseFileId
     label:
       en: Case file
       nl: Dossier
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: case_file_id
+      storageClass: core
+    semanticType: CaseFile
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: currentVersion
-    kind: belongsTo
-    target: DocumentVersion
-    foreignKey: current_version_id
-    label:
-      en: Current version
-      nl: Huidige versie
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
   - key: versions
-    kind: hasMany
-    target: DocumentVersion
-    foreignKey: document_id
     label:
       en: Versions
       nl: Versies
+    semanticType: DocumentVersion
+    cardinality: collection
+    relationship:
+      inverse: documentId
+      ownership: reference
 operations:
   list:
     name: { en: List documents, nl: Documenten tonen }
@@ -469,18 +482,18 @@ interfaces:
         subtitle: "{{status}}"
         layout:
           context:
-            fields: [documentType, confidentiality, author, registeredAt]
-            relationships: [relation, caseFile, case, currentVersion]
+            fields: [ documentType, confidentiality, author, registeredAt ]
+            relationships: [ relationId, caseFileId, caseId, currentVersionId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Document, nl: Document }
-                  fields: [code, title, description, documentType, status]
+                  fields: [ code, title, description, documentType, status ]
                 - title: { en: Origin and access, nl: Herkomst en toegang }
-                  fields: [author, source, isExternal, confidentiality]
+                  fields: [ author, source, isExternal, confidentiality ]
                 - title: { en: Registration and publication, nl: Registratie en publicatie }
-                  fields: [receivedAt, registeredAt, publishedAt]
+                  fields: [ receivedAt, registeredAt, publishedAt ]
             - id: versions
               label: { en: Versions, nl: Versies }
               relationship: versions
@@ -489,4 +502,4 @@ interfaces:
             title: { en: Create document, nl: Document aanmaken }
             groups:
               - title: { en: Document, nl: Document }
-                fields: [title, documentType, status]
+                fields: [ title, documentType, status ]

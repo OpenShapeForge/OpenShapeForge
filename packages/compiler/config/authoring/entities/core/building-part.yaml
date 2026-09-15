@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BuildingPart
@@ -55,10 +55,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
+    semanticType: multilineText
   - key: installedAt
     valueType: date
     required: false
@@ -71,9 +68,6 @@ fields:
     persisted:
       column: installed_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: replacedAt
     valueType: date
     required: false
@@ -86,9 +80,6 @@ fields:
     persisted:
       column: replaced_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -103,137 +94,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: building
-    kind: belongsTo
-    target: Building
-    foreignKey: building_id
+  - key: buildingId
     label:
       en: Building
       nl: Pand
-ui:
-  routes:
-    list:
-      en: /building-parts
-      nl: /bouwdelen
-    detail:
-      en: /building-parts/:id
-      nl: /bouwdelen/:id
-    create:
-      en: /building-parts/create
-      nl: /bouwdelen/aanmaken
-    edit:
-      en: /building-parts/:id/edit
-      nl: /bouwdelen/:id/bewerken
-    delete:
-      en: /building-parts/:id/delete
-      nl: /bouwdelen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Building parts
-        nl: Bouwdelen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: installedAt
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /building-parts/:id
-        nl: /bouwdelen/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: ""
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Building part details
-                nl: Bouwdeelgegevens
-              fields:
-                - code
-                - name
-                - installedAt
-                - replacedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create building part
-            nl: Bouwdeel aanmaken
-          groups:
-            - title:
-                en: Building part details
-                nl: Bouwdeelgegevens
-              fields:
-                - code
-                - name
-                - installedAt
-                - replacedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit building part
-            nl: Bouwdeel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: building_id
+      storageClass: core
+    semanticType: Building
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -248,3 +118,196 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Building Part
+    description: List BuildingPart records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Building Part
+    description: Get BuildingPart records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Building Part
+    description: Create BuildingPart records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BuildingPart records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /building-parts
+          nl: /bouwdelen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: installedAt
+            sortable: true
+        title:
+          en: Building parts
+          nl: Bouwdelen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /building-parts/:id
+            nl: /bouwdelen/:id
+          create:
+            en: /building-parts/create
+            nl: /bouwdelen/aanmaken
+        title: "{{code}} {{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Building part details
+                    nl: Bouwdeelgegevens
+                  fields:
+                    - code
+                    - name
+                    - installedAt
+                    - replacedAt
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create building part
+              nl: Bouwdeel aanmaken
+            groups:
+              - title:
+                  en: Building part details
+                  nl: Bouwdeelgegevens
+                fields:
+                  - code
+                  - name
+                  - installedAt
+                  - replacedAt
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit building part
+              nl: Bouwdeel bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+      installedAt:
+        render:
+          component: DatePicker
+          props: {}
+      replacedAt:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

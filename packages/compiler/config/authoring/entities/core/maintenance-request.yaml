@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MaintenanceRequest
@@ -57,12 +57,6 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
-        variableTokens: true
   - key: priority
     valueType: string
     required: false
@@ -75,11 +69,10 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MAINTENANCEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: MAINTENANCEPRIORITY
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -92,11 +85,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MAINTENANCEREQUESTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MAINTENANCEREQUESTSTATUS
+    semanticType: referenceDataCode
   - key: reportedAt
     valueType: datetime
     required: true
@@ -109,9 +101,6 @@ fields:
     persisted:
       column: reported_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -126,152 +115,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: reportedBy
-    kind: belongsTo
-    target: Relation
-    foreignKey: reported_by_relation_id
+  - key: reportedById
     label:
       en: Reported by
       nl: Gemeld door
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+    persisted:
+      column: reported_by_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /maintenance-requests
-      nl: /onderhoudsverzoeken
-    detail:
-      en: /maintenance-requests/:id
-      nl: /onderhoudsverzoeken/:id
-    create:
-      en: /maintenance-requests/create
-      nl: /onderhoudsverzoeken/aanmaken
-    edit:
-      en: /maintenance-requests/:id/edit
-      nl: /onderhoudsverzoeken/:id/bewerken
-    delete:
-      en: /maintenance-requests/:id/delete
-      nl: /onderhoudsverzoeken/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Maintenance requests
-        nl: Onderhoudsverzoeken
-      columns:
-        - key: code
-          sortable: true
-        - key: title
-          sortable: true
-        - key: status
-          sortable: true
-        - key: priority
-          sortable: true
-        - key: reportedAt
-          sortable: true
-      defaultSort:
-        key: reportedAt
-        direction: desc
-      rowLink:
-        en: /maintenance-requests/:id
-        nl: /onderhoudsverzoeken/:id
-    detail:
-      header:
-        title: "{{code}} {{title}}"
-        subtitle: "{{status}}"
-        badges:
-          - priority
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Request details
-                nl: Verzoekgegevens
-              fields:
-                - code
-                - title
-                - priority
-                - status
-                - reportedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create maintenance request
-            nl: Onderhoudsverzoek aanmaken
-          groups:
-            - title:
-                en: Request details
-                nl: Verzoekgegevens
-              fields:
-                - code
-                - title
-                - priority
-                - status
-                - reportedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit maintenance request
-            nl: Onderhoudsverzoek bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -286,3 +149,215 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Maintenance Request
+    description: List MaintenanceRequest records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Maintenance Request
+    description: Get MaintenanceRequest records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Maintenance Request
+    description: Create MaintenanceRequest records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MaintenanceRequest records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /maintenance-requests
+          nl: /onderhoudsverzoeken
+        columns:
+          - key: code
+            sortable: true
+          - key: title
+            sortable: true
+          - key: status
+            sortable: true
+          - key: priority
+            sortable: true
+          - key: reportedAt
+            sortable: true
+        title:
+          en: Maintenance requests
+          nl: Onderhoudsverzoeken
+        defaultSort:
+          key: reportedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /maintenance-requests/:id
+            nl: /onderhoudsverzoeken/:id
+          create:
+            en: /maintenance-requests/create
+            nl: /onderhoudsverzoeken/aanmaken
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - priority
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Request details
+                    nl: Verzoekgegevens
+                  fields:
+                    - code
+                    - title
+                    - priority
+                    - status
+                    - reportedAt
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create maintenance request
+              nl: Onderhoudsverzoek aanmaken
+            groups:
+              - title:
+                  en: Request details
+                  nl: Verzoekgegevens
+                fields:
+                  - code
+                  - title
+                  - priority
+                  - status
+                  - reportedAt
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit maintenance request
+              nl: Onderhoudsverzoek bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+            variableTokens: true
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MAINTENANCEPRIORITY
+            clearable: true
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MAINTENANCEREQUESTSTATUS
+            clearable: false
+      reportedAt:
+        render:
+          component: DateTimePicker
+          props: {}

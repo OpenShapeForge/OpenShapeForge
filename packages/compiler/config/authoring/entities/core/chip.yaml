@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Chip
@@ -45,7 +45,8 @@ fields:
       nl: Variabele-sleutel
     description:
       en: Stable lower-case key used in templates as `{{chips.<key>}}`, for example `general.phone`.
-      nl: Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld `general.phone`.
+      nl: Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld
+        `general.phone`.
     validation:
       minLength: 1
       maxLength: 160
@@ -83,11 +84,7 @@ fields:
     persisted:
       column: value
       storageClass: core
-    render:
-      component: InputMultiline
-      props:
-        rows: 5
-        maxLength: 8000
+    semanticType: multilineText
   - key: description
     valueType: string
     required: false
@@ -102,11 +99,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: category
     valueType: string
     required: false
@@ -134,11 +127,98 @@ fields:
     persisted:
       column: is_active
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: List Chip
+    description: List Chip records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Chip
+    description: Get Chip records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Chip
+    description: Create Chip records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Chip
+    description: Update Chip records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Chip
+    description: Delete Chip records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      value:
+        render:
+          component: InputMultiline
+          props:
+            rows: 5
+            maxLength: 8000
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500

@@ -1,9 +1,11 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BillingRunItem
 title: Billing Run Item
-description: Per-agreement/per-period idempotency ledger for one BillingRun. Enforces append-only financial semantics — one immutable result per (run, agreement, period, mode). Replays of the same run resume unfinished items and return existing invoice ids for completed items.
+description: Per-agreement/per-period idempotency ledger for one BillingRun. Enforces append-only financial semantics —
+  one immutable result per (run, agreement, period, mode). Replays of the same run resume unfinished items and return
+  existing invoice ids for completed items.
 language: en
 displayTemplate: "{{periodStart}} → {{periodEnd}}"
 filterField: idempotencyKey
@@ -26,8 +28,10 @@ fields:
       en: Idempotency key
       nl: Idempotentiesleutel
     description:
-      en: Stable key over (tenant, run, agreement, schedule, periodStart, periodEnd, mode). Unique within tenant; protects against duplicate financial artifacts on retry.
-      nl: Stabiele sleutel over (tenant, run, overeenkomst, schema, periodStart, periodEnd, modus). Uniek binnen tenant; voorkomt dubbele financiële boekingen bij herhaling.
+      en: Stable key over (tenant, run, agreement, schedule, periodStart, periodEnd, mode). Unique within tenant; protects
+        against duplicate financial artifacts on retry.
+      nl: Stabiele sleutel over (tenant, run, overeenkomst, schema, periodStart, periodEnd, modus). Uniek binnen tenant;
+        voorkomt dubbele financiële boekingen bij herhaling.
     validation:
       minLength: 1
       maxLength: 300
@@ -44,11 +48,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGRUNITEMSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGRUNITEMSTATUS
+    semanticType: referenceDataCode
   - key: mode
     valueType: string
     required: true
@@ -59,11 +62,10 @@ fields:
     persisted:
       column: mode
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGRUNMODE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGRUNMODE
+    semanticType: referenceDataCode
   - key: periodStart
     valueType: date
     required: false
@@ -71,14 +73,13 @@ fields:
       en: Period start
       nl: Periode start
     description:
-      en: Inclusive start of the billing period covered by this item. Null for mode = milestone, which bills a single event rather than a period.
-      nl: Inclusieve startdatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige gebeurtenis factureert in plaats van een periode.
+      en: Inclusive start of the billing period covered by this item. Null for mode = milestone, which bills a single event
+        rather than a period.
+      nl: Inclusieve startdatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige
+        gebeurtenis factureert in plaats van een periode.
     persisted:
       column: period_start
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: periodEnd
     valueType: date
     required: false
@@ -86,14 +87,13 @@ fields:
       en: Period end
       nl: Periode einde
     description:
-      en: Inclusive end of the billing period covered by this item. Null for mode = milestone, which bills a single event rather than a period.
-      nl: Inclusieve einddatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige gebeurtenis factureert in plaats van een periode.
+      en: Inclusive end of the billing period covered by this item. Null for mode = milestone, which bills a single event
+        rather than a period.
+      nl: Inclusieve einddatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige gebeurtenis
+        factureert in plaats van een periode.
     persisted:
       column: period_end
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: lockedAt
     valueType: datetime
     required: false
@@ -151,11 +151,7 @@ fields:
     persisted:
       column: failure_message
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    semanticType: multilineText
   - key: failureContext
     valueType: object
     required: false
@@ -164,7 +160,8 @@ fields:
       nl: Foutcontext
     description:
       en: Optional structured payload with diagnostic context (e.g. invalid component ids, missing payer split).
-      nl: Optionele gestructureerde context met diagnostische informatie (bv. ongeldige componentregels, ontbrekende debiteurensplit).
+      nl: Optionele gestructureerde context met diagnostische informatie (bv. ongeldige componentregels, ontbrekende
+        debiteurensplit).
     persisted:
       column: failure_context
       storageClass: core
@@ -181,153 +178,56 @@ fields:
     persisted:
       column: amount_total
       storageClass: core
-relationships:
-  - key: billingRun
-    kind: belongsTo
-    target: BillingRun
-    foreignKey: billing_run_id
+  - key: billingRunId
     label:
       en: Billing run
       nl: Facturatie-run
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: billing_run_id
+      storageClass: core
+    semanticType: BillingRun
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: billingSchedule
-    kind: belongsTo
-    target: BillingSchedule
-    foreignKey: billing_schedule_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
+  - key: billingScheduleId
     label:
       en: Billing schedule
       nl: Facturatieschema
-  - key: agreementMilestone
-    kind: belongsTo
-    target: AgreementMilestone
-    foreignKey: agreement_milestone_id
+    persisted:
+      column: billing_schedule_id
+      storageClass: core
+    semanticType: BillingSchedule
+    relationship:
+      ownership: reference
+  - key: agreementMilestoneId
     label:
       en: Agreement milestone
       nl: Overeenkomstmijlpaal
-  - key: producedInvoice
-    kind: belongsTo
-    target: Invoice
-    foreignKey: produced_invoice_id
+    persisted:
+      column: agreement_milestone_id
+      storageClass: core
+    semanticType: AgreementMilestone
+    relationship:
+      ownership: reference
+  - key: producedInvoiceId
     label:
       en: Produced invoice
       nl: Geproduceerde factuur
-ui:
-  routes:
-    list:
-      en: /billing-run-items
-      nl: /facturatie-run-items
-    detail:
-      en: /billing-run-items/:id
-      nl: /facturatie-run-items/:id
-    create:
-      en: /billing-run-items/create
-      nl: /facturatie-run-items/aanmaken
-    edit:
-      en: /billing-run-items/:id/edit
-      nl: /facturatie-run-items/:id/bewerken
-    delete:
-      en: /billing-run-items/:id/delete
-      nl: /facturatie-run-items/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Billing run items
-        nl: Facturatie-run-items
-      columns:
-        - key: status
-          sortable: true
-        - key: mode
-          sortable: true
-        - key: periodStart
-          sortable: true
-        - key: periodEnd
-          sortable: true
-        - key: amountTotal
-          sortable: true
-        - key: completedAt
-          sortable: true
-      defaultSort:
-        key: periodStart
-        direction: desc
-      rowLink:
-        en: /billing-run-items/:id
-        nl: /facturatie-run-items/:id
-    detail:
-      header:
-        title: "{{periodStart}} → {{periodEnd}}"
-        subtitle: "{{status}}"
-        badges:
-          - mode
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Item details
-                nl: Item-gegevens
-              fields:
-                - status
-                - mode
-                - periodStart
-                - periodEnd
-                - amountTotal
-                - idempotencyKey
-            - title:
-                en: Lock and timing
-                nl: Vergrendeling en tijdstippen
-              fields:
-                - lockedAt
-                - lockedBy
-                - completedAt
-            - title:
-                en: Failure
-                nl: Mislukking
-              fields:
-                - failureCode
-                - failureMessage
-                - failureContext
-    form:
-      variants:
-        create:
-          title:
-            en: Create billing run item
-            nl: Facturatie-run-item aanmaken
-          groups:
-            - title:
-                en: Item details
-                nl: Item-gegevens
-              fields:
-                - status
-                - mode
-                - periodStart
-                - periodEnd
-                - amountTotal
-                - idempotencyKey
-        edit:
-          extends: create
-          title:
-            en: Edit billing run item
-            nl: Facturatie-run-item bewerken
-workflow:
-  nodes:
-    actions:
-      getOne: true
-      list: true
+    persisted:
+      column: produced_invoice_id
+      storageClass: core
+    semanticType: Invoice
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -342,3 +242,201 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Billing Run Item
+    description: List BillingRunItem records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Billing Run Item
+    description: Get BillingRunItem records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Billing Run Item
+    description: Create BillingRunItem records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BillingRunItem records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Billing Run Item
+    description: Delete BillingRunItem records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        getOne: true
+        list: true
+  web:
+    views:
+      collection:
+        route:
+          en: /billing-run-items
+          nl: /facturatie-run-items
+        columns:
+          - key: status
+            sortable: true
+          - key: mode
+            sortable: true
+          - key: periodStart
+            sortable: true
+          - key: periodEnd
+            sortable: true
+          - key: amountTotal
+            sortable: true
+          - key: completedAt
+            sortable: true
+        title:
+          en: Billing run items
+          nl: Facturatie-run-items
+        defaultSort:
+          key: periodStart
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /billing-run-items/:id
+            nl: /facturatie-run-items/:id
+          create:
+            en: /billing-run-items/create
+            nl: /facturatie-run-items/aanmaken
+        title: "{{periodStart}} → {{periodEnd}}"
+        subtitle: "{{status}}"
+        badges:
+          - mode
+          - status
+        actions:
+          - update
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Item details
+                    nl: Item-gegevens
+                  fields:
+                    - status
+                    - mode
+                    - periodStart
+                    - periodEnd
+                    - amountTotal
+                    - idempotencyKey
+                - title:
+                    en: Lock and timing
+                    nl: Vergrendeling en tijdstippen
+                  fields:
+                    - lockedAt
+                    - lockedBy
+                    - completedAt
+                - title:
+                    en: Failure
+                    nl: Mislukking
+                  fields:
+                    - failureCode
+                    - failureMessage
+                    - failureContext
+        modes:
+          create:
+            title:
+              en: Create billing run item
+              nl: Facturatie-run-item aanmaken
+            groups:
+              - title:
+                  en: Item details
+                  nl: Item-gegevens
+                fields:
+                  - status
+                  - mode
+                  - periodStart
+                  - periodEnd
+                  - amountTotal
+                  - idempotencyKey
+          update:
+            title:
+              en: Edit billing run item
+              nl: Facturatie-run-item bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGRUNITEMSTATUS
+            clearable: false
+      mode:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGRUNMODE
+            clearable: false
+      periodStart:
+        render:
+          component: DatePicker
+          props: {}
+      periodEnd:
+        render:
+          component: DatePicker
+          props: {}
+      failureMessage:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000

@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: NaturalPerson
 title: Natural Person
-description: A natural person, extending the concept of a relation as an individual. Shared reachability and business contact state should be modeled on the related Relation aggregate.
+description: A natural person, extending the concept of a relation as an individual. Shared reachability and business
+  contact state should be modeled on the related Relation aggregate.
 language: en
 displayTemplate: "{{firstName}} {{lastName}}"
 filterField: lastName
@@ -111,10 +112,6 @@ fields:
     persisted:
       column: date_of_birth
       storageClass: core
-    render:
-      component: DatePicker
-      props:
-        maxDate: today
   - key: dateOfDeath
     valueType: date
     required: false
@@ -127,10 +124,6 @@ fields:
     persisted:
       column: date_of_death
       storageClass: core
-    render:
-      component: DatePicker
-      props:
-        maxDate: today
   - key: gender
     valueType: string
     required: false
@@ -145,11 +138,10 @@ fields:
     persisted:
       column: gender
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: GENDER
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: GENDER
+    semanticType: referenceDataCode
   - key: salutation
     valueType: string
     required: false
@@ -220,164 +212,246 @@ fields:
     persisted:
       column: nationality
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
   - key: addresses
-    kind: hasMany
-    target: Address
-    foreignKey: natural_person_id
     label:
       en: Addresses
       nl: Adressen
+    semanticType: Address
+    cardinality: collection
+    relationship:
+      inverse: naturalPersonId
+      ownership: reference
   - key: accounts
-    kind: hasMany
-    target: Account
-    foreignKey: natural_person_id
     label:
       en: Accounts
       nl: Accounts
+    semanticType: Account
+    cardinality: collection
+    relationship:
+      inverse: naturalPersonId
+      ownership: reference
   - key: contactMoments
-    kind: hasMany
-    target: ContactMoment
-    foreignKey: relation_id
-    via: relation
     label:
       en: Contact moments
       nl: Contactmomenten
-ui:
-  routes:
-    list:
-      en: /natural-persons
-      nl: /natuurlijke-personen
-    detail:
-      en: /natural-persons/:id
-      nl: /natuurlijke-personen/:id
-    create:
-      en: /natural-persons/create
-      nl: /natuurlijke-personen/aanmaken
-    edit:
-      en: /natural-persons/:id/edit
-      nl: /natuurlijke-personen/:id/bewerken
-    delete:
-      en: /natural-persons/:id/delete
-      nl: /natuurlijke-personen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Natural Persons
-        nl: Natuurlijke Personen
-      columns:
-        - key: firstName
-          sortable: true
-        - key: lastName
-          sortable: true
-        - key: dateOfBirth
-          sortable: true
-        - key: nationality
-          sortable: true
-      defaultSort:
-        key: lastName
-        direction: asc
-      rowLink:
-        en: /natural-persons/:id
-        nl: /natuurlijke-personen/:id
-    detail:
-      header:
+    semanticType: ContactMoment
+    cardinality: collection
+    relationship:
+      inverse: relationId
+      ownership: reference
+      via: relationId
+operations:
+  list:
+    name: List Natural Person
+    description: List NaturalPerson records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Natural Person
+    description: Get NaturalPerson records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Natural Person
+    description: Create NaturalPerson records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update NaturalPerson records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /natural-persons
+          nl: /natuurlijke-personen
+        columns:
+          - key: firstName
+            sortable: true
+          - key: lastName
+            sortable: true
+          - key: dateOfBirth
+            sortable: true
+          - key: nationality
+            sortable: true
+        title:
+          en: Natural Persons
+          nl: Natuurlijke Personen
+        defaultSort:
+          key: lastName
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /natural-persons/:id
+            nl: /natuurlijke-personen/:id
+          create:
+            en: /natural-persons/create
+            nl: /natuurlijke-personen/aanmaken
         title: "{{firstName}} {{namePrefix}} {{lastName}}"
         subtitle: "{{dateOfBirth}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Personal details
-                nl: Persoonsgegevens
-              fields:
-                - firstName
-                - namePrefix
-                - lastName
-                - initials
-                - birthName
-                - gender
-                - salutation
-            - title:
-                en: Dates
-                nl: Datums
-              fields:
-                - dateOfBirth
-                - dateOfDeath
-            - title:
-                en: Preferences
-                nl: Voorkeuren
-              fields:
-                - preferredName
-                - callName
-                - preferredLanguage
-                - nationality
-    form:
-      variants:
-        create:
-          title:
-            en: Create natural person
-            nl: Natuurlijk persoon aanmaken
-          groups:
-            - title:
-                en: Personal details
-                nl: Persoonsgegevens
-              fields:
-                - firstName
-                - namePrefix
-                - lastName
-                - initials
-                - birthName
-                - gender
-                - salutation
-            - title:
-                en: Dates
-                nl: Datums
-              fields:
-                - dateOfBirth
-                - dateOfDeath
-            - title:
-                en: Preferences
-                nl: Voorkeuren
-              fields:
-                - preferredName
-                - callName
-                - preferredLanguage
-                - nationality
-        edit:
-          extends: create
-          title:
-            en: Edit natural person
-            nl: Natuurlijk persoon bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Personal details
+                    nl: Persoonsgegevens
+                  fields:
+                    - firstName
+                    - namePrefix
+                    - lastName
+                    - initials
+                    - birthName
+                    - gender
+                    - salutation
+                - title:
+                    en: Dates
+                    nl: Datums
+                  fields:
+                    - dateOfBirth
+                    - dateOfDeath
+                - title:
+                    en: Preferences
+                    nl: Voorkeuren
+                  fields:
+                    - preferredName
+                    - callName
+                    - preferredLanguage
+                    - nationality
+        modes:
+          create:
+            title:
+              en: Create natural person
+              nl: Natuurlijk persoon aanmaken
+            groups:
+              - title:
+                  en: Personal details
+                  nl: Persoonsgegevens
+                fields:
+                  - firstName
+                  - namePrefix
+                  - lastName
+                  - initials
+                  - birthName
+                  - gender
+                  - salutation
+              - title:
+                  en: Dates
+                  nl: Datums
+                fields:
+                  - dateOfBirth
+                  - dateOfDeath
+              - title:
+                  en: Preferences
+                  nl: Voorkeuren
+                fields:
+                  - preferredName
+                  - callName
+                  - preferredLanguage
+                  - nationality
+          update:
+            title:
+              en: Edit natural person
+              nl: Natuurlijk persoon bewerken
+    fields:
+      dateOfBirth:
+        render:
+          component: DatePicker
+          props:
+            maxDate: today
+      dateOfDeath:
+        render:
+          component: DatePicker
+          props:
+            maxDate: today
+      gender:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: GENDER
+            clearable: true

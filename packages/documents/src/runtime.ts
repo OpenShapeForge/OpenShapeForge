@@ -3,6 +3,7 @@ import type { RuntimeModule } from "@openshapeforge/plugin-runtime";
 import { createDocument, createDocumentVersion } from "./commands.js";
 import { composeTemplate, materializeFields, materializeTemplate } from "./content-runtime.js";
 import { createDocumentFromTemplate } from "./template-document.js";
+import { renderSnapshot } from "./render-runtime.js";
 
 const module = {
   name: "documents",
@@ -13,6 +14,7 @@ const module = {
     materializeFields,
     materializeTemplate,
     createDocumentFromTemplate,
+    renderSnapshot,
   },
 } satisfies RuntimeModule;
 

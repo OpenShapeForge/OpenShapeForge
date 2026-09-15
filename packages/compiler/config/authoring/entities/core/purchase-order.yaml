@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PurchaseOrder
 title: Purchase Order
-description: Outgoing purchase order to a supplier relation, optionally linked to an agreement. Mirrors the Quote workflow on the supplier side.
+description: Outgoing purchase order to a supplier relation, optionally linked to an agreement. Mirrors the Quote
+  workflow on the supplier side.
 language: en
 displayTemplate: "{{purchaseOrderNumber}}"
 filterField: purchaseOrderNumber
@@ -25,11 +26,10 @@ fields:
     persisted:
       column: purchase_order_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PURCHASEORDERSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PURCHASEORDERSTATUS
+    semanticType: referenceDataCode
   - key: purchaseOrderNumber
     valueType: string
     required: true
@@ -57,9 +57,6 @@ fields:
     persisted:
       column: issue_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: expectedDeliveryDate
     valueType: date
     required: false
@@ -72,9 +69,6 @@ fields:
     persisted:
       column: expected_delivery_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: currencyCode
     valueType: string
     required: true
@@ -144,11 +138,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -163,166 +153,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-ui:
-  routes:
-    list:
-      en: /purchase-orders
-      nl: /inkoopopdrachten
-    detail:
-      en: /purchase-orders/:id
-      nl: /inkoopopdrachten/:id
-    create:
-      en: /purchase-orders/create
-      nl: /inkoopopdrachten/aanmaken
-    edit:
-      en: /purchase-orders/:id/edit
-      nl: /inkoopopdrachten/:id/bewerken
-    delete:
-      en: /purchase-orders/:id/delete
-      nl: /inkoopopdrachten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Purchase orders
-        nl: Inkoopopdrachten
-      columns:
-        - key: purchaseOrderNumber
-          sortable: true
-        - key: purchaseOrderStatus
-          sortable: true
-        - key: issueDate
-          sortable: true
-        - key: expectedDeliveryDate
-          sortable: true
-        - key: amountTotal
-          sortable: true
-      defaultSort:
-        key: issueDate
-        direction: desc
-      rowLink:
-        en: /purchase-orders/:id
-        nl: /inkoopopdrachten/:id
-    detail:
-      header:
-        title: "{{purchaseOrderNumber}}"
-        subtitle: "{{amountTotal}}"
-        badges:
-          - purchaseOrderStatus
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Purchase order details
-                nl: Inkoopopdrachtgegevens
-              fields:
-                - purchaseOrderStatus
-                - purchaseOrderNumber
-                - issueDate
-                - expectedDeliveryDate
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create purchase order
-            nl: Inkoopopdracht aanmaken
-          groups:
-            - title:
-                en: Purchase order details
-                nl: Inkoopopdrachtgegevens
-              fields:
-                - purchaseOrderStatus
-                - purchaseOrderNumber
-                - issueDate
-                - expectedDeliveryDate
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit purchase order
-            nl: Inkoopopdracht bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -337,3 +187,226 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Purchase Order
+    description: List PurchaseOrder records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Purchase Order
+    description: Get PurchaseOrder records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Purchase Order
+    description: Create PurchaseOrder records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update PurchaseOrder records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /purchase-orders
+          nl: /inkoopopdrachten
+        columns:
+          - key: purchaseOrderNumber
+            sortable: true
+          - key: purchaseOrderStatus
+            sortable: true
+          - key: issueDate
+            sortable: true
+          - key: expectedDeliveryDate
+            sortable: true
+          - key: amountTotal
+            sortable: true
+        title:
+          en: Purchase orders
+          nl: Inkoopopdrachten
+        defaultSort:
+          key: issueDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /purchase-orders/:id
+            nl: /inkoopopdrachten/:id
+          create:
+            en: /purchase-orders/create
+            nl: /inkoopopdrachten/aanmaken
+        title: "{{purchaseOrderNumber}}"
+        subtitle: "{{amountTotal}}"
+        badges:
+          - purchaseOrderStatus
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Purchase order details
+                    nl: Inkoopopdrachtgegevens
+                  fields:
+                    - purchaseOrderStatus
+                    - purchaseOrderNumber
+                    - issueDate
+                    - expectedDeliveryDate
+                    - currencyCode
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - amountBase
+                    - amountVat
+                    - amountTotal
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create purchase order
+              nl: Inkoopopdracht aanmaken
+            groups:
+              - title:
+                  en: Purchase order details
+                  nl: Inkoopopdrachtgegevens
+                fields:
+                  - purchaseOrderStatus
+                  - purchaseOrderNumber
+                  - issueDate
+                  - expectedDeliveryDate
+                  - currencyCode
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - amountBase
+                  - amountVat
+                  - amountTotal
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit purchase order
+              nl: Inkoopopdracht bewerken
+    fields:
+      purchaseOrderStatus:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PURCHASEORDERSTATUS
+            clearable: false
+      issueDate:
+        render:
+          component: DatePicker
+          props: {}
+      expectedDeliveryDate:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000

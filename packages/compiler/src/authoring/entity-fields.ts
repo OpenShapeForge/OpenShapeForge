@@ -70,7 +70,14 @@ export function normalizeEntityFields(
     if (entity.schemaVersion === 3 && field.semanticType && !semantic) {
       throw new Error(`${entity.entity}.${field.key}: unknown semanticType ${field.semanticType}.`);
     }
-    if (entity.schemaVersion === 3 && semantic?.kind === "entityId" &&
+    // Inline identifier values (for example arguments in a stored template)
+    // are not entity relationships. Preserve their scalar semantic type;
+    // only an EntityName semantic type requests relational storage. A nested
+    // value cannot claim its own persisted column or relationship metadata.
+    if (entity.schemaVersion === 3 && nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
+      throw new Error(`${entity.entity}.${field.key}: inline identifier values cannot declare relational storage.`);
+    }
+    if (entity.schemaVersion === 3 && !nested && semantic?.kind === "entityId" &&
       (field.key !== "id" || field.semanticType !== `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`)) {
       throw new Error(`${entity.entity}.${field.key}: identity aliases identify primary keys; use the entity semanticType for a relationship.`);
     }
@@ -142,15 +149,29 @@ export function normalizeEntityFields(
       throw new Error(`${entity.entity}.${field.key}: single owned references require a single-storage ownership contract; use an owned inverse collection until supported.`);
     }
     const inverse = metadata.inverse;
+    let inverseTarget = entity.entity;
+    let through: { field: string; column: string; target: string } | undefined;
+    if (metadata.via) {
+      const via = entity.fields.find(candidate => candidate.key === metadata.via);
+      const viaType = via?.semanticType ? catalog[via.semanticType] : undefined;
+      if (!collection || !inverse || metadata.ownership === "owned" || field.sortable || field.persisted ||
+        !via || via === field || viaType?.kind !== "entity" || viaType.entityIdentity === false ||
+        fieldCardinality(via) !== "single" || via.relationship?.via) {
+        throw new Error(`${entity.entity}.${field.key}: via requires a read-only inverse collection through a direct, single entity reference.`);
+      }
+      inverseTarget = viaType.entity!;
+      through = { field: via.key, column: via.persisted?.column ?? `${snake(via.key)}_id`, target: inverseTarget };
+      result.readOnly = true;
+    }
     let foreignKey: string | undefined;
     let unique = false;
     if (inverse) {
       const inverseField = semantic.shape?.find((candidate) => candidate.key === inverse);
-      if (!inverseField || inverseField.semanticType !== entity.entity) {
-        throw new Error(`${entity.entity}.${field.key}: inverse ${target}.${inverse} must refer to ${entity.entity}.`);
+      if (!inverseField || inverseField.semanticType !== inverseTarget) {
+        throw new Error(`${entity.entity}.${field.key}: inverse ${target}.${inverse} must refer to ${inverseTarget}.`);
       }
       const opposite = inverseField.relationship?.inverse;
-      if (opposite && opposite !== field.key) {
+      if (!through && opposite && opposite !== field.key) {
         throw new Error(`${entity.entity}.${field.key}: inverse ${target}.${inverse} points to ${opposite}.`);
       }
       if (collection) {
@@ -169,6 +190,7 @@ export function normalizeEntityFields(
     if (!collection) {
       foreignKey = field.persisted?.column ?? `${snake(field.key)}_id`;
       result.persisted = field.persisted ?? { column: foreignKey, storageClass: "core" };
+      if (entity.authorization && result.persisted.column === "tenant_id") result.readOnly = true;
       result.validation = { ...semantic.validation, ...field.validation, format: "uuid" };
     }
     result.relationship = {
@@ -178,6 +200,7 @@ export function normalizeEntityFields(
       fieldKey: field.key,
       ownership: metadata.ownership ?? "reference",
       ...(inverse ? { inverse } : {}),
+      ...(through ? { via: metadata.via!, through } : {}),
       ...(foreignKey ? { foreignKey } : {}),
       ...(unique ? { unique: true } : {}),
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),

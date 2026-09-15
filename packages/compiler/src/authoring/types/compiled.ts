@@ -136,6 +136,7 @@ export interface CompiledField {
 }
 
 export interface CompiledRelationship {
+  through?: { field: string; column: string; target: string };
   key: string;
   fieldKey?: string;
   inverse?: string;
@@ -163,6 +164,7 @@ export interface GraphQLField {
 }
 
 export interface GraphQLRelationship {
+  through?: { field: string; column: string; target: string };
   name: string;
   target: string;
   type: string;
@@ -717,6 +719,7 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
+      fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       recordContext?: { fields: string[]; relationships?: string[] };

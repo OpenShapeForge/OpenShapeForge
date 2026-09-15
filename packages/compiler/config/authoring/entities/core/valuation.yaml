@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Valuation
@@ -25,11 +25,10 @@ fields:
     persisted:
       column: valuation_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: VALUATIONKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: VALUATIONKIND
+    semanticType: referenceDataCode
   - key: valuedAt
     valueType: date
     required: true
@@ -42,9 +41,6 @@ fields:
     persisted:
       column: valued_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: amount
     valueType: number
     required: true
@@ -88,11 +84,7 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -107,148 +99,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_id
+  - key: assetId
     label:
       en: Asset
       nl: Object
-  - key: valuer
-    kind: belongsTo
-    target: Relation
-    foreignKey: valuer_relation_id
+    persisted:
+      column: asset_id
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
+  - key: valuerId
     label:
       en: Valuer
       nl: Taxateur
-ui:
-  routes:
-    list:
-      en: /valuations
-      nl: /waarderingen
-    detail:
-      en: /valuations/:id
-      nl: /waarderingen/:id
-    create:
-      en: /valuations/create
-      nl: /waarderingen/aanmaken
-    edit:
-      en: /valuations/:id/edit
-      nl: /waarderingen/:id/bewerken
-    delete:
-      en: /valuations/:id/delete
-      nl: /waarderingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Valuations
-        nl: Waarderingen
-      columns:
-        - key: valuationKind
-          sortable: true
-        - key: valuedAt
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: currencyCode
-          sortable: true
-      defaultSort:
-        key: valuedAt
-        direction: desc
-      rowLink:
-        en: /valuations/:id
-        nl: /waarderingen/:id
-    detail:
-      header:
-        title: "{{valuationKind}}: {{amount}}"
-        subtitle: "{{valuedAt}}"
-        badges:
-          - valuationKind
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Valuation details
-                nl: Waarderingsgegevens
-              fields:
-                - valuationKind
-                - valuedAt
-                - amount
-                - currencyCode
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create valuation
-            nl: Waardering aanmaken
-          groups:
-            - title:
-                en: Valuation details
-                nl: Waarderingsgegevens
-              fields:
-                - valuationKind
-                - valuedAt
-                - amount
-                - currencyCode
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit valuation
-            nl: Waardering bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: valuer_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -263,3 +133,204 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Valuation
+    description: List Valuation records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Valuation
+    description: Get Valuation records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Valuation
+    description: Create Valuation records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Valuation records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /valuations
+          nl: /waarderingen
+        columns:
+          - key: valuationKind
+            sortable: true
+          - key: valuedAt
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: currencyCode
+            sortable: true
+        title:
+          en: Valuations
+          nl: Waarderingen
+        defaultSort:
+          key: valuedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /valuations/:id
+            nl: /waarderingen/:id
+          create:
+            en: /valuations/create
+            nl: /waarderingen/aanmaken
+        title: "{{valuationKind}}: {{amount}}"
+        subtitle: "{{valuedAt}}"
+        badges:
+          - valuationKind
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Valuation details
+                    nl: Waarderingsgegevens
+                  fields:
+                    - valuationKind
+                    - valuedAt
+                    - amount
+                    - currencyCode
+                - title:
+                    en: Notes
+                    nl: Notities
+                  fields:
+                    - notes
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create valuation
+              nl: Waardering aanmaken
+            groups:
+              - title:
+                  en: Valuation details
+                  nl: Waarderingsgegevens
+                fields:
+                  - valuationKind
+                  - valuedAt
+                  - amount
+                  - currencyCode
+              - title:
+                  en: Notes
+                  nl: Notities
+                fields:
+                  - notes
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit valuation
+              nl: Waardering bewerken
+    fields:
+      valuationKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: VALUATIONKIND
+            clearable: false
+      valuedAt:
+        render:
+          component: DatePicker
+          props: {}
+      notes:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000

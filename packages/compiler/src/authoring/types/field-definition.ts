@@ -45,6 +45,10 @@ export interface FieldDefinitionRelationship {
   kind?: "belongsTo" | "hasMany" | "manyToMany";
   entity?: string;
   inverse?: string;
+  /** Read-only inverse traversal through a local, single entity reference. */
+  via?: string;
+  /** Compiler-derived join source, not an authored SQL/storage choice. */
+  through?: { field: string; column: string; target: string };
   ownership?: "owned" | "reference";
   /** Compiler-derived identity; not authored twice beside semanticType. */
   target?: string;

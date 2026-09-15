@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ContactDetail
@@ -28,7 +28,6 @@ authorization:
     empty: public
 fields:
   - key: relationId
-    valueType: string
     required: false
     label:
       en: Relation ID
@@ -36,12 +35,17 @@ fields:
     description:
       en: Identifier of the related relation instance.
       nl: Identifier van de gerelateerde relatie-instantie.
-    semanticType: relationId
+    semanticType: Relation
     persisted:
       column: relation_id
       storageClass: core
     validation:
       format: uuid
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: type
     valueType: string
     required: true
@@ -206,21 +210,16 @@ fields:
     persisted:
       column: valid_until
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
-    label:
-      en: Relation
-      nl: Relatie
-  - key: relationRole
-    kind: belongsTo
-    target: RelationRole
-    foreignKey: relation_role_id
+  - key: relationRoleId
     label:
       en: Relation role
       nl: Relatierol
+    persisted:
+      column: relation_role_id
+      storageClass: core
+    semanticType: RelationRole
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List contact details, nl: Contactgegevens tonen }
@@ -283,7 +282,7 @@ operations:
         kind: type-current-field
         field: value
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -336,31 +335,60 @@ interfaces:
           create: { en: /contact-details/new, nl: /contactgegevens/nieuw }
         title: "{{type}}: {{value}}"
         subtitle: "{{status}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [isPrimary, isReachable, confidentiality, validUntil]
-            relationships: [relation, relationRole]
+            fields: [ isPrimary, isReachable, confidentiality, validUntil ]
+            relationships: [ relationId, relationRoleId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Contact information, nl: Contactinformatie }
-                  fields: [type, detailType, value, status]
+                  fields: [ type, detailType, value, status ]
                 - title: { en: Contact preferences, nl: Contactvoorkeuren }
-                  fields: [isPrimary, preferenceRank, isReachable]
+                  fields: [ isPrimary, preferenceRank, isReachable ]
                 - title: { en: Privacy and verification, nl: Privacy en verificatie }
-                  fields: [confidentiality, consentStatus, verifiedAt]
+                  fields: [ confidentiality, consentStatus, verifiedAt ]
                 - title: { en: Validity, nl: Geldigheid }
-                  fields: [validFrom, validUntil]
+                  fields: [ validFrom, validUntil ]
         modes:
           create:
             title: { en: Create contact detail, nl: Contactgegeven aanmaken }
             groups:
               - title: { en: Contact information, nl: Contactinformatie }
-                fields: [relationId, type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+                fields:
+                  [
+                    relationId,
+                    type,
+                    detailType,
+                    value,
+                    status,
+                    confidentiality,
+                    isPrimary,
+                    preferenceRank,
+                    isReachable,
+                    consentStatus,
+                    validFrom,
+                    validUntil,
+                    verifiedAt
+                  ]
           update:
             title: { en: Update contact detail, nl: Contactgegeven wijzigen }
             groups:
               - title: { en: Contact information, nl: Contactinformatie }
-                fields: [type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+                fields:
+                  [
+                    type,
+                    detailType,
+                    value,
+                    status,
+                    confidentiality,
+                    isPrimary,
+                    preferenceRank,
+                    isReachable,
+                    consentStatus,
+                    validFrom,
+                    validUntil,
+                    verifiedAt
+                  ]

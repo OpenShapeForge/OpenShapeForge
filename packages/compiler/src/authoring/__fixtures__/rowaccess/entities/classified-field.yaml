@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ClassifiedField
 title: Classified Field
-description: Test fixture — carries pii/confidential/internal fields to prove classification propagation into the manifest. Not part of the shipped slice.
+description: Test fixture — carries pii/confidential/internal fields to prove classification propagation into the
+  manifest. Not part of the shipped slice.
 language: en
 displayTemplate: "{{label}}"
 filterField: label
@@ -69,3 +70,76 @@ fields:
     persisted:
       column: internal_note
       storageClass: core
+operations:
+  list:
+    name: List Classified Field
+    description: List ClassifiedField records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Classified Field
+    description: Get ClassifiedField records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Classified Field
+    description: Create ClassifiedField records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Classified Field
+    description: Update ClassifiedField records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Classified Field
+    description: Delete ClassifiedField records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

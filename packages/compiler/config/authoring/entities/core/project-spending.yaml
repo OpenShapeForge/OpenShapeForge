@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProjectSpending
@@ -27,11 +27,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: spentAt
     valueType: date
     required: true
@@ -44,9 +40,6 @@ fields:
     persisted:
       column: spent_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: amount
     valueType: number
     required: true
@@ -60,128 +53,46 @@ fields:
     persisted:
       column: amount
       storageClass: core
-relationships:
-  - key: project
-    kind: belongsTo
-    target: Project
-    foreignKey: project_id
+  - key: projectId
     label:
       en: Project
       nl: Project
-  - key: projectTask
-    kind: belongsTo
-    target: ProjectTask
-    foreignKey: project_task_id
+    persisted:
+      column: project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
+  - key: projectTaskId
     label:
       en: Project task
       nl: Projecttaak
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: project_task_id
+      storageClass: core
+    semanticType: ProjectTask
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: costDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: cost_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: costDimensionId
     label:
       en: Cost dimension
       nl: Kostendimensie
-ui:
-  routes:
-    list:
-      en: /project-spendings
-      nl: /projectbestedingen
-    detail:
-      en: /project-spendings/:id
-      nl: /projectbestedingen/:id
-    create:
-      en: /project-spendings/create
-      nl: /projectbestedingen/aanmaken
-    edit:
-      en: /project-spendings/:id/edit
-      nl: /projectbestedingen/:id/bewerken
-    delete:
-      en: /project-spendings/:id/delete
-      nl: /projectbestedingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Project spendings
-        nl: Projectbestedingen
-      columns:
-        - key: spentAt
-          sortable: true
-        - key: description
-          sortable: true
-        - key: amount
-          sortable: true
-      defaultSort:
-        key: spentAt
-        direction: desc
-      rowLink:
-        en: /project-spendings/:id
-        nl: /projectbestedingen/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{amount}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Spending details
-                nl: Bestedingsgegevens
-              fields:
-                - description
-                - spentAt
-                - amount
-    form:
-      variants:
-        create:
-          title:
-            en: Create project spending
-            nl: Projectbesteding aanmaken
-          groups:
-            - title:
-                en: Spending details
-                nl: Bestedingsgegevens
-              fields:
-                - description
-                - spentAt
-                - amount
-        edit:
-          extends: create
-          title:
-            en: Edit project spending
-            nl: Projectbesteding bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -196,3 +107,164 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project Spending
+    description: List ProjectSpending records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project Spending
+    description: Get ProjectSpending records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project Spending
+    description: Create ProjectSpending records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ProjectSpending records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /project-spendings
+          nl: /projectbestedingen
+        columns:
+          - key: spentAt
+            sortable: true
+          - key: description
+            sortable: true
+          - key: amount
+            sortable: true
+        title:
+          en: Project spendings
+          nl: Projectbestedingen
+        defaultSort:
+          key: spentAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /project-spendings/:id
+            nl: /projectbestedingen/:id
+          create:
+            en: /project-spendings/create
+            nl: /projectbestedingen/aanmaken
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Spending details
+                    nl: Bestedingsgegevens
+                  fields:
+                    - description
+                    - spentAt
+                    - amount
+        modes:
+          create:
+            title:
+              en: Create project spending
+              nl: Projectbesteding aanmaken
+            groups:
+              - title:
+                  en: Spending details
+                  nl: Bestedingsgegevens
+                fields:
+                  - description
+                  - spentAt
+                  - amount
+          update:
+            title:
+              en: Edit project spending
+              nl: Projectbesteding bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+      spentAt:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

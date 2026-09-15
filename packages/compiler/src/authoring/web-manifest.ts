@@ -295,7 +295,7 @@ function collectionFor(
     columns: columnKeys.map((key) => ({
       fieldId: `${entityName}.${key}`,
       key,
-      label: localized(fieldByKey.get(key)?.label, key),
+      label: localized(list?.columns.find(column => column.key === key)?.label ?? fieldByKey.get(key)?.label, key),
     })),
     ...(list?.defaultSort ? { defaultSort: list.defaultSort } : {}),
   };
@@ -378,14 +378,17 @@ function projectField(
   parent: string,
   supports: WebFieldProjection["supports"],
   editNested = false,
+  presentations: Record<string, { render: NonNullable<WebFieldProjection["presentation"]> }> = {},
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
+  const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     valueType: field.valueType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
+    ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
     ...(field.semanticType ? { semanticType: field.semanticType } : {}),
     ...(field.relationship?.target ? { relationship: { targetEntityId: field.relationship.target } } : {}),
@@ -401,8 +404,8 @@ function projectField(
       ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
     ...((field.options?.type === "remote" || field.options?.type === "dynamic") && (field.options.remoteUrl || field.options.source)
       ? { optionSource: { type: field.options.type, source: field.options.remoteUrl ?? field.options.source! } } : {}),
-    ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested)) } : {}),
-    ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested) } : {}),
+    ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
+    ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
     supports: { read: supports.read, create: supports.create && !field.readOnly, update: supports.update && !field.readOnly && !field.immutable },
   };
 }
@@ -413,7 +416,7 @@ function unsupportedGenericCreate(source: ProjectableEntity, all: ReadonlyMap<st
   if (contract.model.relationships.some((relationship) => relationship.fieldKey && relationship.kind !== "belongsTo" &&
     typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0)) return true;
   return [...all.values()].some((owner) => owner.contract.model.relationships.some((relationship) =>
-    relationship.fieldKey && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
+    relationship.fieldKey && !relationship.through && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
     (relationship.sortable || contract.storage.columns.some((column) => column.column === relationship.foreignKey && !column.nullable))));
 }
 
@@ -442,7 +445,7 @@ function projectEntity(
   }
   for (const owner of all.values()) {
     for (const relationship of owner.contract.model.relationships) {
-      if (!relationship.fieldKey || relationship.kind !== "hasMany" || relationship.target !== entityName) continue;
+      if (!relationship.fieldKey || relationship.through || relationship.kind !== "hasMany" || relationship.target !== entityName) continue;
       const inverse = contract.storage.columns.find((column) => column.column === relationship.foreignKey);
       if (inverse) serverOwnedFields.add(inverse.field);
     }
@@ -458,7 +461,7 @@ function projectEntity(
         read: true,
         create: !field.readOnly && createFields.has(field.key),
         update: !field.readOnly && !field.immutable && updateFields.has(field.key),
-    });
+    }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
   });
   const implicitRelationshipFields = contract.model.relationships.flatMap((relationship) => {
@@ -527,6 +530,7 @@ function projectEntity(
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
       ...(relationship.sortable ? { sortable: true, positionColumn: relationship.kind === "manyToMany" ? "position" : `${relationship.foreignKey}_position` } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),
+      ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
       operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create && !relationship.fieldKey ? { create } : {}), ...nativeOperations },
       ...(list ? { collection: { ...target.collection,
@@ -614,6 +618,7 @@ function projectEntity(
     },
     titleTemplate: detail?.header.title ?? `{{${source.collection.displayField}}}`,
     ...(detail?.header.subtitle ? { subtitleTemplate: detail.header.subtitle } : {}),
+    ...(detail?.header.badges?.items.length ? { badges: detail.header.badges.items } : {}),
     layout: {
       tabs: recordTabs,
       context: {
@@ -685,7 +690,7 @@ export function buildWebManifest(
       entityName: name,
       label: localized(definition.entity.labels, definition.entity.title ?? name),
       // These supports describe editing inside a carrier value, not CRUD.
-      fields: definition.model.fields.map((field) => projectField(field, name, { read: true, create: true, update: true }, true)),
+      fields: definition.model.fields.map((field) => projectField(field, name, { read: true, create: true, update: true }, true, definition.interfaces?.web?.fields)),
       ...(materialize ? { materializeOperationId: materialize.id } : {}),
     }];
   }));

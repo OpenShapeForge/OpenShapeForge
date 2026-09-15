@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DirectDebitMandate
@@ -53,9 +53,6 @@ fields:
     persisted:
       column: signed_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: firstUsedDate
     valueType: date
     required: false
@@ -68,9 +65,6 @@ fields:
     persisted:
       column: first_used_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: lastUsedDate
     valueType: date
     required: false
@@ -83,9 +77,6 @@ fields:
     persisted:
       column: last_used_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: status
     valueType: string
     required: true
@@ -98,11 +89,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MANDATESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MANDATESTATUS
+    semanticType: referenceDataCode
   - key: sequenceType
     valueType: string
     required: true
@@ -115,11 +105,10 @@ fields:
     persisted:
       column: sequence_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SEPASEQUENCETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SEPASEQUENCETYPE
+    semanticType: referenceDataCode
   - key: externalCode
     valueType: string
     required: false
@@ -134,150 +123,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-ui:
-  routes:
-    list:
-      en: /direct-debit-mandates
-      nl: /incassomachtigingen
-    detail:
-      en: /direct-debit-mandates/:id
-      nl: /incassomachtigingen/:id
-    create:
-      en: /direct-debit-mandates/create
-      nl: /incassomachtigingen/aanmaken
-    edit:
-      en: /direct-debit-mandates/:id/edit
-      nl: /incassomachtigingen/:id/bewerken
-    delete:
-      en: /direct-debit-mandates/:id/delete
-      nl: /incassomachtigingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Direct debit mandates
-        nl: Incassomachtigingen
-      columns:
-        - key: mandateReference
-          sortable: true
-        - key: iban
-          sortable: true
-        - key: status
-          sortable: true
-        - key: sequenceType
-          sortable: true
-        - key: signedDate
-          sortable: true
-        - key: lastUsedDate
-          sortable: true
-      defaultSort:
-        key: signedDate
-        direction: desc
-      rowLink:
-        en: /direct-debit-mandates/:id
-        nl: /incassomachtigingen/:id
-    detail:
-      header:
-        title: "{{mandateReference}}"
-        subtitle: "{{iban}}"
-        badges:
-          - status
-          - sequenceType
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Mandate details
-                nl: Machtigingsgegevens
-              fields:
-                - mandateReference
-                - iban
-                - status
-                - sequenceType
-            - title:
-                en: Lifecycle
-                nl: Levensloop
-              fields:
-                - signedDate
-                - firstUsedDate
-                - lastUsedDate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create direct debit mandate
-            nl: Incassomachtiging aanmaken
-          groups:
-            - title:
-                en: Mandate details
-                nl: Machtigingsgegevens
-              fields:
-                - mandateReference
-                - iban
-                - status
-                - sequenceType
-            - title:
-                en: Lifecycle
-                nl: Levensloop
-              fields:
-                - signedDate
-                - firstUsedDate
-                - lastUsedDate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit direct debit mandate
-            nl: Incassomachtiging bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -292,3 +147,221 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Direct Debit Mandate
+    description: List DirectDebitMandate records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Direct Debit Mandate
+    description: Get DirectDebitMandate records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Direct Debit Mandate
+    description: Create DirectDebitMandate records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update DirectDebitMandate records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /direct-debit-mandates
+          nl: /incassomachtigingen
+        columns:
+          - key: mandateReference
+            sortable: true
+          - key: iban
+            sortable: true
+          - key: status
+            sortable: true
+          - key: sequenceType
+            sortable: true
+          - key: signedDate
+            sortable: true
+          - key: lastUsedDate
+            sortable: true
+        title:
+          en: Direct debit mandates
+          nl: Incassomachtigingen
+        defaultSort:
+          key: signedDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /direct-debit-mandates/:id
+            nl: /incassomachtigingen/:id
+          create:
+            en: /direct-debit-mandates/create
+            nl: /incassomachtigingen/aanmaken
+        title: "{{mandateReference}}"
+        subtitle: "{{iban}}"
+        badges:
+          - status
+          - sequenceType
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Mandate details
+                    nl: Machtigingsgegevens
+                  fields:
+                    - mandateReference
+                    - iban
+                    - status
+                    - sequenceType
+                - title:
+                    en: Lifecycle
+                    nl: Levensloop
+                  fields:
+                    - signedDate
+                    - firstUsedDate
+                    - lastUsedDate
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create direct debit mandate
+              nl: Incassomachtiging aanmaken
+            groups:
+              - title:
+                  en: Mandate details
+                  nl: Machtigingsgegevens
+                fields:
+                  - mandateReference
+                  - iban
+                  - status
+                  - sequenceType
+              - title:
+                  en: Lifecycle
+                  nl: Levensloop
+                fields:
+                  - signedDate
+                  - firstUsedDate
+                  - lastUsedDate
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit direct debit mandate
+              nl: Incassomachtiging bewerken
+    fields:
+      signedDate:
+        render:
+          component: DatePicker
+          props: {}
+      firstUsedDate:
+        render:
+          component: DatePicker
+          props: {}
+      lastUsedDate:
+        render:
+          component: DatePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MANDATESTATUS
+            clearable: false
+      sequenceType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SEPASEQUENCETYPE
+            clearable: false

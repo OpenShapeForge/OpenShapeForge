@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AgreementComponentType
 title: Agreement Component Type
-description: Catalog of component types (e.g. main rent, service fee, insurance) carrying the GL account pair that lines of this type post to.
+description: Catalog of component types (e.g. main rent, service fee, insurance) carrying the GL account pair that lines
+  of this type post to.
 language: en
 displayTemplate: "{{code}} {{name}}"
 filterField: code
@@ -58,11 +59,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: unitId
     valueType: string
     required: false
@@ -84,14 +81,16 @@ fields:
       en: Applicable to agreement types
       nl: Toepasbaar op overeenkomsttypen
     description:
-      en: Optional whitelist of AGREEMENTTYPE values for which this component type may be selected. Empty/null means no restriction.
-      nl: Optionele whitelist van AGREEMENTTYPE-waarden waarvoor dit componenttype kan worden gekozen. Leeg/null betekent geen beperking.
+      en: Optional whitelist of AGREEMENTTYPE values for which this component type may be selected. Empty/null means no
+        restriction.
+      nl: Optionele whitelist van AGREEMENTTYPE-waarden waarvoor dit componenttype kan worden gekozen. Leeg/null betekent geen
+        beperking.
     persisted:
       column: applicable_to_agreement_types
       storageClass: core
     cardinality:
       min: 0
-      max: "unbounded"
+      max: unbounded
     item:
       key: agreementType
       valueType: string
@@ -99,11 +98,10 @@ fields:
       label:
         en: Agreement type
         nl: Overeenkomsttype
-      render:
-        component: ReferenceSelect
-        props:
-          referentieGroep: AGREEMENTTYPE
-          clearable: false
+      options:
+        type: referentiedata
+        referentieGroep: AGREEMENTTYPE
+      semanticType: referenceDataCode
   - key: externalCode
     valueType: string
     required: false
@@ -118,149 +116,36 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: debitLedgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: debit_ledger_account_id
+  - key: debitLedgerAccountId
     label:
       en: Debit ledger account
       nl: Debet grootboekrekening
-  - key: creditLedgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: credit_ledger_account_id
+    persisted:
+      column: debit_ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: creditLedgerAccountId
     label:
       en: Credit ledger account
       nl: Credit grootboekrekening
-  - key: defaultCostDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: default_cost_dimension_id
+    persisted:
+      column: credit_ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: defaultCostDimensionId
     label:
       en: Default cost dimension
       nl: Standaard kostendimensie
-ui:
-  routes:
-    list:
-      en: /agreement-component-types
-      nl: /overeenkomstcomponenttypen
-    detail:
-      en: /agreement-component-types/:id
-      nl: /overeenkomstcomponenttypen/:id
-    create:
-      en: /agreement-component-types/create
-      nl: /overeenkomstcomponenttypen/aanmaken
-    edit:
-      en: /agreement-component-types/:id/edit
-      nl: /overeenkomstcomponenttypen/:id/bewerken
-    delete:
-      en: /agreement-component-types/:id/delete
-      nl: /overeenkomstcomponenttypen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Agreement component types
-        nl: Overeenkomstcomponenttypen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: unitId
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /agreement-component-types/:id
-        nl: /overeenkomstcomponenttypen/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{unitId}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Component type details
-                nl: Componenttypegegevens
-              fields:
-                - code
-                - name
-                - unitId
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create agreement component type
-            nl: Overeenkomstcomponenttype aanmaken
-          groups:
-            - title:
-                en: Component type details
-                nl: Componenttypegegevens
-              fields:
-                - code
-                - name
-                - unitId
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit agreement component type
-            nl: Overeenkomstcomponenttype bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: default_cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -275,3 +160,194 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Agreement Component Type
+    description: List AgreementComponentType records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Agreement Component Type
+    description: Get AgreementComponentType records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Agreement Component Type
+    description: Create AgreementComponentType records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AgreementComponentType records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /agreement-component-types
+          nl: /overeenkomstcomponenttypen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: unitId
+            sortable: true
+        title:
+          en: Agreement component types
+          nl: Overeenkomstcomponenttypen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /agreement-component-types/:id
+            nl: /overeenkomstcomponenttypen/:id
+          create:
+            en: /agreement-component-types/create
+            nl: /overeenkomstcomponenttypen/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{unitId}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Component type details
+                    nl: Componenttypegegevens
+                  fields:
+                    - code
+                    - name
+                    - unitId
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create agreement component type
+              nl: Overeenkomstcomponenttype aanmaken
+            groups:
+              - title:
+                  en: Component type details
+                  nl: Componenttypegegevens
+                fields:
+                  - code
+                  - name
+                  - unitId
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit agreement component type
+              nl: Overeenkomstcomponenttype bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000
+      applicableToAgreementTypes.agreementType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: AGREEMENTTYPE
+            clearable: false
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RelationGroup
@@ -102,28 +102,35 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
   - key: memberships
-    kind: hasMany
-    target: RelationGroupMembership
-    foreignKey: relation_group_id
     label:
       en: Memberships
       nl: Lidmaatschappen
-  - key: orgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: org_unit_id
+    semanticType: RelationGroupMembership
+    cardinality: collection
+    relationship:
+      inverse: relationGroupId
+      ownership: reference
+  - key: orgUnitId
     label:
       en: Org unit
       nl: Organisatorische eenheid
+    persisted:
+      column: org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List relation groups, nl: Relatiegroepen tonen }
@@ -186,7 +193,7 @@ operations:
         kind: type-current-field
         field: name
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -238,21 +245,21 @@ interfaces:
           read: { en: /relation-groups/:id, nl: /relatiegroepen/:id }
           create: { en: /relation-groups/new, nl: /relatiegroepen/nieuw }
         title: "{{name}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [groupType, status]
-            relationships: [relation, orgUnit]
+            fields: [ groupType, status ]
+            relationships: [ relationId, orgUnitId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: General, nl: Algemeen }
-                  fields: [name, groupType, status]
+                  fields: [ name, groupType, status ]
                 - title: { en: Description, nl: Omschrijving }
-                  fields: [description]
+                  fields: [ description ]
                 - title: { en: Source, nl: Herkomst }
-                  fields: [externalId, externalCode]
+                  fields: [ externalId, externalCode ]
             - id: memberships
               label: { en: Memberships, nl: Lidmaatschappen }
               relationship: memberships
@@ -261,17 +268,17 @@ interfaces:
             title: { en: Create relation group, nl: Relatiegroep aanmaken }
             groups:
               - title: { en: General, nl: Algemeen }
-                fields: [name, groupType, status]
+                fields: [ name, groupType, status ]
               - title: { en: Description, nl: Omschrijving }
-                fields: [description]
+                fields: [ description ]
               - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode]
+                fields: [ externalId, externalCode ]
           update:
             title: { en: Update relation group, nl: Relatiegroep wijzigen }
             groups:
               - title: { en: General, nl: Algemeen }
-                fields: [name, groupType, status]
+                fields: [ name, groupType, status ]
               - title: { en: Description, nl: Omschrijving }
-                fields: [description]
+                fields: [ description ]
               - title: { en: Source, nl: Herkomst }
-                fields: [externalCode]
+                fields: [ externalCode ]

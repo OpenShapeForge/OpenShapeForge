@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RowAccessRetentionBadDuration
@@ -46,3 +46,76 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List Row Access Retention Bad Duration
+    description: List RowAccessRetentionBadDuration records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Row Access Retention Bad Duration
+    description: Get RowAccessRetentionBadDuration records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Row Access Retention Bad Duration
+    description: Create RowAccessRetentionBadDuration records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Row Access Retention Bad Duration
+    description: Update RowAccessRetentionBadDuration records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Row Access Retention Bad Duration
+    description: Delete RowAccessRetentionBadDuration records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

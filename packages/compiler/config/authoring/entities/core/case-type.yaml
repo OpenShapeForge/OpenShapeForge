@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseType
@@ -63,11 +63,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: category
     valueType: string
     required: false
@@ -77,11 +73,10 @@ fields:
     persisted:
       column: category
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASECATEGORY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASECATEGORY
+    semanticType: referenceDataCode
   - key: defaultPriority
     valueType: string
     required: false
@@ -91,11 +86,10 @@ fields:
     persisted:
       column: default_priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEPRIORITY
+    semanticType: referenceDataCode
   - key: serviceNormHours
     valueType: integer
     required: false
@@ -137,11 +131,104 @@ fields:
     persisted:
       column: routing_profile
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: List Case Type
+    description: List CaseType records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Type
+    description: Get CaseType records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Type
+    description: Create CaseType records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Type
+    description: Update CaseType records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Type
+    description: Delete CaseType records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      category:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASECATEGORY
+            clearable: true
+      defaultPriority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+            clearable: true

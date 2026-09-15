@@ -1,23 +1,24 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PersonalPreference
 title: Personal preference
-description: A private application preference override owned by the signed-in subject within an organization. Definitions are managed by the composed application, not the user.
+description: A private application preference override owned by the signed-in subject within an organization.
+  Definitions are managed by the composed application, not the user.
 language: en
 displayTemplate: "{{key}}"
 filterField: key
 labels: { en: Personal preference, nl: Persoonlijke voorkeur }
 indexes:
   - name: personal_preferences_owner_key_uidx
-    fields: [tenantId, ownerUserId, namespace, key]
+    fields: [ tenantId, ownerUserId, namespace, key ]
     unique: true
 authorization:
   roles:
-    read: [Preferences.Self.Read]
-    create: [Preferences.Self.Write]
-    update: [Preferences.Self.Write]
-    delete: [Preferences.Self.Write]
+    read: [ Preferences.Self.Read ]
+    create: [ Preferences.Self.Write ]
+    update: [ Preferences.Self.Write ]
+    delete: [ Preferences.Self.Write ]
   rowAccess:
     enabled: true
     empty: restricted
@@ -48,7 +49,11 @@ fields:
     valueType: object
     required: false
     label: { en: Value, nl: Waarde }
-    description: {"en":"JSON storage; the canonical managed FieldDefinition determines and validates the actual value type.","nl":"JSON-opslag; de beheerde velddefinitie bepaalt en valideert het werkelijke waardetype."}
+    description:
+      {
+        "en": "JSON storage; the canonical managed FieldDefinition determines and validates the actual value type.",
+        "nl": "JSON-opslag; de beheerde velddefinitie bepaalt en valideert het werkelijke waardetype."
+      }
     persisted: { column: value, storageClass: core }
 operations:
   list:

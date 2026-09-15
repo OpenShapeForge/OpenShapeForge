@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Case
@@ -87,11 +87,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 10000
+    semanticType: multilineText
   - key: category
     valueType: string
     required: false
@@ -104,11 +100,10 @@ fields:
     persisted:
       column: category
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASECATEGORY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASECATEGORY
+    semanticType: referenceDataCode
   - key: caseType
     valueType: string
     required: true
@@ -121,11 +116,10 @@ fields:
     persisted:
       column: case_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASETYPE
+    semanticType: referenceDataCode
   - key: caseSubType
     valueType: string
     required: false
@@ -152,11 +146,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTATUS
+    semanticType: referenceDataCode
   - key: routingStatus
     valueType: string
     required: false
@@ -169,11 +162,10 @@ fields:
     persisted:
       column: routing_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEROUTINGSTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEROUTINGSTATUS
+    semanticType: referenceDataCode
   - key: priority
     valueType: string
     required: false
@@ -186,11 +178,10 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEPRIORITY
+    semanticType: referenceDataCode
   - key: originChannel
     valueType: string
     required: false
@@ -203,11 +194,10 @@ fields:
     persisted:
       column: origin_channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEORIGINCHANNEL
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEORIGINCHANNEL
+    semanticType: referenceDataCode
   - key: fieldDefinitions
     valueType: object
     label:
@@ -222,7 +212,7 @@ fields:
     layoutFraction: 1
     cardinality:
       min: 0
-      max: "unbounded"
+      max: unbounded
     semanticType: fieldDefinition
     authoring:
       profile: workflowInputField
@@ -238,11 +228,10 @@ fields:
     persisted:
       column: confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASECONFIDENTIALITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASECONFIDENTIALITY
+    semanticType: referenceDataCode
   - key: waitingReason
     valueType: string
     required: false
@@ -255,11 +244,10 @@ fields:
     persisted:
       column: waiting_reason
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEWAITINGREASON
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEWAITINGREASON
+    semanticType: referenceDataCode
   - key: breachState
     valueType: string
     required: false
@@ -272,11 +260,10 @@ fields:
     persisted:
       column: breach_state
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEBREACHSTATE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEBREACHSTATE
+    semanticType: referenceDataCode
   - key: registeredAt
     valueType: datetime
     required: true
@@ -289,9 +276,6 @@ fields:
     persisted:
       column: registered_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: startedAt
     valueType: datetime
     required: false
@@ -304,9 +288,6 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: routedAt
     valueType: datetime
     required: false
@@ -319,9 +300,6 @@ fields:
     persisted:
       column: routed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: lastCustomerContactAt
     valueType: datetime
     required: false
@@ -334,9 +312,6 @@ fields:
     persisted:
       column: last_customer_contact_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: nextActionAt
     valueType: datetime
     required: false
@@ -349,9 +324,6 @@ fields:
     persisted:
       column: next_action_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: plannedEndAt
     valueType: datetime
     required: false
@@ -364,9 +336,6 @@ fields:
     persisted:
       column: planned_end_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
     valueType: datetime
     required: false
@@ -379,9 +348,6 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: firstResponseDueAt
     valueType: datetime
     required: false
@@ -394,9 +360,6 @@ fields:
     persisted:
       column: first_response_due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: resolutionDueAt
     valueType: datetime
     required: false
@@ -409,9 +372,6 @@ fields:
     persisted:
       column: resolution_due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: closedAt
     valueType: datetime
     required: false
@@ -425,9 +385,6 @@ fields:
     persisted:
       column: closed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: portalVisible
     valueType: boolean
     required: true
@@ -469,11 +426,7 @@ fields:
     persisted:
       column: result_details
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: aiSummary
     valueType: string
     required: false
@@ -489,11 +442,7 @@ fields:
     persisted:
       column: ai_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 8000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -508,132 +457,357 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: primaryRelation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: primaryRelationId
     label:
       en: Primary relation
       nl: Primaire relatie
-  - key: caseFile
-    kind: belongsTo
-    target: CaseFile
-    foreignKey: case_file_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: caseFileId
     label:
       en: Case file
       nl: Dossier
-  - key: currentQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: work_queue_id
+    persisted:
+      column: case_file_id
+      storageClass: core
+    semanticType: CaseFile
+    relationship:
+      ownership: reference
+  - key: currentQueueId
     label:
       en: Current queue
       nl: Huidige queue
-  - key: slaPolicy
-    kind: belongsTo
-    target: SlaPolicy
-    foreignKey: sla_policy_id
+    persisted:
+      column: work_queue_id
+      storageClass: core
+    semanticType: WorkQueue
+    relationship:
+      ownership: reference
+  - key: slaPolicyId
     label:
       en: SLA policy
       nl: SLA-beleid
-  - key: parentCase
-    kind: belongsTo
-    target: Case
-    foreignKey: parent_case_id
+    persisted:
+      column: sla_policy_id
+      storageClass: core
+    semanticType: SlaPolicy
+    relationship:
+      ownership: reference
+  - key: parentCaseId
     label:
       en: Parent case
       nl: Hoofdzaak
+    persisted:
+      column: parent_case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
   - key: childCases
-    kind: hasMany
-    target: Case
-    foreignKey: parent_case_id
     label:
       en: Child cases
       nl: Deelzaken
+    semanticType: Case
+    cardinality: collection
+    relationship:
+      inverse: parentCaseId
+      ownership: reference
   - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: case_id
     label:
       en: Tasks
       nl: Taken
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: contactMoments
-    kind: hasMany
-    target: ContactMoment
-    foreignKey: case_id
     label:
       en: Contact moments
       nl: Contactmomenten
+    semanticType: ContactMoment
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: appointments
-    kind: hasMany
-    target: Appointment
-    foreignKey: case_id
     label:
       en: Appointments
       nl: Afspraken
+    semanticType: Appointment
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: agreements
-    kind: hasMany
-    target: Agreement
-    foreignKey: case_id
     label:
       en: Agreements
       nl: Overeenkomsten
+    semanticType: Agreement
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: statusEvents
-    kind: hasMany
-    target: CaseStatusEvent
-    foreignKey: case_id
     label:
       en: Status events
       nl: Statusgebeurtenissen
+    semanticType: CaseStatusEvent
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: parties
-    kind: hasMany
-    target: CaseParty
-    foreignKey: case_id
     label:
       en: Parties
       nl: Betrokkenen
+    semanticType: CaseParty
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: objectLinks
-    kind: hasMany
-    target: CaseObjectLink
-    foreignKey: case_id
     label:
       en: Linked objects
       nl: Gekoppelde objecten
+    semanticType: CaseObjectLink
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: documents
-    kind: hasMany
-    target: Document
-    foreignKey: case_id
     label:
       en: Documents
       nl: Documenten
+    semanticType: Document
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: processes
-    kind: hasMany
-    target: Process
-    foreignKey: case_id
     label:
       en: Steps
       nl: Stappen
+    semanticType: Process
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: assignments
-    kind: hasMany
-    target: Assignment
-    foreignKey: case_id
     label:
       en: Assignments
       nl: Toewijzingen
+    semanticType: Assignment
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
   - key: milestones
-    kind: hasMany
-    target: Milestone
-    foreignKey: case_id
     label:
       en: Milestones
       nl: Mijlpalen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: Milestone
+    cardinality: collection
+    relationship:
+      inverse: caseId
+      ownership: reference
+operations:
+  list:
+    name: List Case
+    description: List Case records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case
+    description: Get Case records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case
+    description: Create Case records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case
+    description: Update Case records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case
+    description: Delete Case records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 10000
+      category:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASECATEGORY
+            clearable: true
+      caseType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTATUS
+            clearable: false
+      routingStatus:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEROUTINGSTATUS
+            clearable: true
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+            clearable: true
+      originChannel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEORIGINCHANNEL
+            clearable: true
+      confidentiality:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASECONFIDENTIALITY
+            clearable: true
+      waitingReason:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEWAITINGREASON
+            clearable: true
+      breachState:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEBREACHSTATE
+            clearable: true
+      registeredAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      routedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      lastCustomerContactAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      nextActionAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      plannedEndAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      firstResponseDueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      resolutionDueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      closedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      resultDetails:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      aiSummary:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 8000

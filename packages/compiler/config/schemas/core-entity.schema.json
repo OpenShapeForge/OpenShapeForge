@@ -2100,7 +2100,8 @@
         },
         "label": {
           "$ref": "#/$defs/localizedText"
-        }
+        },
+        "constraints": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationshipConstraints" }
       }
     },
     "hookList": {

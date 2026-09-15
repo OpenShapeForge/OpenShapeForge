@@ -800,10 +800,78 @@ export function collectAuthoredEntityPluginOperations(
   );
   return [
     ...collectOperationContracts(synthetic, context, true),
+    ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
       : []),
   ];
+}
+
+export function constrainedReferenceCreateOperationId(entityName: string, field: string): string {
+  return `core.${entityName}.${field}.create-constrained-reference`;
+}
+
+/**
+ * A constrained reference may need one related child write. Materialize that
+ * bounded case as a normal discoverable Operation instead of teaching YAML a
+ * procedural workflow language.
+ */
+function collectConstrainedReferenceCreateOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  referentiedata: CoreReferentiedataSnapshot,
+): CompiledPluginOperation[] {
+  const contracts = entities.map(({ contract }) => contract);
+  const output: CompiledPluginOperation[] = [];
+  for (const owner of contracts) for (const field of owner.model?.fields ?? []) {
+    const constraints = field.relationship?.constraints;
+    if (!constraints || !field.relationship?.target) continue;
+    const nested = Object.entries(constraints).filter((entry): entry is [string, { any: Record<string, { eq: string | number | boolean }> }] => "any" in entry[1]);
+    if (nested.length === 0) continue;
+    const target = contracts.find(contract => contract.entity.name === field.relationship!.target);
+    const collection = target?.model.relationships.find(relation => relation.key === nested[0]![0]);
+    const child = collection && contracts.find(contract => contract.entity.name === collection.target);
+    const parentColumn = child?.storage.columns.find(column => column.column === collection?.foreignKey);
+    const create = target?.entityOperations.create;
+    const childCreate = child?.entityOperations.create;
+    if (!target || !collection || collection.kind !== "hasMany" || !child || !parentColumn || !create || !childCreate ||
+        create.implementation.type !== "entity" || childCreate.implementation.type !== "entity") {
+      throw new Error(`${owner.entity.name}.${field.key}: constrained reference create needs native target and collection-child create Operations.`);
+    }
+    const schemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
+    const id = constrainedReferenceCreateOperationId(owner.entity.name, field.key);
+    const targetValues = Object.fromEntries(Object.entries(constraints).flatMap(([key, value]) => "eq" in value ? [[key, value.eq]] : []));
+    const childValues = Object.fromEntries(Object.entries(nested[0]![1].any).map(([key, value]) => [key, value.eq]));
+    const roles = [...new Set([...create.authorization.roles, ...childCreate.authorization.roles])].sort();
+    const raw: PluginOperationContract = {
+      key: id,
+      title: `Create ${target.entity.title} for ${owner.entity.title}`,
+      description: `Creates one ${target.entity.title} and its required ${child.entity.title} atomically.`,
+      handler: "constrainedReferenceCreate",
+      target: { entityId: target.entity.id, entityName: target.entity.name, scope: "collection" },
+      inputSchema: schemas.inputSchema,
+      outputSchema: schemas.outputSchema,
+      errors: [],
+      auth: { mode: "session", roles }, tenancy: { mode: "required" },
+      idempotency: { mode: "none" }, effects: { data: "write", external: "none" },
+      confirmation: { mode: "none" },
+      transports: {
+        rest: { method: "POST", path: `/api/core/reference/${kebab(owner.entity.name)}/${kebab(field.key)}`, response: { kind: "json" } },
+        mcp: { enabled: true, name: `${snake(owner.entity.name)}_${snake(field.key)}_create_reference` },
+        graphql: { enabled: true, kind: "mutation", field: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+        typescript: { enabled: true, functionName: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+      },
+    };
+    const compiled: CompiledPluginOperation = { ...raw, plugin: "core", id, intent: "invoke" };
+    const binding: NonNullable<CompiledPluginOperation["implementation"]> = {
+      type: "constrained-reference-create", targetEntityName: target.entity.name,
+      collectionEntityName: child.entity.name, parentField: parentColumn.field,
+      targetValues, childValues,
+    };
+    compiled.implementation = binding;
+    verifiedNativeOperations.set(compiled, JSON.stringify(binding));
+    output.push(compiled);
+  }
+  return output;
 }
 
 /** Built-in model discovery follows canonical Operation authentication and transport. */
@@ -1018,7 +1086,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes"].includes(operation.handler) ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }

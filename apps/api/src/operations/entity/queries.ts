@@ -9,6 +9,8 @@ import {
   projectGeneratedEntityRow,
   projectRows,
   readGeneratedCrudTable,
+  getGeneratedCrudTables,
+  requireEntityOperation,
 } from "./catalog.js";
 import { fieldColumnMap, tableColumnMap } from "./columns.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
@@ -83,6 +85,7 @@ function normalizeSortDirection(value: unknown): "asc" | "desc" {
 
 function buildFilterConditions(
   table: GeneratedCrudTable,
+  session: DbSessionInput,
   filter?: Record<string, unknown> | null,
   fixedWhere: Array<{ column: string; value: unknown }> = [],
 ) {
@@ -103,6 +106,39 @@ function buildFilterConditions(
       continue;
     }
 
+    const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
+    if (relationship && value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "any")) {
+      if (relationship.resolve !== "hasMany" || !relationship.foreignKey || !table.primaryKey) {
+        throw generatedCrudError(`Relationship filter ${key} is not a supported collection for ${table.name}.`, "BAD_USER_INPUT");
+      }
+      const any = (value as { any?: unknown }).any;
+      if (!any || typeof any !== "object" || Array.isArray(any) || Object.keys(any).length === 0) {
+        throw generatedCrudError(`Relationship filter ${key}.any requires exact field constraints.`, "BAD_USER_INPUT");
+      }
+      const related = getGeneratedCrudTables().find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
+      if (!related) throw generatedCrudError(`Relationship filter ${key} has no generated target.`, "INTERNAL_SERVER_ERROR");
+      requireEntityOperation(related, "list", session);
+      assertClassifiedQueryAllowed(related, session, { filter: any as Record<string, unknown> });
+      const relatedFields = fieldColumnMap(related);
+      const relatedConditions = [];
+      for (const [relatedKey, relatedValue] of Object.entries(any as Record<string, unknown>)) {
+        const column = relatedFields.get(relatedKey);
+        const eq = relatedValue && typeof relatedValue === "object" && !Array.isArray(relatedValue)
+          ? (relatedValue as { eq?: unknown }).eq : undefined;
+        if (!column || eq === undefined || Object.keys(relatedValue as object).length !== 1) {
+          throw generatedCrudError(`Relationship filter ${key}.any.${relatedKey} supports eq on declared scalar fields only.`, "BAD_USER_INPUT");
+        }
+        relatedConditions.push(sql`${sql.id("related", column.name)} = ${eq}`);
+      }
+      if (related.tenantScoped) relatedConditions.push(sql`${sql.id("related", "tenant_id")} = ${session.tenantId}`);
+      conditions.push(sql`exists (
+        select 1 from ${sql.id(related.schema, related.table)} as related
+        where ${sql.id("related", relationship.foreignKey)} = ${sql.id("row_source", table.primaryKey)}
+          and ${sql.join(relatedConditions, sql` and `)}
+      )`);
+      continue;
+    }
+
     const isInFilter = key.endsWith("In");
     const fieldName = isInFilter ? key.slice(0, -2) : key;
     const column = fields.get(fieldName);
@@ -118,6 +154,16 @@ function buildFilterConditions(
         continue;
       }
       conditions.push(sql`${sql.id("row_source", column.name)} in (${sql.join(value)})`);
+      continue;
+    }
+
+    const exact = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "eq")
+      ? (value as { eq?: unknown }).eq : undefined;
+    if (exact !== undefined) {
+      if (Object.keys(value as object).length !== 1) {
+        throw generatedCrudError(`Exact filter ${key} accepts eq only.`, "BAD_USER_INPUT");
+      }
+      conditions.push(sql`${sql.id("row_source", column.name)} = ${exact}`);
       continue;
     }
 
@@ -192,7 +238,7 @@ async function listGeneratedEntityRowsForTable(
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
-  const ordinaryWhere = buildFilterConditions(table, input.filter, fixedWhere);
+  const ordinaryWhere = buildFilterConditions(table, session, input.filter, fixedWhere);
   const where = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
   const orderBy = relationScope?.orderBy ?? buildSortExpression(table, input.sort);
 

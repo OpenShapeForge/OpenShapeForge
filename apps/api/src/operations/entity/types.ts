@@ -64,6 +64,12 @@ export type GeneratedCrudRelationship = {
   via?: string;
   viaSchema?: string;
   mutationSupport?: "unsupported";
+  constraints?: Record<
+    string,
+    { eq: string | number | boolean } | {
+      any: Record<string, { eq: string | number | boolean }>;
+    }
+  >;
 };
 
 export type GeneratedCrudTable = {

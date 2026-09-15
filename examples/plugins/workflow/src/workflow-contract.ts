@@ -75,6 +75,8 @@ const CONTRACT_DECLARATIONS = [
   { kind: "type", name: "FieldDefinitionVariableMode" },
   { kind: "type", name: "FieldDefinitionValidation" },
   { kind: "interface", name: "FieldDefinitionSuggestions" },
+  { kind: "type", name: "FieldDefinitionEqualityConstraint" },
+  { kind: "type", name: "FieldDefinitionRelationshipConstraints" },
   { kind: "interface", name: "FieldDefinitionRelationship" },
   { kind: "interface", name: "FieldDefinitionDeriveOnCreate" },
   { kind: "interface", name: "FieldDefinitionRuntimeMetadata" },

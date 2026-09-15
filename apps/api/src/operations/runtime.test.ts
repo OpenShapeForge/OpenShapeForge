@@ -310,7 +310,8 @@ describe("canonical operation runtime", () => {
     expect(
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
-        operation.implementation?.type === "entity-type-list"
+        operation.implementation?.type === "entity-type-list" ||
+        operation.implementation?.type === "constrained-reference-create"
       ),
     ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.

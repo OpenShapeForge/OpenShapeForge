@@ -152,6 +152,7 @@ export interface CompiledRelationship {
   foreignKey?: string;
   via?: string;
   label?: LocalizedText;
+  constraints?: import("./field-definition.js").FieldDefinitionRelationshipConstraints;
 }
 
 export interface GraphQLField {

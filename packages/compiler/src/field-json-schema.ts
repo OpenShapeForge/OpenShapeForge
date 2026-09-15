@@ -493,6 +493,15 @@ function addCompiledFieldMetadata(
   } else if (field.relationship?.target && field.cardinality !== "collection") {
     schema["x-osf-reference"] = { entity: field.relationship.target };
   }
+  if (field.relationship?.target) {
+    schema["x-osf-reference"] = {
+      entity: field.relationship.target,
+      valueField: "id",
+      ...(field.relationship.constraints
+        ? { constraints: structuredClone(field.relationship.constraints) }
+        : {}),
+    };
+  }
 
   const descriptionParts: string[] = [];
   const fieldDescription = describeField(field);

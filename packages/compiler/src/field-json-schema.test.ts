@@ -86,9 +86,19 @@ describe("compiled field JSON Schema projection", () => {
       },
     }));
 
-    expect(schema["x-osf-reference"]).toEqual({ entity: "Account" });
+    expect(schema["x-osf-reference"]).toEqual({ entity: "Account", valueField: "id" });
   });
 
+  it("projects bounded relationship constraints into the canonical reference annotation", () => {
+    const constraints = {
+      relationType: { eq: "organization" },
+      groupMemberships: { any: { relationGroupId: { eq: "10000000-0000-4000-8000-000000000099" } } },
+    };
+    expect(compiledFieldSchema(field({
+      key: "customer", semanticType: "Relation",
+      relationship: { kind: "belongsTo", target: "Relation", constraints },
+    }))["x-osf-reference"]).toEqual({ entity: "Relation", valueField: "id", constraints });
+  });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
       $ref: "https://example.test/schema#/$defs/value",

@@ -67,11 +67,15 @@ import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
+import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 
 export type OperationContract = {
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
-  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" } | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> };
+  implementation?:
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
+    | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName: string; parentField: string; targetValues: Record<string, string | number | boolean>; childValues: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -577,6 +581,10 @@ export function bindOperationHandlers(
     }
     if (operation.implementation?.type === "collection") {
       bound.set(operation.key, { operation, handler: nativeCollectionHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "constrained-reference-create") {
+      bound.set(operation.key, { operation, handler: nativeConstrainedReferenceCreateHandler(operation) });
       continue;
     }
     if (pluginOperations === "absent") continue;

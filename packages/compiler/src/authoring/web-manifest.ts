@@ -12,6 +12,7 @@ import type { CompiledEntityInfo } from "../plugins.js";
 import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
 import { assertEntityValueDefinition } from "./entity-values.js";
 import { materializeCollectionOperations } from "./collection-operations.js";
+import { constrainedReferenceCreateOperationId } from "../generate-operations.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -391,7 +392,13 @@ function projectField(
     ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
     ...(field.semanticType ? { semanticType: field.semanticType } : {}),
-    ...(field.relationship?.target ? { relationship: { targetEntityId: field.relationship.target } } : {}),
+    ...(field.relationship?.target ? { relationship: {
+      targetEntityId: field.relationship.target,
+      ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
+      ...(field.relationship.constraints && Object.values(field.relationship.constraints).some(value => "any" in value)
+        ? { createOperation: { id: constrainedReferenceCreateOperationId(parent.split(".")[0]!, field.key), intent: "invoke" as const } }
+        : {}),
+    } } : {}),
     ...(field.variables ? { variables: field.variables } : {}),
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
     ...(field.visibility ? { visibility: field.visibility } : {}),
@@ -536,6 +543,7 @@ function projectEntity(
       } : {}),
       ...(relationship.fieldKey ? { fieldKey: relationship.fieldKey } : {}),
       ...(definitions ? { allowedDefinitions: [...definitions].sort() } : {}),
+      ...(relationship.constraints ? { constraints: structuredClone(relationship.constraints) } : {}),
       ...(relationship.inverse ? { inverse: relationship.inverse } : {}),
       ...(relationship.ownership ? { ownership: relationship.ownership } : {}),
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),

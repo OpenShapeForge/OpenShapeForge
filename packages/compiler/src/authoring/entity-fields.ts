@@ -135,12 +135,14 @@ export function normalizeEntityFields(
     }
     if (field.sortable && !collection) throw new Error(`${entity.entity}.${field.key}: sortable requires a collection.`);
     if (semantic?.kind !== "entity") {
-      if (entity.schemaVersion === 3 && field.relationship) {
+      if (field.relationship) {
         throw new Error(`${entity.entity}.${field.key}: relationship requires a loaded entity semanticType.`);
       }
       return result;
     }
-    if (entity.schemaVersion !== 3) throw new Error(`${entity.entity}.${field.key}: entity relationship fields require schemaVersion 3.`);
+    if (entity.schemaVersion === 1) {
+      throw new Error(`${entity.entity}.${field.key}: entity relationship fields require schemaVersion 2 or 3.`);
+    }
     if (semantic.entityIdentity === false) throw new Error(`${entity.entity}.${field.key}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${entity.entity}.${field.key}: entity references must be relational fields, not IDs inside JSON values.`);
     const target = semantic.entity!;
@@ -204,6 +206,7 @@ export function normalizeEntityFields(
       ...(foreignKey ? { foreignKey } : {}),
       ...(unique ? { unique: true } : {}),
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+      ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
     };
     return result;
   };

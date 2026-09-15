@@ -225,6 +225,27 @@ describe("canonical entity Operation JSON Schemas", () => {
     });
   });
 
+  test("accepts exact scalar and one-hop any relationship filters", () => {
+    const membershipEntity = { id: "example.Membership", name: "Membership" };
+    const membership = {
+      entity: { ...membershipEntity, title: "Membership" },
+      model: { fields: [field("groupId")], relationships: [] },
+      storage: { columns: [{ field: "groupId", column: "group_id", type: "text", nullable: false, storageClass: "core" }] },
+      entityOperations: buildEntityOperations({ entity: membershipEntity, authorization, crud: { operations: { list: true, get: false, create: false, update: false, delete: false } } }),
+    } as unknown as CompiledEntityContract;
+    const constrained = structuredClone(contract);
+    constrained.model.relationships.push({ key: "memberships", kind: "hasMany", target: "Membership", foreignKey: "work_item_id" });
+    const list = entityOperationJsonSchemas(constrained, constrained.entityOperations.list!, [...contracts, membership], {});
+    const filter = (list.inputSchema.properties as Record<string, any>).filter;
+    expect(filter.properties.title.oneOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "string" }),
+      expect.objectContaining({ type: "object", additionalProperties: false, required: ["eq"], properties: { eq: expect.objectContaining({ type: "string" }) } }),
+    ]));
+    expect(filter.properties.memberships).toMatchObject({
+      properties: { any: { properties: { groupId: { properties: { eq: { type: "string" } } } } } },
+    });
+  });
+
   test("keeps writable value eligibility aligned with generated MCP", () => {
     const catalog = buildMcpCatalog(
       [

@@ -39,6 +39,22 @@ export type FieldDefinitionSemanticTypeKind =
   | "entity"
   | "object";
 
+export type FieldDefinitionEqualityConstraint = {
+  eq: string | number | boolean;
+};
+
+/**
+ * Deliberately bounded target-record predicate language. A field may require
+ * exact scalar values and one related collection may require any matching
+ * child. It is not a general expression language.
+ */
+export type FieldDefinitionRelationshipConstraints = Record<
+  string,
+  FieldDefinitionEqualityConstraint | {
+    any: Record<string, FieldDefinitionEqualityConstraint>;
+  }
+>;
+
 export type FieldDefinitionValidation = FieldValidation;
 
 export interface FieldDefinitionRelationship {
@@ -56,6 +72,8 @@ export interface FieldDefinitionRelationship {
   unique?: boolean;
   foreignKey?: string;
   displayField?: string;
+  /** Canonical validity rules for the referenced target record. */
+  constraints?: FieldDefinitionRelationshipConstraints;
 }
 
 export interface FieldDefinitionSuggestions {

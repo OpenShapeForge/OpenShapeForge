@@ -331,8 +331,9 @@ no tenant.
   cleanup. An all-tenant re-apply may reconcile realm-wide audience scopes and
   remove derived orphan scopes; it still never deletes an unclaimed Keycloak
   Organization.
-- **Identity and guide tools:** both roles receive `whoami` (role "Platform
-  administrator", scope `platform`, tenant count) and `platform_guide`, whose
+- **Identity and guide tools:** both roles receive `whoami` (a role label that
+  distinguishes administrator, operator, or both; scope `platform`; tenant
+  count) and `platform_guide`, whose
   instructions tell the client to use only Operations offered to the session.
 - **Catalog, notice and audit tools** (`platform_admin`):
   `list_catalog_entries`, `get_catalog_entry`, `list_platform_audit`,

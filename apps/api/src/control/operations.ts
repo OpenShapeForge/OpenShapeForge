@@ -206,6 +206,7 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
     const presentation = context.runtime.presentation;
     return buildPlatformSessionInfo({
       administrator: context.session.administrator,
+      roles: context.session.roles,
       tenants: await listPlatformTenantsCount(catalogDeps(context)),
       client: presentation?.client ?? null,
       access: presentation ? presentation.access() : accessFromContracts(context),

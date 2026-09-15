@@ -270,6 +270,15 @@ describe("settings source ownership", () => {
   test("emits stable plugin provenance and passes the same effective policy to generators", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "base"), { recursive: true });
+    mkdirSync(join(root, "documents-plugin"), { recursive: true });
+    writeFileSync(
+      join(root, "documents-plugin", "index.ts"),
+      'export default { name: "documents" };\n',
+    );
+    writeFileSync(
+      join(root, "documents-plugin", "runtime.ts"),
+      'export default { name: "documents", operationHandlers: {} };\n',
+    );
     const plugin = join(root, "adapter", "index.ts");
     writeYaml(join(root, "adapter", "authoring", "settings", "artifacts.yaml"), allDefinitions().document);
     writeYaml(join(root, "adapter", "authoring", "settings", "provider.yaml"), providerSource().document);
@@ -284,7 +293,7 @@ describe("settings source ownership", () => {
     ].join("\n"));
     writeYaml(join(root, "authoring.config.yaml"), {
       layers: ["packages/compiler/config/authoring"],
-      plugins: ["./adapter/index.ts"],
+      plugins: ["./documents-plugin/index.ts", "./adapter/index.ts"],
       settings: {
         "storage.artifacts.maximumBytes": 4_000_000,
       },

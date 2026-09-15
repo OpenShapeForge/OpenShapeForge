@@ -7,7 +7,8 @@ import { buildWebManifest } from "./web-manifest.js";
 
 const authoring = join(import.meta.dir, "../../config/authoring");
 const slugs = ["template", "template-version", "template-variant", "block"];
-const entries = slugs.map((slug) => {
+const definitionSlugs = ["text-block", "youtube-embed", "template-block"];
+const entries = [...slugs, ...definitionSlugs].map((slug) => {
   const loaded = loadEntity(authoring, slug);
   return { slug, path: `entities/core/${slug}.yaml`, origin: "core" as const, contract: compile(loaded) };
 });

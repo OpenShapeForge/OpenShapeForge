@@ -790,7 +790,19 @@ export function collectAuthoredEntityPluginOperations(
     name,
     operations,
   } satisfies CompilerPlugin));
-  return [...collectOperationContracts(synthetic, context, true), ...(entities.some(({ contract }) => contract.model.fields.some((field) => field.options?.type === "dynamic" && field.options.source === "entityTypes.list")) ? collectEntityTypeListOperation(context, entities) : [])];
+  const needsEntityTypeList = entities.some(({ contract }) =>
+    contract.model?.fields?.some(
+      (field) =>
+        field.options?.type === "dynamic" &&
+        field.options.source === "entityTypes.list",
+    ) === true
+  );
+  return [
+    ...collectOperationContracts(synthetic, context, true),
+    ...(needsEntityTypeList
+      ? collectEntityTypeListOperation(context, entities)
+      : []),
+  ];
 }
 
 /** Built-in model discovery follows canonical Operation authentication and transport. */

@@ -230,6 +230,7 @@ function canonicalOutputDefinitions(): JsonObject {
             operation: { $ref: "#/$defs/OperationReference" },
             available: { const: true },
             concurrency: { $ref: "#/$defs/OperationConcurrency" },
+            binding: { $ref: "#/$defs/OperationTargetBinding" },
           },
         },
         {
@@ -243,6 +244,24 @@ function canonicalOutputDefinitions(): JsonObject {
           },
         },
       ],
+    },
+    OperationTargetBinding: {
+      type: "object",
+      additionalProperties: false,
+      required: ["target", "input"],
+      properties: {
+        target: {
+          type: "object",
+          additionalProperties: false,
+          required: ["entityId", "id"],
+          properties: {
+            entityId: { type: "string" },
+            id: { type: "string" },
+            version: { type: "string" },
+          },
+        },
+        input: { type: "object", additionalProperties: true },
+      },
     },
   };
 }

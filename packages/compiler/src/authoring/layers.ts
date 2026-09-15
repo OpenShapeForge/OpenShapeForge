@@ -527,13 +527,46 @@ function isPlainObject(value: JsonValue | undefined): value is { [key: string]: 
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function arrayMergeKey(items: JsonValue[]): "key" | "id" | "value" | null {
-  for (const candidate of ["key", "id", "value"] as const) {
+const ARRAY_MERGE_KEYS = ["key", "id", "value", "title"] as const;
+type ArrayMergeKey = (typeof ARRAY_MERGE_KEYS)[number];
+
+/**
+ * Locales localized text may carry, in the order one of them stands in for
+ * the whole text. Every entity authors in English (`language: en`), so the
+ * English text is the one a patch author can rely on restating.
+ */
+const LOCALIZED_TEXT_IDENTITY_ORDER = ["en", "nl", "fr"] as const;
+
+/**
+ * What identifies `item` in a keyed array under `mergeKey`, or null when the
+ * item carries no usable key. `key`, `id` and `value` are plain strings.
+ * `title` is what view groups (record tabs, create and update modes) are keyed
+ * by, and a group title is localized text rather than a string: two groups are
+ * the same group when their authoring-language text agrees. Matching on one
+ * locale is deliberate — a patch that restates `title: { en: Membership }`
+ * must find `{ en: Membership, nl: Lidmaatschap }` and refine it, not append a
+ * look-alike twin beside it. Without this key every layout tweak had to
+ * restate all of a tab's groups, which is exactly how a patch drifts from its
+ * base.
+ */
+function mergeKeyIdentity(item: JsonValue, mergeKey: ArrayMergeKey): string | null {
+  if (!isPlainObject(item)) return null;
+  const value = item[mergeKey];
+  if (typeof value === "string") return value;
+  if (mergeKey === "title" && isPlainObject(value)) {
+    for (const locale of LOCALIZED_TEXT_IDENTITY_ORDER) {
+      const text = value[locale];
+      if (typeof text === "string") return `${locale}:${text}`;
+    }
+  }
+  return null;
+}
+
+function arrayMergeKey(items: JsonValue[]): ArrayMergeKey | null {
+  for (const candidate of ARRAY_MERGE_KEYS) {
     if (
       items.length > 0 &&
-      items.every(
-        (item) => isPlainObject(item) && typeof item[candidate] === "string",
-      )
+      items.every((item) => mergeKeyIdentity(item, candidate) !== null)
     ) {
       return candidate;
     }
@@ -544,8 +577,9 @@ function arrayMergeKey(items: JsonValue[]): "key" | "id" | "value" | null {
 /**
  * Kustomize-style strategic merge:
  * - objects deep-merge; a patch property with value `null` deletes the key
- * - arrays whose items all carry a string `key` (or `id`) merge by that key;
- *   a patch item with `$delete: true` removes the base item; new keys append
+ * - arrays whose items all carry a `key`, `id`, `value` or (localized)
+ *   `title` merge by it, in that priority order; a patch item with
+ *   `$delete: true` removes the base item; new keys append
  * - all other arrays are replaced wholesale
  */
 export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
@@ -568,13 +602,14 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
     if (mergeKey) {
       const result: JsonValue[] = [...base];
       for (const patchItem of patch) {
-        if (!isPlainObject(patchItem) || typeof patchItem[mergeKey] !== "string") {
+        const identity = mergeKeyIdentity(patchItem, mergeKey);
+        if (!isPlainObject(patchItem) || identity === null) {
           throw new Error(
-            `Patch array items must carry a string "${mergeKey}" to merge into a keyed array.`,
+            `Patch array items must carry a "${mergeKey}" to merge into a keyed array.`,
           );
         }
         const index = result.findIndex(
-          (item) => isPlainObject(item) && item[mergeKey] === patchItem[mergeKey],
+          (item) => mergeKeyIdentity(item, mergeKey) === identity,
         );
         if (patchItem.$delete === true) {
           if (index >= 0) result.splice(index, 1);
@@ -1107,6 +1142,11 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   // entity slugs are tracked separately so patches can target them by slug.
   const files = new Map<string, { layer: string; path: string }>();
   const entityPathBySlug = new Map<string, string>();
+  // Entity names are tracked too: the same `entity:` under a second file stem
+  // is the slug collision wearing a different name, and a slug-only check lets
+  // it through to compile as two candidates for one GraphQL type and one
+  // physical table.
+  const entityPathByName = new Map<string, { layer: string; path: string }>();
 
   for (const layerDir of layerDirs) {
     for (const relativePath of walkFiles(layerDir)) {
@@ -1115,11 +1155,13 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         ? APP_SHELL_FILENAME
         : relativePath;
 
-      if (relativePath.endsWith(".yaml")) {
-        const parsed = YAML.parse(readFileSync(sourcePath, "utf8")) as
-          | { kind?: string; entity?: string }
-          | null;
+      const parsed = relativePath.endsWith(".yaml")
+        ? (YAML.parse(readFileSync(sourcePath, "utf8")) as
+            | { kind?: string; entity?: string }
+            | null)
+        : null;
 
+      if (relativePath.endsWith(".yaml")) {
         if (parsed?.kind === "entityPatch") {
           const slug = entitySlug(relativePath);
           const targetRelative = entityPathBySlug.get(slug);
@@ -1249,6 +1291,25 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           );
         }
         entityPathBySlug.set(slug, relativePath);
+
+        // Same entity, different stem. The backend manifest's collision audit
+        // would refuse this too, but three stages later and in terms of the
+        // physical table it produces; here the two authoring files and the
+        // stem a patch has to carry are both still in view.
+        const entityName = parsed?.entity;
+        if (typeof entityName === "string") {
+          const owner = entityPathByName.get(entityName);
+          if (owner && owner.path !== relativePath) {
+            const remedy = owner.layer === layerDir
+              ? "Entity names must be unique within a layer."
+              : `Use kind: entityPatch (file stem "${entitySlug(owner.path)}") ` +
+                "to modify an entity from an earlier layer.";
+            throw new Error(
+              `Duplicate entity "${entityName}" across layers (${owner.path} vs ${relativePath}). ${remedy}`,
+            );
+          }
+          entityPathByName.set(entityName, { layer: layerDir, path: relativePath });
+        }
       }
       files.set(resolvedRelativePath, { layer: layerDir, path: relativePath });
     }

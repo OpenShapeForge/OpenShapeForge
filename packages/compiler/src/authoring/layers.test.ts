@@ -39,6 +39,30 @@ describe("strategicMerge", () => {
   test("unkeyed arrays are replaced wholesale", () => {
     expect(strategicMerge(["a", "b"], ["c"])).toEqual(["c"]);
   });
+
+  test("view groups merge by localized title, so a patch restates one group and keeps its siblings", () => {
+    const base = [
+      { title: { en: "Membership", nl: "Lidmaatschap" }, fields: ["relationId", "status"] },
+      { title: { en: "Source", nl: "Herkomst" }, fields: ["externalCode"] },
+    ];
+    const patch = [
+      // The authoring-language text alone identifies the group; the Dutch
+      // title survives from the base.
+      { title: { en: "Membership" }, fields: ["relationId", "role", "status"] },
+      { title: { en: "Source" }, $delete: true },
+      { title: { en: "Period", nl: "Periode" }, fields: ["startDate", "endDate"] },
+    ];
+    expect(strategicMerge(base, patch)).toEqual([
+      { title: { en: "Membership", nl: "Lidmaatschap" }, fields: ["relationId", "role", "status"] },
+      { title: { en: "Period", nl: "Periode" }, fields: ["startDate", "endDate"] },
+    ]);
+  });
+
+  test("a patch item without the array's merge key is refused", () => {
+    expect(() =>
+      strategicMerge([{ title: { en: "Basics" }, fields: ["name"] }], [{ fields: ["notes"] }]),
+    ).toThrow(/must carry a "title"/);
+  });
 });
 
 describe("resolveAuthoringLayers", () => {
@@ -493,6 +517,44 @@ describe("resolveAuthoringLayers", () => {
     writeYaml(root, "overlay/entities/other/widget.yaml", { ...baseEntity, title: "Other" });
     configureLayers(root, ["base", "overlay"]);
     expect(() => resolveAuthoringLayers(root)).toThrow(/Duplicate entity slug/);
+  });
+
+  test("the same entity under a different slug across layers is rejected at resolution, naming the stem to patch", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    writeYaml(root, "overlay/entities/other/widget-v2.yaml", { ...baseEntity, title: "Other" });
+    configureLayers(root, ["base", "overlay"]);
+    expect(() => resolveAuthoringLayers(root)).toThrow(
+      /Duplicate entity "Widget" across layers \(entities\/core\/widget\.yaml vs entities\/other\/widget-v2\.yaml\)\. Use kind: entityPatch \(file stem "widget"\)/,
+    );
+  });
+
+  test("an entity patch refines one view group by title without restating the others", () => {
+    const root = makeRepo();
+    const groups = (items: unknown[]) => ({
+      interfaces: {
+        web: { views: { record: { layout: { tabs: [{ id: "overview", groups: items }] } } } },
+      },
+    });
+    writeYaml(root, "base/entities/core/widget.yaml", {
+      ...baseEntity,
+      ...groups([
+        { title: { en: "Basics", nl: "Basis" }, fields: ["name"] },
+        { title: { en: "Notes", nl: "Notities" }, fields: ["notes"] },
+      ]),
+    });
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      ...groups([{ title: { en: "Basics" }, fields: ["name", "status"] }]),
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(merged.interfaces.web.views.record.layout.tabs[0].groups).toEqual([
+      { title: { en: "Basics", nl: "Basis" }, fields: ["name", "status"] },
+      { title: { en: "Notes", nl: "Notities" }, fields: ["notes"] },
+    ]);
   });
 
   test("patch targeting a missing entity is rejected", () => {

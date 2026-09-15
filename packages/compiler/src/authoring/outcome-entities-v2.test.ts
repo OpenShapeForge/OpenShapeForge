@@ -48,7 +48,7 @@ const expected = {
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
       "externalCode",
     ],
-    relationships: ["relation", "case", "parentAgreement", "childAgreements"],
+    relationships: ["relation", "case", "parentAgreement", "childAgreements", "parties"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "agreement-milestone": {

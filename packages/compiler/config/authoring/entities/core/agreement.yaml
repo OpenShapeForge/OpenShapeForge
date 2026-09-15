@@ -299,6 +299,13 @@ relationships:
     label:
       en: Child agreements
       nl: Onderliggende overeenkomsten
+  - key: parties
+    kind: hasMany
+    target: AgreementParty
+    foreignKey: agreement_id
+    label:
+      en: Parties
+      nl: Partijen
 operations:
   list:
     name: { en: List agreements, nl: Overeenkomsten tonen }

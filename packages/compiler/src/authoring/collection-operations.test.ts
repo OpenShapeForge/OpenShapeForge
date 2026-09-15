@@ -146,6 +146,30 @@ test("materializes one atomic create Operation for a reference with a hasMany co
   });
 });
 
+test("materializes direct-only constrained create with server-owned values", () => {
+  const entries = fixture((owner, child) => {
+    owner.fields.push({
+      key: "primaryChild", semanticType: "Child", required: true,
+      relationship: { constraints: { kind: { eq: "primary" } } },
+    });
+    child.fields.push({ key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
+  });
+  const operation = compile(entries).find(item => item.id === "core.Owner.primaryChild.create-constrained-reference")!;
+  expect(operation).toMatchObject({
+    auth: { mode: "session", roleGroups: [["Example.Create"]] },
+    implementation: {
+      type: "constrained-reference-create", targetEntityName: "Child", targetValues: { kind: "primary" },
+    },
+  });
+  const values = (operation.inputSchema.properties as Record<string, unknown>).values as { properties: Record<string, unknown>; required: string[] };
+  expect(values.properties.kind).toBeUndefined();
+  expect(values.required).toEqual(["owner", "body"]);
+  expect(operation.implementation).not.toHaveProperty("collectionEntityName");
+  expect(buildWebManifest(entries).entities.Owner!.fields.primaryChild!.relationship).toMatchObject({
+    createOperation: { id: operation.id, intent: "invoke" },
+  });
+});
+
 test("refuses spoofed native metadata and a cloned native Operation without compiler provenance", () => {
   const operation = compile()[0]!;
   expect(() => collectPluginOperations([{ name: "core", operations: [{ ...operation, key: operation.id } as PluginOperationContract] }], context)).toThrow("implementation");

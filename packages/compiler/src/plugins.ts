@@ -51,10 +51,10 @@ export type CompiledPluginOperation = PluginOperationContract & {
     | {
         type: "constrained-reference-create";
         targetEntityName: string;
-        collectionEntityName: string;
-        parentField: string;
+        collectionEntityName?: string;
+        parentField?: string;
         targetValues: Record<string, string | number | boolean>;
-        childValues: Record<string, string | number | boolean>;
+        childValues?: Record<string, string | number | boolean>;
       };
   plugin: string;
   /** Stable canonical identity. Equal to `key` for this operation kind. */
@@ -197,6 +197,8 @@ export type PluginOperationAuth =
       mode: "session";
       /** Omitted means any authenticated session; [] deliberately denies all. */
       roles?: string[];
+      /** Every group requires at least one matching role; groups are combined with AND. */
+      roleGroups?: string[][];
       scopes?: string[];
       /** Current target-record permission checked in addition to roles. */
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;

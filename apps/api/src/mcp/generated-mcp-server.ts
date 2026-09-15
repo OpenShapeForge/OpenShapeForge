@@ -395,7 +395,7 @@ import {
   isMcpProjection,
   requireOperationAuthorization,
 } from "../operations/runtime.js";
-import { sessionOperationRolesAllow } from "../operations/session-authorization.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
 export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
@@ -627,7 +627,7 @@ type Catalog = {
     auth:
       | { mode: "public" }
       | { mode: "control"; roles: string[] }
-      | { mode: "session"; roles?: string[]; scopes?: string[] };
+      | { mode: "session"; roles?: string[]; roleGroups?: string[][]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
       destructiveHint: boolean;
@@ -3223,6 +3223,7 @@ function operationMayInvoke(
   const scopes = new Set(session.oauthScopes ?? []);
   return (
     sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
+    sessionOperationRoleGroupsAllow(tool.auth.roleGroups, session.roles) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );
 }

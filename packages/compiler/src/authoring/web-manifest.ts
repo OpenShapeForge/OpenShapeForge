@@ -447,7 +447,7 @@ function projectField(
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
       ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
-      ...(field.relationship.constraints && Object.values(field.relationship.constraints).some(value => "any" in value)
+      ...(field.relationship.constraints
         ? { createOperation: { id: constrainedReferenceCreateOperationId(parent.split(".")[0]!, field.key), intent: "invoke" as const } }
         : {}),
     } } : {}),

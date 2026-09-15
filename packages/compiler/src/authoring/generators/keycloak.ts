@@ -996,10 +996,10 @@ function aggregateFromEntities(
 
   const pushOperationRoles = (
     operationId: string,
-    auth: { mode: string; roles?: readonly string[] },
+    auth: { mode: string; roles?: readonly string[]; roleGroups?: readonly (readonly string[])[] },
   ) => {
     if (auth.mode !== "session") return;
-    for (const role of auth.roles ?? []) {
+    for (const role of [...(auth.roles ?? []), ...(auth.roleGroups?.flat() ?? [])]) {
       push(entityRoleClient, {
         name: role,
         description: `Invoke ${operationId}`,

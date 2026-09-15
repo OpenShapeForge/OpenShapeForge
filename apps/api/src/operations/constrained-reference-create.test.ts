@@ -11,7 +11,7 @@ const fixture = (): OperationContract => ({
   plugin: "core",
   target: { entityId: "core.Relation", entityName: "Relation", scope: "collection" },
   inputSchema: { type: "object" }, outputSchema: { type: "object" }, errors: [],
-  auth: { mode: "session", roles: ["Relations.All.ReadWrite", "Relations.RelationGroups.ReadWrite"] },
+  auth: { mode: "session", roleGroups: [["Relations.All.ReadWrite"], ["Relations.RelationGroups.ReadWrite"]] },
   tenancy: { mode: "required" }, idempotency: { mode: "none" },
   effects: { data: "write", external: "none" }, confirmation: { mode: "none" },
   transports: {
@@ -26,6 +26,17 @@ const fixture = (): OperationContract => ({
     targetValues: { relationType: "organization" },
     childValues: { relationGroupId: "10000000-0000-4000-8000-000000000099" },
   },
+});
+
+test("accepts the bounded direct-only create binding", () => {
+  const operation = fixture();
+  operation.description = "Create a constrained customer.";
+  operation.auth = { mode: "session", roleGroups: [["Relations.All.ReadWrite"]] };
+  operation.implementation = {
+    type: "constrained-reference-create", targetEntityName: "Relation",
+    targetValues: { relationType: "organization" },
+  };
+  expect(nativeConstrainedReferenceCreateBinding(operation)).toEqual(operation.implementation);
 });
 
 test("accepts only compiler-owned bounded compound-create metadata", () => {

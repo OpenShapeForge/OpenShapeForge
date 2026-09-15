@@ -676,8 +676,9 @@ function toConnection(
  * `totalCount` must not pay for the count pass. Walks the selection set the
  * same way execution will — inline fragments and named fragment spreads
  * included, since `... on FooConnection { totalCount }` selects the field just
- * as plainly as naming it. Aliases need no handling: an alias renames the
- * response key, not the field.
+ * as plainly as naming it — and through the canonical `data` envelope, where a
+ * v2 client's `totalCount` lives. Aliases need no handling: an alias renames
+ * the response key, not the field.
  *
  * Wrong in the safe direction if it ever missed a spelling: the count comes
  * back null and the client sees no value, rather than the server quietly
@@ -691,6 +692,12 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
     for (const selection of selectionSet.selections) {
       if (selection.kind === Kind.FIELD) {
         if (selection.name.value === name) return true;
+        // A canonical result wraps the collection in `data { ... }`, so the
+        // count a v2 client asks for sits one field down. Only that envelope
+        // is descended: a record's own nested selections never carry a count,
+        // and walking them would charge a count pass to a query that asked
+        // for none.
+        if (selection.name.value === "data" && walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.INLINE_FRAGMENT) {
         if (walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.FRAGMENT_SPREAD) {

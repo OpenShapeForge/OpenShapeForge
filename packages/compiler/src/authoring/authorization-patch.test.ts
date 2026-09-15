@@ -40,15 +40,15 @@ function baseRealm() {
       ],
     },
     realmRoles: {
-      directie: {
-        description: "Directie",
+      workspaceAdmin: {
+        description: "Workspace admin",
         composites: {
           "erp-provider": ["General.All.ReadWrite", "Relations.All.ReadWrite"],
           "openshapeforge-support": ["Support.Issues.All"],
         },
       },
-      controller: {
-        description: "Controller",
+      auditor: {
+        description: "Auditor",
         composites: { "erp-provider": ["Finance.All.ReadWrite"] },
       },
     },
@@ -56,11 +56,18 @@ function baseRealm() {
       "erp-provider": ["General.All.ReadWrite", "Relations.All.ReadWrite", "Finance.All.ReadWrite"],
       "openshapeforge-support": ["Support.Issues.All"],
     },
+    clientRoleComposites: {
+      "erp-provider": {
+        "Application.Editor": {
+          composites: { "erp-provider": ["Relations.All.ReadWrite"] },
+        },
+      },
+    },
     users: [
       {
-        username: "directeur",
+        username: "test-admin",
         password: "test",
-        realmRoles: ["directie"],
+        realmRoles: ["workspaceAdmin"],
         clientRoles: { "erp-provider": ["Relations.All.ReadWrite"] },
       },
     ],
@@ -77,6 +84,7 @@ type Realm = {
   keycloak: { entityRoleClient?: string; client?: string; clients: Record<string, unknown>[] };
   realmRoles: Record<string, { description?: string; composites: Record<string, string[]> }>;
   clientRoles: Record<string, string[]>;
+  clientRoleComposites: Record<string, Record<string, { composites: Record<string, string[]> }>>;
   users: { clientRoles?: Record<string, string[]> }[];
 };
 
@@ -89,51 +97,54 @@ function apply(patch: Record<string, unknown>, base: unknown = baseRealm()): Rea
 
 describe("applyAuthorizationPatch — renameClient", () => {
   test("rewrites every reference to the client id and nothing else", () => {
-    const merged = apply({ renameClient: { from: "erp-provider", to: "hubble-api" } });
+    const merged = apply({ renameClient: { from: "erp-provider", to: "application-api" } });
 
-    expect(merged.keycloak.entityRoleClient).toBe("hubble-api");
+    expect(merged.keycloak.entityRoleClient).toBe("application-api");
     expect(merged.keycloak.clients.map((c) => c.id)).toEqual([
       "openshapeforge-gateway",
-      "hubble-api",
+      "application-api",
       "openshapeforge-support",
     ]);
     // Identity moved; the client's own fields are untouched by the rename.
     const renamed = merged.keycloak.clients[1]!;
     expect(renamed.name).toBe("ERP Provider — entity scopes");
     expect(renamed.secret).toBe("${env:KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER}");
-    expect(Object.keys(merged.realmRoles.directie!.composites)).toEqual([
-      "hubble-api",
+    expect(Object.keys(merged.realmRoles.workspaceAdmin!.composites)).toEqual([
+      "application-api",
       "openshapeforge-support",
     ]);
-    expect(merged.realmRoles.controller!.composites).toEqual({
-      "hubble-api": ["Finance.All.ReadWrite"],
+    expect(merged.realmRoles.auditor!.composites).toEqual({
+      "application-api": ["Finance.All.ReadWrite"],
     });
-    expect(Object.keys(merged.clientRoles)).toEqual(["hubble-api", "openshapeforge-support"]);
-    expect(merged.users[0]!.clientRoles).toEqual({ "hubble-api": ["Relations.All.ReadWrite"] });
+    expect(Object.keys(merged.clientRoles)).toEqual(["application-api", "openshapeforge-support"]);
+    expect(merged.clientRoleComposites["application-api"]!["Application.Editor"]!.composites).toEqual({
+      "application-api": ["Relations.All.ReadWrite"],
+    });
+    expect(merged.users[0]!.clientRoles).toEqual({ "application-api": ["Relations.All.ReadWrite"] });
     expect(JSON.stringify(merged)).not.toContain('"erp-provider"');
   });
 
   test("the patch body addresses the client under its NEW id", () => {
     const merged = apply({
-      renameClient: { from: "erp-provider", to: "hubble-api" },
+      renameClient: { from: "erp-provider", to: "application-api" },
       keycloak: {
         clients: [
           {
-            id: "hubble-api",
-            name: "Hubble API",
-            devSecret: "hubble-api-secret",
-            secret: "${env:KEYCLOAK_CLIENT_SECRET_HUBBLE_API}",
+            id: "application-api",
+            name: "Application API",
+            devSecret: "application-api-secret",
+            secret: "${env:KEYCLOAK_CLIENT_SECRET_APPLICATION_API}",
           },
         ],
       },
     });
-    const client = merged.keycloak.clients.find((c) => c.id === "hubble-api")!;
+    const client = merged.keycloak.clients.find((c) => c.id === "application-api")!;
     expect(client).toEqual({
-      id: "hubble-api",
+      id: "application-api",
       kind: "bearerOnly",
-      name: "Hubble API",
-      devSecret: "hubble-api-secret",
-      secret: "${env:KEYCLOAK_CLIENT_SECRET_HUBBLE_API}",
+      name: "Application API",
+      devSecret: "application-api-secret",
+      secret: "${env:KEYCLOAK_CLIENT_SECRET_APPLICATION_API}",
     });
     expect(merged.keycloak.clients).toHaveLength(3);
   });
@@ -156,7 +167,7 @@ describe("applyAuthorizationPatch — renameClient", () => {
     };
     const renamed = renameClientReferences(
       base as never,
-      { from: "erp-provider", to: "hubble-api" },
+      { from: "erp-provider", to: "application-api" },
       origin,
     ) as unknown as {
       keycloak: {
@@ -165,15 +176,15 @@ describe("applyAuthorizationPatch — renameClient", () => {
         clients: Record<string, unknown>[];
       };
     };
-    expect(renamed.keycloak.client).toBe("hubble-api");
-    expect(renamed.keycloak.realmRoles.legacy!.composites).toEqual({ "hubble-api": ["X"] });
+    expect(renamed.keycloak.client).toBe("application-api");
+    expect(renamed.keycloak.realmRoles.legacy!.composites).toEqual({ "application-api": ["X"] });
     expect(renamed.keycloak.clients[1]!.serviceAccountClientRoles).toEqual({
-      "hubble-api": ["General.All.Read"],
+      "application-api": ["General.All.Read"],
     });
   });
 
   test("a rename of a client the base does not have is refused", () => {
-    expect(() => apply({ renameClient: { from: "nope", to: "hubble-api" } })).toThrow(
+    expect(() => apply({ renameClient: { from: "nope", to: "application-api" } })).toThrow(
       /renameClient\.from "nope" is not a client of the realm being patched \(clients: "openshapeforge-gateway", "erp-provider", "openshapeforge-support"\)/,
     );
   });
@@ -186,7 +197,7 @@ describe("applyAuthorizationPatch — renameClient", () => {
 
   test("renameClient only knows from and to", () => {
     expect(() =>
-      apply({ renameClient: { from: "erp-provider", to: "hubble-api", name: "Hubble API" } }),
+      apply({ renameClient: { from: "erp-provider", to: "application-api", name: "Application API" } }),
     ).toThrow(/renameClient has unknown field\(s\): name/);
     expect(() => apply({ renameClient: { from: "erp-provider", to: "erp-provider" } })).toThrow(
       /both "erp-provider"/,
@@ -218,58 +229,70 @@ describe("applyAuthorizationPatch — merge", () => {
   test("role-name lists union: composites and clientRoles gain grants without restating the base", () => {
     const merged = apply({
       realmRoles: {
-        directie: {
+        workspaceAdmin: {
           composites: {
-            "erp-provider": ["Pentest.All.ReadWrite", "General.All.ReadWrite"],
+            "erp-provider": ["Inspection.All.ReadWrite", "General.All.ReadWrite"],
             "openshapeforge-audit": ["Audit.Logs.All"],
           },
         },
-        pentester: {
-          description: "Pentester",
-          composites: { "erp-provider": ["Pentest.All.ReadWrite"] },
+        inspector: {
+          description: "Inspector",
+          composites: { "erp-provider": ["Inspection.All.ReadWrite"] },
         },
       },
-      clientRoles: { "erp-provider": ["Pentest.All.ReadWrite"], "openshapeforge-audit": ["Audit.Logs.All"] },
+      clientRoles: { "erp-provider": ["Inspection.All.ReadWrite"], "openshapeforge-audit": ["Audit.Logs.All"] },
+      clientRoleComposites: {
+        "erp-provider": {
+          "Application.Editor": {
+            composites: { "erp-provider": ["General.All.ReadWrite"] },
+          },
+        },
+      },
     });
     // Base order first, additions appended once — deterministic and duplicate-free.
-    expect(merged.realmRoles.directie!.composites).toEqual({
-      "erp-provider": ["General.All.ReadWrite", "Relations.All.ReadWrite", "Pentest.All.ReadWrite"],
+    expect(merged.realmRoles.workspaceAdmin!.composites).toEqual({
+      "erp-provider": ["General.All.ReadWrite", "Relations.All.ReadWrite", "Inspection.All.ReadWrite"],
       "openshapeforge-support": ["Support.Issues.All"],
       "openshapeforge-audit": ["Audit.Logs.All"],
     });
-    expect(merged.realmRoles.directie!.description).toBe("Directie");
-    expect(merged.realmRoles.pentester).toEqual({
-      description: "Pentester",
-      composites: { "erp-provider": ["Pentest.All.ReadWrite"] },
+    expect(merged.realmRoles.workspaceAdmin!.description).toBe("Workspace admin");
+    expect(merged.realmRoles.inspector).toEqual({
+      description: "Inspector",
+      composites: { "erp-provider": ["Inspection.All.ReadWrite"] },
     });
     expect(merged.clientRoles["erp-provider"]).toEqual([
       "General.All.ReadWrite",
       "Relations.All.ReadWrite",
       "Finance.All.ReadWrite",
-      "Pentest.All.ReadWrite",
+      "Inspection.All.ReadWrite",
     ]);
     expect(merged.clientRoles["openshapeforge-audit"]).toEqual(["Audit.Logs.All"]);
+    expect(
+      merged.clientRoleComposites["erp-provider"]!["Application.Editor"]!.composites[
+        "erp-provider"
+      ],
+    ).toEqual(["Relations.All.ReadWrite", "General.All.ReadWrite"]);
   });
 
   test("null removes a composite client, a realm role or a client role list", () => {
     const merged = apply({
-      realmRoles: { controller: null, directie: { composites: { "openshapeforge-support": null } } },
+      realmRoles: { auditor: null, workspaceAdmin: { composites: { "openshapeforge-support": null } } },
       clientRoles: { "openshapeforge-support": null },
     });
-    expect(Object.keys(merged.realmRoles)).toEqual(["directie"]);
-    expect(Object.keys(merged.realmRoles.directie!.composites)).toEqual(["erp-provider"]);
+    expect(Object.keys(merged.realmRoles)).toEqual(["workspaceAdmin"]);
+    expect(Object.keys(merged.realmRoles.workspaceAdmin!.composites)).toEqual(["erp-provider"]);
     expect(Object.keys(merged.clientRoles)).toEqual(["erp-provider"]);
   });
 
   test("rename runs before the merge, so grants can be added to the renamed client in one patch", () => {
     const merged = apply({
-      renameClient: { from: "erp-provider", to: "hubble-api" },
-      realmRoles: { directie: { composites: { "hubble-api": ["Pentest.All.ReadWrite"] } } },
+      renameClient: { from: "erp-provider", to: "application-api" },
+      realmRoles: { workspaceAdmin: { composites: { "application-api": ["Inspection.All.ReadWrite"] } } },
     });
-    expect(merged.realmRoles.directie!.composites["hubble-api"]).toEqual([
+    expect(merged.realmRoles.workspaceAdmin!.composites["application-api"]).toEqual([
       "General.All.ReadWrite",
       "Relations.All.ReadWrite",
-      "Pentest.All.ReadWrite",
+      "Inspection.All.ReadWrite",
     ]);
   });
 
@@ -295,7 +318,7 @@ describe("applyAuthorizationPatch — merge", () => {
   test("inputs are not mutated", () => {
     const base = baseRealm();
     const snapshot = JSON.stringify(base);
-    apply({ renameClient: { from: "erp-provider", to: "hubble-api" }, clientRoles: { "hubble-api": ["X"] } }, base);
+    apply({ renameClient: { from: "erp-provider", to: "application-api" }, clientRoles: { "application-api": ["X"] } }, base);
     expect(JSON.stringify(base)).toBe(snapshot);
   });
 });
@@ -329,16 +352,16 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     writeFileSync(join(root, "authoring.config.yaml"), YAML.stringify({ layers }), "utf8");
   }
 
-  const hubblePatch = {
+  const hostPatch = {
     kind: "authorizationPatch",
-    renameClient: { from: "erp-provider", to: "hubble-api" },
+    renameClient: { from: "erp-provider", to: "application-api" },
     keycloak: {
       clients: [
         {
-          id: "hubble-api",
-          name: "Hubble API",
-          devSecret: "hubble-api-secret",
-          secret: "${env:KEYCLOAK_CLIENT_SECRET_HUBBLE_API}",
+          id: "application-api",
+          name: "Application API",
+          devSecret: "application-api-secret",
+          secret: "${env:KEYCLOAK_CLIENT_SECRET_APPLICATION_API}",
         },
       ],
     },
@@ -347,7 +370,7 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
   test("a host layer renames the entity-role client through to the generated realm export", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());
-    writeYaml(root, "host/authorization.yaml", hubblePatch);
+    writeYaml(root, "host/authorization.yaml", hostPatch);
     configureLayers(root, ["base", "host"]);
 
     const resolved = resolveAuthoringLayers(root);
@@ -361,22 +384,77 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     expect(artifact?.path).toBe("keycloak/openshapeforge-realm.json");
     const realm = JSON.parse(artifact!.contents);
     expect(artifact!.contents).not.toContain("erp-provider");
-    expect(realm.clients.map((c: { clientId: string }) => c.clientId)).toContain("hubble-api");
-    const client = realm.clients.find((c: { clientId: string }) => c.clientId === "hubble-api");
-    expect(client.name).toBe("Hubble API");
-    expect(client.secret).toBe("hubble-api-secret");
+    expect(realm.clients.map((c: { clientId: string }) => c.clientId)).toContain("application-api");
+    const client = realm.clients.find((c: { clientId: string }) => c.clientId === "application-api");
+    expect(client.name).toBe("Application API");
+    expect(client.secret).toBe("application-api-secret");
     // Audience mappers on the gateway derive from bearer-only client ids.
     const gateway = realm.clients.find((c: { clientId: string }) => c.clientId === "openshapeforge-gateway");
-    expect(gateway.protocolMappers.map((m: { name: string }) => m.name)).toContain("hubble-api-audience");
-    expect(Object.keys(realm.roles.client)).toContain("hubble-api");
-    const directie = realm.roles.realm.find((r: { name: string }) => r.name === "directie");
-    expect(Object.keys(directie.composites.client)).toEqual(["hubble-api", "openshapeforge-support"]);
+    expect(gateway.protocolMappers.map((m: { name: string }) => m.name)).toContain("application-api-audience");
+    expect(Object.keys(realm.roles.client)).toContain("application-api");
+    const workspaceAdmin = realm.roles.realm.find((r: { name: string }) => r.name === "workspaceAdmin");
+    expect(Object.keys(workspaceAdmin.composites.client)).toEqual(["application-api", "openshapeforge-support"]);
+    const applicationEditor = realm.roles.client["application-api"].find(
+      (role: { name: string }) => role.name === "Application.Editor",
+    );
+    expect(applicationEditor.composites.client).toEqual({
+      "application-api": ["Relations.All.ReadWrite"],
+    });
+  });
+
+  test("module Operation roles reach a clean generated realm through the resolved authoring tree", () => {
+    const root = makeRepo();
+    const realm = baseRealm();
+    const composites = realm.clientRoleComposites["erp-provider"] as Record<
+      string,
+      { composites: Record<string, string[]> }
+    >;
+    composites["Application.Operator"] = {
+      composites: { "erp-provider": ["Example.All.Manage"] },
+    };
+    writeYaml(root, "base/authorization.yaml", realm);
+    writeYaml(root, "base/operations/example.yaml", {
+      schemaVersion: 1,
+      kind: "operationCatalog",
+      plugin: "example",
+      operations: {
+        manage: {
+          id: "example.manage",
+          name: { en: "Manage", nl: "Beheren" },
+          description: { en: "Manage examples", nl: "Beheer voorbeelden" },
+          implementation: { type: "plugin", plugin: "example", handler: "manage" },
+          input: { schema: { type: "object", additionalProperties: false } },
+          output: { schema: { type: "object" } },
+          errors: [],
+          auth: { mode: "session", roles: ["Example.All.Manage"] },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+    configureLayers(root, ["base"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const [artifact] = generateAuthoringKeycloakArtifacts(resolved);
+    const generated = JSON.parse(artifact!.contents);
+    const roles = generated.roles.client["erp-provider"] as Array<{
+      name: string;
+      composites?: { client: Record<string, string[]> };
+    }>;
+
+    expect(roles.map(({ name }) => name)).toContain("Example.All.Manage");
+    expect(
+      roles.find(({ name }) => name === "Application.Operator")!.composites!.client,
+    ).toEqual({ "erp-provider": ["Example.All.Manage"] });
   });
 
   test("resolution is deterministic: two runs materialize byte-identical realm files", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());
-    writeYaml(root, "host/authorization.yaml", hubblePatch);
+    writeYaml(root, "host/authorization.yaml", hostPatch);
     configureLayers(root, ["base", "host"]);
 
     const first = readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8");
@@ -387,21 +465,21 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
   test("patches stack in layer order, each seeing the previous result", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());
-    writeYaml(root, "host/authorization.yaml", hubblePatch);
+    writeYaml(root, "host/authorization.yaml", hostPatch);
     writeYaml(root, "plugin/authorization.yaml", {
       kind: "authorizationPatch",
-      realmRoles: { directie: { composites: { "hubble-api": ["Pentest.All.ReadWrite"] } } },
-      clientRoles: { "hubble-api": ["Pentest.All.ReadWrite"] },
+      realmRoles: { workspaceAdmin: { composites: { "application-api": ["Inspection.All.ReadWrite"] } } },
+      clientRoles: { "application-api": ["Inspection.All.ReadWrite"] },
     });
     configureLayers(root, ["base", "host", "plugin"]);
 
     const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
-    expect(merged.realmRoles.directie!.composites["hubble-api"]).toEqual([
+    expect(merged.realmRoles.workspaceAdmin!.composites["application-api"]).toEqual([
       "General.All.ReadWrite",
       "Relations.All.ReadWrite",
-      "Pentest.All.ReadWrite",
+      "Inspection.All.ReadWrite",
     ]);
-    expect(merged.clientRoles["hubble-api"]).toHaveLength(4);
+    expect(merged.clientRoles["application-api"]).toHaveLength(4);
   });
 
   test("a second realm file is patched under its own name and the first is left alone", () => {
@@ -416,13 +494,13 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     });
     writeYaml(root, "host/authorization.control.yaml", {
       kind: "authorizationPatch",
-      realm: { displayName: "Hubble Control" },
+      realm: { displayName: "Host Control" },
     });
     configureLayers(root, ["base", "host"]);
 
     const resolved = resolveAuthoringLayers(root);
     const control = YAML.parse(readFileSync(join(resolved, "authorization.control.yaml"), "utf8"));
-    expect(control.realm).toEqual({ name: "openshapeforge-control", displayName: "Hubble Control" });
+    expect(control.realm).toEqual({ name: "openshapeforge-control", displayName: "Host Control" });
     const tenant = YAML.parse(readFileSync(join(resolved, "authorization.yaml"), "utf8"));
     expect(tenant.realm.displayName).toBe("OpenShapeForge");
     expect(generateAuthoringKeycloakArtifacts(resolved).map((a) => a.path)).toEqual([
@@ -434,7 +512,7 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
   test("a patch for a realm no earlier layer defines is rejected", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", { schemaVersion: 1, kind: "coreEntity" });
-    writeYaml(root, "host/authorization.yaml", hubblePatch);
+    writeYaml(root, "host/authorization.yaml", hostPatch);
     configureLayers(root, ["base", "host"]);
 
     expect(() => resolveAuthoringLayers(root)).toThrow(
@@ -445,7 +523,7 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
   test("a patch filed away from the realm root is rejected rather than copied through", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());
-    writeYaml(root, "host/realms/authorization.yaml", hubblePatch);
+    writeYaml(root, "host/realms/authorization.yaml", hostPatch);
     configureLayers(root, ["base", "host"]);
 
     expect(() => resolveAuthoringLayers(root)).toThrow(
@@ -469,7 +547,7 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     writeYaml(root, "base/authorization.yaml", baseRealm());
     writeYaml(root, "host/authorization.yaml", {
       kind: "authorizationPatch",
-      renameClient: { from: "missing-client", to: "hubble-api" },
+      renameClient: { from: "missing-client", to: "application-api" },
     });
     configureLayers(root, ["base", "host"]);
 

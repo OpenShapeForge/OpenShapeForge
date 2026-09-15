@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import { OperationFailure } from "@openshapeforge/operations";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -12,18 +14,33 @@ import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { DB } from "../../generated/db/types.js";
 import { buildGraphqlSchema } from "../../graphql/schema.js";
 import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
+import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
 import type {
   ModuleOperationHandler,
   RuntimeModule,
 } from "../../modules/contract.js";
-import { ModulePlatformRuntime } from "../../modules/platform.js";
+
+import {
+  ModulePlatformRuntime,
+  withModuleOperationSession,
+} from "../../modules/platform.js";
 import {
   listOperationContracts,
   registerOperationRestRoutes,
+  runtimeStaticOperationRegistrations,
+  type OperationContract,
 } from "../../operations/runtime.js";
+import {
+  acquireEntityEditLease,
+  getGeneratedCrudTables,
+} from "../../operations/entity/index.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+
+// The public plugin keeps its database generic unbound; the API runtime
+// specializes the same contract to the generated DB at its loader boundary.
+const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -72,12 +89,216 @@ async function withScratchDb<T>(
 }
 
 type Observation = {
-  transport: "rest" | "graphql" | "mcp";
+  transport: "rest" | "graphql" | "mcp" | "operation";
   session: TrustedSessionContext;
   rows: { id: string; tenantId: string; actorId: string }[];
 };
 
 describe("canonical operation database sessions", () => {
+  test(
+    "keeps custom write guards and plugin database work in one transaction",
+    async () => {
+      await withScratchDb(async (db, admin) => {
+        const tenantId = randomUUID();
+        const userId = randomUUID();
+        const relationId = randomUUID();
+        await sql`
+          insert into erp.relations
+            (id, tenant_id, display_name, relation_type)
+          values
+            (${relationId}::uuid, ${tenantId}::uuid, 'Before', 'organization')
+          returning updated_at
+        `.execute(admin);
+        const operation: OperationContract = {
+          key: "example.relation.rename",
+          plugin: "example",
+          title: "Rename relation",
+          description: "Renames one relation.",
+          handler: "renameRelation",
+          target: {
+            entityId: "core.Relation",
+            entityName: "Relation",
+            scope: "record",
+            inputField: "relationId",
+          },
+          inputSchema: {
+            type: "object",
+            required: ["relationId", "displayName", "expectedVersion", "leaseToken"],
+            properties: {
+              relationId: { type: "string", format: "uuid" },
+              displayName: { type: "string", minLength: 1 },
+              expectedVersion: { type: "string", format: "date-time" },
+              leaseToken: { type: "string", minLength: 1 },
+              confirmed: { type: "boolean" },
+            },
+            additionalProperties: false,
+          },
+          outputSchema: {
+            type: "object",
+            required: ["changed"],
+            properties: { changed: { const: true } },
+            additionalProperties: false,
+          },
+          errors: [],
+          auth: { mode: "session", roles: ["Relations.All.ReadWrite"] },
+          tenancy: { mode: "required" },
+          idempotency: { mode: "intrinsic" },
+          effects: { data: "write", external: "none" },
+          concurrency: {
+            version: { mode: "required", field: "updatedAt" },
+            editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+          },
+          confirmation: { mode: "acknowledgement" },
+          transports: {
+            rest: {
+              method: "POST",
+              path: "/api/example/relations/:relationId/rename",
+              response: { kind: "json" },
+            },
+            mcp: { enabled: true, name: "rename_relation" },
+            graphql: { enabled: true, kind: "mutation", field: "renameRelation" },
+            typescript: { enabled: true, functionName: "renameRelation" },
+          },
+        };
+        let validOutput = false;
+        const module: RuntimeModule = {
+          name: "example",
+          operationHandlers: {
+            renameRelation: async (input, context) => {
+              if (!context.platform || !context.session) {
+                throw new Error("Expected a protected plugin database session.");
+              }
+              expect(input).toEqual({
+                relationId,
+                displayName: "After",
+              });
+              await context.platform.db.withSession(context.session, async (trx) => {
+                await sql`
+                  update erp.relations
+                  set display_name = ${String(input.displayName)}, updated_at = now()
+                  where id = ${relationId}::uuid
+                `.execute(trx);
+                const nested = await context.platform!.operations.execute(
+                  context.session!,
+                  {
+                    operation: { id: "Relation.create", intent: "create" },
+                    input: {
+                      values: {
+                        displayName: "Nested relation",
+                        relationType: "organization",
+                      },
+                    },
+                  },
+                );
+                if ("error" in nested) throw new OperationFailure(nested.error);
+              });
+              return { value: { changed: validOutput } };
+            },
+          },
+        };
+        const verifiedSession: TrustedSessionContext = {
+          tenantId,
+          userId,
+          roles: ["Relations.All.ReadWrite"],
+          groups: [],
+          scope: "tenant",
+          credential: "trusted-context",
+        };
+        const platform = new ModulePlatformRuntime(db);
+        platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+          [module],
+          { db, platform: platform.services },
+          [operation],
+        ));
+        const table = getGeneratedCrudTables().find((candidate) =>
+          candidate.source?.authoringEntityName === "Relation"
+        )!;
+        const lease = await acquireEntityEditLease(db, verifiedSession, {
+          operation: {
+            id: operation.key,
+            entityId: operation.target!.entityId,
+            entityName: operation.target!.entityName,
+            intent: "invoke",
+            concurrency: operation.concurrency!,
+          },
+          table,
+          targetId: relationId,
+        });
+        expect((await sql<{ inactivity_timeout_seconds: number }>`
+          select inactivity_timeout_seconds from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows[0]?.inactivity_timeout_seconds).toBe(120);
+        const execute = () => withModuleOperationSession(
+          platform.services,
+          verifiedSession,
+          (active) => platform.services.operations.execute(active!, {
+            operation: { id: operation.key, intent: "invoke" },
+            input: {
+              relationId,
+              displayName: "After",
+              expectedVersion: lease.targetVersion,
+              leaseToken: lease.leaseToken,
+              confirmed: true,
+            },
+          }),
+        );
+
+        const missingControls = await withModuleOperationSession(
+          platform.services,
+          verifiedSession,
+          (active) => platform.services.operations.execute(active!, {
+            operation: { id: operation.key, intent: "invoke" },
+            input: {
+              relationId,
+              displayName: "After",
+              confirmed: true,
+            },
+          }),
+        );
+        expect(missingControls).toMatchObject({
+          error: { code: "BAD_USER_INPUT" },
+        });
+        expect((await sql<{ operation_id: string }>`
+          select operation_id from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows).toHaveLength(1);
+
+        const invalid = await execute();
+        expect(invalid).toMatchObject({
+          error: { code: "HANDLER_CONTRACT_VIOLATION" },
+        });
+        expect((await sql<{ display_name: string }>`
+          select display_name from erp.relations where id = ${relationId}::uuid
+        `.execute(admin)).rows[0]?.display_name).toBe("Before");
+        expect((await sql<{ operation_id: string }>`
+          select operation_id from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows).toHaveLength(1);
+        expect((await sql<{ count: string }>`
+          select count(*)::text as count from erp.relations
+          where tenant_id = ${tenantId}::uuid and display_name = 'Nested relation'
+        `.execute(admin)).rows[0]?.count).toBe("0");
+
+        validOutput = true;
+        await expect(execute()).resolves.toMatchObject({
+          data: { changed: true },
+        });
+        expect((await sql<{ display_name: string }>`
+          select display_name from erp.relations where id = ${relationId}::uuid
+        `.execute(admin)).rows[0]?.display_name).toBe("After");
+        expect((await sql<{ operation_id: string }>`
+          select operation_id from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows).toHaveLength(0);
+        expect((await sql<{ count: string }>`
+          select count(*)::text as count from erp.relations
+          where tenant_id = ${tenantId}::uuid and display_name = 'Nested relation'
+        `.execute(admin)).rows[0]?.count).toBe("1");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
   test(
     "REST, GraphQL and MCP apply the same tenant and actor RLS session",
     async () => {
@@ -115,16 +336,24 @@ describe("canonical operation database sessions", () => {
         const tenantId = randomUUID();
         const userId = randomUUID();
         const visibleId = randomUUID();
+        // A keyed Operation persists its execution receipt against the tenant
+        // row, so the tenant must exist — it is not only a session claim.
+        await sql`
+          insert into platform.tenants (id, slug, name, status)
+          values (${tenantId}::uuid, ${`session-${tenantId.slice(0, 8)}`}, ${"Session test"}, ${"active"})
+        `.execute(admin);
         await admin.insertInto("module_operation_session_test" as never).values([
           { id: visibleId, tenant_id: tenantId, owner_user_id: userId },
           { id: randomUUID(), tenant_id: tenantId, owner_user_id: randomUUID() },
           { id: randomUUID(), tenant_id: randomUUID(), owner_user_id: userId },
         ] as never).execute();
 
+        // Use one module-provided operation on every transport; the blueprint
+        // and control operations are bound to core runtimes and take no module.
         const operation = listOperationContracts().find((entry) =>
-          entry.transports.mcp.enabled && entry.transports.graphql.enabled
+          entry.key === "workflow.instance.webhook-start"
         );
-        if (!operation || operation.auth.mode !== "session") {
+        if (!operation || operation.auth.mode !== "session" || !operation.auth.roles?.length) {
           throw new Error("Expected a session-authenticated operation on every transport.");
         }
         const role = operation.auth.roles[0]!;
@@ -209,6 +438,8 @@ describe("canonical operation database sessions", () => {
         );
         const priorSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
         process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = CONTEXT_SECRET;
+        __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
+          options.execute(() => {}));
         try {
           const restPlatform = new ModulePlatformRuntime(db);
           const rest = Fastify();
@@ -216,6 +447,7 @@ describe("canonical operation database sessions", () => {
             rest,
             [module],
             { db, platform: restPlatform.services },
+            [operation],
           );
           try {
             const response = await rest.inject({
@@ -239,7 +471,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [module],
+            [documentsRuntime, module],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -261,7 +493,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [module],
+            modules: [documentsRuntime, module],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(
@@ -286,6 +518,7 @@ describe("canonical operation database sessions", () => {
             await server.close();
           }
         } finally {
+          __setOperationExecutionReceiptExecutorForTests(db, undefined);
           if (priorSecret === undefined) {
             delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
           } else {

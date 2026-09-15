@@ -1,34 +1,42 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+ * Compatibility evidence for the two historical Document command URLs.
+ *
+ * The routes retain their old request and success envelopes, but execution is
+ * the same generated Entity Operation used by REST, GraphQL, MCP and Web. The
+ * tests therefore boot the real module registry and restricted app role.
+ */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { SQL } from "bun";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import { SQL } from "bun";
 import { sql } from "kysely";
-import type { DB } from "../../generated/db/types.js";
-import {
-  createDatabaseRuntime,
-  type DatabaseRuntime,
-} from "../connection.js";
-import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
-import { withDbSession, type DbSessionInput } from "../session.js";
-import {
-  appendDocumentVersion,
-  createDocumentWithFirstVersion,
-} from "../../documents/service.js";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
+import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
+import { runMigrationChain } from "../migration-chain.js";
+import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../migrations/app-role.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const TEST_TIMEOUT = 90_000;
-const scratchName = `document_version_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const scratchName = `document_routes_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const tenantId = randomUUID();
+const userId = randomUUID();
+const roles = ["CaseFile.All.ReadWrite"];
+
+let admin: SQL;
+let privileged: DatabaseRuntime;
+let api: ReturnType<typeof createApiApp>;
 
 function scratchUrl(role?: { username: string; password: string }): string {
   const url = new URL(ADMIN_URL);
-  if (url.pathname === "/openshapeforge_dev") throw new Error("admin URL must not point at openshapeforge_dev");
+  if (url.pathname === "/openshapeforge_dev" || url.pathname === "/hubble_dev") {
+    throw new Error("admin URL must not point at an application database");
+  }
   if (role) {
     url.username = role.username;
     url.password = role.password;
@@ -37,481 +45,265 @@ function scratchUrl(role?: { username: string; password: string }): string {
   return url.toString();
 }
 
-const tenantA = randomUUID();
-const tenantB = randomUUID();
-const userA = randomUUID();
-const userB = randomUUID();
-const sessionA: DbSessionInput = {
-  tenantId: tenantA,
-  userId: userA,
-  roles: ["CaseFile.All.ReadWrite"],
-  scope: "tenant",
-};
-const sessionB: DbSessionInput = {
-  tenantId: tenantB,
-  userId: userB,
-  roles: ["CaseFile.All.ReadWrite"],
-  scope: "tenant",
-};
-
-let admin: SQL;
-let privileged: DatabaseRuntime;
-let restricted: DatabaseRuntime;
-let api: ReturnType<typeof createApiApp>;
-let first: { documentId: string; documentVersionId: string };
-
-function sqlState(error: unknown): string | undefined {
-  const postgres = error as { errno?: string; code?: string } | null;
-  return postgres?.errno ?? postgres?.code;
+function requestHeaders(
+  activeRoles: readonly string[],
+  idempotencyKey?: string,
+): Record<string, string> {
+  const secret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  if (!secret) throw new Error("OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is required by this test.");
+  const headers = new Headers({ "content-type": "application/json" });
+  if (idempotencyKey !== undefined) headers.set("idempotency-key", idempotencyKey);
+  applyTrustedContextHeaders(headers, { tenantId, userId, roles: [...activeRoles] }, { secret });
+  return Object.fromEntries(headers.entries());
 }
 
-async function rejection(promise: Promise<unknown>): Promise<unknown> {
-  try {
-    await promise;
-  } catch (error) {
-    return error;
-  }
-  throw new Error("Expected operation to be rejected.");
+function documentBody(title: string, versionLabel = "1.0") {
+  return {
+    document: {
+      title,
+      documentType: "incoming_mail",
+      status: "draft",
+    },
+    version: { versionLabel, status: "draft" },
+  };
 }
 
 beforeAll(async () => {
-  if (!/^[a-z0-9_]+$/.test(scratchName)) throw new Error("unsafe scratch database name");
+  if (!/^[a-z0-9_]+$/.test(scratchName)) {
+    throw new Error(`unsafe scratch database name: ${scratchName}`);
+  }
   admin = new SQL(ADMIN_URL, { max: 1 });
   await admin.unsafe(`create database "${scratchName}"`);
-  privileged = createDatabaseRuntime({ databaseUrl: scratchUrl(), maxConnections: 4 });
-  await privileged.db.connection().execute((conn) => runMigrationChain(conn));
-  restricted = createDatabaseRuntime({
-    databaseUrl: scratchUrl({ username: APP_ROLE, password: "openshapeforge_app" }),
-    maxConnections: 4,
-  });
-  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
-    "openshapeforge-local-dev-context-secret";
+  privileged = createDatabaseRuntime({ databaseUrl: scratchUrl(), maxConnections: 2 });
+
+  const modules = await loadRuntimeModules();
+  expect(modules.failures).toEqual([]);
+  const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
+  await privileged.db
+    .connection()
+    .execute((connection) => runMigrationChain(connection, { moduleSeeds }));
+  await sql`
+    insert into platform.tenants (id, slug, name, status)
+    values (${tenantId}::uuid, ${`document-routes-${tenantId.slice(0, 8)}`}, 'Document routes', 'active')
+  `.execute(privileged.db);
+  await sql`
+    insert into erp.document_types (tenant_id, code, name)
+    values (${tenantId}::uuid, 'incoming_mail', 'Incoming mail')
+  `.execute(privileged.db);
+
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "openshapeforge-local-dev-context-secret";
   api = createApiApp({
     cors: false,
-    databaseUrl: scratchUrl({ username: APP_ROLE, password: "openshapeforge_app" }),
+    databaseUrl: scratchUrl({
+      username: APP_ROLE,
+      password: process.env.OPENSHAPEFORGE_APP_PASSWORD ?? DEV_APP_ROLE_PASSWORD_DEFAULT,
+    }),
+    modules,
   });
   await api.ready();
 }, TEST_TIMEOUT);
 
 afterAll(async () => {
   await api?.close();
-  await restricted?.close();
   await privileged?.close();
   await admin?.unsafe(`drop database if exists "${scratchName}" with (force)`);
   await admin?.close();
 });
 
-describe("DocumentVersion authority", () => {
-  test("fresh schema has one artifact truth and read-only app-role grants", async () => {
-    const columns = await sql<{ table_name: string; column_name: string; is_nullable: string }>`
-      select table_name, column_name, is_nullable
-      from information_schema.columns
-      where table_schema = 'erp'
-        and table_name in ('documents', 'document_versions')
-    `.execute(privileged.db);
-    const documentColumns = columns.rows
-      .filter((row) => row.table_name === "documents")
-      .map((row) => row.column_name);
-    for (const removed of ["file_name", "mime_type", "storage_location", "version_label", "checksum"]) {
-      expect(documentColumns).not.toContain(removed);
-    }
-    expect(
-      columns.rows.find(
-        (row) => row.table_name === "document_versions" && row.column_name === "document_id",
-      )?.is_nullable,
-    ).toBe("NO");
-
-    const grants = await sql<{ can_select: boolean; can_insert: boolean; can_update: boolean; can_delete: boolean }>`
-      select
-        has_table_privilege(${APP_ROLE}, 'erp.document_versions', 'select') as can_select,
-        has_table_privilege(${APP_ROLE}, 'erp.document_versions', 'insert') as can_insert,
-        has_table_privilege(${APP_ROLE}, 'erp.document_versions', 'update') as can_update,
-        has_table_privilege(${APP_ROLE}, 'erp.document_versions', 'delete') as can_delete
-    `.execute(privileged.db);
-    expect(grants.rows[0]).toEqual({
-      can_select: true,
-      can_insert: false,
-      can_update: false,
-      can_delete: false,
-    });
-
-    const documentGrant = await sql<{ can_insert: boolean }>`
-      select has_table_privilege(${APP_ROLE}, 'erp.documents', 'insert') as can_insert
-    `.execute(privileged.db);
-    expect(documentGrant.rows[0]).toEqual({ can_insert: false });
-  });
-
-  test("creates Document, first version and current pointer atomically", async () => {
-    first = await createDocumentWithFirstVersion(restricted.db, sessionA, {
-      document: { title: "Offer A", documentType: "quote", status: "draft" },
-      version: {
-        versionLabel: "1.0",
-        status: "published",
-        fileName: "offer-a.pdf",
-        mimeType: "application/pdf",
-        storageLocation: "documents/offer-a-v1.pdf",
-        checksum: "sha256:first",
-      },
-    });
-
-    const rows = await sql<{
-      document_id: string;
-      current_version_id: string;
-      version_document_id: string;
-      checksum: string;
-    }>`
-      select document.id as document_id,
-             document.current_version_id,
-             version.document_id as version_document_id,
-             version.checksum
-      from erp.documents document
-      join erp.document_versions version on version.id = document.current_version_id
-      where document.id = ${first.documentId}::uuid
-    `.execute(privileged.db);
-    expect(rows.rows[0]).toEqual({
-      document_id: first.documentId,
-      current_version_id: first.documentVersionId,
-      version_document_id: first.documentId,
-      checksum: "sha256:first",
-    });
-  });
-
-  test("database commands fail closed when the required role is absent", async () => {
-    const error = await rejection(
-      restricted.db.transaction().execute(async (trx) => {
-        await sql`select set_config('app.tenant_id', ${tenantA}, true)`.execute(trx);
-        await sql`select set_config('app.user_id', ${userA}, true)`.execute(trx);
-        const roleSetting = await sql<{ roles: string | null }>`
-          select current_setting('app.roles', true) as roles
-        `.execute(trx);
-        expect(roleSetting.rows[0]?.roles ?? null).toBeNull();
-        return sql`
-          select app.create_document_with_first_version(
-            ${JSON.stringify({ title: "Unauthorized", documentType: "quote", status: "draft" })}::text::jsonb,
-            ${JSON.stringify({ versionLabel: "1.0", status: "draft" })}::text::jsonb
-          )
-        `.execute(trx);
-      }),
-    );
-    expect((error as Error).message).toContain("Not authorized to create Document");
-  });
-
-  test("database commands reject JSON types that bypass REST parsing", async () => {
-    const invalidInputs = [
-      {
-        document: { title: { nested: "not a string" }, documentType: "quote", status: "draft" },
-        version: { versionLabel: "1.0", status: "draft" },
-        expected: "Document input field title has an invalid JSON type",
-      },
-      {
-        document: { title: "Typed offer", documentType: "quote", status: "draft" },
-        version: { versionLabel: "1.0", status: "draft", isMajorVersion: "yes" },
-        expected: "DocumentVersion input field isMajorVersion has an invalid JSON type",
-      },
-    ];
-    for (const input of invalidInputs) {
-      const error = await rejection(
-        withDbSession(restricted.db, sessionA, (trx) =>
-          sql`
-            select app.create_document_with_first_version(
-              ${JSON.stringify(input.document)}::text::jsonb,
-              ${JSON.stringify(input.version)}::text::jsonb
-            )
-          `.execute(trx),
-        ),
-      );
-      expect((error as Error).message).toContain(input.expected);
-    }
-  });
-
-  test("exposes the atomic commands as authenticated HTTP APIs", async () => {
+describe("legacy Document command URL adapters", () => {
+  test("requires authentication and a caller-supplied idempotency key", async () => {
     const unauthenticated = await api.inject({
       method: "POST",
       url: "/api/documents",
       headers: { "content-type": "application/json" },
-      payload: JSON.stringify({}),
+      payload: JSON.stringify(documentBody("Unauthenticated")),
     });
     expect(unauthenticated.statusCode).toBe(401);
+    expect(unauthenticated.json().error.code).toBe("UNAUTHENTICATED");
 
-    const headers = new Headers({ "content-type": "application/json" });
-    applyTrustedContextHeaders(headers, {
-      tenantId: tenantA,
-      userId: userA,
-      roles: ["CaseFile.All.ReadWrite"],
-    }, {
-      secret: process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!,
+    const missingKey = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles),
+      payload: JSON.stringify(documentBody("Missing key")),
     });
+    expect(missingKey.statusCode).toBe(400);
+    expect(missingKey.json().error.code).toBe("IDEMPOTENCY_KEY_REQUIRED");
+
+    const bodyKey = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles, "header-key"),
+      payload: JSON.stringify({
+        ...documentBody("Body key"),
+        idempotencyKey: "body-key",
+      }),
+    });
+    expect(bodyKey.statusCode).toBe(400);
+    expect(bodyKey.json().error.code).toBe("BAD_USER_INPUT");
+  });
+
+  test("checks canonical authorization before nested input validation", async () => {
+    const response = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders([], `unauthorized-${randomUUID()}`),
+      payload: JSON.stringify({
+        document: { title: 42 },
+        version: { fileName: "must-not-reveal-schema.pdf" },
+      }),
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe("FORBIDDEN");
+  });
+
+  test("replays the canonical create while retaining the legacy success envelope", async () => {
+    const title = `Canonical legacy URL ${randomUUID()}`;
+    const key = `create-${randomUUID()}`;
+    const payload = JSON.stringify(documentBody(title));
+    const first = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles, key),
+      payload,
+    });
+    expect(first.statusCode).toBe(201);
+    const firstIds = first.json() as {
+      documentId: string;
+      documentVersionId: string;
+    };
+    expect(UUID_PATTERN.test(firstIds.documentId)).toBe(true);
+    expect(UUID_PATTERN.test(firstIds.documentVersionId)).toBe(true);
+
+    const replay = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles, key),
+      payload,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json() as typeof firstIds).toEqual(firstIds);
+
+    const changed = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles, key),
+      payload: JSON.stringify(documentBody(`${title} changed`)),
+    });
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json().error.code).toBe("IDEMPOTENCY_KEY_REUSED");
+
+    const persisted = await sql<{ documents: string; versions: string }>`
+      select
+        count(distinct document.id)::text as documents,
+        count(version.id)::text as versions
+      from erp.documents document
+      join erp.document_versions version on version.document_id = document.id
+      where document.id = ${firstIds.documentId}::uuid
+    `.execute(privileged.db);
+    expect(persisted.rows[0]).toEqual({ documents: "1", versions: "1" });
+  });
+
+  test("enforces managed references and canonical binary-field ownership", async () => {
+    const invalidEnum = await api.inject({
+      method: "POST",
+      url: "/api/documents",
+      headers: requestHeaders(roles, `enum-${randomUUID()}`),
+      payload: JSON.stringify({
+        ...documentBody(`Invalid enum ${randomUUID()}`),
+        document: {
+          title: "Invalid enum",
+          documentType: "legacy-free-text-type",
+          status: "draft",
+        },
+      }),
+    });
+    expect(invalidEnum.statusCode).toBe(404);
+    expect(invalidEnum.json().error.code).toBe("REFERENCE_NOT_FOUND");
+
+    for (const [field, value] of Object.entries({
+      fileName: "caller.pdf",
+      mimeType: "application/pdf",
+      storageLocation: "caller/controlled/path.pdf",
+      checksum: "sha256:caller-controlled",
+    })) {
+      const title = `Binary refusal ${field} ${randomUUID()}`;
+      const binary = await api.inject({
+        method: "POST",
+        url: "/api/documents",
+        headers: requestHeaders(roles, `binary-${randomUUID()}`),
+        payload: JSON.stringify({
+          ...documentBody(title),
+          version: {
+            versionLabel: "1.0",
+            status: "draft",
+            [field]: value,
+          },
+        }),
+      });
+      expect(binary.statusCode).toBe(400);
+      expect(binary.json().error.code).toBe("BAD_USER_INPUT");
+      const count = await sql<{ count: string }>`
+        select count(*)::text as count from erp.documents where title = ${title}
+      `.execute(privileged.db);
+      expect(count.rows[0]?.count).toBe("0");
+    }
+  });
+
+  test("replays a canonical version append without duplicating the version", async () => {
+    const createKey = `append-parent-${randomUUID()}`;
     const created = await api.inject({
       method: "POST",
       url: "/api/documents",
-      headers: Object.fromEntries(headers.entries()),
-      payload: JSON.stringify({
-        document: { title: "HTTP offer", documentType: "quote", status: "draft" },
-        version: { versionLabel: "1.0", status: "draft", checksum: "sha256:http-1" },
-      }),
+      headers: requestHeaders(roles, createKey),
+      payload: JSON.stringify(documentBody(`Append parent ${randomUUID()}`)),
     });
     expect(created.statusCode).toBe(201);
-    const ids = created.json() as { documentId: string; documentVersionId: string };
-    expect(UUID_PATTERN.test(ids.documentId)).toBe(true);
-    expect(UUID_PATTERN.test(ids.documentVersionId)).toBe(true);
+    const parent = created.json() as { documentId: string; documentVersionId: string };
 
-    const appended = await api.inject({
+    const appendKey = `append-${randomUUID()}`;
+    const appendPayload = JSON.stringify({
+      version: { versionLabel: "1.1", status: "final", changeSummary: "Final version" },
+    });
+    const first = await api.inject({
       method: "POST",
-      url: `/api/documents/${ids.documentId}/versions`,
-      headers: Object.fromEntries(headers.entries()),
-      payload: JSON.stringify({
-        version: { versionLabel: "1.1", status: "published", checksum: "sha256:http-2" },
-      }),
+      url: `/api/documents/${parent.documentId}/versions`,
+      headers: requestHeaders(roles, appendKey),
+      payload: appendPayload,
     });
-    expect(appended.statusCode).toBe(201);
-    expect(appended.json().documentId).toBe(ids.documentId);
-  });
+    expect(first.statusCode).toBe(201);
+    const firstIds = first.json() as { documentId: string; documentVersionId: string };
+    expect(firstIds.documentId).toBe(parent.documentId);
+    expect(UUID_PATTERN.test(firstIds.documentVersionId)).toBe(true);
 
-  test("generated transports and the database reject direct current-pointer changes", async () => {
-    const headers = new Headers({ "content-type": "application/json" });
-    applyTrustedContextHeaders(headers, {
-      tenantId: tenantA,
-      userId: userA,
-      roles: ["CaseFile.All.ReadWrite"],
-    }, {
-      secret: process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!,
-    });
-    const response = await api.inject({
+    const replay = await api.inject({
       method: "POST",
-      url: "/api/graphql",
-      headers: Object.fromEntries(headers.entries()),
-      payload: JSON.stringify({
-        query: `mutation($input: UpdateDocumentInput!) {
-          updateDocument(input: $input) { id }
-        }`,
-        variables: {
-          input: {
-            id: first.documentId,
-            currentVersionId: first.documentVersionId,
-          },
-        },
-      }),
+      url: `/api/documents/${parent.documentId}/versions`,
+      headers: requestHeaders(roles, appendKey),
+      payload: appendPayload,
     });
-    expect(response.statusCode).toBe(400);
-    expect(response.json().errors?.[0]?.message).toContain("currentVersionId");
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json() as typeof firstIds).toEqual(firstIds);
 
-    const direct = await rejection(
-      withDbSession(restricted.db, sessionA, (trx) =>
-        sql`
-          update erp.documents
-          set current_version_id = null
-          where id = ${first.documentId}::uuid
-        `.execute(trx),
-      ),
-    );
-    expect((direct as Error).message).toContain("currentVersionId is server-managed");
-    const pointer = await sql<{ current_version_id: string }>`
-      select current_version_id from erp.documents where id = ${first.documentId}::uuid
-    `.execute(privileged.db);
-    expect(pointer.rows[0]?.current_version_id).toBe(first.documentVersionId);
-  });
+    const changed = await api.inject({
+      method: "POST",
+      url: `/api/documents/${parent.documentId}/versions`,
+      headers: requestHeaders(roles, appendKey),
+      payload: JSON.stringify({ version: { versionLabel: "1.2", status: "final" } }),
+    });
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json().error.code).toBe("IDEMPOTENCY_KEY_REUSED");
 
-  test("serializes concurrent appends and preserves one consistent current pointer", async () => {
-    const created = await Promise.all([
-      appendDocumentVersion(restricted.db, sessionA, first.documentId, {
-        versionLabel: "1.1",
-        status: "draft",
-        checksum: "sha256:second",
-      }),
-      appendDocumentVersion(restricted.db, sessionA, first.documentId, {
-        versionLabel: "1.2",
-        status: "published",
-        checksum: "sha256:third",
-      }),
-    ]);
-    const state = await sql<{ current_version_id: string; count: string }>`
-      select document.current_version_id, count(version.id)::text as count
+    const state = await sql<{ current_version_id: string; version_count: string }>`
+      select document.current_version_id, count(version.id)::text as version_count
       from erp.documents document
-      join erp.document_versions version
-        on version.tenant_id = document.tenant_id
-       and version.document_id = document.id
-      where document.id = ${first.documentId}::uuid
+      join erp.document_versions version on version.document_id = document.id
+      where document.id = ${parent.documentId}::uuid
       group by document.current_version_id
     `.execute(privileged.db);
-    expect(state.rows[0]?.count).toBe("3");
-    const currentVersionId = state.rows[0]?.current_version_id;
-    expect(currentVersionId).toBeDefined();
-    expect(created.map((item) => item.documentVersionId)).toContain(currentVersionId!);
-
-    const duplicate = await rejection(
-      appendDocumentVersion(restricted.db, sessionA, first.documentId, {
-        versionLabel: "1.2",
-        status: "draft",
-      }),
-    );
-    expect(sqlState(duplicate)).toBe("23505");
-  });
-
-  test("the database guard blocks every direct app-role write", async () => {
-    const deniedDocumentInsert = await rejection(
-      withDbSession(restricted.db, sessionA, (trx) =>
-        sql`
-          insert into erp.documents (tenant_id, title, document_type, status)
-          values (${tenantA}::uuid, 'Direct document', 'quote', 'draft')
-        `.execute(trx),
-      ),
-    );
-    expect(sqlState(deniedDocumentInsert)).toBe("42501");
-
-    await sql`grant insert on erp.documents to ${sql.ref(APP_ROLE)}`.execute(privileged.db);
-    await sql`grant insert, update, delete on erp.document_versions to ${sql.ref(APP_ROLE)}`.execute(
-      privileged.db,
-    );
-    try {
-      const guardedDocumentInsert = await rejection(
-        withDbSession(restricted.db, sessionA, (trx) =>
-          sql`
-            insert into erp.documents (tenant_id, title, document_type, status)
-            values (${tenantA}::uuid, 'Direct document', 'quote', 'draft')
-          `.execute(trx),
-        ),
-      );
-      expect((guardedDocumentInsert as Error).message).toContain("created atomically");
-
-      const attempts = [
-        () => withDbSession(restricted.db, sessionA, (trx) =>
-          sql`
-            insert into erp.document_versions
-              (tenant_id, version_label, status, document_id)
-            values (${tenantA}::uuid, 'direct', 'draft', ${first.documentId}::uuid)
-          `.execute(trx),
-        ),
-        () => withDbSession(restricted.db, sessionA, (trx) =>
-          sql`update erp.document_versions set status = 'changed' where id = ${first.documentVersionId}::uuid`.execute(trx),
-        ),
-        () => withDbSession(restricted.db, sessionA, (trx) =>
-          sql`delete from erp.document_versions where id = ${first.documentVersionId}::uuid`.execute(trx),
-        ),
-      ];
-      for (const attempt of attempts) {
-        const error = await rejection(attempt());
-        expect((error as Error).message).toContain("DocumentVersion is immutable");
-      }
-    } finally {
-      await sql`revoke insert on erp.documents from ${sql.ref(APP_ROLE)}`.execute(privileged.db);
-      await sql`revoke insert, update, delete on erp.document_versions from ${sql.ref(APP_ROLE)}`.execute(
-        privileged.db,
-      );
-    }
-  });
-
-  test("composite foreign keys reject cross-tenant and cross-document pointers", async () => {
-    const secondA = await createDocumentWithFirstVersion(restricted.db, sessionA, {
-      document: { title: "Offer A2", documentType: "quote", status: "draft" },
-      version: { versionLabel: "1.0", status: "draft" },
+    expect(state.rows[0]).toEqual({
+      current_version_id: firstIds.documentVersionId,
+      version_count: "2",
     });
-    const firstB = await createDocumentWithFirstVersion(restricted.db, sessionB, {
-      document: { title: "Offer B", documentType: "quote", status: "draft" },
-      version: { versionLabel: "1.0", status: "draft" },
-    });
-
-    const crossDocument = await rejection(
-      sql`
-        update erp.documents
-        set current_version_id = ${secondA.documentVersionId}::uuid
-        where id = ${first.documentId}::uuid
-      `.execute(privileged.db),
-    );
-    expect(sqlState(crossDocument)).toBe("23503");
-
-    const crossTenantPointer = await rejection(
-      sql`
-        update erp.documents
-        set current_version_id = ${firstB.documentVersionId}::uuid
-        where id = ${first.documentId}::uuid
-      `.execute(privileged.db),
-    );
-    expect(sqlState(crossTenantPointer)).toBe("23503");
-
-    const crossTenantOwner = await rejection(
-      sql`
-        insert into erp.document_versions
-          (tenant_id, version_label, status, document_id)
-        values (${tenantB}::uuid, 'foreign-owner', 'draft', ${first.documentId}::uuid)
-      `.execute(privileged.db),
-    );
-    expect(sqlState(crossTenantOwner)).toBe("23503");
-  });
-
-  test("document commands reject every cross-tenant optional reference", async () => {
-    const accountB = randomUUID();
-    const relationB = randomUUID();
-    const caseB = randomUUID();
-    const caseFileB = randomUUID();
-    await sql`
-      insert into erp.accounts (id, tenant_id, username, email, status)
-      values (${accountB}::uuid, ${tenantB}::uuid, ${`account-${accountB}`}, ${`${accountB}@example.test`}, 'active')
-    `.execute(privileged.db);
-    await sql`
-      insert into erp.relations (id, tenant_id, display_name, relation_type)
-      values (${relationB}::uuid, ${tenantB}::uuid, 'Tenant B relation', 'organization')
-    `.execute(privileged.db);
-    await sql`
-      insert into erp.cases (
-        id, tenant_id, code, title, case_type, status, registered_at, portal_visible
-      ) values (
-        ${caseB}::uuid, ${tenantB}::uuid, ${`case-${caseB}`}, 'Tenant B case',
-        'request', 'open', now(), true
-      )
-    `.execute(privileged.db);
-    await sql`
-      insert into erp.case_files (id, tenant_id, code, title, case_file_type, status)
-      values (
-        ${caseFileB}::uuid, ${tenantB}::uuid, ${`file-${caseFileB}`},
-        'Tenant B case file', 'case', 'open'
-      )
-    `.execute(privileged.db);
-
-    const documentReferences = [
-      { caseFileId: caseFileB },
-      { caseId: caseB },
-      { relationId: relationB },
-    ];
-    for (const reference of documentReferences) {
-      const error = await rejection(
-        createDocumentWithFirstVersion(restricted.db, sessionA, {
-          document: {
-            title: "Cross-tenant offer",
-            documentType: "quote",
-            status: "draft",
-            ...reference,
-          },
-          version: { versionLabel: "1.0", status: "draft" },
-        }),
-      );
-      expect(sqlState(error)).toBe("23503");
-    }
-
-    const accountError = await rejection(
-      createDocumentWithFirstVersion(restricted.db, sessionA, {
-        document: { title: "Cross-tenant account", documentType: "quote", status: "draft" },
-        version: { versionLabel: "1.0", status: "draft", accountId: accountB },
-      }),
-    );
-    expect(sqlState(accountError)).toBe("23503");
-  });
-
-  test("a failed first-version insert rolls the container back", async () => {
-    const title = `Rollback ${randomUUID()}`;
-    const failed = await rejection(
-      createDocumentWithFirstVersion(restricted.db, sessionA, {
-        document: { title, documentType: "quote", status: "draft" },
-        version: {
-          versionLabel: "1.0",
-          status: "draft",
-          accountId: randomUUID(),
-        },
-      }),
-    );
-    expect(sqlState(failed)).toBe("23503");
-    const count = await sql<{ count: string }>`
-      select count(*)::text as count from erp.documents where title = ${title}
-    `.execute(privileged.db);
-    expect(count.rows[0]?.count).toBe("0");
   });
 });

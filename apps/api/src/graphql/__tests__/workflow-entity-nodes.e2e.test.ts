@@ -89,7 +89,7 @@ const ADMIN_URL =
 const TEST_TIMEOUT = 90_000;
 
 /** The realm role that may author workflows and enqueue runs at all. */
-const WRITER_ROLE = "directie";
+const WRITER_ROLE = "workflow-admin";
 
 /**
  * The node types under test, spelled exactly as

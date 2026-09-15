@@ -18,6 +18,8 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
+import { assertV2Authoring } from "./entity-v2.js";
+import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
 import type {
   CoreEntity,
   EntityProfile,
@@ -43,6 +45,61 @@ export interface LoadedArtifacts {
   retentionPolicies: Record<string, RetentionPolicy>;
   appShell: AppShell | null;
   viewDefinition: ViewDefinition | null;
+}
+
+export type FieldAuthoringProfile = Record<string, unknown> & {
+  label?: Record<string, string>;
+  description?: Record<string, string>;
+  keyBehavior?: string;
+  excludedFieldTypes?: string[];
+  typePickerUsage?: string;
+  controls?: Record<string, unknown>;
+  lockedVisibleProperties?: string[];
+};
+
+type FieldAuthoringProfileCatalog = {
+  schemaVersion: number;
+  kind: "fieldAuthoringProfileCatalog";
+  profiles: Record<string, FieldAuthoringProfile>;
+};
+
+/** Load the resolved, unnormalized field-authoring presets for build-time UI consumers. */
+export function loadFieldAuthoringProfiles(
+  authoringDir: string,
+): Record<string, FieldAuthoringProfile> {
+  const path = join(authoringDir, "catalogs", "field-authoring-profiles.yaml");
+  const catalog = loadYaml<FieldAuthoringProfileCatalog>(path);
+  if (
+    catalog.schemaVersion !== 1 ||
+    catalog.kind !== "fieldAuthoringProfileCatalog" ||
+    !catalog.profiles ||
+    typeof catalog.profiles !== "object" ||
+    Array.isArray(catalog.profiles)
+  ) {
+    throw new Error(
+      `${path} must be a schemaVersion 1 fieldAuthoringProfileCatalog with a profiles object.`,
+    );
+  }
+  for (const [key, profile] of Object.entries(catalog.profiles)) {
+    validateContentIdentifier(key, FIELD_KEY_PATTERN, "field authoring profile key", path);
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+      throw new Error(`Field authoring profile "${key}" in ${path} must be an object.`);
+    }
+  }
+  return catalog.profiles;
+}
+
+/** Catalogs that bind the public build-time FieldDefinition schema compiler. */
+export function loadFieldCompilationCatalogs(authoringDir: string): {
+  componentCatalog: ComponentCatalog;
+  semanticTypes: Record<string, SemanticTypeDefinition>;
+} {
+  return {
+    componentCatalog: loadYaml<ComponentCatalog>(
+      join(authoringDir, "catalogs", "components.yaml"),
+    ),
+    semanticTypes: loadSemanticTypes(authoringDir),
+  };
 }
 
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9-]*$/i;
@@ -148,12 +205,21 @@ export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin:
   }
 }
 
+const parsedYaml = new Map<string, { source: string; value: unknown }>();
+
 function loadYaml<T>(filePath: string): T {
   if (!existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
   }
   const raw = readFileSync(filePath, "utf-8");
-  return parseYaml(raw) as T;
+  let cached = parsedYaml.get(filePath);
+  if (!cached || cached.source !== raw) {
+    cached = { source: raw, value: parseYaml(raw) };
+    parsedYaml.set(filePath, cached);
+  }
+  // The corpus is loaded for multiple projections. Cache parsing by actual
+  // source bytes, not timestamps, and isolate callers from shared mutation.
+  return structuredClone(cached.value) as T;
 }
 
 /**
@@ -240,10 +306,11 @@ export function loadEntity(
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawCoreEntity = loadYaml<CoreEntity>(corePath);
   const baseEntity = loadBaseEntity(authoringDir);
-  const coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
+  let coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
     kind: "core",
     path: corePath,
   });
+  assertV2Authoring(coreEntity, corePath);
   validateEntityContentIdentifiers(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
@@ -278,11 +345,12 @@ export function loadEntity(
   const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
 
   // App shell (optional)
-  const shellPath = join(authoringDir, "appShell.yaml");
+  const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
   // Semantic types (core + context catalogs merged)
   const semanticTypes = loadSemanticTypes(authoringDir);
+  coreEntity = normalizeEntityFields(coreEntity, semanticTypes);
   const retentionPolicies = loadRetentionPolicies(authoringDir);
 
   // View definition (optional)
@@ -362,7 +430,7 @@ export function loadContextEntity(
   const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
 
   // App shell (optional)
-  const shellPath = join(authoringDir, "appShell.yaml");
+  const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
   // Semantic types
@@ -418,7 +486,8 @@ export function loadSemanticTypes(authoringDir: string): Record<string, Semantic
   for (const { types } of loadSemanticTypeCatalogSources(authoringDir)) {
     Object.assign(merged, types);
   }
-  return merged;
+  const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
+  return deriveEntitySemanticTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
 }
 
 export interface SemanticTypeCatalogSource {

@@ -104,7 +104,8 @@ export async function checkGeneratedSchemaDrift(
 
 /**
  * Schema objects that exist in the connected database but that this branch's
- * manifest does not declare. Both lists are qualified and sorted.
+ * manifest or a dedicated runtime migration does not declare. Both lists are
+ * qualified and sorted.
  */
 export type UndeclaredDatabaseSchema = {
   /** e.g. "platform.api_keys". */
@@ -132,10 +133,9 @@ export type UndeclaredSchemaManifestTable = {
  * correctly, and rerunning it will keep refusing.
  *
  * Only schemas the manifest covers are examined, so unrelated schemas on the
- * same database are never mistaken for drift. `nonManifestManagedTables` and
- * `nonManifestManagedColumns` are exempt for the same reason the migrator
- * exempts them: those tables and columns come from dedicated (core or plugin)
- * migrations, not from the manifest.
+ * same database are never mistaken for drift. Dedicated runtime-migration
+ * tables and plugin-migration-owned columns are exempt for the same reason the
+ * migrator exempts them: they are declared outside the generated manifest.
  *
  * Two catalog queries, no row probes; safe to run as the restricted runtime
  * role. A missing schema is not an error here — information_schema simply
@@ -195,7 +195,7 @@ export async function findUndeclaredDatabaseSchema(
     const name = `${row.table_schema}.${row.table_name}`;
     // Columns of an undeclared table are already covered by the table entry.
     const declared = declaredColumnsByTable.get(name);
-    if (declared === undefined || nonManifestManagedTables.has(name)) {
+    if (declared === undefined) {
       continue;
     }
     if (
@@ -302,11 +302,9 @@ export function describeGeneratedSchemaDrift(
         "already have, without echoing them here):",
         ...SCRATCH_DATABASE_RECIPE,
         "",
-        "Or recreate the shared database, destroying its data — and only until the",
-        "next worktree migrates it:",
-        '  ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"; DB="${DATABASE_URL##*/}"',
-        '  psql "${ADMIN%/*}/postgres" -c "drop database \\"$DB\\" with (force)" -c "create database \\"$DB\\""',
-        "  bun run db:migrate",
+        "Or rebuild the shared database from this branch's manifest, destroying its",
+        "data — and only until the next worktree migrates it:",
+        '  OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
       ].join("\n"),
     };
   }

@@ -32,8 +32,9 @@ bun install
 cp apps/api/.env.example apps/api/.env                      # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build   # Postgres :5434, Keycloak :8181
 
-bun run generate      # compile YAML -> schema.sql, manifest, realm, CRUD pages, plugin artifacts
-bun run db:migrate    # apply the schema (roll-forward, additive-safe)
+bun run generate           # compile YAML -> schema.sql, manifest, realm, CRUD pages, plugin artifacts
+bun run db:provision-roles # once per Postgres cluster/volume; uses the administrator connection
+bun run db:migrate         # apply the schema (roll-forward, additive-safe)
 bun run dev:api       # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 bun run dev:web       # http://localhost:3000 — the generated CRUD app
 
@@ -57,7 +58,7 @@ Requests need a Keycloak bearer token or signed trusted-context headers — see
 | [docs/api.md](docs/api.md) | CRUD engine, RLS, auth, event journal, local stack |
 | [docs/mcp.md](docs/mcp.md) | Generated MCP server: tools from field definitions, authorization |
 | [docs/testing.md](docs/testing.md) | Proof gates, e2e suite, reports, k6 |
-| [docs/migrations.md](docs/migrations.md) | Roll-forward + versioned migrations, drift signals |
+| [docs/migrations.md](docs/migrations.md) | The reset model: build from the manifest, db:reset, drift signals |
 | [docs/consuming.md](docs/consuming.md) | Using the compiler from a host repo |
 | [docs/README.md](docs/README.md) | Index of the above |
 

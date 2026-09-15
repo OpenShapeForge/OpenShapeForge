@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import mcpCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import openApi from "../../generated/rest/openapi.json" with { type: "json" };
-import workflowNodes from "../../generated/workflow/entity-workflow-nodes.generated.json" with { type: "json" };
 import { buildGraphqlSchema } from "../../graphql/schema.js";
 
 const tables = manifest.tables as Array<{
@@ -14,40 +13,50 @@ const tables = manifest.tables as Array<{
 
 describe("generated Document contracts", () => {
   test("Document no longer projects version or artifact fields", () => {
-    const document = tables.find((table) => table.table === "documents")!;
-    expect(document).toBeDefined();
+    const document = tables.find((table) => table.table === "documents");
+    if (!document) throw new Error("Generated Document table is missing.");
     const columns = document.columns.map((column) => column.name);
-    for (const removed of ["file_name", "mime_type", "storage_location", "version_label", "checksum"]) {
+    for (const removed of [
+      "file_name",
+      "mime_type",
+      "storage_location",
+      "version_label",
+      "checksum",
+    ]) {
       expect(columns).not.toContain(removed);
     }
-    expect(document.columns.find((column) => column.name === "current_version_id")?.immutable).toBe(true);
+    expect(document.columns.find((column) => column.name === "current_version_id")?.immutable).toBe(
+      true,
+    );
 
     const schema = buildGraphqlSchema();
     const updateInput = schema.getType("UpdateDocumentInput") as
       | { getFields(): Record<string, unknown> }
       | undefined;
     expect(updateInput?.getFields()).not.toHaveProperty("currentVersionId");
-    expect(schema.getMutationType()?.getFields()).not.toHaveProperty("createDocument");
+    expect(schema.getMutationType()?.getFields()).toHaveProperty("createDocument");
 
-    const documentActions = workflowNodes
-      .filter((node) => node.entity === "Document")
-      .map((node) => node.action);
-    expect(documentActions).not.toContain("create");
+    // The current workflow plugin exposes canonical Operations and no longer
+    // emits the former entity-workflow-nodes.generated.json bridge.
   });
 
-  test("DocumentVersion is required-owned and read-only on every generated transport", () => {
-    const version = tables.find((table) => table.table === "document_versions")!;
+  test("DocumentVersion is required-owned and exposes only its canonical create command", () => {
+    const version = tables.find((table) => table.table === "document_versions");
+    if (!version) throw new Error("Generated DocumentVersion table is missing.");
     expect(version.columns.find((column) => column.name === "document_id")?.required).toBe(true);
     expect(version.source?.crud?.operations).toEqual({
       list: true,
       get: true,
-      create: false,
+      create: true,
       update: false,
       delete: false,
     });
 
     const restPaths = openApi.paths as Record<string, Record<string, unknown>>;
-    expect(Object.keys(restPaths["/api/rest/v1/document-versions"] ?? {})).toEqual(["get"]);
+    expect(Object.keys(restPaths["/api/rest/v1/document-versions"] ?? {}).sort()).toEqual([
+      "get",
+      "post",
+    ]);
     expect(Object.keys(restPaths["/api/rest/v1/document-versions/{id}"] ?? {}).sort()).toEqual([
       "get",
       "parameters",
@@ -57,13 +66,14 @@ describe("generated Document contracts", () => {
     expect(tools.filter((name) => name.startsWith("document_version_"))).toEqual([
       "document_version_list",
       "document_version_get",
+      "document_version_create",
     ]);
 
     const schema = buildGraphqlSchema();
     expect(schema.getQueryType()?.getFields()).toHaveProperty("documentVersion");
     expect(schema.getQueryType()?.getFields()).toHaveProperty("documentVersions");
     const mutations = schema.getMutationType()?.getFields() ?? {};
-    expect(mutations).not.toHaveProperty("createDocumentVersion");
+    expect(mutations).toHaveProperty("createDocumentVersion");
     expect(mutations).not.toHaveProperty("updateDocumentVersion");
     expect(mutations).not.toHaveProperty("deleteDocumentVersion");
   });

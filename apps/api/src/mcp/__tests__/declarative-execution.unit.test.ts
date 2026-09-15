@@ -15,6 +15,7 @@ import {
   bindingSelected,
   buildAuthHeaders,
   executeBinding,
+  executeBindingStep,
   fetchWithAllowedRedirects,
   mapOperationResponse,
   mergeOutputs,
@@ -42,11 +43,30 @@ const WRONG_KEYRING = keyringFromEnv(
 )!;
 
 describe("binding selection and mapped paths", () => {
-  it("does not fan an empty selector out and rejects prototype paths", () => {
-    const binding = { when: { field: "provider", equals: "alpha" } };
-    expect(bindingSelected(binding, {})).toBe(true);
-    expect(bindingSelected(binding, { provider: "" })).toBe(false);
-    expect(bindingSelected(binding, { provider: "alpha" })).toBe(true);
+  it("selects presence only for populated input and preserves fixed selectors", () => {
+    const present = { when: { field: "dealId", present: true } };
+    expect(bindingSelected(present, {})).toBe(false);
+    expect(bindingSelected(present, { dealId: null })).toBe(false);
+    expect(bindingSelected(present, { dealId: "" })).toBe(false);
+    expect(bindingSelected(present, { dealId: "deal-1" })).toBe(true);
+    expect(bindingSelected(present, { dealId: 0 })).toBe(true);
+
+    const fixed = { when: { field: "provider", equals: "alpha" } };
+    expect(bindingSelected(fixed, {})).toBe(true);
+    expect(bindingSelected(fixed, { provider: null })).toBe(true);
+    expect(bindingSelected(fixed, { provider: "" })).toBe(false);
+    expect(bindingSelected(fixed, { provider: "alpha" })).toBe(true);
+    expect(bindingSelected(fixed, { provider: "beta" })).toBe(false);
+  });
+
+  it("fails malformed selectors closed and rejects prototype paths", () => {
+    expect(bindingSelected({ when: { field: "dealId" } }, { dealId: "deal-1" })).toBe(false);
+    expect(
+      bindingSelected(
+        { when: { field: "dealId", equals: "deal-1", present: true } },
+        { dealId: "deal-1" },
+      ),
+    ).toBe(false);
     expect(() => setPath({}, "a.__proto__.polluted", "yes")).toThrow(
       /unsafe segment/,
     );
@@ -809,6 +829,7 @@ describe("executeBinding", () => {
         title: "Updated",
         notify: false,
       },
+      idempotencyKey: "stable-step-key",
       keyring: KEYRING,
       fetchImpl: spy.impl,
       secretScope: "erp.providers",
@@ -836,11 +857,15 @@ describe("executeBinding", () => {
       "https://acme.example.com/records/record-1?sendUpdates=false",
     );
     expect(new Headers(spy.calls[0]?.init.headers).get("if-match")).toBe('"etag-1"');
+    expect(new Headers(spy.calls[0]?.init.headers).get("idempotency-key"))
+      .toBe("stable-step-key");
     expect(JSON.parse(String(spy.calls[0]?.init.body))).toEqual({
       resource: { title: "Updated" },
     });
     expect(spy.calls[1]?.url).toBe("https://acme.example.com/records/record-2");
     expect(new Headers(spy.calls[1]?.init.headers).get("if-match")).toBe('"etag-2"');
+    expect(new Headers(spy.calls[1]?.init.headers).has("idempotency-key"))
+      .toBe(false);
     expect(spy.calls[1]?.init.body).toBeUndefined();
   });
 
@@ -1845,6 +1870,95 @@ describe("mapping honesty", () => {
       fetchImpl: fetchWith({ items: [] }),
     });
     expect(empty).toEqual({ ids: [], starts: [] });
+  });
+});
+
+describe("executeBindingStep", () => {
+  const providerRow = {
+    transport: "rest",
+    baseUrlTemplate: "https://api.example.com",
+    egressHosts: ["api.example.com"],
+  };
+  const binding = {
+    order: 2,
+    forEach: { from: "recordIds", as: "recordId" },
+    inputMapping: [{ from: "recordId", to: "providerId" }],
+    outputMapping: [{ from: "record", to: "records" }],
+  };
+  const operationRow = {
+    key: "read-record",
+    kind: "query",
+    operation: { method: "GET", pathTemplate: "/records/{providerId}" },
+    responseMapping: { fieldPaths: [{ field: "record", path: "$" }] },
+  };
+
+  it("fans a query out over an earlier collection and preserves its order", async () => {
+    const calls: string[] = [];
+    const outputs = await executeBindingStep({
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      serviceInputs: { recordIds: ["second", "first"] },
+      secretScope: "unused",
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        calls.push(url);
+        const id = url.split("/").at(-1);
+        return Response.json({ id, title: `Title ${id}` });
+      }) as typeof fetch,
+    });
+
+    expect(calls).toEqual([
+      "https://api.example.com/records/second",
+      "https://api.example.com/records/first",
+    ]);
+    expect(outputs).toEqual({
+      records: [
+        { id: "second", title: "Title second" },
+        { id: "first", title: "Title first" },
+      ],
+    });
+  });
+
+  it("returns empty authored collections without calling the provider", async () => {
+    let called = false;
+    const outputs = await executeBindingStep({
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      serviceInputs: { recordIds: [] },
+      secretScope: "unused",
+      fetchImpl: (async () => {
+        called = true;
+        return Response.json({});
+      }) as unknown as typeof fetch,
+    });
+
+    expect(called).toBe(false);
+    expect(outputs).toEqual({ records: [] });
+  });
+
+  it("fails closed for missing, mutating and oversized fan-out", async () => {
+    const base = {
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      secretScope: "unused",
+    };
+    await expect(executeBindingStep({ ...base, serviceInputs: {} }))
+      .rejects.toMatchObject({ code: "SERVICE_MISCONFIGURED" });
+    await expect(executeBindingStep({
+      ...base,
+      operationRow: { ...operationRow, kind: "mutation" },
+      serviceInputs: { recordIds: ["one"] },
+    })).rejects.toThrow(/only for query operations/);
+    await expect(executeBindingStep({
+      ...base,
+      serviceInputs: { recordIds: Array.from({ length: 101 }, (_, index) => index) },
+    })).rejects.toThrow(/100-item limit/);
   });
 });
 

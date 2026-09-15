@@ -56,8 +56,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * PASSWORD OWNERSHIP
  * ------------------
  * Identical contract to the app role's: operator-owned, read from
- * OPENSHAPEFORGE_WORKER_PASSWORD, applied only at role creation, rotated only
- * when OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE=1 is set for a single migrate run.
+ * OPENSHAPEFORGE_WORKER_PASSWORD, applied only at role creation, and rotated
+ * only by `db:provision-roles` with OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE=1.
  * It must stay consistent with the password in
  * OPENSHAPEFORGE_WORKER_DATABASE_URL.
  */
@@ -107,12 +107,12 @@ export function readWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): st
 }
 
 /**
- * Whether this migrate run should ROTATE the existing worker role's password.
- * Off by default, for the reason the app role's flag is off by default: the
+ * Whether this provisioning run should ROTATE the existing worker role's
+ * password. Off by default, for the reason the app role's flag is off: the
  * password is set only at role creation, so an operator-chosen credential is
  * never clobbered by a routine `helm upgrade`.
  */
-function shouldRotateWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
+export function shouldRotateWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env.OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE;
   return flag === "1" || flag === "true";
 }
@@ -122,8 +122,6 @@ type ManifestWorkerTable = {
   table: string;
   workerAccess?: string;
   workerDml?: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
 };
 
 const manifestTables = manifest.tables as unknown as ManifestWorkerTable[];
@@ -138,26 +136,22 @@ const manifestTables = manifest.tables as unknown as ManifestWorkerTable[];
  * removes its last worker plugin does not leave a credentialed role behind with
  * standing access to the model.
  */
-const hasWorkers = manifestTables.some((table) => table.workerAccess !== undefined);
-
 /**
  * The exact tables a worker is granted DML on, qualified and sorted so the DDL
  * order is deterministic.
  *
- * Three sources, and each is a different statement about the table:
+ * Two explicit sources, and each is a different statement about the table:
  *
  *   - `workerAccess` — the queue a worker claims ACROSS tenants. Its policy
  *     already names the worker; withholding the grant would emit a policy for a
  *     role that cannot reach the table.
  *   - `workerDml` — everything a worker touches inside a session scoped to one
  *     tenant: its run tables, its node catalog, its trigger registry.
- *   - generated-CRUD eligibility — the business entities. Derived rather than declared
- *     because the compiler emits an `entity.<slug>.<action>` workflow node for
- *     every generated entity, so any workflow may perform CRUD against any of
- *     them; asking each entity's author to name a worker they have never heard
- *     of would be a declaration nobody could maintain. RLS is what keeps this
- *     honest — the worker is NOBYPASSRLS, so it still reads one tenant at a
- *     time.
+ *
+ * Generated CRUD eligibility is deliberately NOT a grant source. Durable
+ * business Operations execute through the canonical HTTP boundary under a
+ * freshly verified organization service identity; the queue connection never
+ * needs direct access to every generated business table.
  *
  * What is left out is the point of enumerating at all: the platform control
  * plane. `platform.tenants`, `platform.api_keys`, `platform.api_key_integrations`,
@@ -168,21 +162,24 @@ const hasWorkers = manifestTables.some((table) => table.workerAccess !== undefin
  * reachable by the app role and none of them by a worker. Several are GLOBAL
  * tables with no policy at all, where the grant is the only gate there is.
  */
-export function workerGrantedTables(): string[] {
-  if (!hasWorkers) {
+export function workerGrantedTablesFromManifest(
+  tables: readonly ManifestWorkerTable[],
+): string[] {
+  if (!tables.some((table) => table.workerAccess !== undefined)) {
     return [];
   }
-  return manifestTables
+  return tables
     .filter(
       (table) =>
         table.workerAccess !== undefined ||
-        table.workerDml === true ||
-        (table.generatedCrudEligible === undefined
-          ? table.generatedCrud === true
-          : table.generatedCrudEligible === true),
+        table.workerDml === true,
     )
     .map((table) => `${table.schema}.${table.table}`)
     .sort();
+}
+
+export function workerGrantedTables(): string[] {
+  return workerGrantedTablesFromManifest(manifestTables);
 }
 
 /** Distinct schemas the granted tables live in, for the USAGE grants. */
@@ -215,59 +212,10 @@ const MANIFEST_SCHEMAS: readonly string[] = [
  * steps instead, and only the role itself and the CONNECT grant land here.
  */
 export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
-  const workerRolePassword = readWorkerRolePassword();
-
-  // 1. Create the role if absent. Same contract as the app role: the password
-  //    is set ONLY here, at first creation, so a routine migrate cannot clobber
-  //    an operator-chosen credential or downgrade it to a known value.
-  //    NOSUPERUSER + NOBYPASSRLS are load-bearing here too — a worker that
-  //    bypassed RLS would read every tenant's business data, which is the
-  //    outcome `workerAccess` was introduced to avoid.
-  await sql`
-    do $$
-    begin
-      if not exists (select 1 from pg_roles where rolname = ${sql.lit(WORKER_ROLE)}) then
-        create role ${sql.ref(WORKER_ROLE)}
-          login password ${sql.lit(workerRolePassword)}
-          nosuperuser nobypassrls;
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  // Repair the load-bearing attributes if they have drifted — a tampered or
-  // hand-created role — but only then.
-  //
-  // The app role's equivalent statement is unconditional, and that is a known
-  // source of contention rather than a pattern to copy: `pg_authid` is
-  // CLUSTER-wide, so every migrate against every throwaway scratch database
-  // rewrites the same tuple, and concurrent runs collide with
-  // `tuple concurrently updated`. Adding a second role that did the same would
-  // double the collision surface. Reading `pg_roles` first makes the write
-  // happen on first creation and after tampering, and never on a routine
-  // migrate — so this role contributes no steady-state writes at all. (The app
-  // role's own statement is tracked separately; it is not changed here.)
-  await sql`
-    do $$
-    begin
-      if exists (
-        select 1 from pg_roles
-        where rolname = ${sql.lit(WORKER_ROLE)}
-          and (not rolcanlogin or rolsuper or rolbypassrls)
-      ) then
-        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(WORKER_ROLE)});
-      end if;
-    end
-    $$;
-  `.execute(db);
-
-  if (shouldRotateWorkerRolePassword()) {
-    await sql`alter role ${sql.ref(WORKER_ROLE)} login password ${sql.lit(workerRolePassword)}`.execute(
-      db,
-    );
-  }
-
-  // 2. CONNECT on the database itself. Stock PostgreSQL grants it to PUBLIC;
+  // The role is declared in the database role contract and provisioned by
+  //    the host; the chain verified LOGIN, NOSUPERUSER and NOBYPASSRLS before
+  //    this step. No cluster-wide write happens on a routine migrate.
+  // 1. CONNECT on the database itself. Stock PostgreSQL grants it to PUBLIC;
   //    managed providers revoke it, leaving a role able to authenticate but not
   //    connect. Same reasoning, and same statement, as the app role's.
   await sql`
@@ -289,8 +237,8 @@ export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
  * `workerDml` without a bespoke migration.
  *
  * REVOKE-then-GRANT rather than GRANT alone. A table that STOPS declaring
- * `workerDml` — or an entity that stops being CRUD-generated, or a whole plugin
- * that is removed — must lose the grant, and a plain sweep would leave it in
+ * `workerDml` — or a whole plugin that is removed — must lose the grant, and a
+ * plain sweep would leave it in
  * place forever. `revoke all` names the worker role, so it can never touch the
  * app role's privileges, and it runs over every schema the manifest reaches
  * rather than only the ones currently granted.

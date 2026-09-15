@@ -54,10 +54,10 @@ const ADMIN_URL =
 
 const TEST_TIMEOUT = 90_000;
 
-/** The realm role `WORKFLOW_WRITER_ROLES` admits; authoring requires it. */
-const WRITER_ROLE = "directie";
-/** A realm role that is not one of those: enough to read, never to author. */
-const NON_WRITER_ROLE = "controller";
+/** A generic workflow role admitted by `WORKFLOW_WRITER_ROLES`. */
+const WRITER_ROLE = "workflow-admin";
+/** A role that is not one of those: enough to read, never to author. */
+const NON_WRITER_ROLE = "workflow-viewer";
 
 /**
  * `WORKFLOW_DEFINITION_LOCK_TTL_MS`, restated rather than imported: this

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: LabelRule
@@ -6,7 +6,6 @@ title: Label Rule
 description: A configurable rule that evaluates conditions against entity data and displays a badge label when matched.
 language: en
 displayTemplate: "{{name}}"
-filterField: name
 labels:
   en: Label Rule
   nl: Labelregel
@@ -41,6 +40,7 @@ fields:
       storageClass: core
   - key: entityType
     valueType: string
+    semanticType: entityTypeName
     required: true
     label:
       en: Entity type
@@ -51,58 +51,9 @@ fields:
     validation:
       minLength: 1
       maxLength: 120
-    options:
-      type: static
-      items:
-        - value: Relation
-          label:
-            en: Relation
-            nl: Relatie
-        - value: NaturalPerson
-          label:
-            en: Natural person
-            nl: Natuurlijk persoon
-        - value: LegalEntity
-          label:
-            en: Legal entity
-            nl: Rechtspersoon
-        - value: Case
-          label:
-            en: Case
-            nl: Zaak
-        - value: Task
-          label:
-            en: Task
-            nl: Taak
-        - value: CaseFile
-          label:
-            en: Case file
-            nl: Dossier
-        - value: Document
-          label:
-            en: Document
-            nl: Document
-        - value: Agreement
-          label:
-            en: Agreement
-            nl: Overeenkomst
-        - value: Account
-          label:
-            en: Account
-            nl: Account
-        - value: ContactMoment
-          label:
-            en: Contact moment
-            nl: Contactmoment
-        - value: Address
-          label:
-            en: Address
-            nl: Adres
     persisted:
       column: entity_type
       storageClass: core
-    render:
-      component: ListSelect
   - key: label
     valueType: string
     required: true
@@ -120,6 +71,7 @@ fields:
       storageClass: core
   - key: variant
     valueType: string
+    semanticType: badgeVariant
     required: true
     label:
       en: Variant
@@ -131,30 +83,9 @@ fields:
     validation:
       minLength: 1
       maxLength: 40
-    options:
-      type: static
-      items:
-        - value: default
-          label:
-            en: Default
-            nl: Standaard
-        - value: secondary
-          label:
-            en: Secondary
-            nl: Secundair
-        - value: destructive
-          label:
-            en: Destructive
-            nl: Destructief
-        - value: outline
-          label:
-            en: Outline
-            nl: Omlijning
     persisted:
       column: variant
       storageClass: core
-    render:
-      component: ListSelect
   - key: key
     valueType: string
     required: true
@@ -173,6 +104,7 @@ fields:
       storageClass: core
   - key: outputType
     valueType: string
+    semanticType: labelOutputType
     required: true
     label:
       en: Output type
@@ -181,26 +113,9 @@ fields:
       en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`, `numberValue`, or `stringValue`) and how the variable is typed downstream.
       nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`, `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
     defaultValue: boolean
-    options:
-      type: static
-      items:
-        - value: boolean
-          label:
-            en: Boolean
-            nl: Boolean
-        - value: number
-          label:
-            en: Number
-            nl: Getal
-        - value: string
-          label:
-            en: String
-            nl: Tekst
     persisted:
       column: output_type
       storageClass: core
-    render:
-      component: ListSelect
   - key: expression
     valueType: object
     required: true
@@ -220,7 +135,7 @@ fields:
           operator: isNotEmpty
     variables: template
     suggestions:
-      sourceField: entityType
+      sourceKey: entityFields
   - key: descriptionTemplate
     valueType: string
     required: false
@@ -242,7 +157,7 @@ fields:
           operator: isNotEmpty
     variables: template
     suggestions:
-      sourceField: entityType
+      sourceKey: entityFields
   - key: priority
     valueType: integer
     required: true
@@ -270,6 +185,7 @@ fields:
       storageClass: core
   - key: validity
     valueType: string
+    semanticType: labelValidity
     required: true
     label:
       en: Validity
@@ -278,26 +194,9 @@ fields:
       en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional` honors the dates plus any context-specific conditions (e.g. tenant or process state).
       nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate; `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
     defaultValue: permanent
-    options:
-      type: static
-      items:
-        - value: permanent
-          label:
-            en: Permanent
-            nl: Permanent
-        - value: temporary
-          label:
-            en: Temporary
-            nl: Tijdelijk
-        - value: conditional
-          label:
-            en: Conditional
-            nl: Voorwaardelijk
     persisted:
       column: validity
       storageClass: core
-    render:
-      component: ListSelect
   - key: startDate
     valueType: datetime
     required: false
@@ -310,13 +209,13 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
     visibility:
       conditions:
         - field: validity
-          operator: isNotEmpty
+          operator: in
+          value:
+            - temporary
+            - conditional
   - key: endDate
     valueType: datetime
     required: false
@@ -329,163 +228,218 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
     visibility:
       conditions:
         - field: validity
-          operator: isNotEmpty
-relationships:
-  - key: tenant
-    kind: belongsTo
-    target: Tenant
-    foreignKey: tenant_id
-    label:
-      en: Tenant
-      nl: Tenant
-ui:
-  routes:
-    list:
-      en: /label-rules
-      nl: /labelregels
-    detail:
-      en: /label-rules/:id
-      nl: /labelregels/:id
-    create:
-      en: /label-rules/create
-      nl: /labelregels/aanmaken
-    edit:
-      en: /label-rules/:id/edit
-      nl: /labelregels/:id/bewerken
-    delete:
-      en: /label-rules/:id/delete
-      nl: /labelregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Label rules
-        nl: Labelregels
-      columns:
-        - key: name
-          sortable: true
-        - key: entityType
-          sortable: true
-        - key: label
-          sortable: true
-        - key: variant
-          sortable: true
-        - key: priority
-          sortable: true
-        - key: active
-          sortable: true
-      defaultSort:
-        key: priority
-        direction: desc
-      rowLink:
-        en: /label-rules/:id
-        nl: /labelregels/:id
-    detail:
-      header:
+          operator: in
+          value:
+            - temporary
+            - conditional
+operations:
+  list:
+    name: List label rule
+    description: List an accessible label rule.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get label rule
+    description: Get an accessible label rule.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create label rule
+    description: Create an accessible label rule.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update label rule
+    description: Update an accessible label rule.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+  delete:
+    name: Delete label rule
+    description: Delete an accessible label rule.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route:
+          en: /label-rules
+          nl: /labelregels
+        title:
+          en: Label rules
+          nl: Labelregels
+        columns:
+          - key: name
+            sortable: true
+          - key: entityType
+            sortable: true
+          - key: label
+            sortable: true
+          - key: variant
+            sortable: true
+          - key: priority
+            sortable: true
+          - key: active
+            sortable: true
+        defaultSort:
+          key: priority
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /label-rules/:id
+            nl: /labelregels/:id
+          create:
+            en: /label-rules/create
+            nl: /labelregels/aanmaken
         title: "{{name}}"
         subtitle: "{{entityType}}"
-        badges:
-          - variant
-          - active
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure you want to delete this label rule?
-            nl: Weet je zeker dat je deze labelregel wilt verwijderen?
-          mutation: delete
-      groups:
-        - id: general
-          title:
-            en: General
-            nl: Algemeen
-          fields:
-            - name
-            - key
-            - entityType
-            - outputType
-            - label
-            - variant
-            - priority
-            - active
-        - id: validity
-          title:
-            en: Validity
-            nl: Geldigheid
-          fields:
-            - validity
-            - startDate
-            - endDate
-        - id: expression
-          title:
-            en: Expression
-            nl: Expressie
-          fields:
-            - expression
-        - id: description
-          title:
-            en: Description template
-            nl: Omschrijvingstemplate
-          fields:
-            - descriptionTemplate
-    form:
-      variants:
-        create:
-          title:
-            en: Create label rule
-            nl: Labelregel aanmaken
-          groups:
-            - title:
-                en: General
-                nl: Algemeen
-              fields:
-                - name
-                - key
-                - entityType
-                - outputType
-                - label
-                - variant
-                - priority
-                - active
-            - title:
-                en: Validity
-                nl: Geldigheid
-              fields:
-                - validity
-                - startDate
-                - endDate
-            - title:
-                en: Expression
-                nl: Expressie
-              fields:
-                - expression
-            - title:
-                en: Description template
-                nl: Omschrijvingstemplate
-              fields:
-                - descriptionTemplate
-        edit:
-          extends: create
-          title:
-            en: Edit label rule
-            nl: Labelregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        variableSources:
+          - key: entityFields
+            resolver: entityFields
+            params:
+              sourceField: entityType
+          - key: chips
+            resolver: chips
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - id: general
+                  title:
+                    en: General
+                    nl: Algemeen
+                  fields:
+                    - name
+                    - key
+                    - entityType
+                    - outputType
+                    - label
+                    - variant
+                    - priority
+                    - active
+                - id: validity
+                  title:
+                    en: Validity
+                    nl: Geldigheid
+                  fields:
+                    - validity
+                    - startDate
+                    - endDate
+                - id: expression
+                  title:
+                    en: Expression
+                    nl: Expressie
+                  fields:
+                    - expression
+                - id: description
+                  title:
+                    en: Description template
+                    nl: Omschrijvingstemplate
+                  fields:
+                    - descriptionTemplate
+        modes:
+          create:
+            title:
+              en: Create label rule
+              nl: Labelregel aanmaken
+            groups:
+              - title:
+                  en: General
+                  nl: Algemeen
+                fields:
+                  - name
+                  - key
+                  - entityType
+                  - outputType
+                  - label
+                  - variant
+                  - priority
+                  - active
+              - title:
+                  en: Validity
+                  nl: Geldigheid
+                fields:
+                  - validity
+                  - startDate
+                  - endDate
+              - title:
+                  en: Expression
+                  nl: Expressie
+                fields:
+                  - expression
+              - title:
+                  en: Description template
+                  nl: Omschrijvingstemplate
+                fields:
+                  - descriptionTemplate
+          update:
+            title:
+              en: Edit label rule
+              nl: Labelregel bewerken

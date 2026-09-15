@@ -112,9 +112,9 @@ export function keycloakTokenFor(
   return token;
 }
 
-/** Token for a user that holds realm roles (acme-directie by default). */
+/** Token for the neutral full-access test identity. */
 export function getKeycloakToken(): Promise<string | null> {
-  const username = process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie";
+  const username = process.env.E2E_KEYCLOAK_USERNAME ?? "tenant-a-admin";
   store.defaultToken ??= fetchKeycloakToken(
     username,
     process.env.E2E_KEYCLOAK_PASSWORD ?? passwordFor(username),
@@ -124,7 +124,7 @@ export function getKeycloakToken(): Promise<string | null> {
 
 /** Token for an enabled user without realm roles, proving bearer role denial. */
 export function getRolelessKeycloakToken(): Promise<string | null> {
-  const username = process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "acme-noaccess";
+  const username = process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "tenant-a-no-access";
   store.rolelessToken ??= fetchKeycloakToken(
     username,
     process.env.E2E_KEYCLOAK_NOACCESS_PASSWORD ?? passwordFor(username),

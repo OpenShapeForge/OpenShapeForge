@@ -32,11 +32,17 @@ export function resolveModelFields(
 ): CompiledField[] {
   return coreFields.map((field) => {
     const semType = field.semanticType ? semanticTypes?.[field.semanticType] : undefined;
+    const authoredCardinality = field.cardinality ?? semType?.cardinality;
+    const cardinality = fieldCardinality({ cardinality: authoredCardinality });
 
     const compiled: CompiledField = {
       key: field.key,
-      valueType: field.valueType,
-      cardinality: fieldCardinality(field),
+      valueType: field.valueType ?? semType?.valueType,
+      cardinality,
+      ...(authoredCardinality && typeof authoredCardinality === "object" &&
+        cardinality === "collection"
+        ? { cardinalityBounds: { ...authoredCardinality } }
+        : {}),
       required: field.required ?? false,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
@@ -45,6 +51,7 @@ export function resolveModelFields(
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
     if (field.writtenBy && field.writtenBy.length > 0) compiled.writtenBy = [...field.writtenBy];
+    if (field.deriveOnCreate) compiled.deriveOnCreate = { ...field.deriveOnCreate };
     if (field.description) compiled.description = field.description;
     if (field.help) compiled.help = field.help;
     // Validation: field-level overrides semantic type defaults
@@ -65,17 +72,23 @@ export function resolveModelFields(
     if (field.defaultValue !== undefined) compiled.defaultValue = field.defaultValue;
     if (field.variables) compiled.variables = field.variables;
     if (field.sortable) compiled.sortable = field.sortable;
+    if (field.entityValue) compiled.entityValue = { ...field.entityValue };
+    if (field.allowedDefinitions) compiled.allowedDefinitions = [...field.allowedDefinitions].sort();
     if (field.relationship) compiled.relationship = field.relationship;
     if (field.visibility) compiled.visibility = field.visibility;
     if (field.computed) compiled.computed = field.computed;
     if (field.graphqlType) compiled.graphqlType = field.graphqlType;
-    const fieldOptions = resolveFieldOptions(field);
+    const fieldOptions = resolveFieldOptions(field) ?? semType?.options;
     if (fieldOptions) compiled.options = fieldOptions;
     if (field.layoutFraction) compiled.layoutFraction = field.layoutFraction;
     if (field.localized) compiled.localized = field.localized;
     if (field.suggestions) compiled.suggestions = field.suggestions;
     // Nested fields (object/array types)
-    const childFields = field.shape ?? field.children ?? semType?.shape ?? semType?.children;
+    // A reference's target schema belongs to the entity registry, not inline
+    // under the UUID field. Expanding it would recurse forever on inverses.
+    const childFields = semType?.kind === "entity"
+      ? undefined
+      : field.shape ?? field.children ?? semType?.shape ?? semType?.children;
     if (childFields) {
       compiled.children = resolveModelFields(childFields, componentCatalog, semanticTypes);
     }

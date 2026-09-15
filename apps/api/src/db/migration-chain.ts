@@ -1,73 +1,88 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The ordered migration chain, shared by the db:migrate CLI (migrate.ts,
- * which adds the advisory lock + lock_timeout around it) and the migration
- * tests (which run it against throwaway scratch databases).
+ * The ordered chain that builds a database from the compiled manifest,
+ * shared by db:migrate, db:reset and the empty-database bootstrap
+ * (db/bootstrap.ts adds the advisory lock + lock_timeout around it) and by
+ * the migration tests (which run it against throwaway scratch databases).
  *
- * Order matters:
- *   0. app role               — provision the restricted, non-superuser
- *      runtime role + schema/function grants + default privileges. Must run
- *      first (privileged migrate chain) so RLS is actually enforced against
- *      the app role; the table-grant SWEEP runs last (step 5) once tables
- *      exist.
+ * Three phases, no ledger of hand-written history: the schema is versioned
+ * by git, and a database is created from what the manifest says today.
+ *
+ *   VERIFY
+ *   0.  role contract         — every declared database role exists
+ *      (db/database-roles.ts) with LOGIN/NOSUPERUSER/NOBYPASSRLS as declared,
+ *      and the migrate role is a member of the definer roles. Roles are
+ *      cluster-wide; the host provisions them, the chain never creates one.
+ *   0a. app role              — CONNECT, schema USAGE and default privileges
+ *      for the restricted runtime role; the table-grant SWEEP runs in step 4
+ *      once tables exist.
  *   0b. worker role           — the SECOND restricted role, the one the
- *      `workerAccess` policies compare `current_user` against. Same position
- *      and same reason as the app role; its grants are enumerated rather than
- *      swept, and also land in step 5.
- *   1. app helpers            — RLS helper functions every policy references.
- *   2. system bypass audit    — break-glass audit table (not manifest-managed).
- *   3. versioned bespoke      — hand-written transformations; run BEFORE the
- *      generated step so a bespoke migration can eliminate non-additive drift
- *      before the roll-forward evaluates it.
- *   4. generated roll-forward — manifest-driven schema apply/diff.
- *   4b. plugin invariants     — immutable compiler-plugin constraints,
- *      functions, triggers, and other DDL, after contributed tables exist.
- *   4c. identity link         — runtime-owned platform.identities /
- *      platform.identity_relations (idempotent DDL, like step 2); after the
- *      generated step because they reference platform.tenants and
- *      erp.relations.
- *   4d. employee invitations  — runtime-owned platform.employee_invitations
- *      (idempotent DDL, same reasoning); references platform.tenants only, so
- *      it could run before 4c, but sits next to it because both are the
- *      "login ↔ party" story (db/migrations/employee-invitations.ts).
- *   4e. organization relation link — platform.tenants.relation_id (idempotent
- *      DDL, same reasoning); references erp.relations, so it must run after
- *      the generated step like 4c/4d
- *      (db/migrations/organization-relation-link.ts).
- *   5. app role grants        — sweep DML grants over ALL now-existing tables
+ *      `workerAccess` policies compare `current_user` against. Its grants
+ *      are enumerated rather than swept, and also land in step 4.
+ *
+ *   CREATE
+ *   1.  app helpers           — the `app` schema and the RLS helper functions
+ *      every policy references.
+ *   2.  generated schema      — schema.sql from the ONE declaration of every
+ *      table (platform-schema.yaml + the authoring layers), the runtime-owned
+ *      platform bookkeeping included; on a built database, the checksum
+ *      no-op or an additive roll-forward (migrations/generated-schema.ts).
+ *   3.  core invariants       — what the manifest cannot express on manifest
+ *      tables and the core owns: the org-unit closure trigger, the document
+ *      authority guards and compound keys, the logical document commands,
+ *      the artifact binding (migrations/core-invariants.ts). Plain idempotent
+ *      DDL on every run.
+ *   3a. identity link         — the same for platform.identities /
+ *      platform.identity_relations: checks, an expression index,
+ *      app.identity_subject() and the bespoke policies. Before the plugin
+ *      invariants because plugin DDL may reference the function.
+ *   3b. plugin invariants     — immutable compiler-plugin constraints,
+ *      functions, triggers and other DDL, ledgered per plugin and version
+ *      (migrations/generated-plugin-migrations.ts), after contributed tables
+ *      exist.
+ *   3c–3f. the other runtime invariants the manifest cannot express, one file
+ *      per table family, each idempotent on every run: employee invitations
+ *      (checks, the one-pending-per-address partial expression index,
+ *      policy), the tenant's organization-Relation write policy, update
+ *      notices (policies), execution receipts (checks, policy), blueprints
+ *      (checks, compound provenance reference, policies, the SECURITY
+ *      DEFINER read function and its ownership transfer).
+ *   4.  grants                — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
- *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
- *      because step 1 had not created the schema yet, then grant the worker
- *      role the enumerated subset it is allowed.
- *   6. catalog seeds          — load the compiler's global configuration
+ *      re-apply the `app` schema USAGE/EXECUTE grants that step 0a had to
+ *      skip because step 1 had not created the schema yet, re-narrow the
+ *      blueprint tables, then grant the worker role the enumerated subset
+ *      it is allowed.
+ *
+ *   SEED
+ *   5.  catalog seeds         — load the compiler's global configuration
  *      catalogs into their platform tables: the entity page configs, then
  *      whatever the loaded runtime modules contribute, in registration order.
  *      Data, not DDL, so they run after the tables exist and after the grant
  *      sweep. Each is a no-op when its seed was not emitted.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
- * runtime.db.connection().execute) — steps 3, 4, and 4b use explicit
+ * runtime.db.connection().execute) — steps 2 and 3b use explicit
  * BEGIN/COMMIT transactions on that single connection.
  *
  * NOTE: the whole chain runs as the PRIVILEGED migrate role
- * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — CREATE ROLE / GRANT / DDL require it.
+ * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — DDL and GRANT require it.
  */
 import type { Kysely } from "kysely";
+import { fileURLToPath } from "node:url";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { DB } from "../generated/db/types.js";
+import { verifyDatabaseRoles } from "./database-roles.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
-import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
+import { applyCoreInvariants } from "./migrations/core-invariants.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
-import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
-import {
-  applyVersionedMigrations,
-  type VersionedMigration,
-} from "./migrations/versioned-runner.js";
-import { versionedMigrations } from "./migrations/versioned/index.js";
+import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
+import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
@@ -85,8 +100,6 @@ import type { ModuleSeed } from "../modules/contract.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 
 export type MigrationChainOptions = {
-  /** Override the versioned-migration registry (used by tests). */
-  versioned?: readonly VersionedMigration[];
   /** Override compiler-plugin invariant DDL (used by tests). */
   pluginMigrations?: readonly GeneratedPluginMigration[];
   appliedBy?: string;
@@ -99,10 +112,6 @@ export type MigrationChainOptions = {
 };
 
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
-  /** Versions of bespoke migrations applied during this run. */
-  versionedApplied: string[];
-  /** Applied versions whose ledger checksum was reconciled to the current file. */
-  versionedReconciled: string[];
   /** Compiler-plugin invariant migrations applied during this run. */
   pluginMigrationsApplied: string[];
   /** Outcome of the entity page-config catalog seed. */
@@ -115,27 +124,32 @@ export async function runMigrationChain(
   db: Kysely<DB>,
   options: MigrationChainOptions = {},
 ): Promise<MigrationChainResult> {
+  // Step 0: the declared roles must already exist — the host provisions them,
+  // this chain only verifies. A fresh environment fails here with the exact
+  // administrator statements instead of half-way through the schema.
+  await verifyDatabaseRoles(db);
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
-  await applySystemBypassAuditMigration(db);
-  const versioned = await applyVersionedMigrations(
-    db,
-    options.versioned ?? versionedMigrations,
-  );
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  await applyCoreInvariants(db);
+  // The identity-link invariants (app.identity_subject() above all) may be
+  // referenced by a plugin's invariant DDL, so they land before the plugin
+  // migrations run.
+  await applyIdentityLinkMigration(db);
   const pluginMigrations = await applyGeneratedPluginMigrations(
     db,
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
     options.appliedBy,
   );
-  await applyIdentityLinkMigration(db);
   await applyEmployeeInvitationsMigration(db);
   await applyOrganizationRelationLinkMigration(db);
-  await applyOnboardingMigration(db);
   await applyUpdateNoticesMigration(db);
+  await applyOperationExecutionReceiptsMigration(db);
+  await applyBlueprintsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
+  await applyBlueprintsGrants(db);
   // The worker role's grants are enumerated from the manifest rather than
   // swept, and re-evaluated here on every migrate so a table that newly
   // declares (or stops declaring) workerDml is picked up without a bespoke
@@ -144,12 +158,13 @@ export async function runMigrationChain(
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
-    moduleSeeds[seed.name] = await seed.apply(db);
+    moduleSeeds[seed.name] = await seed.apply(db, {
+      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas },
+      seedDirectory: fileURLToPath(new URL("../../../../authoring/seeds/", import.meta.url)),
+    });
   }
   return {
     ...generated,
-    versionedApplied: versioned.applied,
-    versionedReconciled: versioned.reconciled,
     pluginMigrationsApplied: pluginMigrations.applied,
     pageConfigs,
     moduleSeeds,

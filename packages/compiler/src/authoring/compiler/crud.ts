@@ -8,6 +8,7 @@
  */
 import type { CrudConfig, CrudOperationKey, CrudSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { isCoreEntityV2, v2OperationByAction } from "../entity-v2.js";
 
 export const CRUD_OPERATION_KEYS: readonly CrudOperationKey[] = [
   "list",
@@ -39,6 +40,14 @@ export function resolveCrudOperations(
 export function buildCrud(
   coreEntity: LoadedArtifacts["coreEntity"],
 ): CrudSection {
+  if (isCoreEntityV2(coreEntity)) {
+    const operations = v2OperationByAction(coreEntity);
+    return {
+      operations: Object.fromEntries(
+        CRUD_OPERATION_KEYS.map((operation) => [operation, Boolean(operations[operation])]),
+      ) as Record<CrudOperationKey, boolean>,
+    };
+  }
   return { operations: resolveCrudOperations(coreEntity.crud) };
 }
 

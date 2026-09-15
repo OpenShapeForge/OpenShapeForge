@@ -8,6 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import Fastify from "fastify";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import {
@@ -21,7 +22,9 @@ import {
 let app: ReturnType<typeof createApiApp>;
 
 beforeAll(async () => {
-  app = createApiApp({ cors: false });
+  // Canonical operations bind to their runtime modules at boot, so the app
+  // needs the generated registry's modules even for a discovery test.
+  app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
   await app.ready();
 });
 
@@ -163,6 +166,35 @@ describe("RFC 8414 path-inserted authorization server metadata", () => {
 });
 
 describe("the 401 challenge", () => {
+  test("is issued before the media type is judged, so a bare probe can discover where to authenticate", async () => {
+    // Hosted clients open with an empty POST — no body, no content-type — and
+    // expect the RFC 9728 challenge. A 415 there ends discovery.
+    const response = await app.inject({ method: "POST", url: "/zerocopter/mcp" });
+    expect(response.statusCode).toBe(401);
+    expect(String(response.headers["www-authenticate"])).toContain(
+      `${PROTECTED_RESOURCE_METADATA_PATH}/zerocopter`,
+    );
+  });
+
+  test("a credentialed request with a refused media type is still 415, never authenticated", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/zerocopter/mcp",
+      headers: { authorization: "Bearer not-a-real-token", "content-type": "text/plain" },
+      payload: "{}",
+    });
+    expect(response.statusCode).toBe(415);
+  });
+
+  test("the document is also served at the path derived from the explicit /mcp spelling", async () => {
+    const [canonical, explicit] = await Promise.all([
+      app.inject({ method: "GET", url: `${PROTECTED_RESOURCE_METADATA_PATH}/zerocopter` }),
+      app.inject({ method: "GET", url: `${PROTECTED_RESOURCE_METADATA_PATH}/zerocopter/mcp` }),
+    ]);
+    expect(explicit.statusCode).toBe(200);
+    expect(JSON.parse(explicit.body)).toEqual(JSON.parse(canonical.body));
+  });
+
   test("points an unauthenticated MCP request at the metadata document", async () => {
     const response = await app.inject({
       method: "POST",

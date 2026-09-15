@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import { __resetControlVerifiersForTests } from "../../control/authorization.js";
 import { PLATFORM_ADMIN_ROLE } from "../../control/platform-admin.js";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { CONTROL_MCP_METADATA_PATH, CONTROL_MCP_PATH } from "../control-mcp-server.js";
 import { PROTECTED_RESOURCE_METADATA_PATH } from "../protected-resource-metadata.js";
@@ -72,7 +73,7 @@ if (!EXTERNAL_CONTROL_REALM) beforeAll(async () => {
   process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = ORIGIN;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = TENANT_ISSUER;
   __resetControlVerifiersForTests();
-  app = createApiApp({ cors: false });
+  app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
   await app.ready();
 });
 
@@ -137,6 +138,27 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP discovery", ()
       `Bearer resource_metadata="${ORIGIN}${CONTROL_MCP_METADATA_PATH}", scope="roles profile email mcp-resource:control"`,
     );
   });
+
+  test("a bare discovery probe — no body, a media type without a parser — is challenged, not a 500", async () => {
+    // aiohttp-based hosted clients open with exactly this request.
+    const response = await app.inject({
+      method: "POST",
+      url: CONTROL_MCP_PATH,
+      headers: { "content-type": "application/octet-stream" },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(String(response.headers["www-authenticate"])).toContain(CONTROL_MCP_METADATA_PATH);
+  });
+
+  test("a credentialed request under an unparsable media type is 415, never authenticated", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: CONTROL_MCP_PATH,
+      headers: { authorization: "Bearer not-a-real-token", "content-type": "application/octet-stream" },
+      payload: "{}",
+    });
+    expect(response.statusCode).toBe(415);
+  });
 });
 
 if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", () => {
@@ -167,8 +189,14 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
     expect(message).not.toContain("issuer");
   });
 
-  test("a control-realm token without platform_admin is 403, the operator role notwithstanding", async () => {
+  test("a platform-operator token is admitted too — which tools it reaches is the Operations' decision", async () => {
     const response = await call(adminToken({ realm_access: { roles: ["platform-operator"] } }));
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
+  });
+
+  test("a control-realm token holding no platform role is 403", async () => {
+    const response = await call(adminToken({ realm_access: { roles: ["default-roles-openshapeforge-control"] } }));
     expect(response.statusCode).toBe(403);
     expect(JSON.parse(response.body).error.code).toBe("FORBIDDEN");
   });

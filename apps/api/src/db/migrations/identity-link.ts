@@ -1,26 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { ensureCheckConstraint } from "./sql-invariants.js";
 
 /**
- * Runtime-owned tables that tie a login (an identity at the identity
- * provider) to the party it is in an organization: an OpenShapeForge Relation.
+ * The invariants of the login ↔ party link that the manifest cannot express.
  *
- *   platform.identities          one row per (issuer, subject) — platform-level,
- *                                because the same person signs in to several
- *                                tenants with the same Keycloak account.
- *   platform.identity_relations  one row per (identity, tenant): either LINKED
- *                                to a Relation in that tenant, or PENDING with
- *                                the Relation the person is probably (an e-mail
- *                                match) but that nobody has confirmed yet.
+ * The two tables — platform.identities (one row per identity-provider login)
+ * and platform.identity_relations (one row per identity × tenant, LINKED to
+ * a Relation or PENDING confirmation) — are declared in
+ * packages/compiler/config/platform-schema.yaml and created by the generated
+ * step. This file runs after it and adds, idempotently on every migrate:
  *
- * Neither table is manifest-managed (like platform.system_bypass_audit and
- * platform.mcp_handoffs), so this is idempotent DDL applied on every migrate
- * run rather than a versioned migration. It runs AFTER the generated
- * roll-forward on purpose: both foreign keys point at generated tables
- * (platform.tenants, erp.relations), which do not exist yet on a fresh
- * database while the versioned step runs. The app-role grant sweep that
- * follows covers the two tables like any other.
+ *   - the `lower(email)` lookup index (an expression index);
+ *   - the status vocabulary and the columns each status requires, as checks;
+ *   - `app.identity_subject()`, the point lookup the write policy needs;
+ *   - row-level security and the two bespoke policies.
  *
  * Row-level security, consistent with the rest of platform.*:
  *   - identity_relations is tenant-fenced the way erp.relations is
@@ -38,64 +33,25 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  */
 export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
   await sql`
-    create schema if not exists platform;
-
-    create table if not exists platform.identities (
-      id            uuid primary key default gen_random_uuid(),
-      issuer        text not null,
-      subject       text not null,
-      email         text,
-      display_name  text,
-      created_at    timestamptz not null default now(),
-      updated_at    timestamptz not null default now(),
-      unique (issuer, subject)
-    );
-
     create index if not exists identities_email_idx
       on platform.identities (lower(email));
+  `.execute(db);
 
-    create table if not exists platform.identity_relations (
-      identity_id            uuid not null references platform.identities (id) on delete cascade,
-      tenant_id              uuid not null references platform.tenants (id) on delete cascade,
-      relation_id            uuid references erp.relations (id) on delete cascade,
-      status                 text not null check (status in ('linked', 'pending_confirmation')),
-      candidate_relation_id  uuid references erp.relations (id) on delete set null,
-      linked_at              timestamptz,
-      -- 'jit' for the just-in-time path, otherwise the platform.identities id
-      -- of whoever linked: the person (confirm_my_link) or an administrator.
-      linked_by              text,
-      -- True only for a Relation the just-in-time path CREATED (the "no
-      -- existing Relation carries this e-mail" branch of resolveIdentityLink,
-      -- ensureIdentityLink's phase 2). Never set on the pending_confirmation
-      -- path for an existing Relation, and never set by link_identity or
-      -- confirm_my_link — those attach to a Relation someone already has, so
-      -- there is nothing to grant. Cleared by set_member_role once an
-      -- administrator has assigned a real role. See auth/identity.ts: while
-      -- true, the session's roles are overridden to a hardcoded minimal set
-      -- regardless of the JWT's resource_access — a JIT-created Relation's
-      -- very first session is issued before any admin API role grant could
-      -- reach that same token, so a code-level fallback is the only way that
-      -- first session already has minimal working access.
-      needs_role_assignment  boolean not null default false,
-      created_at             timestamptz not null default now(),
-      updated_at             timestamptz not null default now(),
-      primary key (identity_id, tenant_id),
-      constraint identity_relations_status_shape check (
-        (status = 'linked' and relation_id is not null and linked_at is not null and linked_by is not null)
-        or (status = 'pending_confirmation' and relation_id is null)
-      )
-    );
+  await ensureCheckConstraint(db, {
+    table: "platform.identity_relations",
+    name: "identity_relations_status_check",
+    expression: "status in ('linked', 'pending_confirmation')",
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.identity_relations",
+    name: "identity_relations_status_shape",
+    expression: `
+      (status = 'linked' and relation_id is not null and linked_at is not null and linked_by is not null)
+      or (status = 'pending_confirmation' and relation_id is null)
+    `,
+  });
 
-    alter table platform.identity_relations
-      add column if not exists needs_role_assignment boolean not null default false;
-
-    create index if not exists identity_relations_tenant_relation_idx
-      on platform.identity_relations (tenant_id, relation_id);
-
-    create index if not exists identity_relations_pending_role_idx
-      on platform.identity_relations (tenant_id)
-      where needs_role_assignment;
-
+  await sql`
     -- The subject behind an identity id, for the write policy below. A
     -- function-scoped bypass (the same shape as app.tenant_for_keycloak_
     -- organization) rather than a subquery: the two tables' policies refer to

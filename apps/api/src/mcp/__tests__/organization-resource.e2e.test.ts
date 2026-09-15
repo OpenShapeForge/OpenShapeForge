@@ -12,6 +12,7 @@ import {
   __resetSessionResolverForTests,
   __setTenantForOrganizationForTests,
 } from "../../auth/identity.js";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import { PROTECTED_RESOURCE_METADATA_PATH } from "../protected-resource-metadata.js";
@@ -66,7 +67,7 @@ beforeAll(async () => {
     if (organizationId === HUBBLE_ORG) return HUBBLE_TENANT;
     return null;
   });
-  app = createApiApp({ cors: false });
+  app = createApiApp({ cors: false, modules: await loadRuntimeModules() });
   await app.ready();
 });
 

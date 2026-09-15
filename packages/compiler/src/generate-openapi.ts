@@ -16,8 +16,10 @@
  * no entity opts in — so the API runtime can statically import it
  * unconditionally. Determinism: no timestamps; entities sorted by base path.
  */
+import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import type {
   CompiledEntityContract,
+  CompiledEntityOperation,
   CompiledField,
 } from "./authoring/types.js";
 import type { RestApiDocumentation } from "./authoring/layers.js";
@@ -39,6 +41,7 @@ import {
   operationOpenApiPaths,
   type CompiledPluginOperation,
 } from "./generate-operations.js";
+import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
 const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
@@ -71,8 +74,8 @@ const GENERIC_DEVELOPER_ONBOARDING = [
   "1. **Check security.** Follow the security requirement documented for the operation.",
   "   Most host operations use a bearer token through the **Authorize** button, while",
   "   a contract can deliberately declare public or custom authentication. For a",
-  "   session-authenticated entity or operation, the caller's roles still decide which",
-  "   documented data may be read or written, so a contract-valid request can receive",
+  "   session-authenticated entity or operation, the caller must satisfy any declared role",
+  "   and scope restrictions, so a contract-valid request can still receive",
   "   `401` or `403`.",
   "2. **Choose a documented operation.** Tags group the available entity or plugin",
   "   operations. Do not assume an operation exists if it is absent below.",
@@ -146,6 +149,8 @@ function schemaForScalar(type: ScalarType): JsonObject {
       return { type: "string", format: "date-time" };
     case "jsonb":
       return {};
+    case "text[]":
+      return { type: "array", items: { type: "string" } };
     case "text":
     default:
       return { type: "string" };
@@ -170,6 +175,7 @@ function isWritableColumn(
     column.name !== "created_at" &&
     column.name !== "updated_at" &&
     (column.writtenBy === undefined || column.writtenBy.length === 0) &&
+    column.deriveOnCreate === undefined &&
     !(operation === "update" && column.immutable === true)
   );
 }
@@ -334,8 +340,13 @@ function filterSchemaForColumn(
 function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
+  operation: CompiledEntityOperation | undefined,
 ): JsonObject[] {
-  const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
+  const pagination = operation?.input?.kind === "collection-query"
+    ? operation.input.pagination
+    : { defaultLimit: 50, maxLimit: 200 };
+  const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
+    table.source?.mcp?.elicitOnCreate?.into;
   const sortableFields = table.columns
     .filter(
       (column) =>
@@ -357,8 +368,14 @@ function listParameters(
       name: "first",
       in: "query",
       description:
-        "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
-      schema: { type: "integer", default: 50 },
+        `Number of records to return. When absent it defaults to ${pagination.defaultLimit}; ` +
+        `supplied values are clamped to 1-${pagination.maxLimit}.`,
+      schema: {
+        type: "integer",
+        minimum: 1,
+        maximum: pagination.maxLimit,
+        default: pagination.defaultLimit,
+      },
     },
     {
       name: "after",
@@ -454,12 +471,19 @@ function listParameters(
   return parameters;
 }
 
-function errorResponse(description: string): JsonObject {
+function errorResponse(
+  description: string,
+  canonical: boolean,
+): JsonObject {
   return {
     description,
     content: {
       "application/json": {
-        schema: { $ref: "#/components/schemas/Error" },
+        schema: {
+          $ref: canonical
+            ? "#/components/schemas/OperationFailure"
+            : "#/components/schemas/Error",
+        },
       },
     },
   };
@@ -473,6 +497,64 @@ function entityResponse(name: string, description: string): JsonObject {
         schema: { $ref: `#/components/schemas/${name}` },
       },
     },
+  };
+}
+
+function operationControlSchema(
+  operation: CompiledEntityOperation | undefined,
+): {
+  properties: JsonObject;
+  required: string[];
+  dependentRequired?: Record<string, string[]>;
+} {
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  let dependentRequired: Record<string, string[]> | undefined;
+  if (operation?.concurrency?.version) {
+    properties.expectedVersion = {
+      type: "string",
+      format: "date-time",
+      description:
+        `Version from the record's ${operation.concurrency.version.field} field.`,
+    };
+    required.push("expectedVersion");
+  }
+  if (operation?.concurrency?.editLease) {
+    properties.leaseToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque edit-lease token issued by the server for this operation and record.",
+    };
+    required.push("leaseToken");
+  }
+  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
+    properties.confirmed = {
+      type: "boolean",
+      description:
+        "Only true lets the operation continue after caller acknowledgement; this is not a server-issued security proof.",
+    };
+  }
+  if (operation?.interaction?.confirmation.mode === "challenge") {
+    properties.confirmationToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque, single-use confirmation challenge token issued by the server.",
+    };
+    properties.confirmationAnswer = {
+      type: "string",
+      minLength: 1,
+      description:
+        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
+    };
+    dependentRequired = {
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    };
+  }
+  return {
+    properties,
+    required,
+    ...(dependentRequired ? { dependentRequired } : {}),
   };
 }
 
@@ -496,6 +578,27 @@ export function renderOpenApiSpec(
     .sort((a, b) =>
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
+  const hasCanonicalEntity = [...contractsByEntityName.values()].some(
+    (contract) => contract.authoringVersion >= 2,
+  );
+  const restEditLeaseOperationIds = [...new Set(
+    restTables.flatMap((table) => {
+      const contract = contractsByEntityName.get(entitySchemaName(table));
+      if (!contract || contract.authoringVersion < 2) return [];
+      return (["list", "get", "create", "update", "delete"] as const).flatMap(
+        (intent) => {
+          const operation = contract.entityOperations[intent];
+          return table.source!.rest!.operations[intent] === true &&
+            operation?.concurrency?.editLease?.mode === "required"
+            ? [operation.id]
+            : [];
+        },
+      );
+    }),
+  )].sort();
+  const hasCanonicalEditLease = restEditLeaseOperationIds.length > 0;
+  const hasArtifactTransport = contractsByEntityName.has("Document") &&
+    contractsByEntityName.has("DocumentVersion");
 
   const schemas: JsonObject = {
     Error: {
@@ -512,20 +615,431 @@ export function renderOpenApiSpec(
         },
       },
     },
+    ...(hasCanonicalEntity
+      ? {
+          OperationReference: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "intent"],
+            properties: {
+              id: { type: "string" },
+              intent: {
+                type: "string",
+                enum: ["list", "get", "create", "update", "delete"],
+              },
+            },
+          },
+          OperationError: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message", "retryable"],
+            properties: {
+              code: { type: "string" },
+              message: { type: "string" },
+              detail: { type: "string" },
+              retryable: { type: "boolean" },
+              retryAt: { type: "string", format: "date-time" },
+              violations: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["code", "message"],
+                  properties: {
+                    field: { type: "string" },
+                    code: { type: "string" },
+                    message: { type: "string" },
+                    detail: { type: "string" },
+                  },
+                },
+              },
+              data: { type: "object", additionalProperties: true },
+            },
+          },
+          OperationOffer: {
+            oneOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["operation", "available"],
+                properties: {
+                  operation: { $ref: "#/components/schemas/OperationReference" },
+                  available: { const: true },
+                  concurrency: { $ref: "#/components/schemas/OperationConcurrency" },
+                  binding: { $ref: "#/components/schemas/OperationTargetBinding" },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["operation", "available", "error"],
+                properties: {
+                  operation: { $ref: "#/components/schemas/OperationReference" },
+                  available: { const: false },
+                  error: { $ref: "#/components/schemas/OperationError" },
+                },
+              },
+            ],
+          },
+          OperationTargetBinding: {
+            type: "object",
+            additionalProperties: false,
+            required: ["target", "input"],
+            properties: {
+              target: {
+                type: "object",
+                additionalProperties: false,
+                required: ["entityId", "id"],
+                properties: {
+                  entityId: { type: "string" },
+                  id: { type: "string" },
+                  version: { type: "string" },
+                },
+              },
+              input: { type: "object", additionalProperties: true },
+            },
+          },
+          OperationConcurrency: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              version: {
+                type: "object",
+                additionalProperties: false,
+                required: ["mode", "field"],
+                properties: {
+                  mode: { const: "required" },
+                  field: { const: "updatedAt" },
+                },
+              },
+              editLease: {
+                type: "object",
+                additionalProperties: false,
+                required: ["mode", "expiresAfterInactivity"],
+                properties: {
+                  mode: { const: "required" },
+                  expiresAfterInactivity: { type: "string" },
+                },
+              },
+            },
+          },
+          OperationFailure: {
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: { $ref: "#/components/schemas/OperationError" },
+            },
+          },
+          DeletionData: {
+            type: "object",
+            additionalProperties: false,
+            required: ["deleted"],
+            properties: { deleted: { type: "boolean", const: true } },
+          },
+          DeletionResult: {
+            type: "object",
+            additionalProperties: false,
+            required: ["data", "operations"],
+            properties: {
+              data: { $ref: "#/components/schemas/DeletionData" },
+              operations: {
+                type: "array",
+                items: { $ref: "#/components/schemas/OperationOffer" },
+              },
+            },
+          },
+          ...(hasCanonicalEditLease
+            ? {
+                EditLeaseAcquireInput: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["operationId", "targetId"],
+                  properties: {
+                    operationId: {
+                      type: "string",
+                      enum: restEditLeaseOperationIds,
+                      description: "Canonical lease-protected Operation id.",
+                    },
+                    targetId: { type: "string", format: "uuid" },
+                  },
+                },
+                EditLeaseTokenInput: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["leaseToken"],
+                  properties: {
+                    leaseToken: {
+                      type: "string",
+                      minLength: 20,
+                      description: "Opaque edit-lease token issued by the server.",
+                    },
+                  },
+                },
+                EditLeaseAcquireData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "leaseToken",
+                    "operationId",
+                    "entityId",
+                    "targetId",
+                    "targetVersion",
+                    "expiresAt",
+                  ],
+                  properties: {
+                    leaseToken: { type: "string", minLength: 20 },
+                    operationId: { type: "string" },
+                    entityId: { type: "string" },
+                    targetId: { type: "string", format: "uuid" },
+                    targetVersion: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                  },
+                },
+                EditLeaseAcquireResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseAcquireData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+                EditLeaseRenewData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "operationId",
+                    "entityId",
+                    "targetId",
+                    "targetVersion",
+                    "expiresAt",
+                  ],
+                  properties: {
+                    operationId: { type: "string" },
+                    entityId: { type: "string" },
+                    targetId: { type: "string", format: "uuid" },
+                    targetVersion: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                  },
+                },
+                EditLeaseRenewResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseRenewData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+                EditLeaseReleaseData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["released"],
+                  properties: { released: { type: "boolean" } },
+                },
+                EditLeaseReleaseResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseReleaseData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+              }
+            : {}),
+        }
+      : {}),
   };
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
+
+  if (hasArtifactTransport) {
+  tags.push({
+    name: "Files",
+    description: "Authenticated streaming transport for temporary and document-bound files. Storage policy and authorization remain server-side.",
+  });
+  paths["/api/artifacts"] = {
+    post: {
+      operationId: "stageArtifact",
+      summary: "Upload a temporary document file",
+      description: "Streams bytes into the configured storage provider. Use the returned opaque handle in Document.create or DocumentVersion.create before it expires.",
+      tags: ["Files"],
+      parameters: [{
+        name: "x-file-name",
+        in: "header",
+        required: true,
+        description: "Percent-encoded UTF-8 file name.",
+        schema: { type: "string", minLength: 1, maxLength: 765 },
+      }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/octet-stream": {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "File staged and inspected",
+          content: { "application/json": { schema: {
+            type: "object", additionalProperties: false, required: ["data", "operations"],
+            properties: {
+              data: {
+                type: "object", additionalProperties: false,
+                required: ["artifactId", "version", "fileName", "mediaType", "sha256", "byteSize"],
+                properties: {
+                  artifactId: { type: "string", format: "uuid" },
+                  version: { type: "integer", minimum: 1 },
+                  fileName: { type: "string" },
+                  mediaType: { type: "string" },
+                  sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                  byteSize: { type: "integer", minimum: 0 },
+                },
+              },
+              operations: { type: "array", maxItems: 0, items: { $ref: "#/components/schemas/OperationOffer" } },
+            },
+          } } },
+        },
+        "400": errorResponse("Invalid file request", true),
+        "401": errorResponse("Missing or invalid credentials", true),
+        "413": errorResponse("File exceeds the configured size limit", true),
+        "415": errorResponse("File type is not permitted", true),
+        "503": errorResponse("Storage is unavailable", true),
+      },
+    },
+  };
+  paths["/api/artifacts/{artifactId}/contents"] = {
+    get: {
+      operationId: "downloadArtifact",
+      summary: "Download a document-version file",
+      description: "Returns bytes only when this exact artifact is bound to the supplied authorized DocumentVersion.",
+      tags: ["Files"],
+      parameters: [
+        { name: "artifactId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        { name: "documentVersionId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+      responses: {
+        "200": { description: "Authorized file contents", headers: {
+          "Content-Disposition": { schema: { type: "string" } },
+        }, content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } },
+        "400": errorResponse("Invalid file or owner identity", true),
+        "401": errorResponse("Missing or invalid credentials", true),
+        "403": errorResponse("File access is not authorized", true),
+        "404": errorResponse("File is not available", true),
+        "503": errorResponse("Storage is unavailable", true),
+      },
+    },
+  };
+  }
+
+  if (hasCanonicalEditLease) {
+    tags.push({
+      name: "Edit leases",
+      description: "Central leases for long-running record write modes.",
+    });
+    paths["/api/operation-leases"] = {
+      post: {
+        operationId: "acquireEditLease",
+        summary: "Acquire an edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseAcquireInput" },
+            },
+          },
+        },
+        responses: {
+          "201": entityResponse("EditLeaseAcquireResult", "Edit lease acquired"),
+          "400": errorResponse("Invalid or unsupported operation", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+          "403": errorResponse("Session lacks the operation role", true),
+          "404": errorResponse("Target not found", true),
+          "423": errorResponse("Target is already being edited", true),
+        },
+      },
+    };
+    paths["/api/operation-leases/renew"] = {
+      post: {
+        operationId: "renewEditLease",
+        summary: "Renew an active edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseTokenInput" },
+            },
+          },
+        },
+        responses: {
+          "200": entityResponse("EditLeaseRenewResult", "Edit lease renewed"),
+          "400": errorResponse("Invalid request", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+          "409": errorResponse("Lease expired or invalid", true),
+        },
+      },
+    };
+    paths["/api/operation-leases/release"] = {
+      post: {
+        operationId: "releaseEditLease",
+        summary: "Release an edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseTokenInput" },
+            },
+          },
+        },
+        responses: {
+          "200": entityResponse("EditLeaseReleaseResult", "Edit lease released"),
+          "400": errorResponse("Invalid request", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+        },
+      },
+    };
+  }
 
   for (const table of restTables) {
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
+    const canonical = !!contract && contract.authoringVersion >= 2;
+    const canonicalOperationId = (
+      intent: "list" | "get" | "create" | "update" | "delete",
+    ): string => {
+      const operationId = contract?.entityOperations[intent]?.id;
+      if (!operationId) {
+        throw new Error(
+          `REST operation "${name}.${intent}" has no canonical entity operation contract.`,
+        );
+      }
+      return operationId;
+    };
     const fieldsByKey = new Map(
       (contract?.model.fields ?? []).map((field) => [field.key, field]),
     );
     const label = entityLabel(contract, name);
     const description = entityDescription(contract);
-    const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
+    const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
+      table.source?.mcp?.elicitOnCreate?.into;
     tags.push({ name, ...(description ? { description } : {}) });
 
     const read = columnProperties(
@@ -555,6 +1069,50 @@ export function renderOpenApiSpec(
       "update",
     );
     const updateSchemaName = `${name}UpdateInput`;
+    const deleteSchemaName = `${name}DeleteInput`;
+    const createControls = canonical
+      ? operationControlSchema(contract?.entityOperations.create)
+      : { properties: {}, required: [] };
+    const updateControls = canonical
+      ? operationControlSchema(contract?.entityOperations.update)
+      : { properties: {}, required: [] };
+    const deleteControls = canonical
+      ? operationControlSchema(contract?.entityOperations.delete)
+      : { properties: {}, required: [] };
+    const hasDeleteControls = Object.keys(deleteControls.properties).length > 0;
+    const createOperation = contract?.entityOperations.create;
+    const updateOperation = contract?.entityOperations.update;
+    const deleteOperation = contract?.entityOperations.delete;
+    const compiledContracts = [...contractsByEntityName.values()];
+    const createPluginSchemas = canonical && contract &&
+        createOperation?.implementation?.type === "plugin"
+      ? entityOperationJsonSchemas(
+          contract,
+          createOperation,
+          compiledContracts,
+          referentiedata,
+        )
+      : undefined;
+    const updatePluginSchemas = canonical && contract &&
+        updateOperation?.implementation?.type === "plugin"
+      ? entityOperationJsonSchemas(
+          contract,
+          updateOperation,
+          compiledContracts,
+          referentiedata,
+        )
+      : undefined;
+    const createRequiresConfirmation =
+      createOperation?.interaction?.confirmation.mode !== undefined &&
+      createOperation.interaction.confirmation.mode !== "none";
+    const updateRequiresConfirmation =
+      updateOperation?.interaction?.confirmation.mode !== undefined &&
+      updateOperation.interaction.confirmation.mode !== "none";
+    const deleteRequiresChallenge =
+      deleteOperation?.interaction?.confirmation.mode === "challenge";
+    const deleteRequiresConfirmation =
+      deleteOperation?.interaction?.confirmation.mode !== undefined &&
+      deleteOperation.interaction.confirmation.mode !== "none";
     const fieldDefinitionDefinitions = {
       ...read.definitions,
       ...creatable.definitions,
@@ -573,61 +1131,151 @@ export function renderOpenApiSpec(
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
+    if (canonical) {
+      schemas[`${name}Result`] = {
+        type: "object",
+        additionalProperties: false,
+        required: ["data", "operations"],
+        properties: {
+          data: { $ref: `#/components/schemas/${name}` },
+          operations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/OperationOffer" },
+          },
+        },
+      };
+      for (const [intent, pluginSchemas] of [
+        ["Create", createPluginSchemas],
+        ["Update", updatePluginSchemas],
+      ] as const) {
+        if (!pluginSchemas) continue;
+        schemas[`${name}${intent}Result`] = {
+          type: "object",
+          additionalProperties: false,
+          required: ["data", "operations"],
+          properties: {
+            data: pluginSchemas.outputSchema,
+            operations: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OperationOffer" },
+            },
+          },
+        };
+      }
+    }
     const writerNote = operationWrittenNote(table);
-    schemas[`${name}Input`] = {
+    schemas[`${name}Input`] = createPluginSchemas?.inputSchema ?? {
       type: "object",
       description: `Create body for ${label}.${writerNote}`,
       additionalProperties: false,
-      properties: creatable.properties,
-      ...(creatable.required.length > 0
-        ? { required: creatable.required }
+      properties: { ...creatable.properties, ...createControls.properties },
+      ...(creatable.required.length + createControls.required.length > 0
+        ? { required: [...creatable.required, ...createControls.required] }
         : {}),
     };
-    schemas[updateSchemaName] = {
+    if (!createPluginSchemas) schemas[`${name}Input`] = withBlueprintCreate(schemas[`${name}Input`] as JsonObject, table.source?.blueprint);
+    schemas[updateSchemaName] = updatePluginSchemas?.inputSchema ?? {
       type: "object",
       additionalProperties: false,
-      properties: updatable.properties,
+      properties: { ...updatable.properties, ...updateControls.properties },
+      ...(updateControls.required.length > 0
+        ? { required: updateControls.required }
+        : {}),
+      ...(updateControls.dependentRequired
+        ? { dependentRequired: updateControls.dependentRequired }
+        : {}),
       description:
         "PATCH body; omitted fields are left unchanged. Fields authored " +
         "immutable are settable at create only and are rejected here." +
         writerNote,
     };
-    schemas[`${name}List`] = {
+    if (hasDeleteControls) {
+      schemas[deleteSchemaName] = {
+        type: "object",
+        additionalProperties: false,
+        properties: deleteControls.properties,
+        ...(deleteControls.required.length > 0
+          ? { required: deleteControls.required }
+          : {}),
+        ...(deleteControls.dependentRequired
+          ? { dependentRequired: deleteControls.dependentRequired }
+          : {}),
+        description: deleteRequiresChallenge
+          ? `Submit ${deleteControls.required.join(" and ")} first to receive a server-issued ` +
+            "confirmation challenge. Retry with the same controls plus both " +
+            "confirmationToken and confirmationAnswer."
+          : deleteRequiresConfirmation
+            ? "Set confirmed to true to continue; omitting it or sending false returns CONFIRMATION_REQUIRED."
+            : "Required concurrency controls for this deletion.",
+      };
+    }
+    schemas[canonical ? `${name}ListData` : `${name}List`] = {
       type: "object",
       description: `A page of ${label} records.`,
       required: ["items", "totalCount", "nextCursor"],
       properties: {
         items: {
           type: "array",
-          items: { $ref: `#/components/schemas/${name}` },
+          items: {
+            $ref: canonical
+              ? `#/components/schemas/${name}Result`
+              : `#/components/schemas/${name}`,
+          },
         },
         totalCount: { type: "integer" },
         nextCursor: { type: ["string", "null"] },
       },
     };
+    if (canonical) {
+      schemas[`${name}ListResult`] = {
+        type: "object",
+        additionalProperties: false,
+        required: ["data", "operations"],
+        properties: {
+          data: { $ref: `#/components/schemas/${name}ListData` },
+          operations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/OperationOffer" },
+          },
+        },
+      };
+    }
 
     const collectionPath: JsonObject = {};
     if (rest.operations.list) {
       collectionPath.get = {
         operationId: `list${name}`,
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("list") }
+          : {}),
         summary: `List ${label} records`,
         tags: [name],
         description:
           (description ? `${description} ` : "") +
           "Pagination, sorting, and every supported scalar field filter are " +
           "documented below. Unknown filter fields are rejected.",
-        parameters: listParameters(table, fieldsByKey),
+        parameters: listParameters(table, fieldsByKey, contract?.entityOperations.list),
         responses: {
-          "200": entityResponse(`${name}List`, `${name} page`),
-          "400": errorResponse("Invalid filter, sort, or pagination input"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
+          "200": entityResponse(
+            canonical ? `${name}ListResult` : `${name}List`,
+            canonical ? `${name} page and available operations` : `${name} page`,
+          ),
+          "400": errorResponse("Invalid filter, sort, or pagination input", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
         },
       };
     }
     if (rest.operations.create) {
-      collectionPath.post = {
+      const projection = createOperation?.implementation?.type === "plugin"
+        ? createOperation.interfaces?.rest
+        : undefined;
+      const successStatus = projection ? projection.response?.status ?? 201 : 201;
+      const createRoute: JsonObject = {
         operationId: `create${name}`,
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("create") }
+          : {}),
         summary: `Create ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -640,15 +1288,51 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "201": entityResponse(name, `Created ${label}`),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
+          [String(successStatus)]: entityResponse(
+            createPluginSchemas
+              ? `${name}CreateResult`
+              : canonical ? `${name}Result` : name,
+            canonical ? `Created ${label} and available operations` : `Created ${label}`,
+          ),
+          "400": errorResponse("Invalid request body", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          ...(canonical && createRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
+      if (projection && projection.path) {
+        const method = (projection.method ?? "POST").toLowerCase();
+        const openApiPath = projection.path.replace(
+          /:([_A-Za-z][_0-9A-Za-z]*)/g,
+          "{$1}",
+        );
+        const existing = (paths[openApiPath] ?? {}) as JsonObject;
+        if (method in existing) {
+          throw new Error(
+            `Duplicate canonical entity OpenAPI route "${method.toUpperCase()} ${openApiPath}".`,
+          );
+        }
+        paths[openApiPath] = {
+          ...existing,
+          [method]: createRoute,
+        };
+      } else {
+        collectionPath.post = createRoute;
+      }
     }
     if (Object.keys(collectionPath).length > 0) {
-      paths[`${REST_MOUNT}/${rest.basePath}`] = collectionPath;
+      const basePath = `${REST_MOUNT}/${rest.basePath}`;
+      paths[basePath] = {
+        ...((paths[basePath] ?? {}) as JsonObject),
+        ...collectionPath,
+      };
     }
 
     const itemPath: JsonObject = {
@@ -665,20 +1349,33 @@ export function renderOpenApiSpec(
     if (rest.operations.get) {
       itemPath.get = {
         operationId: `get${name}`,
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("get") }
+          : {}),
         summary: `Fetch ${label} by id`,
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
-          "200": entityResponse(name, `${label} record`),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          "200": entityResponse(
+            canonical ? `${name}Result` : name,
+            canonical ? `${label} record and available operations` : `${label} record`,
+          ),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
         },
       };
     }
     if (rest.operations.update) {
-      itemPath.patch = {
+      const projection = updateOperation?.implementation?.type === "plugin"
+        ? updateOperation.interfaces?.rest
+        : undefined;
+      const successStatus = projection ? projection.response?.status ?? 200 : 200;
+      const updateRoute: JsonObject = {
         operationId: `update${name}`,
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("update") }
+          : {}),
         summary: `Partially update ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -691,30 +1388,153 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "200": entityResponse(name, `Updated ${label}`),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          [String(successStatus)]: entityResponse(
+            updatePluginSchemas
+              ? `${name}UpdateResult`
+              : canonical ? `${name}Result` : name,
+            canonical ? `Updated ${label} and available operations` : `Updated ${label}`,
+          ),
+          "400": errorResponse("Invalid request body", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
+          ...(canonical && updateOperation?.concurrency?.version
+            ? {
+                "409": errorResponse(
+                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
+                  true,
+                ),
+                "422": errorResponse(
+                  "VALIDATION — expectedVersion is not a semantically valid record version",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && updateOperation?.concurrency?.editLease
+            ? {
+                "423": errorResponse(
+                  "LOCKED — another identity currently holds the record edit lease",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && updateRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
+      if (projection && projection.path) {
+        const method = (projection.method ?? "PATCH").toLowerCase();
+        const openApiPath = projection.path.replace(
+          /:([_A-Za-z][_0-9A-Za-z]*)/g,
+          "{$1}",
+        );
+        const target = updateOperation?.target;
+        const existing = (paths[openApiPath] ?? {}) as JsonObject;
+        if (method in existing) {
+          throw new Error(
+            `Duplicate canonical entity OpenAPI route "${method.toUpperCase()} ${openApiPath}".`,
+          );
+        }
+        paths[openApiPath] = {
+          ...existing,
+          ...("parameters" in existing
+            ? {}
+            : {
+                parameters: target?.scope === "record"
+                  ? [{
+                      name: target.inputField,
+                      in: "path",
+                      required: true,
+                      description: `Unique identifier of the ${label} record.`,
+                      schema: { type: "string", format: "uuid" },
+                    }]
+                  : [],
+              }),
+          [method]: updateRoute,
+        };
+      } else {
+        itemPath.patch = updateRoute;
+      }
     }
     if (rest.operations.delete) {
       itemPath.delete = {
         operationId: `delete${name}`,
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("delete") }
+          : {}),
         summary: `Delete ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
+        ...(hasDeleteControls
+          ? {
+              requestBody: {
+                required: deleteControls.required.length > 0,
+                content: {
+                  "application/json": {
+                    schema: { $ref: `#/components/schemas/${deleteSchemaName}` },
+                  },
+                },
+              },
+            }
+          : {}),
         responses: {
-          "204": { description: `${label} deleted` },
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          ...(canonical
+            ? { "200": entityResponse("DeletionResult", `${label} deleted`) }
+            : { "204": { description: `${label} deleted` } }),
+          ...(canonical
+            ? {
+                "400": errorResponse(
+                  "BAD_USER_INPUT — invalid request body or mutation controls",
+                  true,
+                ),
+              }
+            : {}),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
+          ...(canonical && deleteOperation?.concurrency?.version
+            ? {
+                "409": errorResponse(
+                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
+                  true,
+                ),
+                "422": errorResponse(
+                  "VALIDATION — expectedVersion is not a semantically valid record version",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && deleteOperation?.concurrency?.editLease
+            ? {
+                "423": errorResponse(
+                  "LOCKED — another identity currently holds the record edit lease",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && deleteRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
     }
     if (Object.keys(itemPath).some((key) => key !== "parameters")) {
-      paths[`${REST_MOUNT}/${rest.basePath}/{id}`] = itemPath;
+      const baseItemPath = `${REST_MOUNT}/${rest.basePath}/{id}`;
+      paths[baseItemPath] = {
+        ...((paths[baseItemPath] ?? {}) as JsonObject),
+        ...itemPath,
+      };
     }
   }
 
@@ -795,6 +1615,15 @@ export function renderOpenApiSpec(
           ...(documentation?.bearerDescription
             ? { description: documentation.bearerDescription }
             : {}),
+        },
+        // Control-realm operators: a bearer the platform's control realm issued,
+        // carried by Operations with `auth.mode: control`. Distinct from the
+        // tenant session bearer above; the two realms never vouch for each other.
+        controlBearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "Control-realm operator token (platform administration).",
         },
         ...(oauth2
           ? {

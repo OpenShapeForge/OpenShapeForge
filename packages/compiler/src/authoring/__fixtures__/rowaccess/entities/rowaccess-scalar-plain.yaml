@@ -1,0 +1,22 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowaccessScalarPlain
+title: Scalar owner fixture
+language: en
+authorization:
+  roles:
+    read: [Records.All.Read]
+    create: [Records.All.Manage]
+    update: [Records.All.Manage]
+    delete: [Records.All.Manage]
+  rowAccess:
+    enabled: true
+    empty: restricted
+    owner: { column: owner_id, session: app.current_user_id }
+fields:
+  - key: ownerId
+    valueType: string
+    required: true
+    label: { en: Owner }
+    persisted: { column: owner_id, storageClass: core }

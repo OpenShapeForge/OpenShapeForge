@@ -39,13 +39,37 @@ export type FieldDefinitionSemanticTypeKind =
   | "entity"
   | "object";
 
+export type FieldDefinitionEqualityConstraint = {
+  eq: string | number | boolean;
+};
+
+/**
+ * Deliberately bounded target-record predicate language. A field may require
+ * exact scalar values and one related collection may require any matching
+ * child. It is not a general expression language.
+ */
+export type FieldDefinitionRelationshipConstraints = Record<
+  string,
+  FieldDefinitionEqualityConstraint | {
+    any: Record<string, FieldDefinitionEqualityConstraint>;
+  }
+>;
+
 export type FieldDefinitionValidation = FieldValidation;
 
 export interface FieldDefinitionRelationship {
-  kind: "belongsTo" | "hasMany";
-  entity: string;
+  kind?: "belongsTo" | "hasMany" | "manyToMany";
+  entity?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  /** Compiler-derived identity; not authored twice beside semanticType. */
+  target?: string;
+  fieldKey?: string;
+  unique?: boolean;
   foreignKey?: string;
   displayField?: string;
+  /** Canonical validity rules for the referenced target record. */
+  constraints?: FieldDefinitionRelationshipConstraints;
 }
 
 export interface FieldDefinitionSuggestions {
@@ -57,6 +81,19 @@ export interface FieldDefinitionSuggestions {
    * indirection for forms that declare their own variable sources.
    */
   sourceKey?: string;
+}
+
+/**
+ * A persisted value owned by the entity runtime rather than by callers.
+ *
+ * The deliberately small vocabulary keeps this declarative: the source is
+ * another field on the same entity, `slug` is the only transformation, and a
+ * conflicting value is resolved under a compiler-verified unique index.
+ */
+export interface FieldDefinitionDeriveOnCreate {
+  from: string;
+  transform: "slug";
+  onConflict: "suffix";
 }
 
 export interface FieldDefinitionRuntimeMetadata {
@@ -81,10 +118,14 @@ export interface FieldDefinitionAuthoringMetadata {
  */
 export interface FieldDefinition {
   key: string;
-  valueType: FieldDefinitionValueType;
+  valueType?: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
+  /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
+  entityValue?: { definitionField: string };
+  /** Allowed entity-value definitions on this relationship collection. */
+  allowedDefinitions?: string[];
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;
@@ -110,6 +151,8 @@ export interface FieldDefinition {
    * A name that matches no compiled operation fails the build.
    */
   writtenBy?: string[];
+  /** Server-owned, persisted value derived once when the entity is created. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label?: LocalizedText;
   description?: LocalizedText;
   placeholder?: LocalizedText;

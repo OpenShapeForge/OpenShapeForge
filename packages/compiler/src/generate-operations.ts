@@ -1,19 +1,116 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
 import type {
   CompilerPlugin,
+  CompiledPluginOperation,
+  CompiledStaticEntityOperation,
   JsonSchema,
   PluginBaseContext,
   PluginOperationContract,
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
+import type { CompiledEntityOperation } from "./authoring/types.js";
+import type {
+  EntityOperationDefinition,
+  OperationCatalogDefinition,
+} from "./authoring/types.js";
+import type { LocalizedText } from "./authoring/types.js";
+import type { CompiledEntityInfo } from "./plugins.js";
+import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { materializeCollectionOperations } from "./authoring/collection-operations.js";
 
-export type CompiledPluginOperation = PluginOperationContract & { plugin: string };
+const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
+const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
+import {
+  SEARCHABLE_OPERATION_TOOL_NAMES,
+  operationMcpServer,
+  selectOperationToolProjection,
+  type McpOperationToolProjection,
+} from "./generate-mcp.js";
+import { moduleOperationId } from "./authoring/operation-catalog.js";
+
+export type { CompiledPluginOperation } from "./plugins.js";
+
+/**
+ * Runtime modules the API itself provides, so an Operation bound to one needs
+ * no plugin runtime in the module registry: `osf-blueprints` serves the
+ * blueprint Operations and `osf-control` the platform's own administration.
+ */
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control"];
+
+/**
+ * Platform-owned mutation controls are derived from the canonical Operation
+ * policy. Authors describe business input only; every adapter receives this
+ * one augmented schema and therefore asks for the same lease/version or
+ * confirmation values that the shared executor enforces.
+ */
+function withOperationControls(
+  inputSchema: JsonSchema,
+  definition: EntityOperationDefinition,
+): JsonSchema {
+  const properties = {
+    ...((inputSchema.properties ?? {}) as Record<string, unknown>),
+  };
+  const required = new Set(
+    Array.isArray(inputSchema.required) ? inputSchema.required as string[] : [],
+  );
+  const dependentRequired = {
+    ...((inputSchema.dependentRequired ?? {}) as Record<string, string[]>),
+  };
+
+  if (definition.concurrency?.version) {
+    properties.expectedVersion = {
+      type: "string",
+      format: "date-time",
+      "x-osf-i18n": { title: { en: "Expected version", nl: "Verwachte versie" } },
+      description: `Version from the record's ${definition.concurrency.version.field} field.`,
+    };
+    required.add("expectedVersion");
+  }
+  if (definition.concurrency?.editLease) {
+    properties.leaseToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque edit-lease token issued by the server for this Operation and record.",
+    };
+    required.add("leaseToken");
+  }
+  if (definition.confirmation.mode === "acknowledgement") {
+    properties.confirmed = {
+      type: "boolean",
+      description: "Set to true after the user explicitly acknowledges this Operation.",
+    };
+  }
+  if (definition.confirmation.mode === "challenge") {
+    properties.confirmationToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque, single-use confirmation challenge token issued by the server.",
+    };
+    properties.confirmationAnswer = {
+      type: "string",
+      minLength: 1,
+      description: `Exact current value requested for ${definition.confirmation.challenge.field}.`,
+    };
+    dependentRequired.confirmationToken = ["confirmationAnswer"];
+    dependentRequired.confirmationAnswer = ["confirmationToken"];
+  }
+
+  return {
+    ...inputSchema,
+    properties,
+    ...(required.size > 0 ? { required: [...required] } : {}),
+    ...(Object.keys(dependentRequired).length > 0 ? { dependentRequired } : {}),
+  };
+}
 
 const KEY = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+const AUTHORED_KEY = /^[a-zA-Z][a-zA-Z0-9]*(?:[.-][a-zA-Z0-9]+)*$/;
 const IDENTIFIER = /^[_A-Za-z][_0-9A-Za-z]*$/;
 const MCP_NAME = /^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/;
 const GRAPHQL_FIELD = /^[_A-Za-z][_0-9A-Za-z]*$/;
@@ -34,6 +131,15 @@ const RESERVED_API_NAMESPACES = new Set([
   "oauth",
   "ready",
   "rest",
+]);
+
+/**
+ * Reserved namespaces a core module owns outright. The reservation exists so
+ * a plugin cannot squat on a core prefix; the core module that IS that prefix
+ * is the one contributor allowed to author Operations under it.
+ */
+const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
+  ["control", "osf-control"],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {
@@ -77,6 +183,8 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
   { method: "POST", path: "/api/documents", owner: "core document commands" },
   { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
+  { method: "POST", path: "/api/artifacts", owner: "core artifact transport" },
+  { method: "GET", path: "/api/artifacts/:artifactId/contents", owner: "core artifact transport" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
   { method: "GET", path: "/api/rest/v1/connectors/:slug", owner: "core connector catalog" },
   { method: "PUT", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey", owner: "core connector configuration" },
@@ -100,15 +208,10 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "POST", path: "/api/api-keys/:integrationId/keys", owner: "core API-key provisioning" },
   { method: "DELETE", path: "/api/api-keys/keys/:keyId", owner: "core API-key provisioning" },
   { method: "DELETE", path: "/api/api-keys/:integrationId", owner: "core API-key provisioning" },
-  { method: "GET", path: "/api/control/v1/tenants", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/tenants", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
-  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
-  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug/organizations/:orgUnitId", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/reconciliation", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/reconciliation/reapply", owner: "core control plane" },
+  // The control plane under /api/control/v1 is no longer listed here: its
+  // routes are the canonical `osf-control` operation catalog, claimed below
+  // like every other Operation. The "control" namespace itself stays reserved
+  // (RESERVED_API_NAMESPACES) so only that core module can author under it.
 ];
 
 function restPathParameters(path: string): string[] {
@@ -181,13 +284,14 @@ function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
   return valid;
 }
 
-function validateOperation(plugin: string, operation: PluginOperationContract): void {
+function validateOperation(plugin: string, operation: PluginOperationContract, authored = false): void {
   const where = `Plugin "${plugin}" operation "${operation.key}"`;
   if (!operation.transports?.typescript) {
     throw new Error(`${where} must declare an explicit TypeScript projection or disabled reason.`);
   }
-  if (!KEY.test(operation.key) || !operation.key.startsWith(`${plugin}.`)) {
-    throw new Error(`${where} must use a stable lowercase key prefixed with "${plugin}.".`);
+  if (!(authored ? AUTHORED_KEY : KEY).test(operation.key) || (!authored && !operation.key.startsWith(`${plugin}.`))) {
+    throw new Error(authored ? `${where} must use a stable alphanumeric identifier separated by dots or hyphens.`
+      : `${where} must use a stable lowercase key prefixed with "${plugin}.".`);
   }
   nonEmpty(operation.title, `${where} title`);
   nonEmpty(operation.description, `${where} description`);
@@ -196,18 +300,26 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
     throw new Error(`${where} handler must be a TypeScript identifier.`);
   }
   const restPath = operation.transports.rest.path;
-  if (RESERVED_API_NAMESPACES.has(plugin)) {
-    throw new Error(`${where} uses reserved API namespace "${plugin}".`);
+  const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
+  const routeNamespace = restPath.split("/")[2] ?? "";
+  const reservedNamespace = (authored ? [routeNamespace] : [apiNamespace, plugin, routeNamespace])
+    .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()) &&
+      CORE_MODULE_API_NAMESPACES.get(value.toLowerCase()) !== plugin);
+  if (reservedNamespace) {
+    throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }
-  const pluginRoot = `/api/${plugin}`;
+  const pluginRoot = `/api/${apiNamespace}`;
+  const allowedRoots = authored ? [pluginRoot, `/api/${plugin}`] : [pluginRoot];
+  // Authored projections own explicit safe paths; identity and implementation
+  // ownership do not rename existing endpoints. Global route collision audits
+  // remain authoritative, while imperative plugins keep their prefix boundary.
   if (!REST_PATH.test(restPath) ||
-      (restPath !== pluginRoot && !restPath.startsWith(`${pluginRoot}/`))) {
+      (!authored && !allowedRoots.some(root => restPath === root || restPath.startsWith(`${root}/`)))) {
     throw new Error(
       `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
     );
   }
-  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
-  (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
+  const ajv = operationSchemaValidator();
   assertSchema(ajv, operation.inputSchema, `${where} inputSchema`);
   assertSchema(ajv, operation.outputSchema, `${where} outputSchema`);
   if (operation.inputSchema.type !== "object" ||
@@ -263,8 +375,20 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
       }
     }
   }
-  if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
-    throw new Error(`${where} session auth must declare at least one role.`);
+  if (
+    operation.auth.mode === "session" &&
+    operation.auth.recordPermission !== undefined &&
+    (operation.target?.scope !== "record" || !operation.target.inputField)
+  ) {
+    throw new Error(
+      `${where} recordPermission requires a record target with inputField.`,
+    );
+  }
+  if (operation.auth.mode === "session" && operation.auth.roleGroups !== undefined) {
+    if (!Array.isArray(operation.auth.roleGroups) || operation.auth.roleGroups.length === 0 ||
+        operation.auth.roleGroups.some(group => !Array.isArray(group) || group.length === 0 || group.some(role => typeof role !== "string" || !role.trim()))) {
+      throw new Error(`${where} auth.roleGroups must contain one or more non-empty role groups.`);
+    }
   }
   if (operation.auth.mode === "custom") {
     nonEmpty(operation.auth.scheme, `${where} custom auth scheme`);
@@ -284,6 +408,17 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   }
   if (operation.auth.mode === "public" && operation.transports.mcp.enabled) {
     throw new Error(`${where} public operations cannot project to the authenticated MCP endpoint; disable MCP with a reason.`);
+  }
+  if (operation.auth.mode === "control") {
+    // A control-realm operator has no tenant, and the tenant GraphQL schema
+    // has no control-realm session to resolve against; REST and the control
+    // MCP server are the only surfaces that verify a control bearer.
+    if (operation.tenancy.mode !== "none") {
+      throw new Error(`${where} control auth requires tenancy mode none; no tenant context exists for a control-realm operator.`);
+    }
+    if (operation.transports.graphql.enabled) {
+      throw new Error(`${where} control auth can only project to REST and the control MCP server; GraphQL needs a disabled reason.`);
+    }
   }
   const responseKind = operation.transports.rest.response.kind;
   const successStatus = operation.transports.rest.response.status ?? 200;
@@ -318,6 +453,24 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   }
 }
 
+function operationSchemaValidator() {
+  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
+  (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
+  ajv.addKeyword({
+    keyword: "x-osf-sourceField",
+    schemaType: "string",
+    valid: true,
+  });
+  ajv.addKeyword({
+    keyword: "x-osf-control",
+    schemaType: "string",
+    valid: true,
+  });
+  ajv.addKeyword(operationReferenceKeyword);
+  ajv.addKeyword(operationI18nKeyword);
+  return ajv;
+}
+
 function claimSurface(
   seen: Map<string, string>,
   kind: string,
@@ -337,14 +490,18 @@ export function auditOperationSurfaceCollisions(
   manifest: PlatformSchemaManifest,
   connectors: readonly CompiledConnectorContract[],
   maxDedicatedMcpTools: number,
-): void {
+): McpOperationToolProjection {
   const graphql = new Map<string, string>();
   const mcp = new Map<string, string>();
+  // The control MCP server has its own tool-name space and no dedicated-tool
+  // budget: its list is only ever the control Operations (operationMcpServer).
+  const controlMcp = new Map<string, string>();
   // Core owns its internal precedence choices (for example a fixed route next
   // to a parameter fallback). Generated and plugin routes may overlap neither
   // those route languages nor each other.
   const rest: RestRoute[] = [...CORE_API_ROUTES];
   let dedicatedMcpTools = 0;
+  let operationMcpTools = 0;
 
   const claimRest = (route: RestRoute): void => {
     const previous = rest.find((claimed) => restRoutesOverlap(claimed, route));
@@ -375,13 +532,15 @@ export function auditOperationSurfaceCollisions(
     }
     const entityGraphql = table.source?.graphql;
     if (entityGraphql) {
-      for (const name of [
-        entityGraphql.singleQueryName,
-        entityGraphql.listQueryName,
-        entityGraphql.createMutationName,
-        entityGraphql.updateMutationName,
-        entityGraphql.deleteMutationName,
-      ]) claimSurface(graphql, "GraphQL root field", name, owner);
+      for (const [intent, name] of [
+        ["get", entityGraphql.singleQueryName],
+        ["list", entityGraphql.listQueryName],
+        ["create", entityGraphql.createMutationName],
+        ["update", entityGraphql.updateMutationName],
+        ["delete", entityGraphql.deleteMutationName],
+      ] as const) {
+        if (entityGraphql.operations?.[intent] !== false) claimSurface(graphql, "GraphQL root field", name, owner);
+      }
     }
     const entityMcp = table.source?.mcp;
     if (entityMcp) {
@@ -415,22 +574,49 @@ export function auditOperationSurfaceCollisions(
       claimSurface(graphql, "GraphQL root field", operation.transports.graphql.field, owner);
     }
     if (operation.transports.mcp.enabled) {
-      claimSurface(mcp, "MCP tool", operation.transports.mcp.name, owner);
-      dedicatedMcpTools += 1;
+      if (operationMcpServer(operation) === "control") {
+        claimSurface(controlMcp, "control MCP tool", operation.transports.mcp.name, owner);
+      } else {
+        claimSurface(mcp, "MCP tool", operation.transports.mcp.name, owner);
+        operationMcpTools += 1;
+      }
     }
   }
 
-  if (dedicatedMcpTools > maxDedicatedMcpTools) {
-    throw new Error(
-      `The combined MCP catalog would advertise ${dedicatedMcpTools} dedicated tools, ` +
-      `over the ${maxDedicatedMcpTools} limit.`,
+  const projection = selectOperationToolProjection(
+    dedicatedMcpTools,
+    operationMcpTools,
+    maxDedicatedMcpTools,
+  );
+  if (projection === "searchable") {
+    claimSurface(
+      mcp,
+      "MCP tool",
+      SEARCHABLE_OPERATION_TOOL_NAMES.search,
+      "shared searchable Operation catalog",
+    );
+    claimSurface(
+      mcp,
+      "MCP tool",
+      SEARCHABLE_OPERATION_TOOL_NAMES.execute,
+      "shared searchable Operation executor",
     );
   }
+  return projection;
 }
 
 export function collectPluginOperations(
   plugins: readonly CompilerPlugin[],
   context: PluginBaseContext,
+): CompiledPluginOperation[] {
+  return collectOperationContracts(plugins, context, false);
+}
+
+/** Authored canonical identity is separate from the bound implementation owner. */
+function collectOperationContracts(
+  plugins: readonly CompilerPlugin[],
+  context: PluginBaseContext,
+  authored: boolean,
 ): CompiledPluginOperation[] {
   const operations: CompiledPluginOperation[] = [];
   const keys = new Set<string>();
@@ -444,7 +630,8 @@ export function collectPluginOperations(
       ? plugin.operations(context)
       : plugin.operations ?? [];
     for (const operation of declared) {
-      validateOperation(plugin.name, operation);
+      if (Object.hasOwn(operation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+      validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
         operation.transports.rest.path,
@@ -482,17 +669,495 @@ export function collectPluginOperations(
       if (operation.transports.mcp.enabled) mcp.add(operation.transports.mcp.name);
       if (graphqlKey) graphql.add(graphqlKey);
       if (typescriptKey) typescript.add(typescriptKey);
-      operations.push({
+      const compiled: CompiledPluginOperation = {
         ...operation,
         plugin: plugin.name,
-      });
+        id: operation.key,
+        intent: "invoke",
+      };
+      const native = authored ? nativeBindings.get(operation) : undefined;
+      if (native) {
+        compiled.implementation = { ...native };
+        verifiedNativeOperations.set(compiled, JSON.stringify(native));
+      }
+      operations.push(compiled);
     }
   }
   return operations.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-export function renderOperationCatalog(operations: readonly CompiledPluginOperation[]): string {
-  return `${JSON.stringify({ version: 1, operations }, null, 2)}\n`;
+function authoredText(
+  value: string | LocalizedText,
+): string {
+  if (typeof value === "string") return value;
+  return value.en ?? value.nl ?? value.fr ?? "";
+}
+
+function kebab(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function snake(value: string): string {
+  return kebab(value).replace(/-/g, "_");
+}
+
+function lowerCamel(value: string): string {
+  const parts = kebab(value).split("-").filter(Boolean);
+  return parts.map((part, index) =>
+    index === 0 ? part : `${part[0]!.toUpperCase()}${part.slice(1)}`
+  ).join("");
+}
+
+/**
+ * Lower strict-v2 YAML plugin Operations to the established canonical static
+ * registry. YAML owns every contract field; the runtime module supplies only
+ * the named handler implementation.
+ */
+export function collectAuthoredEntityPluginOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  context: PluginBaseContext,
+  referentiedata: CoreReferentiedataSnapshot = {},
+): CompiledPluginOperation[] {
+  materializeCollectionOperations(entities, referentiedata);
+  const byPlugin = new Map<string, PluginOperationContract[]>();
+  for (const { contract } of entities) {
+    for (const authored of contract.pluginOperations ?? []) {
+      const definition = authored.definition;
+      if (definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") continue;
+      const implementation = definition.implementation;
+      const pluginName = implementation.type === "collection" ? "core" : implementation.plugin;
+      const restProjection = authored.interfaces.rest;
+      if (restProjection === undefined || restProjection === false) {
+        throw new Error(
+          `Entity plugin Operation "${authored.id}" currently requires an ` +
+            "interfaces.rest projection so its existing static runtime handler has an address.",
+        );
+      }
+      const mcpProjection = authored.interfaces.mcp;
+      const graphqlProjection = authored.interfaces.graphql;
+      const restMethod = restProjection.method ??
+        (definition.effects.data === "read" ? "GET" : "POST");
+      const targetSegment = definition.target?.scope === "record"
+        ? `/:${definition.target.inputField}`
+        : "";
+      const inputSchema = withOperationControls(definition.input!.schema, definition);
+      const outputSchema = definition.output!.schema;
+      const idempotency = definition.reliability.idempotency;
+      const operation: PluginOperationContract = {
+        key: authored.id,
+        title: authoredText(definition.name),
+        description: authoredText(definition.description),
+        handler: implementation.type === "collection" ? "collectionMutation" : implementation.handler,
+        target: {
+          entityId: authored.entityId,
+          entityName: authored.entityName,
+          scope: definition.target!.scope,
+          ...(definition.target!.scope === "record"
+            ? { inputField: definition.target!.inputField }
+            : {}),
+        },
+        inputSchema,
+        outputSchema,
+        errors: definition.errors! as PluginOperationContract["errors"],
+        auth: definition.auth!,
+        tenancy: definition.tenancy!,
+        idempotency: idempotency.mode === "natural"
+          ? { mode: "intrinsic" }
+          : idempotency.mode === "keyed"
+            ? {
+                mode: "idempotency-key",
+                header: idempotency.header ?? "Idempotency-Key",
+                inputField: idempotency.inputField!,
+              }
+            : { mode: "none" },
+        effects: definition.effects,
+        ...(definition.concurrency ? { concurrency: definition.concurrency } : {}),
+        confirmation: definition.confirmation,
+        transports: {
+          rest: {
+            method: restMethod,
+            path: restProjection.path ??
+              `/api/${pluginName}/${kebab(authored.entityName)}` +
+                `${targetSegment}/${kebab(authored.key)}`,
+            response: restProjection.response ?? { kind: "json" },
+          },
+          mcp: mcpProjection === undefined || mcpProjection === false
+            ? {
+                enabled: false,
+                reason: "This entity interface does not project the Operation to MCP.",
+              }
+            : {
+                enabled: true,
+                name: mcpProjection.name ?? `${snake(authored.entityName)}_${snake(authored.key)}`,
+              },
+          graphql: graphqlProjection === undefined || graphqlProjection === false
+            ? {
+                enabled: false,
+                reason: "This entity interface does not project the Operation to GraphQL.",
+              }
+            : {
+                enabled: true,
+                kind: graphqlProjection.kind ??
+                  (definition.effects.data === "read" ? "query" : "mutation"),
+                field: graphqlProjection.field ??
+                  `${lowerCamel(authored.entityName)}${
+                    authored.key[0]!.toUpperCase()
+                  }${authored.key.slice(1)}`,
+              },
+          typescript: {
+            enabled: true,
+            functionName: `${lowerCamel(authored.entityName)}${
+              authored.key[0]!.toUpperCase()
+            }${authored.key.slice(1)}`,
+          },
+        },
+      };
+      if (implementation.type === "collection") nativeBindings.set(operation, {
+        type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
+      });
+      const current = byPlugin.get(pluginName) ?? [];
+      current.push(operation);
+      byPlugin.set(pluginName, current);
+    }
+  }
+  const synthetic = [...byPlugin.entries()].map(([name, operations]) => ({
+    name,
+    operations,
+  } satisfies CompilerPlugin));
+  const needsEntityTypeList = entities.some(({ contract }) =>
+    contract.model?.fields?.some(
+      (field) =>
+        field.options?.type === "dynamic" &&
+        field.options.source === "entityTypes.list",
+    ) === true
+  );
+  return [
+    ...collectOperationContracts(synthetic, context, true),
+    ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
+    ...(needsEntityTypeList
+      ? collectEntityTypeListOperation(context, entities)
+      : []),
+  ];
+}
+
+export function constrainedReferenceCreateOperationId(entityName: string, field: string): string {
+  return `core.${entityName}.${field}.create-constrained-reference`;
+}
+
+/**
+ * A constrained reference owns its exact values during creation and may need
+ * one related child write. Materialize that bounded case as a normal
+ * discoverable Operation instead of teaching YAML a procedural workflow language.
+ */
+function collectConstrainedReferenceCreateOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  referentiedata: CoreReferentiedataSnapshot,
+): CompiledPluginOperation[] {
+  const contracts = entities.map(({ contract }) => contract);
+  const output: CompiledPluginOperation[] = [];
+  const requireNativeCreate = (
+    operation: CompiledEntityOperation | undefined,
+    label: string,
+  ): CompiledEntityOperation => {
+    if (
+      !operation ||
+      operation.implementation.type !== "entity" ||
+      !operation.authorization.roles.length ||
+      operation.effects.external !== "none" ||
+      operation.interaction.confirmation.mode !== "none" ||
+      operation.interaction.secureInput ||
+      operation.concurrency?.editLease ||
+      operation.prerequisites?.length ||
+      operation.reliability.idempotency.mode === "keyed"
+    ) {
+      throw new Error(
+        `${label} needs an unguarded native entity create Operation; custom handlers, leases, confirmation, prerequisites, keyed idempotency and secure input are unsupported.`,
+      );
+    }
+    return operation;
+  };
+  for (const owner of contracts) for (const field of owner.model?.fields ?? []) {
+    const constraints = field.relationship?.constraints;
+    if (!constraints || !field.relationship?.target) continue;
+    const nested = Object.entries(constraints).filter((entry): entry is [string, { any: Record<string, { eq: string | number | boolean }> }] => "any" in entry[1]);
+    const target = contracts.find(contract => contract.entity.name === field.relationship!.target);
+    const collection = nested[0] ? target?.model.relationships.find(relation => relation.key === nested[0]![0]) : undefined;
+    const child = collection && contracts.find(contract => contract.entity.name === collection.target);
+    const parentColumn = child?.storage.columns.find(column => column.column === collection?.foreignKey);
+    if (!target ||
+        (nested.length > 0 && (!collection || collection.kind !== "hasMany" || !child || !parentColumn))) {
+      throw new Error(`${owner.entity.name}.${field.key}: constrained reference create needs native target and collection-child create Operations.`);
+    }
+    const create = requireNativeCreate(target.entityOperations.create, `${owner.entity.name}.${field.key}: target create`);
+    const childCreate = child
+      ? requireNativeCreate(child.entityOperations.create, `${owner.entity.name}.${field.key}: child create`)
+      : undefined;
+    const nativeSchemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
+    const nativeInput = nativeSchemas.inputSchema as JsonSchema;
+    const id = constrainedReferenceCreateOperationId(owner.entity.name, field.key);
+    const targetValues = Object.fromEntries(Object.entries(constraints).flatMap(([key, value]) => "eq" in value ? [[key, value.eq]] : []));
+    const nativeValues = (nativeInput.properties as Record<string, unknown> | undefined)?.values as JsonSchema | undefined;
+    const properties = Object.fromEntries(Object.entries(nativeValues?.properties ?? {}).filter(([key]) => !Object.hasOwn(targetValues, key)));
+    const required = Array.isArray(nativeValues?.required)
+      ? nativeValues.required.filter((key): key is string => typeof key === "string" && !Object.hasOwn(targetValues, key))
+      : [];
+    const { required: _nativeRequired, ...valuesWithoutRequired } = nativeValues ?? {};
+    const inputSchema: JsonSchema = {
+      ...nativeInput,
+      properties: {
+        ...(nativeInput.properties as Record<string, unknown> | undefined),
+        values: { ...valuesWithoutRequired, properties, ...(required.length > 0 ? { required } : {}) },
+      },
+    };
+    const childValues = nested[0]
+      ? Object.fromEntries(Object.entries(nested[0][1].any).map(([key, value]) => [key, value.eq]))
+      : undefined;
+    const roleGroups = [create.authorization.roles, ...(childCreate ? [childCreate.authorization.roles] : [])]
+      .map(group => [...new Set(group)].sort());
+    const raw: PluginOperationContract = {
+      key: id,
+      title: `Create ${target.entity.title} for ${owner.entity.title}`,
+      description: child
+        ? `Creates one ${target.entity.title} and its required ${child.entity.title} atomically.`
+        : `Creates one ${target.entity.title} with the required relationship values.`,
+      handler: "constrainedReferenceCreate",
+      target: { entityId: target.entity.id, entityName: target.entity.name, scope: "collection" },
+      inputSchema,
+      outputSchema: nativeSchemas.outputSchema,
+      errors: [],
+      auth: { mode: "session", roleGroups }, tenancy: { mode: "required" },
+      idempotency: { mode: "none" }, effects: { data: "write", external: "none" },
+      confirmation: { mode: "none" },
+      transports: {
+        rest: { method: "POST", path: `/api/core/reference/${kebab(owner.entity.name)}/${kebab(field.key)}`, response: { kind: "json" } },
+        mcp: { enabled: true, name: `${snake(owner.entity.name)}_${snake(field.key)}_create_reference` },
+        graphql: { enabled: true, kind: "mutation", field: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+        typescript: { enabled: true, functionName: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+      },
+    };
+    const compiled: CompiledPluginOperation = { ...raw, plugin: "core", id, intent: "invoke" };
+    const binding: NonNullable<CompiledPluginOperation["implementation"]> = {
+      type: "constrained-reference-create", targetEntityName: target.entity.name,
+      ...(child && parentColumn && childValues ? {
+        collectionEntityName: child.entity.name, parentField: parentColumn.field, childValues,
+      } : {}),
+      targetValues,
+    };
+    compiled.implementation = binding;
+    verifiedNativeOperations.set(compiled, JSON.stringify(binding));
+    output.push(compiled);
+  }
+  return output;
+}
+
+/** Built-in model discovery follows canonical Operation authentication and transport. */
+function collectEntityTypeListOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
+  const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
+  const readRoles = [...new Set(entities.flatMap(({ contract }) => contract.authorization.roles.read))].sort();
+  const operation: PluginOperationContract = {
+    key: "entityTypes.list", title: "List entity types", description: "Search entity types readable by the current user.",
+    handler: "listEntityTypes", auth: { mode: "session", roles: readRoles }, tenancy: { mode: "required" },
+    idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      locale: { ...title("Language", "Taal"), type: "string", enum: ["en", "nl"] }, search: { ...title("Search", "Zoeken"), type: "string", maxLength: 500 }, first: { ...title("Page size", "Paginagrootte"), type: "integer", minimum: 1, maximum: 100 }, after: { ...title("Cursor", "Cursor"), type: "string" },
+    } },
+    outputSchema: { type: "object", required: ["items", "pageInfo"], properties: {
+      items: { ...title("Entity types", "Entiteitstypen"), type: "array", items: { type: "object", required: ["value", "label"], properties: { value: { ...title("Value", "Waarde"), type: "string" }, label: { ...title("Label", "Label"), type: "string" } } } },
+      pageInfo: { ...title("Pagination", "Paginering"), type: "object", required: ["hasNextPage", "endCursor"], properties: { hasNextPage: { ...title("More results", "Meer resultaten"), type: "boolean" }, endCursor: { ...title("Next cursor", "Volgende cursor"), type: ["string", "null"] } } },
+    } },
+    errors: [],
+    transports: {
+      rest: { method: "GET", path: "/api/core/entity-types", response: { kind: "json" } },
+      mcp: { enabled: true, name: "entity_types_list" },
+      graphql: { enabled: true, kind: "query", field: "entityTypesList" },
+      typescript: { enabled: true, functionName: "entityTypesList" },
+    },
+  };
+  nativeBindings.set(operation, { type: "entity-type-list", labels: Object.fromEntries(entities.map(({ contract }) => [contract.entity.name, { en: contract.entity.labels?.en ?? contract.entity.title, nl: contract.entity.labels?.nl ?? contract.entity.title }])) });
+  return collectOperationContracts([{ name: "core", operations: [operation] }], context, true);
+}
+
+/** Lower module/global YAML Operations through the same static registry. */
+export function collectAuthoredModulePluginOperations(
+  catalogs: readonly OperationCatalogDefinition[],
+  context: PluginBaseContext,
+): CompiledPluginOperation[] {
+  const synthetic: CompilerPlugin[] = catalogs.map((catalog) => ({
+    name: catalog.plugin,
+    operations: Object.entries(catalog.operations).map(([key, definition]) => {
+      if (definition.implementation.type !== "plugin") {
+        throw new Error(`Module Operation "${key}" must use implementation.type plugin.`);
+      }
+      const restContract = catalog.interfaces.rest;
+      const rest = restContract ? restContract.operations?.[key] ?? {} : undefined;
+      if (rest === undefined || rest === false) {
+        throw new Error(
+          `Module Operation "${definition.id ?? key}" currently requires an ` +
+            "interfaces.rest projection so its existing static runtime handler has an address.",
+        );
+      }
+      const mcpContract = catalog.interfaces.mcp;
+      const mcp = mcpContract ? mcpContract.operations?.[key] ?? {} : undefined;
+      const graphqlContract = catalog.interfaces.graphql;
+      const graphql = graphqlContract
+        ? graphqlContract.operations?.[key] ?? {}
+        : undefined;
+      const idempotency = definition.reliability.idempotency;
+      const canonicalId = moduleOperationId(catalog, key, definition);
+      return {
+        key: canonicalId,
+        title: authoredText(definition.name),
+        description: authoredText(definition.description),
+        handler: definition.implementation.handler,
+        inputSchema: withOperationControls(definition.input!.schema, definition),
+        outputSchema: definition.output!.schema,
+        errors: definition.errors! as PluginOperationContract["errors"],
+        auth: definition.auth!,
+        tenancy: definition.tenancy!,
+        idempotency: idempotency.mode === "natural"
+          ? { mode: "intrinsic" as const }
+          : idempotency.mode === "keyed"
+            ? {
+                mode: "idempotency-key" as const,
+                header: idempotency.header ?? "Idempotency-Key",
+                inputField: idempotency.inputField!,
+              }
+            : { mode: "none" as const },
+        effects: definition.effects,
+        confirmation: definition.confirmation,
+        transports: {
+          rest: {
+            method: rest.method ?? (definition.effects.data === "read" ? "GET" : "POST"),
+            path: rest.path ?? `/api/${catalog.plugin}/${kebab(key)}`,
+            response: rest.response ?? { kind: "json" as const },
+          },
+          mcp: mcp === undefined || mcp === false
+            ? { enabled: false as const, reason: "The module interface does not project this Operation to MCP." }
+            : { enabled: true as const, name: mcp.name ?? snake(canonicalId) },
+          graphql: graphql === undefined || graphql === false
+            ? { enabled: false as const, reason: "The module interface does not project this Operation to GraphQL." }
+            : {
+                enabled: true as const,
+                kind: graphql.kind ?? (definition.effects.data === "read" ? "query" : "mutation"),
+                field: graphql.field ?? lowerCamel(canonicalId),
+              },
+          typescript: { enabled: true as const, functionName: lowerCamel(canonicalId) },
+        },
+      } satisfies PluginOperationContract;
+    }),
+  }));
+  return collectOperationContracts(synthetic, context, true);
+}
+
+export function collectEntityOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+): CompiledEntityOperation[] {
+  const operations = entities
+    .flatMap((entity) => Object.values(entity.contract.entityOperations))
+    .filter((operation): operation is CompiledEntityOperation => operation !== undefined)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const ids = new Set<string>();
+  for (const operation of operations) {
+    if (ids.has(operation.id)) {
+      throw new Error(`Duplicate entity operation id "${operation.id}".`);
+    }
+    ids.add(operation.id);
+  }
+  return operations;
+}
+
+/** Build the one deterministic namespace consumed by compiler plugins. */
+export function buildStaticOperationCatalog(
+  pluginOperations: readonly CompiledPluginOperation[],
+  entityOperations: readonly CompiledEntityOperation[],
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  referentiedata: CoreReferentiedataSnapshot,
+): import("./plugins.js").StaticOperationCatalog {
+  const contracts = entities.map(({ contract }) => contract);
+  const byEntityId = new Map(contracts.map((contract) => [contract.entity.id, contract]));
+  const declaredIds = [...pluginOperations, ...entityOperations]
+    .map((operation) => operation.id)
+    .sort((left, right) => left.localeCompare(right));
+  for (let index = 1; index < declaredIds.length; index += 1) {
+    if (declaredIds[index - 1] === declaredIds[index]) {
+      throw new Error(
+        `Duplicate canonical Operation id "${declaredIds[index]}". ` +
+          "Keep its metadata in exactly one entity or plugin/module declaration.",
+      );
+    }
+  }
+  const concreteEntityOperations = entityOperations.map((operation) => {
+    const contract = byEntityId.get(operation.entityId);
+    if (!contract) {
+      throw new Error(
+        `Canonical entity Operation "${operation.id}" references missing entity ` +
+          `"${operation.entityId}" while building its concrete schemas.`,
+      );
+    }
+    const concrete = {
+      ...operation,
+      ...entityOperationJsonSchemas(contract, operation, contracts, referentiedata),
+    };
+    if (operation.implementation.type === "plugin") {
+      const ajv = operationSchemaValidator();
+      assertSchema(ajv, concrete.inputSchema, `Entity Operation "${operation.id}" inputSchema`);
+      assertSchema(ajv, concrete.outputSchema, `Entity Operation "${operation.id}" outputSchema`);
+    }
+    return concrete;
+  });
+  const operations = [...pluginOperations, ...concreteEntityOperations]
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const byId = new Map(operations.map((operation) => [operation.id, operation]));
+  for (const target of concreteEntityOperations) {
+    for (const prerequisite of target.prerequisites ?? []) {
+      const source = byId.get(prerequisite.operation);
+      if (!source) {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" references missing prerequisite ` +
+            `Operation "${prerequisite.operation}".`,
+        );
+      }
+      if (source.intent !== "invoke") {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" prerequisite ` +
+            `"${prerequisite.operation}" must be an authored invoke Operation.`,
+        );
+      }
+      const requiredInput = Array.isArray(source.inputSchema.required)
+        ? source.inputSchema.required
+        : [];
+      if (
+        source.auth.mode !== "session" ||
+        source.tenancy.mode !== "required" ||
+        source.effects?.data !== "read" ||
+        source.effects.external !== "none" ||
+        requiredInput.length > 0
+      ) {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" prerequisite ` +
+            `"${prerequisite.operation}" must use session auth, required tenancy, ` +
+            "read/no-external effects and no required input so every interface can show it safely.",
+        );
+      }
+    }
+  }
+  return { version: 1, operations };
+}
+
+export function renderOperationCatalog(
+  catalog: import("./plugins.js").StaticOperationCatalog,
+): string {
+  const operations = catalog.operations.filter(
+    (operation): operation is CompiledPluginOperation => operation.intent === "invoke",
+  );
+  const entityOperations = catalog.operations.filter(
+    (operation): operation is CompiledStaticEntityOperation => operation.intent !== "invoke",
+  );
+  return `${JSON.stringify({ version: 1, operations, entityOperations }, null, 2)}\n`;
 }
 
 export function assertOperationRuntimeModules(
@@ -500,8 +1165,14 @@ export function assertOperationRuntimeModules(
   runtimeModuleNames: Iterable<string>,
 ): void {
   const available = new Set(runtimeModuleNames);
+  for (const operation of operations) {
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate"].includes(operation.handler) ||
+      verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
+      throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
+    }
+  }
   const missing = [...new Set(
-    operations.filter((operation) => !available.has(operation.plugin)).map((operation) => operation.plugin),
+    operations.filter((operation) => !operation.implementation && !available.has(operation.plugin)).map((operation) => operation.plugin),
   )].sort();
   if (missing.length > 0) {
     throw new Error(
@@ -679,6 +1350,10 @@ export function operationOpenApiPaths(
       ...(paths[openApiPath] ?? {}),
       [method]: {
         operationId: operation.key,
+        // The canonical id the web REST map (buildWebRestOperationMap) keys on,
+        // spelled the same way as the generated entity CRUD paths spell theirs,
+        // so a static Operation is addressable from the browser too.
+        "x-osf-operation-id": operation.key,
         summary: operation.title,
         description: operation.description,
         tags: [operation.plugin],
@@ -688,7 +1363,10 @@ export function operationOpenApiPaths(
             ? sessionSecuritySchemes.map((scheme) => ({
                 [scheme]: scheme === "oauth2Auth" ? sessionScopes : [],
               }))
-            : [{ [operation.auth.scheme]: [] }],
+            : operation.auth.mode === "control"
+              // A control-realm bearer: its own scheme, never the tenant session's.
+              ? [{ controlBearerAuth: [] }]
+              : [{ [operation.auth.scheme]: [] }],
         "x-osf-operation": {
           key: operation.key,
           handler: operation.handler,

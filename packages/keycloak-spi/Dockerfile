@@ -31,10 +31,14 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn package -B -DskipTests
 
-FROM quay.io/keycloak/keycloak:26.5.3@sha256:5a236ae4dd8ece77490115bace15a11a4d15e9cbcf58a490b95a7da2cd71d32a
+FROM quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4
 # Two separate jars on purpose: the OSF SPI is first-party code built above; the
 # Apple provider is a verified third-party release. Neither is repackaged into
 # the other, so each can be upgraded, audited and removed on its own.
 COPY --from=builder /build/target/openshapeforge-keycloak-spi.jar /opt/keycloak/providers/
 COPY --from=builder /build/providers/apple-identity-provider-*.jar /opt/keycloak/providers/
+# The child login theme inherits Keycloak v2 and changes only the passkey
+# registration label. Keeping it in this immutable image makes a realm's
+# loginTheme pin reproducible without a writable theme volume.
+COPY theme/openshapeforge /opt/keycloak/themes/openshapeforge
 RUN /opt/keycloak/bin/kc.sh build --db=postgres --health-enabled=true

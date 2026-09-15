@@ -1,8 +1,8 @@
 {
   "name": "@openshapeforge/compiler",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Compiles OpenShapeForge authoring YAML into database, API, UI and Keycloak artifacts. Runs under Bun; see docs/consuming.md in the repository.",
-  "//publishConfig": "Published to the GitHub Packages npm registry by .github/workflows/package-compiler.yml on pushes to main (only when this version does not exist there yet — bump `version` to release). The registry pin means a stray `npm publish` from a dev machine cannot land on npmjs.com.",
+  "//publishConfig": "Published with its operations and interface-web runtime dependencies by .github/workflows/package-compiler.yml on pushes to main (only when a package version does not exist there yet). The registry pin prevents a stray npm publish from landing on npmjs.com.",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
@@ -31,6 +31,8 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@openshapeforge/operations": "^0.1.0",
+    "@openshapeforge/interface-web": "^0.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "ejs": "^5.0.1",

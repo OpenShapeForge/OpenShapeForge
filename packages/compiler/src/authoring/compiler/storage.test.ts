@@ -78,4 +78,27 @@ describe("resolveStorageColumns identifier validation", () => {
       ),
     ).toThrow(/Unsafe storage column name/);
   });
+
+  it("uses bigint only when an authored integer bound exceeds PostgreSQL integer", () => {
+    const columns = resolveStorageColumns(
+      [
+        {
+          ...field("ordinary", "ordinary"),
+          valueType: "integer",
+          validation: { max: 2_147_483_647 },
+        },
+        {
+          ...field("artifactVersion", "artifact_version"),
+          valueType: "integer",
+          validation: { max: { value: 2_147_483_648 } },
+        },
+      ],
+      [],
+      [],
+    );
+    expect(columns.map(({ column, type }) => ({ column, type }))).toEqual([
+      { column: "ordinary", type: "integer" },
+      { column: "artifact_version", type: "bigint" },
+    ]);
+  });
 });

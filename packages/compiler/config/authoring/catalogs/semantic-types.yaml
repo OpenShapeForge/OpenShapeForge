@@ -3,6 +3,101 @@ kind: semanticTypeCatalog
 
 # Core semantic types — always available
 types:
+  # A selected entity definition supplies the shape. Its relationship fields
+  # are stored relationally, never embedded in this object's JSON values.
+  entityValue:
+    kind: object
+    label: { en: Typed entity values, nl: Getypeerde entiteitswaarden }
+    valueType: object
+
+  # Entity type identity, distinct from an individual record ID.
+  entityTypeName:
+    options: { type: dynamic, source: entityTypes.list }
+    label: { en: Entity type, nl: Entiteitstype }
+    valueType: string
+    validation:
+      minLength: 1
+      maxLength: 120
+
+  badgeVariant:
+    label: { en: Badge variant, nl: Badgevariant }
+    valueType: string
+    options:
+      type: static
+      items:
+        - value: default
+          label:
+            en: Default
+            nl: Standaard
+        - value: secondary
+          label:
+            en: Secondary
+            nl: Secundair
+        - value: destructive
+          label:
+            en: Destructive
+            nl: Destructief
+        - value: outline
+          label:
+            en: Outline
+            nl: Omlijning
+    render:
+      display: TextDisplay
+      input: ListSelect
+
+  labelOutputType:
+    label: { en: Label output type, nl: Labeluitvoertype }
+    valueType: string
+    options:
+      type: static
+      items:
+        - value: boolean
+          label:
+            en: Yes/no
+            nl: Ja/nee
+        - value: number
+          label:
+            en: Number
+            nl: Getal
+        - value: string
+          label:
+            en: String
+            nl: Tekst
+    render:
+      display: TextDisplay
+      input: ListSelect
+
+  labelValidity:
+    label: { en: Label validity, nl: Labelgeldigheid }
+    valueType: string
+    options:
+      type: static
+      items:
+        - value: permanent
+          label:
+            en: Permanent
+            nl: Permanent
+        - value: temporary
+          label:
+            en: Temporary
+            nl: Tijdelijk
+        - value: conditional
+          label:
+            en: Conditional
+            nl: Voorwaardelijk
+    render:
+      display: TextDisplay
+      input: ListSelect
+
+  multilineText:
+    label: { en: Multiline text, nl: Meerregelige tekst }
+    valueType: string
+    render:
+      display: TextDisplay
+      input: Textarea
+    props:
+      rows: 4
+
   email:
     label: { en: Email, nl: E-mail }
     valueType: string
@@ -175,6 +270,28 @@ types:
         - { value: verified_identity, label: { en: Verified identity, nl: Geverifieerde identiteit } }
         - { value: manual, label: { en: Manually confirmed, nl: Handmatig bevestigd } }
 
+  referenceDataCode:
+    label: { en: Reference value, nl: Referentiewaarde }
+    valueType: string
+    icon: List
+    render:
+      display: TextDisplay
+      input: ReferenceSelect
+    props:
+      clearable: false
+
+  fileStorageLocation:
+    label: { en: File, nl: Bestand }
+    valueType: string
+    icon: File
+    render:
+      display: TextDisplay
+      input: FileUpload
+    props:
+      fileNameField: fileName
+      mimeTypeField: mimeType
+      checksumField: checksum
+
   workflowDefinitionId:
     label: { en: Workflow definition ID, nl: Workflow-definitie-ID }
     pluralLabel: { en: Workflow definition IDs, nl: Workflow-definitie-IDs }
@@ -216,6 +333,14 @@ types:
       input: ConditionBuilder
     props:
       mode: free
+
+  labelSet:
+    valueType: object
+    label: { en: Labels, nl: Labels }
+    icon: Tags
+    render:
+      display: BadgeList
+      input: JsonFieldEditor
 
   variableTemplate:
     valueType: string

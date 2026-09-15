@@ -103,6 +103,17 @@ response unless the operation explicitly declares the
 For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;
 the runtime injects that header into canonical input before validation.
+Core then binds the key to the verified tenant and actor, the canonical
+Operation contract, and normalized authored input. Completed JSON results are
+replayed before one-shot version, lease, or confirmation controls are consumed
+again; current session and record authorization is still checked on every
+call. A concurrent call receives `OPERATION_IN_PROGRESS`, while reusing the
+same key for different authored input receives `IDEMPOTENCY_KEY_REUSED`.
+Database-only effects and their receipt share one transaction. An external
+write first persists a running receipt; if its outcome is lost, core returns
+`OPERATION_OUTCOME_UNKNOWN` and never repeats the effect automatically.
+Schema, authorization, version, lease, and confirmation refusals that happen
+before authored effects leave no receipt, so corrected input may reuse the key.
 
 ## The compiler half
 
@@ -139,6 +150,14 @@ export type PluginBaseContext = {
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;   // full merged manifest
   entities: CompiledEntityInfo[];     // every compiled entity contract
+  operationCatalog: {
+    version: 1;
+    operations: readonly (
+      | CompiledStaticEntityOperation
+      | CompiledPluginOperation
+    )[];
+  };                                  // complete static Operation catalog
+  fieldSchemas: FieldSchemaCompiler;  // canonical FieldDefinition projector
 };
 
 export type CompiledEntityInfo = {
@@ -153,6 +172,47 @@ export type GeneratedArtifact = { path: string; contents: string };
 
 A plugin module **default-exports** a `CompilerPlugin` with a non-empty
 string `name`; duplicate names across registered plugins are an error.
+
+`operationCatalog` is the public consumer boundary for plugins that derive
+workflow nodes, audit policy, or another projection from Operations. It is
+compiled once from the resolved layers, contains both canonical entity CRUD
+and authored entity/module plugin Operations, rejects duplicate ids across
+those sources, and is sorted by stable Operation id. Plugin Operations carry
+`id === key` and `intent: "invoke"`; entity Operations keep their canonical
+CRUD intent and symbolic entity input/output contract, and additionally carry
+concrete `inputSchema`/`outputSchema` for build-time consumers. Those schemas
+describe the shared executor boundary (`values` plus platform-owned mutation
+controls), not a flattened transport request. They are projected from the same
+compiled field-schema helpers as the generated interfaces, including writable
+field eligibility and implicit relationship keys. A plugin should consume this
+catalog instead of parsing entity YAML or inferring actions from transport
+routes.
+
+`fieldSchemas` is bound to the resolved component, semantic-type and reference-
+data catalogs for the current host. A generator that publishes configurable
+fields can call `fieldSchemas.field(definition)` for one value schema or
+`fieldSchemas.object(definitions)` for a strict object schema. Both paths use
+the entity field compiler, including nested `children`/`item`, defaults,
+options, shared validation and collection cardinality bounds. The pure
+`createFieldSchemaCompiler`, `compiledFieldSchema`, `compiledObjectSchema` and
+`resolveModelFields` helpers are also exported from the compiler package root
+for build-time tooling. Runtime modules that must turn stored, user-authored
+FieldDefinitions into an Operation interaction schema use
+`context.platform.schemas.fields.object(definitions)`. The host validates the
+definitions against the generated authoring schema and binds the same projector
+to its active semantic-type and reference-data registries; plugins neither
+import the compiler at runtime nor supply a fallback catalog.
+
+The compiler also emits
+`apps/api/src/generated/compiler/field-authoring-registry.json` for a host that
+mounts a shared FieldDefinition editor. Its stable envelope is
+`{ version: 1, fieldAuthoringProfiles, semanticTypes, referentiedata }`. These
+are the raw, layer-resolved catalog values: profile and semantic-type extension
+properties, reference-group metadata, and multilingual item labels are kept
+intact. A host may inject this JSON into an interface-specific renderer; the
+renderer must not parse authoring YAML or maintain a second field-schema
+compiler. The artifact lives API-side so it is available to headless and
+`apps/product-web` hosts without implying an `apps/web` implementation.
 
 ### Registration
 
@@ -277,14 +337,18 @@ deterministically sorted and covered by the compiler's stale, orphan, and
 double-generation gates. With no contributions the file is absent, preserving
 the existing generated output byte-for-byte.
 
-`db:migrate` applies the registry after the generated tables and before the
-grant sweep. Each migration and its ledger write run in one transaction under
-`plugin:<plugin>:<version>` in `platform.schema_migrations`. The ledger stores
-the exact SQL checksum. A rerun skips an identical entry; changing its SQL or
-checksum fails migration and readiness. Ledger entries absent from an older
-registry are reported as unexpected but tolerated so an image rollback remains
-serviceable. Applied contributions are still immutable: retain old entries in
-forward builds and add a new version for an additive roll-forward.
+`db:migrate` applies every entry after the generated tables exist and before
+the grant sweep. A database is built from the manifest, so there is no earlier
+phase in which legacy ownership could be transformed: a contributed table's
+shape is declared, not migrated to. Each migration and its ledger write run in
+one transaction under `plugin:<plugin>:<version>` in
+`platform.schema_migrations`. The ledger stores the exact SQL checksum; a
+rerun skips an identical entry, and changing the SQL of an applied entry fails
+migration. Ledger entries absent from an older registry are tolerated so an
+image rollback remains serviceable. Applied contributions are still immutable:
+retain old entries in forward builds and add a new version for an additive
+roll-forward — or, in the reset model, rebuild the database with
+`bun run db:reset`.
 
 ### `ownedPaths` and the gates
 

@@ -18,7 +18,8 @@
  *                   inputFields, responseMapping { rootPath, fieldPaths,
  *                   transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
- *                   outputMapping [{from,to}]
+ *                   outputMapping [{from,to}], optional
+ *                   forEach {from,as} for bounded query fan-out
  *   connection row: <connectionValuesField> — plain values and encrypted
  *                   StoredSecret values from create-time elicitation
  *
@@ -86,6 +87,7 @@ export type DeclarativeOperationUrl = {
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
+const MAX_BINDING_FAN_OUT = 100;
 
 /** Follow redirects only while every hop remains inside the authored grant. */
 export async function fetchWithAllowedRedirects(
@@ -601,15 +603,11 @@ export function secretUrlPlaceholderError(
 }
 
 /**
- * Whether a call selects this binding. A binding may declare
- * `when: { field, equals }` against ONE service input: it runs when that
- * input equals the value OR was not provided (an omitted selector means
- * "all sources" — the combined read), and is skipped silently when the call
- * names a different value. This is what routes one canonical intent
- * (tasks, mail) to exactly one of several providers through a plain
- * `provider` input instead of per-provider employee tools. Write intents
- * should declare the selector input as required, so a change can never fan
- * out to every provider at once.
+ * Whether a call selects this binding. A binding may declare exactly one
+ * condition against one service input: `equals` retains the existing
+ * omitted-means-all-sources routing, while `present: true` selects only a
+ * populated value. Publication rejects malformed and ambiguous conditions;
+ * this boundary fails them closed as defence in depth.
  */
 export function bindingSelected(
   binding: JsonRecord,
@@ -618,8 +616,14 @@ export function bindingSelected(
   const when = binding.when as JsonRecord | null | undefined;
   if (!when || typeof when !== "object") return true;
   const field = typeof when.field === "string" ? when.field : "";
-  if (!field) return true;
+  if (!field) return false;
+  const hasEquals = Object.prototype.hasOwnProperty.call(when, "equals");
+  const hasPresent = Object.prototype.hasOwnProperty.call(when, "present");
+  if (hasEquals === hasPresent) return false;
   const value = args[field];
+  if (hasPresent) {
+    return when.present === true && value !== undefined && value !== null && value !== "";
+  }
   if (value === undefined || value === null) return true;
   if (value === "") return false;
   return String(value) === String(when.equals);
@@ -913,6 +917,8 @@ export type ExecuteBindingInput = {
   providerRow: JsonRecord;
   connectionValues: unknown;
   serviceInputs: JsonRecord;
+  /** Core-derived stable key for this exact Service step. */
+  idempotencyKey?: string;
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
   egress?: ModuleEgressDispatch | undefined;
@@ -1150,13 +1156,14 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
   }
 }
 
-/** A generated entity tool (finding_create) or a plugin operation key. */
+/** A canonical entity Operation, legacy generated tool, or plugin operation key. */
 const NATIVE_OPERATION_KEY =
-  /^(?:[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
+  /^(?:[A-Z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*|[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
 
 /**
  * The in-process operation a native Capability binds to, validated: either a
- * generated entity tool name (`finding_create`) or a plugin operation's key
+ * canonical entity Operation id (`Finding.create`), legacy generated entity
+ * tool name (`finding_create`), or a plugin operation's key
  * (`osf-integration.mail.read-attachment`), which the native executor runs
  * through the operation runtime under the caller's session — so a plugin
  * operation that carries no dedicated MCP tool is still reachable as a
@@ -1169,8 +1176,9 @@ export function nativeOperationKey(operationRow: JsonRecord): string {
     throw new HttpError(
       400,
       "OPERATION_MISCONFIGURED",
-      "A native Capability must name operation.nativeOperation (a generated operation key such as " +
-        "finding_create, or a plugin operation key such as osf-integration.mail.read-attachment).",
+      "A native Capability must name operation.nativeOperation (a canonical entity Operation such as " +
+        "Finding.create, a legacy generated tool such as finding_create, or a plugin operation key such as " +
+        "osf-integration.mail.read-attachment).",
     );
   }
   return key;
@@ -1422,6 +1430,16 @@ export async function composeBindingRequest(
     // though publication/runtime validation rejects an authored collision.
     ...authHeaders,
   };
+  if (
+    mode === "acquire" &&
+    input.idempotencyKey &&
+    method !== "GET" &&
+    method !== "HEAD"
+  ) {
+    // Core owns retry identity. An authored header cannot replace it, and the
+    // value never enters a URL or response body.
+    headers["idempotency-key"] = input.idempotencyKey;
+  }
   let body: string | undefined;
   if (isGraphql) {
     headers["content-type"] = "application/json";
@@ -1632,6 +1650,78 @@ export async function executeBinding(
   }
 
   return mapOperationResponse(binding, operationRow, parsed);
+}
+
+/**
+ * Execute a binding once, or once per item from an earlier Service output.
+ * Each invocation receives the item under the authored local name and mapped
+ * outputs are collected in source order. This is provider-neutral control
+ * flow; provider operations and result shapes remain authoring data.
+ */
+export async function executeBindingStep(
+  input: ExecuteBindingInput,
+): Promise<JsonRecord> {
+  const raw = input.binding.forEach;
+  if (raw === undefined) return executeBinding(input);
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    Array.isArray(raw) ||
+    typeof (raw as JsonRecord).from !== "string" ||
+    typeof (raw as JsonRecord).as !== "string" ||
+    !(raw as JsonRecord).from ||
+    !(raw as JsonRecord).as
+  ) {
+    throw new HttpError(
+      400,
+      "SERVICE_MISCONFIGURED",
+      "Binding forEach needs non-empty string fields `from` and `as`.",
+    );
+  }
+  if (input.operationRow.kind !== "query") {
+    throw new HttpError(
+      400,
+      "SERVICE_MISCONFIGURED",
+      "Binding forEach is allowed only for query operations.",
+    );
+  }
+  const from = (raw as JsonRecord).from as string;
+  const localName = (raw as JsonRecord).as as string;
+  const items = input.serviceInputs[from];
+  if (!Array.isArray(items)) {
+    throw new HttpError(
+      400,
+      "SERVICE_MISCONFIGURED",
+      `Binding forEach source "${from}" must be a collection from an earlier binding.`,
+    );
+  }
+  if (items.length > MAX_BINDING_FAN_OUT) {
+    throw new HttpError(
+      400,
+      "SERVICE_MISCONFIGURED",
+      `Binding forEach source "${from}" exceeds the ${MAX_BINDING_FAN_OUT}-item limit.`,
+    );
+  }
+
+  const collected: JsonRecord = {};
+  const mappings = Array.isArray(input.binding.outputMapping)
+    ? (input.binding.outputMapping as JsonRecord[])
+    : [];
+  for (const mapping of mappings) {
+    if (typeof mapping.to === "string") collected[mapping.to] = [];
+  }
+  for (const item of items) {
+    input.signal?.throwIfAborted();
+    const outputs = await executeBinding({
+      ...input,
+      serviceInputs: { ...input.serviceInputs, [localName]: item },
+    });
+    for (const [key, value] of Object.entries(outputs)) {
+      if (!Array.isArray(collected[key])) collected[key] = [];
+      (collected[key] as unknown[]).push(value);
+    }
+  }
+  return collected;
 }
 
 /**

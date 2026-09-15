@@ -41,9 +41,10 @@
  * reach it. Calling `provisionTenant` directly would skip authentication,
  * authorization and the error mapping — and would make the operator token, which
  * is the only thing standing between the internet and a cross-tenant registry,
- * untested here. So the routes are registered on a bare Fastify instance and
- * driven with `inject`, carrying the same unparsed-buffer JSON parser
- * `roles/api.ts` installs.
+ * untested here. So the control Operations' canonical REST routes are
+ * registered on a bare Fastify instance and driven with `inject`, carrying the
+ * same unparsed-buffer JSON parser `roles/api.ts` installs. The contracts come
+ * from the fixture builder until the compiler emits them into the catalog.
  *
  * CLEANUP
  * -------
@@ -59,11 +60,12 @@ import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { sql } from "kysely";
 import { readControlPlaneConfig, type ControlPlaneConfig } from "../../control/config.js";
-import { registerControlRestRoutes } from "../../control/rest-routes.js";
+import { createControlRuntime } from "../../control/runtime.js";
+import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
 import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../db/session.js";
+import { registerOperationRestRoutes } from "../../operations/runtime.js";
 import {
   describe,
-  expectData,
   getRuntime,
   gql,
   registerSuiteLifecycle,
@@ -72,7 +74,15 @@ import {
   test,
   type Identity,
 } from "./e2e/harness.js";
-import { createRow, tables } from "./e2e/entity-factory.js";
+import { createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
+import {
+  collectionOf,
+  deleteDoc,
+  deleteVariables,
+  fetchRecord,
+  listDoc,
+} from "./e2e/gql-shapes.js";
+import { isEntityBackedCreate, placeholderControls } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -145,6 +155,8 @@ const enabled = config !== null && bearer !== null;
 const tenantSlug = `e2e-${seed}`;
 const unitSlug = "emea";
 const createdOrganizationIds: string[] = [];
+/** The registry id of the provisioned tenant, from its create answer. */
+let createdTenantId: string | null = null;
 
 let app: FastifyInstance | null = null;
 
@@ -160,7 +172,17 @@ function control(): FastifyInstance {
     { parseAs: "buffer" },
     (_request, body, done) => done(null, body),
   );
-  registerControlRestRoutes(instance, { db: getRuntime().db });
+  const operations = controlOperationContracts();
+  registerOperationRestRoutes(
+    instance,
+    [],
+    {
+      db: getRuntime().db,
+      control: createControlRuntime({ config: configResult, operations }),
+    },
+    operations,
+    { pluginOperations: "absent" },
+  );
   app = instance;
   return instance;
 }
@@ -230,6 +252,7 @@ describe("control-plane provisioning", () => {
       });
       expect(created.status).toBe(201);
       createdOrganizationIds.push(created.body.organization.id);
+      createdTenantId = created.body.tenant.id as string;
 
       expect(created.body.created).toBe(true);
       expect(created.body.tenant.slug).toBe(tenantSlug);
@@ -243,16 +266,16 @@ describe("control-plane provisioning", () => {
       // uuid here is that fix, observed through the whole stack.
       expect(created.body.organization.id).toMatch(UUID);
 
-      // Read back through Keycloak's OWN admin API — the response above is the
-      // SPI's, and `keycloak-spi-client.ts` documents that only its id/alias/name
-      // can be trusted in the create transaction.
+      // The registry's own view of the tenant: the Operation answers the
+      // platform projection (slug, status, the Organization alias), and the
+      // organization tree carries the linked Organization id the registry
+      // recorded from what Keycloak answered.
       const detail = await get(`/api/control/v1/tenants/${tenantSlug}`);
       expect(detail.status).toBe(200);
-      expect(detail.body.organization).toMatchObject({
-        id: created.body.organization.id,
-        alias: tenantSlug,
-        enabled: true,
-      });
+      expect(detail.body).toMatchObject({ slug: tenantSlug, status: "active", organizationAlias: tenantSlug });
+      const tree = await get(`/api/control/v1/tenants/${tenantSlug}/organizations`);
+      expect(tree.status).toBe(200);
+      expect(tree.body.tenant.keycloakOrganizationId).toBe(created.body.organization.id);
     },
   );
 
@@ -313,64 +336,53 @@ describe("control-plane provisioning", () => {
   test.skipIf(!enabled)(
     "a provisioned tenant is RLS-isolated from an existing one, both ways",
     async () => {
-      const detail = await get(`/api/control/v1/tenants/${tenantSlug}`);
+      expect(createdTenantId).not.toBeNull();
       const provisioned: Identity = {
-        tenantId: detail.body.tenant.id as string,
+        tenantId: createdTenantId!,
         userId: randomUUID(),
         roles: [...tenantA.roles],
       };
       expect(provisioned.tenantId).not.toBe(tenantA.tenantId);
 
-      const table = tables.find((candidate) => candidate.tenantScoped)!;
+      // Any tenant-scoped entity whose rows the factory can create outright;
+      // the readers are shape-aware, so the choice is about RLS, not shape.
+      const table = tables.find(
+        (candidate) => candidate.tenantScoped && isEntityBackedCreate(candidate),
+      )!;
       const graphql = table.source!.graphql!;
       const mine = await createRow(table, provisioned);
       const theirs = await createRow(table, tenantA);
 
       // Neither direction: the provisioned tenant cannot see the seeded one's
       // row, and the seeded one cannot see the provisioned tenant's.
-      const crossRead = await expectData(
-        tenantA,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
-      );
-      expect(crossRead[graphql.singleQueryName]).toBeNull();
-
-      const reverseRead = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: theirs },
-      );
-      expect(reverseRead[graphql.singleQueryName]).toBeNull();
+      expect(await fetchRecord(tenantA, table, mine)).toBeNull();
+      expect(await fetchRecord(provisioned, table, theirs)).toBeNull();
 
       // And it is invisible to a LIST too, which a by-id lookup alone would miss.
-      const crossList = await expectData(
-        tenantA,
-        `query($filter: ${graphql.typeName}Filter) {
-           ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
-         }`,
-        { filter: { id: mine } },
+      const crossList = collectionOf(
+        table,
+        await gql(
+          tenantA,
+          listDoc(table, { variables: ["filter"], args: "first: 1", totalCount: true }),
+          { filter: { id: mine } },
+        ),
+        graphql.listQueryName,
       );
-      expect(crossList[graphql.listQueryName].totalCount).toBe(0);
+      expect(crossList.totalCount).toBe(0);
 
       // Sanity: the row exists for its owner, so the refusals above are about
       // isolation rather than a create that quietly failed.
-      const ownRead = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
-      );
-      expect(ownRead[graphql.singleQueryName]?.id).toBe(mine);
+      expect((await fetchRecord(provisioned, table, mine))?.id).toBe(mine);
 
-      // A cross-tenant delete must not remove it either.
-      await gql(tenantA, `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`, {
-        id: mine,
-      });
-      const stillThere = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
+      // A cross-tenant delete must not remove it either. The other tenant
+      // cannot hold a lease on a row it cannot see, so the attempt carries
+      // placeholder controls; whichever check refuses it, the row survives.
+      await gql(
+        tenantA,
+        deleteDoc(table),
+        deleteVariables(table, mine, placeholderControls(table, "delete")),
       );
-      expect(stillThere[graphql.singleQueryName]?.id).toBe(mine);
+      expect((await fetchRecord(provisioned, table, mine))?.id).toBe(mine);
     },
   );
 });

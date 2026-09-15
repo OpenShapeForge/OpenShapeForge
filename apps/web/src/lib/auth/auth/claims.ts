@@ -7,7 +7,6 @@ import {
   readJwtClaims,
 } from "@openshapeforge/auth";
 import type { StoredSession } from "../redis";
-import { issuer } from "./keycloak";
 
 export type JwtClaims = Record<string, unknown>;
 
@@ -33,24 +32,6 @@ type StoredUserProfile = Pick<
   "name" | "givenName" | "familyName" | "preferredUsername" | "email"
 >;
 
-const applicationRealmRoles = new Set([
-  "directie",
-  "vastgoedbeheerder",
-  "wijkbeheerder",
-  "verhuurconsulent",
-]);
-
-const authoredDevRoleGroupSegments: Record<string, string> = {
-  directie: "directie",
-  vastgoedbeheerder: "vastgoedbeheer",
-  wijkbeheerder: "wijkbeheer",
-  verhuurconsulent: "verhuur",
-};
-
-export function hasApplicationRealmRole(roles: readonly string[]): boolean {
-  return roles.some((role) => applicationRealmRoles.has(role));
-}
-
 export function resolveInitialRoles(
   accessTokenClaims: JwtClaims | undefined,
   idTokenClaims: JwtClaims | undefined,
@@ -67,31 +48,16 @@ export function claimsIncludeRoleState(claims: JwtClaims | undefined): boolean {
   return Boolean(claims && ("realm_access" in claims || "resource_access" in claims));
 }
 
-function resolveAuthoredDevGroupFallback(
-  tenantId: string | undefined,
-  roles: readonly string[],
-): string[] {
-  if (!tenantId || !issuer.endsWith("/realms/openshapeforge")) return [];
-  if (tenantId !== "acme" && tenantId !== "beta") return [];
-
-  return roles
-    .map((role) => authoredDevRoleGroupSegments[role])
-    .filter((segment): segment is string => Boolean(segment))
-    .map((segment) => `/openshapeforge-demo/tenant-${tenantId}/role-${segment}`);
-}
-
 export function resolveInitialGroups(
   accessTokenClaims: JwtClaims | undefined,
   idTokenClaims: JwtClaims | undefined,
   profile: JwtClaims | undefined,
-  tenantId: string | undefined,
-  roles: readonly string[],
 ): string[] {
   for (const claims of [accessTokenClaims, idTokenClaims, profile]) {
     const groups = parseGroups(claims);
     if (groups.length > 0) return groups;
   }
-  return resolveAuthoredDevGroupFallback(tenantId, roles);
+  return [];
 }
 
 export function resolveRefreshedGroups(
@@ -113,9 +79,26 @@ export function resolveInitialTenantId(
   accessTokenClaims: JwtClaims | undefined,
   idTokenClaims: JwtClaims | undefined,
 ): string | undefined {
-  return (profile?.tid as string | undefined)
-    ?? (accessTokenClaims?.tid as string | undefined)
-    ?? (idTokenClaims?.tid as string | undefined);
+  for (const claims of [profile, accessTokenClaims, idTokenClaims]) {
+    const tenantId = claims?.tid;
+    if (typeof tenantId === "string" && tenantId.trim().length > 0) {
+      return tenantId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Web entry is identity-driven, not persona-driven. Any authenticated identity
+ * carrying a tenant context may enter; generated operation authorization then
+ * decides which navigation and actions it can use.
+ */
+export function hasApplicationTenantContext(
+  profile: JwtClaims | undefined,
+  accessTokenClaims: JwtClaims | undefined,
+  idTokenClaims: JwtClaims | undefined,
+): boolean {
+  return resolveInitialTenantId(profile, accessTokenClaims, idTokenClaims) !== undefined;
 }
 
 export function resolveInitialActorType(

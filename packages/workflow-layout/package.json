@@ -1,7 +1,9 @@
 {
   "name": "@openshapeforge/workflow-layout",
   "version": "0.1.0",
-  "private": true,
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "repository": { "type": "git", "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git" },
+  "files": ["src", "LICENSE", "!src/**/*.test.ts"],
   "license": "BUSL-1.1",
   "type": "module",
   "description": "Deterministic auto-layout for workflow graphs. No React, no domain, no app coupling — a graph in, positions out.",

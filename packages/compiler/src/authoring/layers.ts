@@ -894,6 +894,7 @@ function assertSessionAuthOnlyNarrows(
   if (before.roles !== undefined) {
     assertOrListOnlyNarrows(before.roles, after.roles, `${path}.roles`, origin);
   }
+  assertExactWhenPresent(before.roleGroups, after.roleGroups, `${path}.roleGroups`, origin);
   assertAndListOnlyNarrows(before.scopes, after.scopes, `${path}.scopes`, origin);
   assertExactWhenPresent(
     before.recordPermission,

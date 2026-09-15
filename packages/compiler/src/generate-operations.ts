@@ -370,6 +370,12 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       `${where} recordPermission requires a record target with inputField.`,
     );
   }
+  if (operation.auth.mode === "session" && operation.auth.roleGroups !== undefined) {
+    if (!Array.isArray(operation.auth.roleGroups) || operation.auth.roleGroups.length === 0 ||
+        operation.auth.roleGroups.some(group => !Array.isArray(group) || group.length === 0 || group.some(role => typeof role !== "string" || !role.trim()))) {
+      throw new Error(`${where} auth.roleGroups must contain one or more non-empty role groups.`);
+    }
+  }
   if (operation.auth.mode === "custom") {
     nonEmpty(operation.auth.scheme, `${where} custom auth scheme`);
     nonEmpty(operation.auth.description, `${where} custom auth description`);
@@ -812,9 +818,9 @@ export function constrainedReferenceCreateOperationId(entityName: string, field:
 }
 
 /**
- * A constrained reference may need one related child write. Materialize that
- * bounded case as a normal discoverable Operation instead of teaching YAML a
- * procedural workflow language.
+ * A constrained reference owns its exact values during creation and may need
+ * one related child write. Materialize that bounded case as a normal
+ * discoverable Operation instead of teaching YAML a procedural workflow language.
  */
 function collectConstrainedReferenceCreateOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
@@ -826,32 +832,50 @@ function collectConstrainedReferenceCreateOperations(
     const constraints = field.relationship?.constraints;
     if (!constraints || !field.relationship?.target) continue;
     const nested = Object.entries(constraints).filter((entry): entry is [string, { any: Record<string, { eq: string | number | boolean }> }] => "any" in entry[1]);
-    if (nested.length === 0) continue;
     const target = contracts.find(contract => contract.entity.name === field.relationship!.target);
-    const collection = target?.model.relationships.find(relation => relation.key === nested[0]![0]);
+    const collection = nested[0] ? target?.model.relationships.find(relation => relation.key === nested[0]![0]) : undefined;
     const child = collection && contracts.find(contract => contract.entity.name === collection.target);
     const parentColumn = child?.storage.columns.find(column => column.column === collection?.foreignKey);
     const create = target?.entityOperations.create;
     const childCreate = child?.entityOperations.create;
-    if (!target || !collection || collection.kind !== "hasMany" || !child || !parentColumn || !create || !childCreate ||
-        create.implementation.type !== "entity" || childCreate.implementation.type !== "entity") {
+    if (!target || !create || create.implementation.type !== "entity" ||
+        (nested.length > 0 && (!collection || collection.kind !== "hasMany" || !child || !parentColumn || !childCreate || childCreate.implementation.type !== "entity"))) {
       throw new Error(`${owner.entity.name}.${field.key}: constrained reference create needs native target and collection-child create Operations.`);
     }
-    const schemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
+    const nativeSchemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
+    const nativeInput = nativeSchemas.inputSchema as JsonSchema;
     const id = constrainedReferenceCreateOperationId(owner.entity.name, field.key);
     const targetValues = Object.fromEntries(Object.entries(constraints).flatMap(([key, value]) => "eq" in value ? [[key, value.eq]] : []));
-    const childValues = Object.fromEntries(Object.entries(nested[0]![1].any).map(([key, value]) => [key, value.eq]));
-    const roles = [...new Set([...create.authorization.roles, ...childCreate.authorization.roles])].sort();
+    const nativeValues = (nativeInput.properties as Record<string, unknown> | undefined)?.values as JsonSchema | undefined;
+    const properties = Object.fromEntries(Object.entries(nativeValues?.properties ?? {}).filter(([key]) => !Object.hasOwn(targetValues, key)));
+    const required = Array.isArray(nativeValues?.required)
+      ? nativeValues.required.filter((key): key is string => typeof key === "string" && !Object.hasOwn(targetValues, key))
+      : [];
+    const { required: _nativeRequired, ...valuesWithoutRequired } = nativeValues ?? {};
+    const inputSchema: JsonSchema = {
+      ...nativeInput,
+      properties: {
+        ...(nativeInput.properties as Record<string, unknown> | undefined),
+        values: { ...valuesWithoutRequired, properties, ...(required.length > 0 ? { required } : {}) },
+      },
+    };
+    const childValues = nested[0]
+      ? Object.fromEntries(Object.entries(nested[0][1].any).map(([key, value]) => [key, value.eq]))
+      : undefined;
+    const roleGroups = [create.authorization.roles, ...(childCreate ? [childCreate.authorization.roles] : [])]
+      .map(group => [...new Set(group)].sort());
     const raw: PluginOperationContract = {
       key: id,
       title: `Create ${target.entity.title} for ${owner.entity.title}`,
-      description: `Creates one ${target.entity.title} and its required ${child.entity.title} atomically.`,
+      description: child
+        ? `Creates one ${target.entity.title} and its required ${child.entity.title} atomically.`
+        : `Creates one ${target.entity.title} with the required relationship values.`,
       handler: "constrainedReferenceCreate",
       target: { entityId: target.entity.id, entityName: target.entity.name, scope: "collection" },
-      inputSchema: schemas.inputSchema,
-      outputSchema: schemas.outputSchema,
+      inputSchema,
+      outputSchema: nativeSchemas.outputSchema,
       errors: [],
-      auth: { mode: "session", roles }, tenancy: { mode: "required" },
+      auth: { mode: "session", roleGroups }, tenancy: { mode: "required" },
       idempotency: { mode: "none" }, effects: { data: "write", external: "none" },
       confirmation: { mode: "none" },
       transports: {
@@ -864,8 +888,10 @@ function collectConstrainedReferenceCreateOperations(
     const compiled: CompiledPluginOperation = { ...raw, plugin: "core", id, intent: "invoke" };
     const binding: NonNullable<CompiledPluginOperation["implementation"]> = {
       type: "constrained-reference-create", targetEntityName: target.entity.name,
-      collectionEntityName: child.entity.name, parentField: parentColumn.field,
-      targetValues, childValues,
+      ...(child && parentColumn && childValues ? {
+        collectionEntityName: child.entity.name, parentField: parentColumn.field, childValues,
+      } : {}),
+      targetValues,
     };
     compiled.implementation = binding;
     verifiedNativeOperations.set(compiled, JSON.stringify(binding));

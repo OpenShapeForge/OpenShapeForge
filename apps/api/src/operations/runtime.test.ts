@@ -654,6 +654,14 @@ describe("canonical operation runtime", () => {
     const [unavailable] = runtimeStaticOperationRegistrations([module], {}, [denied]);
     expect(available!.available({ ...session, roles: [] })).toBe(true);
     expect(unavailable!.available({ ...session, roles: ["admin"] })).toBe(false);
+
+    const conjunctive: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", roleGroups: [["target-a", "target-b"], ["child"]] },
+    };
+    const [conjunctiveOffer] = runtimeStaticOperationRegistrations([module], {}, [conjunctive]);
+    expect(conjunctiveOffer!.available({ ...session, roles: ["target-b", "child"] })).toBe(true);
+    expect(conjunctiveOffer!.available({ ...session, roles: ["target-a"] })).toBe(false);
   });
 
   test("rejects a success status that differs from the canonical contract", async () => {

@@ -21,7 +21,7 @@ export async function createConstrainedReferenceInTransaction(
   session: Parameters<typeof createGeneratedEntityInTransaction>[1],
   binding: Binding,
   target: ReturnType<typeof oneTable>,
-  child: ReturnType<typeof oneTable>,
+  child: ReturnType<typeof oneTable> | undefined,
   values: Record<string, unknown>,
 ) {
   const targetRow = await createGeneratedEntityInTransaction(trx, session, target, {
@@ -32,21 +32,28 @@ export async function createConstrainedReferenceInTransaction(
   const idField = idColumn ? fieldNameForColumn(idColumn) : "id";
   const id = targetRow[idField] ?? targetRow[target.primaryKey!];
   if (typeof id !== "string") throw operationFailure({ code: "INTERNAL_SERVER_ERROR", message: "Created reference has no canonical id." });
-  await createGeneratedEntityInTransaction(trx, session, child, {
-    ...binding.childValues,
-    [binding.parentField]: id,
-  });
+  if (child && binding.parentField && binding.childValues) {
+    await createGeneratedEntityInTransaction(trx, session, child, {
+      ...binding.childValues,
+      [binding.parentField]: id,
+    });
+  }
   return targetRow;
 }
 
 /** Validate compiler-owned compound-create metadata once; callers can never choose these bindings. */
 export function nativeConstrainedReferenceCreateBinding(operation: OperationContract): Readonly<Binding> {
   const binding = operation.implementation;
+  const hasCompleteChildBinding = binding?.type === "constrained-reference-create" &&
+    [binding.collectionEntityName, binding.parentField, binding.childValues].every(value => value !== undefined);
+  const hasNoChildBinding = binding?.type === "constrained-reference-create" &&
+    [binding.collectionEntityName, binding.parentField, binding.childValues].every(value => value === undefined);
   if (!binding || binding.type !== "constrained-reference-create" || operation.plugin !== "core" ||
       operation.handler !== "constrainedReferenceCreate" || operation.target?.scope !== "collection" ||
       operation.target.entityName !== binding.targetEntityName || operation.auth.mode !== "session" ||
       operation.tenancy.mode !== "required" || operation.effects?.data !== "write" || operation.effects.external !== "none" ||
-      operation.confirmation?.mode !== "none" || operation.idempotency.mode !== "none") {
+      operation.confirmation?.mode !== "none" || operation.idempotency.mode !== "none" ||
+      (!hasCompleteChildBinding && !hasNoChildBinding)) {
     throw new Error(`Canonical constrained reference create Operation ${operation.key} has an unsupported or incomplete binding.`);
   }
   return Object.freeze(binding);
@@ -60,9 +67,9 @@ export function nativeConstrainedReferenceCreateHandler(operation: OperationCont
       code: "UNAUTHENTICATED", message: "Constrained reference creation requires a live verified session.",
     });
     const target = oneTable(binding.targetEntityName);
-    const child = oneTable(binding.collectionEntityName);
+    const child = binding.collectionEntityName ? oneTable(binding.collectionEntityName) : undefined;
     requireEntityOperation(target, "create", context.session);
-    requireEntityOperation(child, "create", context.session);
+    if (child) requireEntityOperation(child, "create", context.session);
     const values = input.values;
     if (!values || typeof values !== "object" || Array.isArray(values)) throw operationFailure({ code: "VALIDATION", message: "Reference values are required." });
     const created = await withModuleOperationTransaction(context.platform, context.session, trx =>

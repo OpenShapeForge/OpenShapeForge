@@ -60,7 +60,7 @@ import {
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
-import { sessionOperationRolesAllow } from "./session-authorization.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
@@ -75,7 +75,7 @@ export type OperationContract = {
   implementation?:
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
-    | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName: string; parentField: string; targetValues: Record<string, string | number | boolean>; childValues: Record<string, string | number | boolean> };
+    | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -102,6 +102,7 @@ export type OperationContract = {
     | {
         mode: "session";
         roles?: string[];
+        roleGroups?: string[][];
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
@@ -636,6 +637,9 @@ export function requireOperationAuthorization(
   }
   if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
+  }
+  if (!sessionOperationRoleGroupsAllow(operation.auth.roleGroups, session.roles)) {
+    throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role group.");
   }
   const requiredScopes = operation.auth.scopes ?? [];
   if (session.credential === "api-key" && requiredScopes.length > 0) {

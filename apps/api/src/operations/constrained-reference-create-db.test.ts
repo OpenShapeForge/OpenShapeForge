@@ -108,6 +108,11 @@ suite("atomic constrained reference creation against PostgreSQL", () => {
     expect((await sql<{ count: number }>`select count(*)::int as count from erp.relations`.execute(privileged!.db)).rows[0]!.count).toBe(1);
     expect((await sql<{ count: number }>`select count(*)::int as count from platform.entity_events`.execute(privileged!.db)).rows[0]!.count).toBe(2);
 
+    await withDbSession(restricted!.db, session, trx => createConstrainedReferenceInTransaction(trx, session, {
+      type: "constrained-reference-create", targetEntityName: "Relation", targetValues: { relationType: "organization" },
+    }, target, undefined, { displayName: "Direct", relationType: "person" }));
+    expect((await sql<{ relationType: string }>`select relation_type as "relationType" from erp.relations where display_name='Direct'`.execute(privileged!.db)).rows[0]!.relationType).toBe("organization");
+
     const selected = await listGeneratedEntitiesForTable(restricted!.db, session, target, { filter: {
       relationType: { eq: "organization" }, groupMemberships: { any: { relationGroupId: { eq: allowedGroup } } },
     } });

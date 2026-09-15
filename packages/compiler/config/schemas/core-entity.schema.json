@@ -1862,7 +1862,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["static", "referentiedata", "remote"]
+              "enum": ["static", "referentiedata", "remote", "dynamic", "entity"]
             },
             "items": {
               "type": "array",
@@ -1883,6 +1883,9 @@
               "type": "string"
             },
             "remoteUrl": {
+              "type": "string"
+            },
+            "source": {
               "type": "string"
             },
             "valueField": {

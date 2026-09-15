@@ -30,7 +30,7 @@
  * clears when a database is recreated.
  */
 import { SQL } from "bun";
-import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
+import { createDatabaseRuntime, readAdminDatabaseUrl, readMigrateDatabaseUrl } from "./connection.js";
 import { loadRuntimeModules } from "../modules/registry.js";
 import { runMigrationChainLocked } from "./bootstrap.js";
 import { renderMigrationReport } from "./migration-report.js";
@@ -76,8 +76,8 @@ if (confirmation !== target) {
 const modules = await loadRuntimeModules();
 const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
 
-const adminUrl = new URL(process.env.OPENSHAPEFORGE_ADMIN_DATABASE_URL ?? migrateUrl);
-if (!process.env.OPENSHAPEFORGE_ADMIN_DATABASE_URL) {
+const adminUrl = new URL(readAdminDatabaseUrl());
+if (!process.env.OPENSHAPEFORGE_ADMIN_DATABASE_URL?.trim()) {
   console.log("OPENSHAPEFORGE_ADMIN_DATABASE_URL not set; using the migrate connection as administrator.");
 }
 const maintenanceUrl = new URL(adminUrl);

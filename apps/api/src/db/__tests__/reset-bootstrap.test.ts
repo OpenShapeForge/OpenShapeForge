@@ -305,6 +305,7 @@ describe("db:reset", () => {
         // checksum is the bundled one, and a second run is idempotent.
         const reset = await runReset({
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: url,
+          OPENSHAPEFORGE_ADMIN_DATABASE_URL: "",
           OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION: name,
         });
         expect(reset.stderr).toBe("");

@@ -4,39 +4,32 @@ import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
 
 /**
- * Provisions the restricted, non-superuser runtime role `openshapeforge_app` and
- * grants it exactly the privileges the app needs — no more.
+ * Grants the provisioned, restricted `openshapeforge_app` role exactly the
+ * database privileges the app needs — no more.
  *
  * WHY THIS EXISTS
  * ---------------
  * The app runtime MUST connect as a NOSUPERUSER / NOBYPASSRLS role, otherwise
  * `FORCE ROW LEVEL SECURITY` on every tenant-scoped table is silently bypassed
  * (a superuser or a rolbypassrls role ignores all RLS policies) and tenant
- * isolation collapses to the app-layer WHERE clause alone. This migration runs
- * in the PRIVILEGED migrate chain (OPENSHAPEFORGE_MIGRATE_DATABASE_URL); the
- * restricted role itself can never create roles or issue these grants.
+ * isolation collapses to the app-layer WHERE clause alone. The host provisions
+ * this cluster-wide role through the administrator connection; this migration
+ * only applies database-scoped grants.
  *
  * IDEMPOTENCY
  * -----------
- * CREATE ROLE is CLUSTER-WIDE, so the role survives across the throwaway
- * scratch databases used by migrations.test.ts. Everything here is therefore
- * fully idempotent:
- *   - the role is created only if pg_roles has no such row, and its password
- *     is set only at that point (never force-reset on later runs);
- *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS repairs the load-bearing RLS
- *     attributes only when they drift (defensive against manual tampering);
- *   - GRANT and ALTER DEFAULT PRIVILEGES are naturally idempotent.
+ * The role survives across the throwaway scratch databases used by
+ * migrations.test.ts. GRANT and ALTER DEFAULT PRIVILEGES are naturally
+ * idempotent, and the chain verifies the role contract before any DDL runs.
  *
  * PASSWORD OWNERSHIP
  * ------------------
  * The password is OPERATOR-OWNED, not source-owned. It is read from
  * OPENSHAPEFORGE_APP_PASSWORD (see {@link readAppRolePassword}) and must stay
  * consistent with the password in the runtime DATABASE_URL. It is applied only
- * on first creation of the role; migrations do NOT overwrite an existing role's
- * password on every run (that would clobber an operator-chosen credential and
- * force a downgrade to a known value). To rotate, set
- * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 for a single migrate run alongside the
- * new OPENSHAPEFORGE_APP_PASSWORD (and update DATABASE_URL in lockstep).
+ * on first creation of the role; migrations never alter it. To rotate, run
+ * `db:provision-roles` once with OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 and the
+ * new password, and update DATABASE_URL in lockstep.
  *
  * ORDERING
  * --------
@@ -101,11 +94,11 @@ export function readAppRolePassword(env: NodeJS.ProcessEnv = process.env): strin
 }
 
 /**
- * Whether this migrate run should ROTATE the existing role's password. Off by
- * default: the password is set only at role creation, so an operator-chosen
+ * Whether this provisioning run should ROTATE the existing role's password.
+ * Off by default: the password is set only at role creation, so an operator-chosen
  * credential is never clobbered on a routine `helm upgrade`. Set
  * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 (with the new OPENSHAPEFORGE_APP_PASSWORD,
- * and DATABASE_URL updated in lockstep) for a single run to rotate.
+ * and DATABASE_URL updated in lockstep) for a single `db:provision-roles` run.
  */
 export function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env.OPENSHAPEFORGE_APP_PASSWORD_ROTATE;
@@ -179,17 +172,11 @@ async function applyAppSchemaGrants(db: OpenShapeForgeDatabase) {
  * the rest take effect.
  */
 export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
-  // 1. The role itself is part of the declared database role contract
+  // The role itself is part of the declared database role contract
   //    (db/database-roles.ts): the host provisions it with the admin
   //    credential and the chain has already verified it exists with LOGIN,
   //    NOSUPERUSER and NOBYPASSRLS. Nothing cluster-wide is written here.
-  //    Rotating the password stays an explicit, single-run opt-in.
-  if (shouldRotateAppRolePassword()) {
-    const appRolePassword = readAppRolePassword();
-    await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(appRolePassword)}`.execute(db);
-  }
-
-  // 2. CONNECT on the database itself.
+  // 1. CONNECT on the database itself.
   //    Stock PostgreSQL grants CONNECT to PUBLIC, so this is a no-op on a local
   //    or CI Postgres — which is exactly why its absence went unnoticed. Managed
   //    providers revoke it (Scaleway RDB does), leaving the role able to
@@ -206,7 +193,7 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // 3. Grant USAGE on every table-bearing schema that exists.
+  // 2. Grant USAGE on every table-bearing schema that exists.
   for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$
@@ -219,12 +206,12 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     `.execute(db);
   }
 
-  // 4. USAGE on `app` + EXECUTE on its RLS helpers. A no-op here on a fresh
+  // 3. USAGE on `app` + EXECUTE on its RLS helpers. A no-op here on a fresh
   //    database (the schema is created by the NEXT chain step);
   //    applyAppRoleGrants re-applies it once it exists.
   await applyAppSchemaGrants(db);
 
-  // 5. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
+  // 4. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
   //    sequence it creates LATER — including newly generated entities — is
   //    auto-granted to openshapeforge_app without a manual grant.
   for (const schema of MANAGED_SCHEMAS) {

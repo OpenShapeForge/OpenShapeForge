@@ -67,7 +67,9 @@ describe("database role contract", () => {
     expect(databaseRole("blueprintReader")).toMatchObject({ login: false, migratorMember: true });
     const rendered = renderProvisioningSql({ migratorRole: "some_migrator" });
     expect(rendered).toContain("create role openshapeforge_blueprint_reader nologin");
-    expect(rendered).toContain("grant openshapeforge_blueprint_reader to some_migrator;");
+    expect(rendered).toContain(
+      "grant openshapeforge_blueprint_reader to some_migrator with inherit true, set true;",
+    );
     expect(rendered).not.toMatch(/password '(?!<set-by-operator>)/);
   });
 
@@ -78,7 +80,9 @@ describe("database role contract", () => {
     );
     expect(error?.message).toContain("Database role contract is not satisfied");
     expect(error?.message).toContain(`migrate role ${migratorRole} is not a member of openshapeforge_blueprint_reader`);
-    expect(error?.message).toContain(`grant openshapeforge_blueprint_reader to ${migratorRole};`);
+    expect(error?.message).toContain(
+      `grant openshapeforge_blueprint_reader to ${migratorRole} with inherit true, set true;`,
+    );
     const schemas = await migrator.db.connection().execute((db) =>
       sql<{ n: number }>`select count(*)::int as n from pg_namespace where nspname in ('app', 'platform')`.execute(db),
     );
@@ -161,12 +165,15 @@ describe("database role contract", () => {
     try {
       await admin.unsafe(`
         create role ${creatorRole} login password '${creatorPassword}'
-          createrole nosuperuser nocreatedb nobypassrls;
+          createrole noinherit nosuperuser nocreatedb nobypassrls;
       `);
       creator = createDatabaseRuntime({
         databaseUrl: url(creatorRole, creatorPassword),
         maxConnections: 1,
       });
+      await creator.db.connection().execute((db) =>
+        sql`set createrole_self_grant = 'inherit'`.execute(db),
+      );
       contracts.splice(0, contracts.length, {
         key: "blueprintReader",
         name: childRole,
@@ -181,6 +188,13 @@ describe("database role contract", () => {
       expect(provisioned.created).toEqual([childRole]);
       expect(provisioned.granted).toEqual([`${childRole} -> ${creatorRole}`]);
       await creator.db.connection().execute((db) => verifyDatabaseRoles(db));
+      const capabilities = await creator.db.connection().execute((db) =>
+        sql<{ usage: boolean; canSet: boolean }>`
+          select pg_has_role(current_user, ${childRole}, 'USAGE') as usage,
+            pg_has_role(current_user, ${childRole}, 'SET') as "canSet"
+        `.execute(db),
+      );
+      expect(capabilities.rows[0]).toEqual({ usage: true, canSet: true });
     } finally {
       contracts.splice(0, contracts.length, ...originalContracts);
       await creator?.close();

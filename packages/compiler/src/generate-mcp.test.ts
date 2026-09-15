@@ -10,6 +10,7 @@ import type {
 import {
   buildMcpCatalog,
   MAX_DEDICATED_TOOLS,
+  operationMcpServer,
   type McpCatalogInput,
 } from "./generate-mcp.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
@@ -1704,5 +1705,49 @@ describe("relationship keys", () => {
     const build = () =>
       JSON.stringify(buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test"));
     expect(build()).toBe(build());
+  });
+});
+
+describe("control-realm Operation tools", () => {
+  const controlOperation = (index: number): CompiledPluginOperation => ({
+    ...staticOperation(index),
+    key: `control.operation-${index}`,
+    id: `control.operation-${index}`,
+    plugin: "osf-control",
+    auth: { mode: "control", roles: ["platform_admin"] },
+    tenancy: { mode: "none" },
+    transports: {
+      ...staticOperation(index).transports,
+      rest: {
+        method: "GET",
+        path: `/api/control/v1/operations/${index}`,
+        response: { status: 200, kind: "json" },
+      },
+      mcp: { enabled: true, name: `control_operation_${index}` },
+    },
+  });
+
+  it("lists control tools by the auth mode the control server filters on, outside the tenant budget", () => {
+    const control = Array.from(
+      { length: MAX_DEDICATED_TOOLS + 1 },
+      (_unused, index) => controlOperation(index),
+    );
+    const catalog = buildMcpCatalog([], "test", {}, [staticOperation(1), ...control]);
+
+    expect(catalog.operationTools).toHaveLength(MAX_DEDICATED_TOOLS + 2);
+    expect(catalog.operationTools.filter((tool) => tool.auth.mode === "control"))
+      .toHaveLength(MAX_DEDICATED_TOOLS + 1);
+    expect(catalog.operationTools.find((tool) => tool.key === "control.operation-0")).toMatchObject({
+      plugin: "osf-control",
+      name: "control_operation_0",
+      auth: { mode: "control", roles: ["platform_admin"] },
+      // No authored effects, so the hint follows the GET projection.
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
+    });
+    // Sixty-one tenant tools would flip the catalog to searchable; these
+    // belong to the control server, so the tenant projection is untouched.
+    expect(catalog.operationToolProjection.mode).toBe("dedicated");
+    expect(operationMcpServer(control[0]!)).toBe("control");
+    expect(operationMcpServer(staticOperation(1))).toBe("tenant");
   });
 });

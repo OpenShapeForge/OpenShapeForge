@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { CompiledEntityInfo } from "../plugins.js";
-import type { CompiledEntityContract, CompiledField, CompiledViewContext } from "./types.js";
+import type { CompiledEntityContract, CompiledField, CompiledViewContext, OperationCatalogDefinition } from "./types.js";
+import { collectAuthoredModulePluginOperations } from "../generate-operations.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 import { buildEntityOperations } from "./compiler/entity-operations.js";
 
@@ -755,5 +756,215 @@ test("blueprint metadata resolves to canonical executable web operations", () =>
     id: "osf-blueprints.Example.reset", intent: "invoke", confirmation: { mode: "acknowledgement" },
     input: { kind: "json-schema", schema: { required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] } },
     rest: { method: "POST", path: "/api/blueprints/example/reset" },
+  });
+});
+
+const operationContext = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: true };
+
+/** A slice of the platform's own administration catalog, as authored. */
+const controlCatalog: OperationCatalogDefinition = {
+  schemaVersion: 1,
+  kind: "operationCatalog",
+  plugin: "osf-control",
+  operations: {
+    listTenants: {
+      id: "control.list-tenants",
+      name: text("Tenants"),
+      description: text("Every tenant of the deployment.", "Alle tenants van deze omgeving."),
+      implementation: { type: "plugin", plugin: "osf-control", handler: "listTenants" },
+      input: { schema: { type: "object", additionalProperties: false } },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "read", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "none" },
+    },
+    getTenant: {
+      id: "control.get-tenant",
+      name: text("Get tenant", "Tenant opvragen"),
+      description: text("One tenant by slug.", "Eén tenant op slug."),
+      implementation: { type: "plugin", plugin: "osf-control", handler: "getTenant" },
+      input: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug"],
+          properties: { slug: { type: "string", "x-osf-i18n": { title: text("Slug") } } },
+        },
+      },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "read", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "none" },
+    },
+    updateTenant: {
+      id: "control.update-tenant",
+      name: text("Update tenant", "Tenant wijzigen"),
+      description: text("Renames one tenant.", "Hernoemt één tenant."),
+      implementation: { type: "plugin", plugin: "osf-control", handler: "updateTenant" },
+      input: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug"],
+          properties: {
+            slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
+            name: { type: "string", "x-osf-i18n": { title: text("Name", "Naam") } },
+          },
+        },
+      },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "control", roles: ["platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "write", external: "write" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "acknowledgement" },
+    },
+  },
+  interfaces: {
+    rest: {
+      operations: {
+        listTenants: { method: "GET", path: "/api/control/v1/tenants", response: { status: 200, kind: "json" } },
+        getTenant: { method: "GET", path: "/api/control/v1/tenants/:slug", response: { status: 200, kind: "json" } },
+        updateTenant: { method: "PATCH", path: "/api/control/v1/tenants/:slug", response: { status: 200, kind: "json" } },
+      },
+    },
+    mcp: { operations: { listTenants: { name: "list_tenants" } } },
+    web: {
+      pages: {
+        tenants: {
+          title: text("Tenants"),
+          description: text("Tenants of this deployment.", "Tenants van deze omgeving."),
+          icon: "buildings",
+          order: 1,
+        },
+      },
+      operations: {
+        listTenants: { page: "tenants", order: 0, landing: true },
+        getTenant: { page: "tenants", order: 1 },
+        updateTenant: { page: "tenants", order: 2 },
+      },
+    },
+  },
+};
+
+const standalone = (catalog: OperationCatalogDefinition) => ({
+  catalogs: [catalog],
+  operations: collectAuthoredModulePluginOperations([catalog], operationContext),
+});
+
+describe("standalone Operation pages", () => {
+  test("projects catalog pages and their Operations next to the entities", () => {
+    const manifest = buildWebManifest([], {}, standalone(controlCatalog));
+    expect(Object.keys(manifest.operations!)).toEqual([
+      "control.get-tenant",
+      "control.list-tenants",
+      "control.update-tenant",
+    ]);
+    expect(manifest.operations!["control.get-tenant"]).toEqual({
+      id: "control.get-tenant",
+      intent: "invoke",
+      key: "getTenant",
+      name: text("Get tenant", "Tenant opvragen"),
+      description: text("One tenant by slug.", "Eén tenant op slug."),
+      input: { kind: "json-schema", schema: controlCatalog.operations.getTenant!.input!.schema },
+      output: { kind: "json-schema", schema: { type: "object", additionalProperties: true } },
+      effects: { data: "read", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "none" },
+      rest: { method: "GET", path: "/api/control/v1/tenants/:slug", response: { status: 200, kind: "json" } },
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      page: "tenants",
+      order: 1,
+    });
+    expect(manifest.operations!["control.list-tenants"]).toMatchObject({ landing: true, order: 0 });
+    expect(manifest.pages).toEqual({
+      tenants: {
+        id: "tenants",
+        title: text("Tenants"),
+        description: text("Tenants of this deployment.", "Tenants van deze omgeving."),
+        icon: "buildings",
+        order: 1,
+        route: "/tenants",
+        operations: ["control.list-tenants", "control.get-tenant", "control.update-tenant"],
+      },
+    });
+    // The rendering is byte-stable across builds, as check:generated requires.
+    expect(renderWebManifest(manifest)).toBe(renderWebManifest(buildWebManifest([], {}, standalone(controlCatalog))));
+  });
+
+  test("puts the landing Operation first whatever its authored order", () => {
+    const reordered: OperationCatalogDefinition = {
+      ...controlCatalog,
+      interfaces: {
+        ...controlCatalog.interfaces,
+        web: {
+          pages: controlCatalog.interfaces.web!.pages,
+          operations: {
+            listTenants: { page: "tenants", order: 9, landing: true },
+            getTenant: { page: "tenants" },
+            updateTenant: { page: "tenants", order: 0 },
+          },
+        },
+      },
+    };
+    expect(buildWebManifest([], {}, standalone(reordered)).pages!.tenants!.operations)
+      .toEqual(["control.list-tenants", "control.update-tenant", "control.get-tenant"]);
+  });
+
+  test("omits the sections when no catalog projects to the web", () => {
+    expect(buildWebManifest([])).not.toHaveProperty("operations");
+    expect(buildWebManifest([])).not.toHaveProperty("pages");
+    const headless: OperationCatalogDefinition = {
+      ...controlCatalog,
+      interfaces: { rest: controlCatalog.interfaces.rest!, mcp: controlCatalog.interfaces.mcp! },
+    };
+    expect(buildWebManifest([], {}, standalone(headless))).not.toHaveProperty("pages");
+  });
+
+  test("refuses a placement whose contract was not compiled", () => {
+    expect(() => buildWebManifest([], {}, { catalogs: [controlCatalog], operations: [] }))
+      .toThrow(/"control.get-tenant" has a web placement but no compiled contract/);
+  });
+
+  test("requires both languages for page copy and Operation names under strict translations", () => {
+    expect(() => buildWebManifest([], { requireTranslations: true }, standalone(controlCatalog))).not.toThrow();
+    const untitled: OperationCatalogDefinition = {
+      ...controlCatalog,
+      interfaces: {
+        ...controlCatalog.interfaces,
+        web: { ...controlCatalog.interfaces.web!, pages: { tenants: { title: { en: "Tenants" } } } },
+      },
+    };
+    expect(() => buildWebManifest([], { requireTranslations: true }, standalone(untitled)))
+      .toThrow(/osf-control\.pages\.tenants\.title\.nl/);
+    const unnamed: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: {
+        ...controlCatalog.operations,
+        listTenants: { ...controlCatalog.operations.listTenants!, name: { en: "Tenants" } },
+      },
+    };
+    expect(() => buildWebManifest([], { requireTranslations: true }, standalone(unnamed)))
+      .toThrow(/control\.list-tenants\.name\.nl/);
+    // Strict hosts label every visible input, standalone forms included.
+    const unlabeled: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: {
+        ...controlCatalog.operations,
+        getTenant: {
+          ...controlCatalog.operations.getTenant!,
+          input: { schema: { type: "object", required: ["slug"], properties: { slug: { type: "string" } } } },
+        },
+      },
+    };
+    expect(() => buildWebManifest([], { requireTranslations: true }, standalone(unlabeled)))
+      .toThrow(/control\.get-tenant\.input\.properties\.slug\.x-osf-i18n\.title/);
   });
 });

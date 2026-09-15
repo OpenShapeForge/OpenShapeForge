@@ -30,3 +30,12 @@ test("operation parameters override shared parameters without duplicate query va
     get: { "x-osf-operation-id": "Record.list", parameters: [{ name: "limit", in: "query", required: true }] },
   } } })["Record.list"]?.parameters).toEqual([{ name: "limit", in: "query", required: true }]);
 });
+
+test("maps PUT, which a standalone Operation may project to", () => {
+  const path = "/api/control/v1/tenants/{slug}/blueprint-library";
+  expect(buildWebRestOperationMap({ paths: { [path]: {
+    put: { "x-osf-operation-id": "control.assign-blueprint-library", parameters: [{ name: "slug", in: "path", required: true }] },
+  } } })["control.assign-blueprint-library"]).toEqual({
+    method: "PUT", path, parameters: [{ name: "slug", in: "path", required: true }],
+  });
+});

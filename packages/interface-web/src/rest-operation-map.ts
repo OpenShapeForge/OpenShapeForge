@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 export type WebRestParameter = { name: string; in: "path" | "query"; required?: boolean };
 export type WebRestOperation = {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   parameters: WebRestParameter[];
 };
 
 type OpenApiOperation = { "x-osf-operation-id"?: string; parameters?: WebRestParameter[] };
-type OpenApiPath = Partial<Record<"get" | "post" | "patch" | "delete", OpenApiOperation>> & {
+// Every method a canonical Operation may project to; entity CRUD never uses
+// PUT, but a standalone Operation (an assignment, say) may.
+const REST_METHODS = ["get", "post", "put", "patch", "delete"] as const;
+type OpenApiPath = Partial<Record<(typeof REST_METHODS)[number], OpenApiOperation>> & {
   parameters?: WebRestParameter[];
 };
 export type WebOperationOpenApi = { paths: Record<string, OpenApiPath> };
@@ -17,7 +20,7 @@ export function buildWebRestOperationMap(document: WebOperationOpenApi, operatio
   const selected = operationIds ? new Set(operationIds) : undefined;
   const operations: Record<string, WebRestOperation> = {};
   for (const [path, item] of Object.entries(document.paths)) {
-    for (const method of ["get", "post", "patch", "delete"] as const) {
+    for (const method of REST_METHODS) {
       const operation = item[method];
       const id = operation?.["x-osf-operation-id"];
       if (!id || (selected && !selected.has(id))) continue;

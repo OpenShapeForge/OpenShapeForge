@@ -24,11 +24,20 @@ import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 import {
   SEARCHABLE_OPERATION_TOOL_NAMES,
+  operationMcpServer,
   selectOperationToolProjection,
   type McpOperationToolProjection,
 } from "./generate-mcp.js";
+import { moduleOperationId } from "./authoring/operation-catalog.js";
 
 export type { CompiledPluginOperation } from "./plugins.js";
+
+/**
+ * Runtime modules the API itself provides, so an Operation bound to one needs
+ * no plugin runtime in the module registry: `osf-blueprints` serves the
+ * blueprint Operations and `osf-control` the platform's own administration.
+ */
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control"];
 
 /**
  * Platform-owned mutation controls are derived from the canonical Operation
@@ -119,6 +128,15 @@ const RESERVED_API_NAMESPACES = new Set([
   "rest",
 ]);
 
+/**
+ * Reserved namespaces a core module owns outright. The reservation exists so
+ * a plugin cannot squat on a core prefix; the core module that IS that prefix
+ * is the one contributor allowed to author Operations under it.
+ */
+const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
+  ["control", "osf-control"],
+]);
+
 const DEFAULT_OPERATION_ERROR_SCHEMA = {
   type: "object",
   required: ["error"],
@@ -185,15 +203,10 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "POST", path: "/api/api-keys/:integrationId/keys", owner: "core API-key provisioning" },
   { method: "DELETE", path: "/api/api-keys/keys/:keyId", owner: "core API-key provisioning" },
   { method: "DELETE", path: "/api/api-keys/:integrationId", owner: "core API-key provisioning" },
-  { method: "GET", path: "/api/control/v1/tenants", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/tenants", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
-  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
-  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug/organizations/:orgUnitId", owner: "core control plane" },
-  { method: "GET", path: "/api/control/v1/reconciliation", owner: "core control plane" },
-  { method: "POST", path: "/api/control/v1/reconciliation/reapply", owner: "core control plane" },
+  // The control plane under /api/control/v1 is no longer listed here: its
+  // routes are the canonical `osf-control` operation catalog, claimed below
+  // like every other Operation. The "control" namespace itself stays reserved
+  // (RESERVED_API_NAMESPACES) so only that core module can author under it.
 ];
 
 function restPathParameters(path: string): string[] {
@@ -285,7 +298,8 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
   const routeNamespace = restPath.split("/")[2] ?? "";
   const reservedNamespace = (authored ? [routeNamespace] : [apiNamespace, plugin, routeNamespace])
-    .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()));
+    .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()) &&
+      CORE_MODULE_API_NAMESPACES.get(value.toLowerCase()) !== plugin);
   if (reservedNamespace) {
     throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }
@@ -384,6 +398,17 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   if (operation.auth.mode === "public" && operation.transports.mcp.enabled) {
     throw new Error(`${where} public operations cannot project to the authenticated MCP endpoint; disable MCP with a reason.`);
   }
+  if (operation.auth.mode === "control") {
+    // A control-realm operator has no tenant, and the tenant GraphQL schema
+    // has no control-realm session to resolve against; REST and the control
+    // MCP server are the only surfaces that verify a control bearer.
+    if (operation.tenancy.mode !== "none") {
+      throw new Error(`${where} control auth requires tenancy mode none; no tenant context exists for a control-realm operator.`);
+    }
+    if (operation.transports.graphql.enabled) {
+      throw new Error(`${where} control auth can only project to REST and the control MCP server; GraphQL needs a disabled reason.`);
+    }
+  }
   const responseKind = operation.transports.rest.response.kind;
   const successStatus = operation.transports.rest.response.status ?? 200;
   if (!Number.isInteger(successStatus) || successStatus < 200 || successStatus > 399) {
@@ -457,6 +482,9 @@ export function auditOperationSurfaceCollisions(
 ): McpOperationToolProjection {
   const graphql = new Map<string, string>();
   const mcp = new Map<string, string>();
+  // The control MCP server has its own tool-name space and no dedicated-tool
+  // budget: its list is only ever the control Operations (operationMcpServer).
+  const controlMcp = new Map<string, string>();
   // Core owns its internal precedence choices (for example a fixed route next
   // to a parameter fallback). Generated and plugin routes may overlap neither
   // those route languages nor each other.
@@ -535,8 +563,12 @@ export function auditOperationSurfaceCollisions(
       claimSurface(graphql, "GraphQL root field", operation.transports.graphql.field, owner);
     }
     if (operation.transports.mcp.enabled) {
-      claimSurface(mcp, "MCP tool", operation.transports.mcp.name, owner);
-      operationMcpTools += 1;
+      if (operationMcpServer(operation) === "control") {
+        claimSurface(controlMcp, "control MCP tool", operation.transports.mcp.name, owner);
+      } else {
+        claimSurface(mcp, "MCP tool", operation.transports.mcp.name, owner);
+        operationMcpTools += 1;
+      }
     }
   }
 
@@ -800,7 +832,7 @@ export function collectAuthoredModulePluginOperations(
         ? graphqlContract.operations?.[key] ?? {}
         : undefined;
       const idempotency = definition.reliability.idempotency;
-      const canonicalId = definition.id ?? `${catalog.plugin}.${key}`;
+      const canonicalId = moduleOperationId(catalog, key, definition);
       return {
         key: canonicalId,
         title: authoredText(definition.name),
@@ -1137,6 +1169,10 @@ export function operationOpenApiPaths(
       ...(paths[openApiPath] ?? {}),
       [method]: {
         operationId: operation.key,
+        // The canonical id the web REST map (buildWebRestOperationMap) keys on,
+        // spelled the same way as the generated entity CRUD paths spell theirs,
+        // so a static Operation is addressable from the browser too.
+        "x-osf-operation-id": operation.key,
         summary: operation.title,
         description: operation.description,
         tags: [operation.plugin],

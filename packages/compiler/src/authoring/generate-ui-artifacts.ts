@@ -18,7 +18,7 @@ import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
-import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
+import { buildWebManifest, renderWebManifest, type WebStandaloneOperationsInput } from "./web-manifest.js";
 
 export type AuthoringUiArtifact = {
   path: string;
@@ -366,6 +366,7 @@ function keepGreenfieldSafeArtifacts(files: Map<string, string>): AuthoringUiArt
 export async function generateAuthoringUiArtifacts(
   authoringDir: string,
   repoRoot: string,
+  standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -502,6 +503,8 @@ export async function generateAuthoringUiArtifacts(
     "generated/web/web-manifest.json",
     renderWebManifest(buildWebManifest(
       compiled.map(({ name, contract }) => ({ slug: name, contract })),
+      {},
+      standalone,
     )),
   );
 

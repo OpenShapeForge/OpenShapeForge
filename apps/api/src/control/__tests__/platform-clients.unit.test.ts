@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import type { ControlPlaneConfig } from "../../control/config.js";
-import { KeycloakAdminError } from "../../control/keycloak-organization-admin.js";
-import { KeycloakSpiError } from "../../control/keycloak-spi-client.js";
-import {
-  createPlatformKeycloakClients,
-  platformCorrelationId,
-} from "../control-mcp-server.js";
+import type { ControlPlaneConfig } from "../config.js";
+import { KeycloakAdminError } from "../keycloak-organization-admin.js";
+import { KeycloakSpiError } from "../keycloak-spi-client.js";
+import { createPlatformKeycloakClients } from "../runtime.js";
 
 const config: ControlPlaneConfig = {
   keycloak: {
@@ -24,17 +21,6 @@ const config: ControlPlaneConfig = {
 };
 
 describe("platform MCP Keycloak client composition", () => {
-  test("never promotes a client-controlled request id into diagnostic metadata", () => {
-    const injected = "person@example.com bearer-secret ".repeat(100);
-    const correlationId = platformCorrelationId(injected);
-
-    expect(correlationId).not.toContain("person@example.com");
-    expect(correlationId).not.toContain("bearer-secret");
-    expect(correlationId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
-  });
-
   test("keeps service-account refusals typed for the API that made the call", async () => {
     const fetch = (async () =>
       new Response(JSON.stringify({ error: "unauthorized_client" }), {

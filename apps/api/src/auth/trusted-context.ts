@@ -5,6 +5,7 @@ import {
   type ReadTrustedContextOptions,
 } from "@openshapeforge/auth";
 import type { IdentityLinkState } from "./identity-link.js";
+import type { PlatformAdministrator } from "../control/platform-admin.js";
 
 export type SessionScope = "tenant" | "group" | "self";
 
@@ -18,8 +19,19 @@ export type SessionScope = "tenant" | "group" | "self";
  *
  * "none" is the unauthenticated empty session. It is spelled out rather than
  * left undefined so no consumer can read a missing value as a permissive one.
+ *
+ * "control-bearer" is a token of the platform's CONTROL realm
+ * (control/control-session.ts): a platform operator acting across every
+ * tenant and for none in particular. It never satisfies a tenant Operation,
+ * and a tenant credential never satisfies a control one — the operations
+ * runtime keys both refusals on this discriminant.
  */
-export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context";
+export type SessionCredential =
+  | "none"
+  | "bearer"
+  | "api-key"
+  | "trusted-context"
+  | "control-bearer";
 
 export type TrustedSessionContext = {
   tenantId: string | null;
@@ -53,6 +65,14 @@ export type TrustedSessionContext = {
   scope: SessionScope;
   /** Which credential authenticated this session. */
   credential: SessionCredential;
+  /**
+   * The verified platform operator behind a "control-bearer" session: the
+   * audit actor (`subject`/`issuer`/`username`) and the display facts whoami
+   * reports. Present exactly when `credential` is "control-bearer"; `userId`
+   * repeats `subject` so session-shaped code keeps working, and `tenantId`
+   * is null because no tenant context exists on the control realm.
+   */
+  administrator?: PlatformAdministrator;
   // ---- identity ↔ Relation link (auth/identity-link.ts) ----
   /**
    * The party this login acts as in the tenant: the link state resolved on

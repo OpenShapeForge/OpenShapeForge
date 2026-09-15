@@ -488,14 +488,19 @@ export class ModulePlatformRuntime {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation listing requires a live verified session.");
     }
+    // A control-realm operator has no tenant: entity Operations and the
+    // record-derived ones a provider lists are tenant-scoped by construction,
+    // so only the static Operations — whose own authorization says whether a
+    // control session may use them — are on offer.
+    const controlSession = isControlRealmSession(session);
     const heldRoles = new Set(session.roles);
-    const entityOperations = getEntityOperationContracts().filter((operation) =>
+    const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
       operation.authorization.roles.some((role) => heldRoles.has(role))
     );
     const staticOperations = [...this.#staticOperations.values()]
       .filter((registration) => registration.available(session))
       .map((registration) => registration.definition);
-    const provided = await this.listRuntimeProviderOperations(session);
+    const provided = controlSession ? [] : await this.listRuntimeProviderOperations(session);
     const byId = new Map<string, RuntimeOperationDefinition>();
     for (const definition of [
       ...entityOperations,
@@ -602,10 +607,12 @@ export class ModulePlatformRuntime {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation lookup requires a live verified session.");
     }
+    const controlSession = isControlRealmSession(session);
     const entityOperation = getEntityOperationContracts().find(
       (candidate) => candidate.id === operationId,
     );
     if (entityOperation) {
+      if (controlSession) return undefined;
       const heldRoles = new Set(session.roles);
       if (!entityOperation.authorization.roles.some((role) => heldRoles.has(role))) {
         return undefined;
@@ -618,6 +625,7 @@ export class ModulePlatformRuntime {
         ? staticOperation.definition
         : undefined;
     }
+    if (controlSession) return undefined;
     const matches = (
       await Promise.all(
         [...this.#operationProviders.values()].map((provider) =>
@@ -648,10 +656,11 @@ export class ModulePlatformRuntime {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation execution requires a live verified session.");
     }
+    const controlSession = isControlRealmSession(session);
     const entityOperation = getEntityOperationContracts().find(
       (candidate) => candidate.id === request.operation.id,
     );
-    if (entityOperation) {
+    if (entityOperation && !controlSession) {
       if (entityOperation.intent !== request.operation.intent) {
         return {
           error: {
@@ -702,6 +711,15 @@ export class ModulePlatformRuntime {
         [...staticStack, request.operation.id],
         () => staticOperation.execute(session, request, options),
       );
+    }
+    if (controlSession) {
+      return {
+        error: {
+          code: "OPERATION_NOT_FOUND",
+          message: "The requested Operation is not available.",
+          retryable: false,
+        },
+      };
     }
     const matches: Array<{
       provider: RuntimeOperationProvider;
@@ -1069,10 +1087,20 @@ export class ModulePlatformRuntime {
   }
 }
 
+/** A control-realm operator's session (control/control-session.ts): no tenant, ever. */
+function isControlRealmSession(session: TrustedSessionContext): boolean {
+  return session.credential === "control-bearer";
+}
+
 /**
  * Run a canonical operation with the runtime that owns its exact platform
  * capability. The ownership lookup is identity-based and is not exposed to
  * modules, so a platform-shaped object cannot activate a session.
+ *
+ * A control-realm session activates like any other and binds nothing: the
+ * capability is tenant-agnostic, `platform.db.withSession` refuses a session
+ * without a tenant, and the control handlers never ask for one — they
+ * elevate themselves with `withSystemSession`, audited per Operation.
  */
 export async function withModuleOperationSession<T>(
   platform: ModulePlatformServices | undefined,

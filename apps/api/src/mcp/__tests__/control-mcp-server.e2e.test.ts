@@ -189,8 +189,14 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
     expect(message).not.toContain("issuer");
   });
 
-  test("a control-realm token without platform_admin is 403, the operator role notwithstanding", async () => {
+  test("a platform-operator token is admitted too — which tools it reaches is the Operations' decision", async () => {
     const response = await call(adminToken({ realm_access: { roles: ["platform-operator"] } }));
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
+  });
+
+  test("a control-realm token holding no platform role is 403", async () => {
+    const response = await call(adminToken({ realm_access: { roles: ["default-roles-openshapeforge-control"] } }));
     expect(response.statusCode).toBe(403);
     expect(JSON.parse(response.body).error.code).toBe("FORBIDDEN");
   });

@@ -11,17 +11,20 @@
  * tenant has no business sitting in an interactive login token where a stolen
  * session, a mis-scoped composite or a token-exchange mistake would carry it.
  *
- * So the elevation is a SERVER-SIDE decision made here, and it is deliberately
- * one line of policy with three preconditions in front of it:
+ * So the elevation is a SERVER-SIDE decision, and it is deliberately one line
+ * of policy with three preconditions in front of it:
  *
  *   1. the bearer verifies against the CONTROL realm — its own issuer and JWKS,
- *      never the tenant realm's (see config.ts);
- *   2. the token was minted for the control realm's one gateway client, and
- *      carries a subject; and
- *   3. the subject holds the realm role `platform-operator`.
+ *      never the tenant realm's (see config.ts) — which {@link verifyControlBearer}
+ *      below is the one implementation of;
+ *   2. the token was minted for an admitted client and carries a subject; and
+ *   3. the subject holds a control-realm platform role, and the Operation being
+ *      invoked names that role in its `auth.roles`.
  *
- * Only then does {@link systemSessionForOperator} attach `Platform.SystemBypass`
- * — to a session object that never leaves the process, for the duration of one
+ * The second and third are decided in `control-session.ts` (the door) and in
+ * the operations runtime (per Operation). Only then does
+ * {@link systemSessionForOperator} attach `Platform.SystemBypass` — to a
+ * session object that never leaves the process, for the duration of one
  * callback. The token is never rewritten and nothing downstream can re-present
  * the elevation.
  *
@@ -37,13 +40,13 @@
 import { createBearerVerifier, type BearerVerifier } from "@openshapeforge/auth";
 import { SYSTEM_BYPASS_ROLE, type SystemSessionInput } from "../db/session.js";
 import type { ControlPlaneConfig } from "./config.js";
-import { usesHostOrganizationContext } from "../config/host-organization.js";
-import { assertHostRealm, hasKeycloakRealmAdmin } from "./realm-boundary.js";
 
 /**
- * The control realm's single realm role. Holding it means "may use the control
- * plane"; it composes nothing, because the authority to change anything lives on
- * the far side of a server-side call rather than in the token.
+ * The control realm's tenant-lifecycle role. Holding it means "may use the
+ * control plane's tenant and organization Operations"; it composes nothing,
+ * because the authority to change anything lives on the far side of a
+ * server-side call rather than in the token. The catalog is
+ * `platform_admin`'s (platform-admin.ts).
  */
 export const PLATFORM_OPERATOR_ROLE = "platform-operator";
 
@@ -180,66 +183,11 @@ export function realmRolesOf(claims: Record<string, unknown>): string[] {
 }
 
 /**
- * Authenticate and authorize the caller as a platform operator: a verified
- * control-realm bearer, minted for the one gateway client, holding the
- * `platform-operator` realm role.
- */
-export async function resolveControlOperator(
-  headers: Headers,
-  config: ControlPlaneConfig,
-  options: ResolveOperatorOptions = {},
-): Promise<ControlOperator> {
-  if (usesHostOrganizationContext()) assertHostRealm(config);
-  const claims = await verifyControlBearer(headers, config, options);
-
-  // The authorized-party check. Without it a valid issuer alone would let in a
-  // token minted by Keycloak's built-in PUBLIC `admin-cli` client — obtainable
-  // by any realm user with a direct-access grant and NO client secret — which
-  // would reduce the control plane's credential requirement from
-  // "password AND the gateway's secret" to "password". `aud` cannot carry this:
-  // the control realm has no resource-server client, so no operator token has
-  // one. Same reasoning as the SPI's own ALLOWED_ADMIN_CLIENTS allow-list, and
-  // like it, this is defence in depth rather than the authorization decision —
-  // the role check below is that.
-  const authorizedParty = typeof claims.azp === "string" ? claims.azp : "";
-  if (authorizedParty !== config.operator.clientId) {
-    throw new ControlAuthorizationError(
-      "UNAUTHENTICATED",
-      "The presented token was not issued for the control plane's client.",
-    );
-  }
-
-  const subject = typeof claims.sub === "string" ? claims.sub.trim() : "";
-  if (!subject) {
-    throw new ControlAuthorizationError(
-      "UNAUTHENTICATED",
-      "The presented token carries no subject.",
-    );
-  }
-
-  // Realm roles only; see realmRolesOf for why client roles never count.
-  const holdsOperatorRole = usesHostOrganizationContext() ? hasKeycloakRealmAdmin(claims) : realmRolesOf(claims).includes(PLATFORM_OPERATOR_ROLE);
-  if (!holdsOperatorRole) {
-    throw new ControlAuthorizationError(
-      "FORBIDDEN",
-      `Not authorized to use the control plane; ${usesHostOrganizationContext() ? "realm-management/realm-admin" : PLATFORM_OPERATOR_ROLE} is required.`,
-    );
-  }
-
-  const username =
-    typeof claims.preferred_username === "string" && claims.preferred_username.trim()
-      ? claims.preferred_username.trim()
-      : undefined;
-
-  return { subject, issuer: config.operator.issuer, username };
-}
-
-/**
  * THE ELEVATION. Turns an authorized operator into the input `withSystemSession`
  * requires.
  *
  * Everything that decides whether this is safe has already happened: the caller
- * proved a control-realm identity holding `platform-operator`. What this adds is
+ * proved a control-realm identity holding the Operation's role. What this adds is
  * the role the database session needs and the audit trail that makes the
  * addition reviewable — an issuer-qualified actor and a reason naming the
  * operation and its target.

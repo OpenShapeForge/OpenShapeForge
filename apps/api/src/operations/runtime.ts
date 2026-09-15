@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { blueprintOperationHandler } from "./entity/blueprints.js";
+import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
+import {
+  bearerIssuerOf,
+  controlSessionHttpError,
+  resolveControlSession,
+} from "../control/control-session.js";
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
@@ -570,6 +576,14 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
       continue;
     }
+    // The platform's own administration is core too: its handlers ship with
+    // the runtime (control/operations.ts) and bind in every process, so a
+    // core-only deployment administers itself without an operation module.
+    if (operation.plugin === CONTROL_PLUGIN) {
+      if (modulesByName.has(CONTROL_PLUGIN)) throw new Error("The core control runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
+      continue;
+    }
     if (pluginOperations === "absent") continue;
     const module = modulesByName.get(operation.plugin);
     if (!module) {
@@ -607,8 +621,26 @@ export function requireOperationAuthorization(
   operation: OperationContract,
   session: TrustedSessionContext | undefined,
 ): void {
+  // A control Operation takes a control-realm session and nothing else; a
+  // tenant credential is refused with the same 401 as no credential, so the
+  // refusal discloses nothing about which realm the surface trusts. Which of
+  // the realm roles it needs is the Operation's own any-of list.
+  if (operation.auth.mode === "control") {
+    if (!session || session.credential !== "control-bearer" || !session.userId) {
+      throw new HttpError(401, "UNAUTHENTICATED", "Operation requires a control-realm operator token.");
+    }
+    if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
+      throw new HttpError(403, "FORBIDDEN", "Operator lacks a required control-realm role.");
+    }
+    return;
+  }
   if (operation.auth.mode !== "session") return;
-  if (!session || session.credential === "none" || !session.userId) {
+  // The mirror image: a platform operator has no tenant and is not a session
+  // on this surface, whatever roles the control realm gave them.
+  if (
+    !session || session.credential === "none" || session.credential === "control-bearer" ||
+    !session.userId
+  ) {
     throw new HttpError(401, "UNAUTHENTICATED", "Operation requires an authenticated bearer session.");
   }
   if (operation.tenancy.mode === "required" && !session.tenantId) {
@@ -1483,13 +1515,42 @@ function operationRestInputFromParts(
   return input;
 }
 
+/**
+ * The session for a control Operation on REST: the control realm's own
+ * verifier, never the tenant one. An unconfigured control plane answers the
+ * 503 every control Operation declares, naming what is missing, rather than
+ * a 401 that would send an operator looking at their token.
+ */
+async function resolveControlRestSession(
+  request: FastifyRequest,
+  context: ModuleRuntimeContext,
+): Promise<TrustedSessionContext> {
+  const control = context.control;
+  if (!control) {
+    throw new HttpError(503, "CONTROL_PLANE_NOT_CONFIGURED", "The control plane is not assembled in this process.");
+  }
+  if (!control.config.ok) {
+    throw new HttpError(
+      503,
+      "CONTROL_PLANE_NOT_CONFIGURED",
+      `The control plane is not configured. Missing environment: ${control.config.missing.join(", ")}.`,
+    );
+  }
+  try {
+    return await resolveControlSession(headersFromFastify(request.headers), control.config.config);
+  } catch (error) {
+    throw controlSessionHttpError(error);
+  }
+}
+
 export function registerOperationRestRoutes(
   app: FastifyInstance,
   modules: readonly RuntimeModule[],
   context: ModuleRuntimeContext,
   operations: readonly OperationContract[] = catalog.operations,
+  options: BindOperationOptions = {},
 ): void {
-  const bound = bindOperationHandlers(modules, operations);
+  const bound = bindOperationHandlers(modules, operations, options);
   for (const entry of bound.values()) {
     const handler = async (request: FastifyRequest, reply: FastifyReply) => {
       let session: TrustedSessionContext | undefined;
@@ -1499,6 +1560,8 @@ export function registerOperationRestRoutes(
         );
         session = entry.operation.auth.mode === "custom"
           ? undefined
+          : entry.operation.auth.mode === "control"
+          ? await resolveControlRestSession(request, context)
           : await resolveSessionContext(headersFromFastify(request.headers), {
               db: context.db,
               failOnUnavailable:
@@ -1556,11 +1619,16 @@ export function registerRuntimeOperationRestRoutes(
     request: FastifyRequest,
     work: (session: TrustedSessionContext) => Promise<T>,
   ): Promise<T> => {
-    const session = await resolveSessionContext(
-      headersFromFastify(request.headers),
-      { db: runtime.db },
-    );
-    if (!session.userId || session.credential === "none") {
+    const headers = headersFromFastify(request.headers);
+    // A control-realm token is routed by its issuer to the control verifier
+    // and lists only the control Operations its roles allow; every other
+    // credential stays on the tenant path. A control token that does not
+    // verify gets the same 401 as any other stranger.
+    const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
+    const session = control && bearerIssuerOf(headers) === control.operator.issuer
+      ? await resolveControlSession(headers, control).catch(() => undefined)
+      : await resolveSessionContext(headers, { db: runtime.db });
+    if (!session || !session.userId || session.credential === "none") {
       throw new HttpError(
         401,
         "UNAUTHENTICATED",

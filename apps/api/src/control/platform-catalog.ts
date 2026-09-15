@@ -252,7 +252,7 @@ function elevated<T>(
 
 /** Every tenant with its catalog installation counts. Empty counts without a provider. */
 export async function listPlatformTenants(deps: PlatformCatalogDeps): Promise<PlatformTenant[]> {
-  return elevated(deps, "list_tenants", async (trx) => {
+  return elevated(deps, "control.list-tenants", async (trx) => {
     const rows = await tenantRows(trx);
     const summaries = deps.provider ? await deps.provider.installationSummary(trx) : [];
     const byTenant = new Map(summaries.map((summary) => [summary.tenantId, summary]));
@@ -262,7 +262,7 @@ export async function listPlatformTenants(deps: PlatformCatalogDeps): Promise<Pl
 
 export async function getPlatformTenant(deps: PlatformCatalogDeps, slug: string): Promise<PlatformTenant> {
   assertSlug(slug, "slug");
-  return elevated(deps, `get_tenant slug="${slug}"`, async (trx) => {
+  return elevated(deps, `control.get-tenant slug="${slug}"`, async (trx) => {
     const row = (await tenantRows(trx)).find((candidate) => candidate.slug === slug);
     if (!row) throw tenantNotFound(slug);
     const summary = deps.provider
@@ -301,7 +301,7 @@ export async function listCatalogEntries(
   options: { kind?: CatalogKind; key?: string; cursor?: string; limit?: number },
 ): Promise<{ entries: CatalogEntryView[]; nextCursor: string | null }> {
   const provider = requireProvider(deps);
-  return elevated(deps, "list_catalog_entries", async (trx) => {
+  return elevated(deps, "control.list-catalog-entries", async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const page = await provider.listEntries(trx, options).catch(translate);
     return {
@@ -317,7 +317,7 @@ export async function getCatalogEntry(
   key: string,
 ): Promise<CatalogEntryDetailView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `get_catalog_entry ${kind}/${key}`, async (trx) => {
+  return elevated(deps, `control.get-catalog-entry ${kind}/${key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const entry = await provider.getEntry(trx, kind, key).catch(translate);
     return { ...entry, tenants: viewOf(slugs, entry.tenants) };
@@ -334,7 +334,7 @@ export async function publishCatalogEntry(
   },
 ): Promise<PublishView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `publish_catalog_entry ${input.kind}/${input.key}`, async (trx) => {
+  return elevated(deps, `control.publish-catalog-entry ${input.kind}/${input.key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const result = await provider.publish(trx, input).catch(translate);
     return { ...result, tenants: viewOf(slugs, result.tenants) };
@@ -347,7 +347,7 @@ export async function retireCatalogEntry(
   key: string,
 ): Promise<PublishView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `retire_catalog_entry ${kind}/${key}`, async (trx) => {
+  return elevated(deps, `control.retire-catalog-entry ${kind}/${key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const result = await provider.retire(trx, kind, key).catch(translate);
     return { ...result, tenants: viewOf(slugs, result.tenants) };
@@ -362,7 +362,7 @@ export async function applyCatalogUpdateForTenant(
 ): Promise<ApplyCatalogUpdateResult & { tenant: string }> {
   const provider = requireProvider(deps);
   assertSlug(slug, "slug");
-  return elevated(deps, `apply_catalog_update_for_tenant ${kind}/${key} tenant="${slug}"`, async (trx) => {
+  return elevated(deps, `control.apply-catalog-update-for-tenant ${kind}/${key} tenant="${slug}"`, async (trx) => {
     const row = (await tenantRows(trx)).find((candidate) => candidate.slug === slug);
     if (!row) throw tenantNotFound(slug);
     const result = await provider.applyUpdateForTenant(trx, row.id, kind, key).catch(translate);

@@ -625,6 +625,7 @@ type Catalog = {
     outputSchema: Record<string, unknown>;
     auth:
       | { mode: "public" }
+      | { mode: "control"; roles: string[] }
       | { mode: "session"; roles?: string[]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
@@ -2258,6 +2259,7 @@ function operationToolResult(
 }
 
 export const __operationToolResultForTests = operationToolResult;
+export const __operationMayInvokeForTests = operationMayInvoke;
 
 /**
  * A plugin operation run as a native binding: its canonical value, plus —
@@ -3198,6 +3200,10 @@ function operationMayInvoke(
   session: TrustedSessionContext,
 ): boolean {
   if (tool.auth.mode === "public") return true;
+  // The platform's own administration is served by `/admin/mcp` on a
+  // control-realm session; a tenant session never sees it, whatever its
+  // roles are called, so the tenant surface cannot even name it.
+  if (tool.auth.mode === "control" || session.credential === "control-bearer") return false;
   if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
     return false;
   const scopes = new Set(session.oauthScopes ?? []);
@@ -3227,8 +3233,8 @@ function projectCatalogOperationTool(
 // environment. `undefined` when that configuration is absent (an existing
 // deployment that never set it up), in which case the tool answers
 // CONTROL_PLANE_NOT_CONFIGURED rather than throwing at server-build time —
-// consistent with how registerControlRestRoutes stays registered and answers
-// 503 by name instead of refusing to start.
+// consistent with how the control Operations stay bound and answer 503 by
+// name instead of refusing to start.
 let cachedEmployeeInvitationKeycloak: KeycloakOrganizationMembersClient | undefined | null = null;
 function employeeInvitationKeycloakClient(): KeycloakOrganizationMembersClient | undefined {
   if (cachedEmployeeInvitationKeycloak !== null) return cachedEmployeeInvitationKeycloak;

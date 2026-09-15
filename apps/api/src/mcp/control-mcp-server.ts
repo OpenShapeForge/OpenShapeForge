@@ -8,21 +8,32 @@
  * tenant's rows and roles, and `whoami` says which organization the person
  * acts for. A platform administrator has no tenant. Threading "no tenant"
  * through a server whose invariants all assume one would be the same defect
- * the control REST surface refuses to be on the GraphQL schema
- * (control/rest-routes.ts), so this server shares the transport plumbing —
- * Streamable HTTP, stateful sessions keyed by `mcp-session-id`, the JSON
- * body parser, RFC 9728 discovery — and nothing else.
+ * the control plane refuses to be on the GraphQL schema, so this server
+ * shares the transport plumbing — Streamable HTTP, stateful sessions keyed
+ * by `mcp-session-id`, the JSON body parser, RFC 9728 discovery — and
+ * nothing else.
+ *
+ * WHAT IT SERVES
+ * --------------
+ * The `osf-control` Operations (control/operations.ts), bound by the same
+ * `bindOperationHandlers` REST uses and dispatched through `invokeOperation`
+ * with `transport: "mcp"`. The tool list is the Operations whose `auth.roles`
+ * admit the session's control-realm roles, under their `transports.mcp`
+ * names, with the compiled input schema — the `confirmed` acknowledgement
+ * field included where the Operation declares one. Beside them, the one
+ * `osf://platform-session` resource.
  *
  * WHO GETS IN
  * -----------
- * Control-realm bearer only (`control/platform-admin.ts`): a token verified
+ * Control-realm bearer only (`control/control-session.ts`): a token verified
  * against the control realm's issuer and JWKS, minted for an admitted client
  * (`azp` allow-list: the admin gateway and the platform's public PKCE
- * client), holding the `platform_admin` realm role. Trusted-context headers
- * and API keys name a tenant and are refused before any of that; a
- * tenant-realm token fails signature verification and is refused with the
- * same 401 as no token at all. A refused caller learns nothing about which
- * tenants, realms or clients exist.
+ * client) or bound to this resource by `aud`, holding a control-realm
+ * platform role. Which tools that role reaches is the Operations' decision.
+ * Trusted-context headers and API keys name a tenant and are refused before
+ * any of that; a tenant-realm token fails signature verification and is
+ * refused with the same 401 as no token at all. A refused caller learns
+ * nothing about which tenants, realms or clients exist.
  *
  * DISCOVERY
  * ---------
@@ -44,39 +55,36 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { ControlAuthorizationError } from "../control/authorization.js";
 import { clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
 import {
-  readControlPlaneConfig,
-  type ControlPlaneConfig,
-  type ControlPlaneConfigResult,
-} from "../control/config.js";
-import type { FirstAdministratorClients } from "../control/first-tenant-administrator.js";
-import { createKeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
-import { createKeycloakOrganizationAdminClient, KeycloakAdminError } from "../control/keycloak-organization-admin.js";
-import { createServiceAccountTokenProvider } from "../control/keycloak-service-account.js";
-import { createKeycloakSpiClient, KeycloakSpiError } from "../control/keycloak-spi-client.js";
-import { createOrganizationScopeAdminClient } from "../control/organization-scopes.js";
-import {
-  resolvePlatformAdministrator,
-  type PlatformAdministrator,
-} from "../control/platform-admin.js";
-import type { PlatformCatalogProvider } from "../control/platform-catalog.js";
+  controlSessionHttpError,
+  resolveControlSession,
+  type ControlSessionContext,
+} from "../control/control-session.js";
+import { CONTROL_PLUGIN } from "../control/operations.js";
 import {
   buildPlatformSessionInfo,
-  callPlatformTool,
   PLATFORM_SERVER_INFO,
   PLATFORM_SERVER_INSTRUCTIONS,
   PLATFORM_SESSION_RESOURCE,
   PLATFORM_SESSION_RESOURCE_URI,
-  PLATFORM_TOOLS,
   listPlatformTenantsCount,
 } from "../control/platform-tools.js";
+import type { ControlPresentation } from "../control/runtime.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
-import type { RuntimeModule } from "../modules/contract.js";
-import type { ControlDeps } from "../control/tenant-registry.js";
+import type { ModuleOperationSuccessResult, ModuleRuntimeContext } from "../modules/contract.js";
+import {
+  bindOperationHandlers,
+  type BoundOperation,
+  DeclaredOperationError,
+  invokeOperation,
+  listOperationContracts,
+  type OperationContract,
+  requireOperationAuthorization,
+} from "../operations/runtime.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
   AUTHORIZATION_SERVER_METADATA_PREFIXES,
@@ -178,90 +186,128 @@ export function buildControlResourceMetadata(
   };
 }
 
-/** The first loaded module that administers a catalog, if any. */
-export function platformCatalogProviderOf(
-  modules: readonly RuntimeModule[] | undefined,
-): PlatformCatalogProvider | undefined {
-  return modules?.find((module) => module.platformCatalog !== undefined)?.platformCatalog;
-}
-
 export type ControlMcpOptions = {
-  db?: OpenShapeForgeDatabase | undefined;
-  modules?: readonly RuntimeModule[] | undefined;
-  /** Injected by tests; defaults to reading the process environment. */
-  config?: ControlPlaneConfigResult;
+  /**
+   * The module runtime context: the database, the platform, and the control
+   * runtime (control/runtime.ts) the Operations need. Without a control
+   * runtime, or with an incomplete configuration, every request answers 503
+   * naming what is missing.
+   */
+  context: ModuleRuntimeContext;
+  /** Injected by tests; defaults to the generated catalog. */
+  operations?: readonly OperationContract[] | undefined;
 };
 
+/** One tool as this session sees it, with the Operation it dispatches to. */
+type SessionTool = { tool: Tool; entry: BoundOperation };
+
 /**
- * Keycloak clients used by the platform MCP. Kept as one composition boundary
- * so tests can prove that the SPI and Admin API preserve their own refusal
- * classes even though both obtain the same service-account credential.
+ * The control Operations bound for this process. Only the core plugin's
+ * entries are of interest here: `bindOperationHandlers` binds the core
+ * Operations in every process, module or no module.
  */
-export function createPlatformKeycloakClients(
-  config: ControlPlaneConfig,
-  options: { fetch?: typeof globalThis.fetch } = {},
-): {
-  firstAdministrator: FirstAdministratorClients;
-  control: Omit<ControlDeps, "db" | "operator">;
-} {
-  const spiTokens = createServiceAccountTokenProvider(config.keycloak, {
-    ...options,
-    unauthorized: (message, status) =>
-      new KeycloakSpiError("KEYCLOAK_SPI_UNAUTHORIZED", message, status),
-    unavailable: (message, status) =>
-      new KeycloakSpiError("KEYCLOAK_SPI_UNAVAILABLE", message, status),
-  });
-  const adminTokens = createServiceAccountTokenProvider(config.keycloak, {
-    ...options,
-    unauthorized: (message, status) =>
-      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
-    unavailable: (message, status) =>
-      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
-  });
-  const keycloak = createKeycloakSpiClient(config.keycloak, { ...options, tokens: spiTokens });
-  const keycloakAdmin = createKeycloakOrganizationAdminClient(config.keycloak, {
-    ...options,
-    tokens: adminTokens,
-  });
-  const organizationScopes = createOrganizationScopeAdminClient(config.keycloak, {
-    ...options,
-    tokens: adminTokens,
-  });
-  const members = createKeycloakOrganizationMembersClient(config.keycloak, {
-    ...options,
-    tokens: adminTokens,
-  });
+function bindControlOperations(operations: readonly OperationContract[]): readonly BoundOperation[] {
+  return [...bindOperationHandlers([], operations, { pluginOperations: "absent" }).values()]
+    .filter(({ operation }) => operation.plugin === CONTROL_PLUGIN);
+}
+
+/**
+ * The tools a session may list and call: the MCP-projected control Operations
+ * whose `auth.roles` admit the session. Decided by the same
+ * `requireOperationAuthorization` REST applies, so the two transports cannot
+ * disagree about who may do what. Annotations follow the compiler's rule for
+ * the tenant surface.
+ */
+function toolsForControlSession(
+  bound: readonly BoundOperation[],
+  session: ControlSessionContext,
+): readonly SessionTool[] {
+  return bound
+    .filter(({ operation }) => {
+      if (!operation.transports.mcp.enabled || !operation.transports.mcp.name) return false;
+      try {
+        requireOperationAuthorization(operation, session);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .map((entry) => ({
+      entry,
+      tool: {
+        name: entry.operation.transports.mcp.name!,
+        title: entry.operation.title,
+        description: entry.operation.description,
+        inputSchema: entry.operation.inputSchema as Tool["inputSchema"],
+        outputSchema: entry.operation.outputSchema as Tool["outputSchema"],
+        annotations: {
+          title: entry.operation.title,
+          readOnlyHint: entry.operation.effects?.data === "read",
+          destructiveHint: entry.operation.effects?.data === "delete",
+          idempotentHint: entry.operation.idempotency.mode !== "none",
+          openWorldHint: (entry.operation.effects?.external ?? "none") !== "none",
+        },
+      },
+    }));
+}
+
+function toolResult(result: ModuleOperationSuccessResult): CallToolResult {
+  if (result.mcp) {
+    return {
+      content: result.mcp.content,
+      ...(result.mcp.structuredContent ? { structuredContent: result.mcp.structuredContent } : {}),
+    };
+  }
+  const value = result.value;
   return {
-    firstAdministrator: {
-      tenantRealm: config.keycloak.tenantRealm,
-      members,
-      organizations: keycloakAdmin,
-    },
-    control: {
-      keycloak,
-      keycloakAdmin,
-      organizationScopes,
-      mcpResource: config.mcpResource,
-      tenantRealm: config.keycloak.tenantRealm,
-    },
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    ...(value && typeof value === "object" && !Array.isArray(value)
+      ? { structuredContent: value as Record<string, unknown> }
+      : {}),
   };
 }
 
 /**
- * A correlation id is diagnostic metadata and therefore server-owned. MCP
- * request ids are client-controlled JSON values and may contain credentials,
- * personal data or unbounded text; never copy them into control-plane logs.
+ * A refusal as a tool result rather than a protocol error, so the assistant
+ * reads the code and message and can act (fix the definition, name a real
+ * tenant). A declared Operation error carries the body the handler stated;
+ * anything else is the runtime's redacted projection, logged here because a
+ * driver error can carry SQL text.
  */
-export function platformCorrelationId(_requestId: unknown): string {
-  return randomUUID();
+function failedToolResult(error: unknown, log: (error: unknown) => void): CallToolResult {
+  if (error instanceof DeclaredOperationError) {
+    const body = error.body;
+    const message = body && typeof body === "object" && !Array.isArray(body)
+      ? (body as { error?: { message?: unknown } }).error?.message
+      : undefined;
+    return {
+      content: [
+        { type: "text", text: `${error.code}: ${typeof message === "string" ? message : error.message}` },
+        { type: "text", text: JSON.stringify(body, null, 2) },
+      ],
+      ...(body && typeof body === "object" && !Array.isArray(body)
+        ? { structuredContent: body as Record<string, unknown> }
+        : {}),
+      isError: true,
+    };
+  }
+  const { status, body } = toHttpError(error);
+  if (status >= 500) log(error);
+  return {
+    content: [
+      { type: "text", text: `${body.error.code}: ${body.error.message}` },
+      { type: "text", text: JSON.stringify(body, null, 2) },
+    ],
+    structuredContent: body,
+    isError: true,
+  };
 }
 
 function buildPlatformServer(input: {
-  firstAdministrator: FirstAdministratorClients | undefined;
-  control: Omit<ControlDeps, "db" | "operator"> | undefined;
+  context: ModuleRuntimeContext;
   db: OpenShapeForgeDatabase;
-  administrator: PlatformAdministrator;
-  provider: PlatformCatalogProvider | undefined;
+  session: ControlSessionContext;
+  bound: readonly BoundOperation[];
   /** What the client said at `initialize` (mcp/session-client.ts); null on a single shot. */
   client: McpClientInfo | null;
   log: (error: unknown) => void;
@@ -270,19 +316,20 @@ function buildPlatformServer(input: {
     capabilities: { tools: {}, resources: {} },
     instructions: PLATFORM_SERVER_INSTRUCTIONS,
   });
-  const access = () => ({ tools: PLATFORM_TOOLS.length, resources: 1 });
-  const context = {
-    ...(input.firstAdministrator ? { firstAdministrator: input.firstAdministrator } : {}),
-    ...(input.control ? { control: input.control } : {}),
+  // Roles are pinned for the life of the session, so its tool list is too.
+  const tools = toolsForControlSession(input.bound, input.session);
+  const access = () => ({ tools: tools.length, resources: 1 });
+  const presentation: ControlPresentation = { client: input.client, access };
+  const { administrator } = input.session;
+  const catalog = {
     db: input.db,
-    administrator: input.administrator,
-    provider: input.provider,
-    client: input.client,
-    access,
-    log: input.log,
+    administrator,
+    provider: input.context.control?.provider,
   };
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...PLATFORM_TOOLS] }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: tools.map(({ tool }) => tool),
+  }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
     resources: [PLATFORM_SESSION_RESOURCE],
   }));
@@ -291,8 +338,8 @@ function buildPlatformServer(input: {
       throw new HttpError(404, "NOT_FOUND", `Unknown resource "${request.params.uri}".`);
     }
     const info = buildPlatformSessionInfo({
-      administrator: input.administrator,
-      tenants: await listPlatformTenantsCount(context),
+      administrator,
+      tenants: await listPlatformTenantsCount(catalog),
       client: input.client,
       access: access(),
     });
@@ -306,24 +353,56 @@ function buildPlatformServer(input: {
       ],
     };
   });
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
-    callPlatformTool(request.params.name, request.params.arguments ?? {}, {
-      ...context,
-      correlationId: platformCorrelationId(extra.requestId),
-    }),
-  );
+  // Unknown names and Operations this session may not use get the same
+  // refusal: NOT_FOUND, no hint of what exists.
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const match = tools.find(({ tool }) => tool.name === request.params.name);
+    if (!match) {
+      return failedToolResult(
+        new HttpError(404, "NOT_FOUND", `Unknown tool "${request.params.name}".`),
+        input.log,
+      );
+    }
+    try {
+      const result = await invokeOperation(match.entry, request.params.arguments ?? {}, {
+        ...input.context,
+        db: input.db,
+        control: { ...input.context.control!, presentation, log: input.log },
+        session: input.session,
+        transport: "mcp",
+      });
+      return toolResult(result);
+    } catch (error) {
+      return failedToolResult(error, input.log);
+    }
+  });
   return server;
 }
 
-export function registerControlMcpServer(app: FastifyInstance, options: ControlMcpOptions = {}): void {
-  const configResult = options.config ?? readControlPlaneConfig();
+/** Test seam: the server one session sees, without the HTTP transport. */
+export function __buildPlatformServerForTests(input: {
+  context: ModuleRuntimeContext;
+  session: ControlSessionContext;
+  operations: readonly OperationContract[];
+  client?: McpClientInfo | null;
+  log?: (error: unknown) => void;
+}): Server {
+  if (!input.context.db) throw new Error("The control MCP test seam needs a database.");
+  return buildPlatformServer({
+    context: input.context,
+    db: input.context.db,
+    session: input.session,
+    bound: bindControlOperations(input.operations),
+    client: input.client ?? null,
+    log: input.log ?? (() => undefined),
+  });
+}
+
+export function registerControlMcpServer(app: FastifyInstance, options: ControlMcpOptions): void {
+  const { context } = options;
+  const configResult = context.control?.config ?? { ok: false as const, missing: ["the control runtime"] };
   const controlIssuer = configResult.ok ? configResult.config.operator.issuer : undefined;
-  const provider = platformCatalogProviderOf(options.modules);
-  const clients = configResult.ok
-    ? createPlatformKeycloakClients(configResult.config)
-    : undefined;
-  const firstAdministrator = clients?.firstAdministrator;
-  const control = clients?.control;
+  const bound = bindControlOperations(options.operations ?? listOperationContracts());
 
   if (!configResult.ok) {
     app.log.warn(
@@ -366,7 +445,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
 
   async function requirePlatformSession(request: FastifyRequest): Promise<{
     db: OpenShapeForgeDatabase;
-    administrator: PlatformAdministrator;
+    session: ControlSessionContext;
   }> {
     if (!configResult.ok) {
       throw new HttpError(
@@ -376,23 +455,20 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
           `${configResult.missing.join(", ")}.`,
       );
     }
-    let administrator: PlatformAdministrator;
+    let session: ControlSessionContext;
     try {
-      administrator = await resolvePlatformAdministrator(
+      session = await resolveControlSession(
         headersFromFastify(request.headers),
         configResult.config,
         { resource: controlResourceUri(request) },
       );
     } catch (error) {
-      if (error instanceof ControlAuthorizationError) {
-        throw new HttpError(error.code === "FORBIDDEN" ? 403 : 401, error.code, error.message);
-      }
-      throw error;
+      throw controlSessionHttpError(error);
     }
-    if (!options.db) {
+    if (!context.db) {
       throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Database is not configured for MCP access.");
     }
-    return { db: options.db, administrator };
+    return { db: context.db, session };
   }
 
   void app.register(async (instance) => {
@@ -474,7 +550,8 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       );
 
     const handle = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      const { db, administrator } = await requirePlatformSession(request);
+      const { db, session } = await requirePlatformSession(request);
+      const { administrator } = session;
       const log = (error: unknown) => request.log.error({ err: error }, "Platform tool failed.");
       const sessionHeader = request.headers["mcp-session-id"];
       const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
@@ -497,7 +574,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
         const client = clientInfoFromInitializeBody(request.body);
-        const server = buildPlatformServer({ db, administrator, provider, client, log, firstAdministrator, control });
+        const server = buildPlatformServer({ context, db, session, bound, client, log });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
@@ -520,7 +597,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
 
       // Sessionless single shot, for probes and scripted proofs.
-      const server = buildPlatformServer({ db, administrator, provider, client: null, log, firstAdministrator, control });
+      const server = buildPlatformServer({ context, db, session, bound, client: null, log });
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();

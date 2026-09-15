@@ -39,7 +39,8 @@ import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
-import { registerControlRestRoutes } from "../control/rest-routes.js";
+import { createControlRuntime } from "../control/runtime.js";
+import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
@@ -64,6 +65,7 @@ import {
   loadRuntimeModules,
   type ModuleRegistry,
 } from "../modules/registry.js";
+import type { ModuleRuntimeContext } from "../modules/contract.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import {
   classifyRequest,
@@ -339,12 +341,22 @@ export function createApiApp(options: {
     const modulePlatform = databaseRuntime
       ? new ModulePlatformRuntime(databaseRuntime.db)
       : undefined;
-    const moduleContext = {
+    const moduleContext: ModuleRuntimeContext = {
       ...dbOptions,
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    // The control plane the `osf-control` Operations run against: its
+    // configuration, Keycloak clients and the loaded module that administers
+    // a catalog. Assembled after init so a module that failed to initialise
+    // cannot supply the catalog, and set on the one context every transport
+    // reads at request time.
+    moduleContext.control = createControlRuntime({
+      modules: initialised.loaded,
+      operations: operationContracts.filter((operation) => operation.plugin === CONTROL_PLUGIN),
+      log: (error) => app.log.error({ err: error }, "Control operation failed."),
+    });
     modulePlatform?.registerArtifactStorage(initialised.loaded);
     modulePlatform?.registerOperationProviders(initialised.loaded);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
@@ -569,21 +581,22 @@ export function createApiApp(options: {
       ...dbOptions,
       config: apiKeyConfig,
     });
-    // The tenant control plane, on its own mount and its own realm. Registered
-    // unconditionally so an unconfigured deployment answers 503 naming what is
-    // missing rather than 404, which reads like a version mismatch.
-    registerControlRestRoutes(routes, dbOptions);
-    // The platform administrator MCP (`/api/control/mcp`): same realm as the
-    // control plane, its own small server (mcp/control-mcp-server.ts), and the
-    // loaded modules so the one that administers a catalog can be found.
-    registerControlMcpServer(routes, { ...dbOptions, modules: initialised.loaded });
+    // The platform administrator MCP (`/api/control/mcp`): the control realm,
+    // its own small server (mcp/control-mcp-server.ts) over the same bound
+    // control Operations the REST routes below serve under /api/control/v1.
+    registerControlMcpServer(routes, { context: moduleContext, operations: operationContracts });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);
     }
-    if (operationsConfigured) {
-      registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
-    }
+    // The core Operations — blueprints and the control plane — always have
+    // their REST routes; with an operation module configured the plugin
+    // Operations join them. An unconfigured control plane keeps its routes
+    // and answers 503 naming what is missing rather than 404, which reads
+    // like a version mismatch.
+    registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts, {
+      pluginOperations: operationsConfigured ? "required" : "absent",
+    });
   });
 
   return app;

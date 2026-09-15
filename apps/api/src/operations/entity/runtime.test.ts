@@ -29,6 +29,14 @@ describe("entity operation runtime", () => {
     };
     expect(pluginOperationAuthAllowsOffer(auth, { roles: ["Target.Create", "Child.Admin"] })).toBe(true);
     expect(pluginOperationAuthAllowsOffer(auth, { roles: ["Target.Create"] })).toBe(false);
+    expect(pluginOperationAuthAllowsOffer(
+      { mode: "session", scopes: ["records:write"] },
+      { roles: [], oauthScopes: ["records:write"], credential: "bearer" },
+    )).toBe(true);
+    expect(pluginOperationAuthAllowsOffer(
+      { mode: "session", scopes: ["records:write"] },
+      { roles: [], oauthScopes: ["records:write"], credential: "api-key" },
+    )).toBe(false);
   });
 
   test("native update and delete offers bind their canonical identity and current version", () => {

@@ -130,8 +130,7 @@ beforeAll(async () => {
       values
         (${tenantId}, ${relationId}, ${activeGroupId}, 'active'),
         (${tenantId}, ${relationId}, ${inactiveGroupId}, 'active'),
-        (${otherTenantId}, ${otherRelationId}, ${otherTenantGroupId}, 'active'),
-        (${otherTenantId}, ${relationId}, ${otherTenantGroupId}, 'active')
+        (${otherTenantId}, ${otherRelationId}, ${otherTenantGroupId}, 'active')
     `.execute(conn);
   });
 }, TEST_TIMEOUT);

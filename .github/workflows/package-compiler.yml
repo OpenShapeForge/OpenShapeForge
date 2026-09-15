@@ -135,16 +135,41 @@ jobs:
       - name: Configure npm for GitHub Packages
         run: printf '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > ~/.npmrc
 
-      - name: Publish packages in dependency order when versions are new
+      - name: Verify immutable versions, then publish in dependency order
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          mkdir -p /tmp/compiler-publish
+          : > /tmp/compiler-publish/new-tarballs
+
+          # Preflight EVERY package before publishing any of them. A version in
+          # the registry is immutable: identical content is a clean no-op, but
+          # changed content under that version is a missing version bump and
+          # must stop before a dependant can be published against stale code.
           for package in operations interface-web compiler; do
             name=$(node -p "require('./packages/${package}/package.json').name")
             version=$(node -p "require('./packages/${package}/package.json').version")
-            if npm view "${name}@${version}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
-              echo "${name}@${version} is already published; nothing to do."
-              continue
+            pack_json=$(npm pack --json --pack-destination /tmp/compiler-publish "./packages/${package}")
+            tarball=$(PACK_JSON="${pack_json}" node -p 'JSON.parse(process.env.PACK_JSON)[0].filename')
+            local_integrity=$(PACK_JSON="${pack_json}" node -p 'JSON.parse(process.env.PACK_JSON)[0].integrity')
+            published_integrity=$(npm view "${name}@${version}" dist.integrity --json --registry=https://npm.pkg.github.com 2>/dev/null || true)
+
+            if [ -n "${published_integrity}" ]; then
+              published_integrity=$(PUBLISHED_INTEGRITY="${published_integrity}" node -p 'JSON.parse(process.env.PUBLISHED_INTEGRITY)')
+              if [ "${local_integrity}" != "${published_integrity}" ]; then
+                echo "::error::${name}@${version} already exists with different contents; bump its version before publishing."
+                exit 1
+              fi
+              echo "${name}@${version} is already published with identical contents; nothing to do."
+            else
+              printf '/tmp/compiler-publish/%s\n' "${tarball}" >> /tmp/compiler-publish/new-tarballs
             fi
-            npm publish "./packages/${package}"
+          done
+
+          # The plan is already dependency ordered because the preflight loop
+          # is operations -> interface-web -> compiler. Publish the exact
+          # tarballs whose integrity was checked rather than repacking them.
+          while IFS= read -r tarball; do
+            npm publish "${tarball}"
+          done < /tmp/compiler-publish/new-tarballs
           done

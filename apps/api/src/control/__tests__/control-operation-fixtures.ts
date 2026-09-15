@@ -103,14 +103,14 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.create-tenant", handler: "createTenant", title: "Create tenant",
     description: "Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization. Use a stable kebab-case slug and a human display name. A replay returns the existing tenant and repairs an incomplete Keycloak projection; it never deletes or replaces a tenant.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural",
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural",
     input: { properties: { slug, name: { type: "string", minLength: 1, description: "Human display name." } }, required: ["slug", "name"] },
     rest: { method: "POST", path: "/api/control/v1/tenants", status: 201 }, mcp: "create_tenant",
   },
   {
     id: "control.update-tenant", handler: "updateTenant", title: "Update tenant",
     description: "Renames ONE tenant and/or changes its lifecycle status. The slug stays immutable. Setting inactive or suspended disables the root Keycloak Organization and can interrupt access. Repeating the same state is a no-op.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
     input: { properties: { slug, name: { type: "string", minLength: 1 }, status: { type: "string", enum: ["active", "inactive", "suspended"] } }, required: ["slug"] },
     rest: { method: "PATCH", path: "/api/control/v1/tenants/:slug", status: 200 }, mcp: "update_tenant",
   },
@@ -125,7 +125,7 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.assign-blueprint-library", handler: "assignBlueprintLibrary", title: "Assign blueprint library",
     description: "Marks ONE active tenant as the blueprint library another tenant copies from. Pass null to clear the assignment. Existing copies keep their recorded source; a tenant cannot be its own library.",
-    roles: BOTH, effects: WRITE, idempotency: "natural",
+    roles: [OPERATOR], effects: WRITE, idempotency: "natural",
     input: { properties: { slug, blueprintTenantSlug: { anyOf: [{ type: "string", pattern: "^[a-z][a-z0-9-]*$" }, { type: "null" }], description: "The library tenant's slug, or null to clear." } }, required: ["slug", "blueprintTenantSlug"] },
     output: { type: "object", additionalProperties: true, properties: { tenant: { type: "string" }, blueprintTenant: { type: ["string", "null"] }, changed: { type: "boolean" } }, required: ["tenant", "blueprintTenant", "changed"] },
     rest: { method: "PUT", path: "/api/control/v1/tenants/:slug/blueprint-library", status: 200 }, mcp: "assign_blueprint_library",
@@ -133,7 +133,7 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.invite-first-tenant-admin", handler: "inviteFirstTenantAdmin", title: "Invite first tenant administrator",
     description: "Invites the first org_admin by email for ONE existing active tenant, through the Keycloak organization invitation flow. Repeating the same request reuses the invitation without resending. Refuses a different first administrator once one exists or is pending.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
     input: { properties: { slug, email: { type: "string", format: "email" } }, required: ["slug", "email"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/first-administrator", status: 200 }, mcp: "invite_first_tenant_admin",
   },
@@ -147,14 +147,14 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.create-tenant-organization", handler: "createTenantOrganization", title: "Create organization",
     description: "Creates or safely replays ONE sub-organization beneath a tenant root or an explicit parent org unit, and provisions its Keycloak Organization and MCP audience scope.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural",
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural",
     input: { properties: { tenantSlug: slug, slug: { type: "string", pattern: "^[a-z][a-z0-9-]*$", description: "Immutable kebab-case path segment." }, name: { type: "string", minLength: 1, description: "Human display name." }, parentOrgUnitId: { type: "string", format: "uuid", description: "Opaque parent org-unit id; omit for the tenant root." } }, required: ["tenantSlug", "slug", "name"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:tenantSlug/organizations", status: 201 }, mcp: "create_tenant_organization",
   },
   {
     id: "control.update-tenant-organization", handler: "updateTenantOrganization", title: "Update organization",
     description: "Renames and/or reparents ONE existing sub-organization inside its tenant. Reparenting reprojects every descendant path in Keycloak and can affect access; null moves the unit directly beneath the tenant root.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
     input: { properties: { tenantSlug: slug, orgUnitId: { type: "string", format: "uuid" }, name: { type: "string", minLength: 1 }, parentOrgUnitId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }], description: "New parent id, or null for the tenant root; omit to keep the current parent." } }, required: ["tenantSlug", "orgUnitId"] },
     rest: { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug/organizations/:orgUnitId", status: 200 }, mcp: "update_tenant_organization",
   },
@@ -167,7 +167,7 @@ const AUTHORED: readonly Authored[] = [
   {
     id: "control.reapply-reconciliation", handler: "reapplyReconciliation", title: "Reapply reconciliation",
     description: "Pushes authoritative registry state back into Keycloak for repairable drift, for ONE tenant slug or for every affected tenant when omitted. It never deletes unclaimed Organizations; replay may change identity access.",
-    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
     input: { properties: { tenantSlug: slug } },
     rest: { method: "POST", path: "/api/control/v1/reconciliation/reapply", status: 200 }, mcp: "reapply_reconciliation",
   },
@@ -299,4 +299,3 @@ export function controlOperationContract(handler: string): OperationContract {
   if (!found) throw new Error(`No control Operation fixture has handler "${handler}".`);
   return found;
 }
-

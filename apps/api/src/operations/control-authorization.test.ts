@@ -56,6 +56,9 @@ describe("requireOperationAuthorization with the control credential", () => {
   test("a control Operation admits a control session holding one of its roles", () => {
     expect(status(controlOperationContract("listTenants"), admin)).toBe(200);
     expect(status(controlOperationContract("listTenants"), operator)).toBe(200);
+    expect(status(controlOperationContract("createTenant"), operator)).toBe(200);
+    // Registry reads are shared, but tenant lifecycle mutations belong to the operator.
+    expect(status(controlOperationContract("createTenant"), admin)).toBe(403);
     expect(status(controlOperationContract("listCatalogEntries"), admin)).toBe(200);
     // The catalog is platform_admin's; the operator role does not imply it.
     expect(status(controlOperationContract("listCatalogEntries"), operator)).toBe(403);
@@ -88,7 +91,12 @@ describe("requireOperationAuthorization with the control credential", () => {
     expect(registrations).toHaveLength(23);
     const availableTo = (session: TrustedSessionContext) =>
       registrations.filter((registration) => registration.available(session)).map((registration) => registration.definition.id);
-    expect(availableTo(admin)).toHaveLength(23);
+    expect(availableTo(admin)).toEqual(
+      controlOperationContracts()
+        .filter((operation) => operation.auth.mode === "control" && operation.auth.roles.includes("platform_admin"))
+        .map((operation) => operation.key),
+    );
+    expect(availableTo(admin)).not.toContain("control.create-tenant");
     expect(availableTo(operator)).toEqual(
       controlOperationContracts()
         .filter((operation) => operation.auth.mode === "control" && operation.auth.roles.includes("platform-operator"))

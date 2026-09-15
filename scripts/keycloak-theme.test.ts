@@ -29,6 +29,7 @@ describe("OpenShapeForge Keycloak login theme", () => {
       "publicKeyCredentialId",
       "authenticatorLabel",
       "transports",
+      "authenticatorAttachment",
       "error",
     ]) {
       expect(template).toContain(`name="${field}"`);
@@ -38,6 +39,7 @@ describe("OpenShapeForge Keycloak login theme", () => {
     expect(template).toContain("navigator.userAgentData?.platform");
     expect(template).toContain("new Intl.DateTimeFormat");
     expect(template).toContain("initLabel : suggestedLabel");
+    expect(template).toContain("residentKey : ${residentKey?c}");
     expect(template).toContain('initLabelPrompt : ${msg("webauthn-registration-init-label-prompt")?c}');
   });
 });

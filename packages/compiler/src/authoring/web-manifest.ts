@@ -9,7 +9,8 @@ import { collectBlueprintOperations } from "../blueprint-operations.js";
  * do not cross this boundary.
  */
 import { missingLocalizedMetadata, missingSchemaUiTranslations, missingUiTranslations } from "@openshapeforge/interface-web";
-import type { CompiledEntityInfo } from "../plugins.js";
+import type { CompiledEntityInfo, CompiledPluginOperation } from "../plugins.js";
+import { moduleOperationId } from "./operation-catalog.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -18,6 +19,7 @@ import type {
   CompiledViewContext,
   CompiledViewGroup,
   LocalizedText as CompiledLocalizedText,
+  OperationCatalogDefinition,
 } from "./types.js";
 import type {
   LocalizedText as WebLocalizedText,
@@ -30,11 +32,25 @@ import type {
   WebManifestV1,
   WebOperationIntent,
   WebOperationRef,
+  WebPage,
   WebRecordTab,
   WebRelationshipProjection,
+  WebStandaloneOperationRef,
   WebViewMode,
 } from "@openshapeforge/interface-web";
 export type * from "@openshapeforge/interface-web";
+
+/**
+ * Standalone Operation catalogs as authored, paired with the contracts the
+ * compiler lowered them to. Both halves are needed: the authored side holds
+ * the bilingual names, the business input schema and the page placement; the
+ * compiled side holds the resolved REST address and the auth the runtime
+ * enforces, so the manifest cannot drift from what the API actually serves.
+ */
+export type WebStandaloneOperationsInput = {
+  catalogs: readonly OperationCatalogDefinition[];
+  operations: readonly CompiledPluginOperation[];
+};
 
 const technicalFields = new Set([
   "id",
@@ -668,10 +684,148 @@ function projectEntity(
   };
 }
 
+function standaloneAuth(
+  operation: CompiledPluginOperation,
+): WebStandaloneOperationRef["auth"] {
+  const auth = operation.auth;
+  switch (auth.mode) {
+    case "public":
+      return { mode: "public" };
+    case "control":
+      return { mode: "control", roles: auth.roles };
+    case "session":
+      return {
+        mode: "session",
+        ...(auth.roles ? { roles: auth.roles } : {}),
+        ...(auth.scopes ? { scopes: auth.scopes } : {}),
+      };
+    case "custom":
+      // The browser holds a session or a control bearer, never a plugin's own
+      // API key, so a custom-scheme Operation cannot be offered on a page.
+      throw new Error(
+        `Standalone Operation "${operation.key}" uses custom auth and cannot be projected to a web page.`,
+      );
+  }
+}
+
+/**
+ * Display order inside a page: authored `order` first (unordered last), then
+ * canonical id so two equal orders still render the same way every build. The
+ * landing operation, when there is one, always leads because its result is
+ * what the page opens with.
+ */
+function pageOperationOrder(
+  refs: readonly WebStandaloneOperationRef[],
+): string[] {
+  return [...refs]
+    .sort((left, right) =>
+      Number(Boolean(right.landing)) - Number(Boolean(left.landing)) ||
+      (left.order ?? Number.POSITIVE_INFINITY) - (right.order ?? Number.POSITIVE_INFINITY) ||
+      left.id.localeCompare(right.id),
+    )
+    .map((ref) => ref.id);
+}
+
+type ProjectedStandalone = {
+  operations: Record<string, WebStandaloneOperationRef>;
+  pages: Record<string, WebPage>;
+  /** Authored copy the strict-host translation check inspects. */
+  metadata: { path: string; value: unknown }[];
+};
+
+/**
+ * Project the web block of every standalone catalog. Pages are keyed by their
+ * authored id and routed at `/<id>` relative to the surface root; the host
+ * mounts them beside the entity routes.
+ */
+function projectStandalone(
+  input: WebStandaloneOperationsInput,
+): ProjectedStandalone | undefined {
+  const operations: Record<string, WebStandaloneOperationRef> = {};
+  const pages: Record<string, WebPage> = {};
+  const metadata: ProjectedStandalone["metadata"] = [];
+  const refsByPage = new Map<string, WebStandaloneOperationRef[]>();
+  const pageOwner = new Map<string, string>();
+  const compiledByKey = new Map(input.operations.map((operation) => [operation.key, operation]));
+  const catalogs = [...input.catalogs]
+    .filter((catalog) => catalog.interfaces.web)
+    .sort((left, right) => left.plugin.localeCompare(right.plugin));
+  for (const catalog of catalogs) {
+    const web = catalog.interfaces.web!;
+    for (const [pageId, page] of Object.entries(web.pages).sort(([left], [right]) => left.localeCompare(right))) {
+      // Page ids are routes, and routes are global: two catalogs cannot each
+      // own `/tenants`.
+      const owner = pageOwner.get(pageId);
+      if (owner) {
+        throw new Error(
+          `Web page "${pageId}" is declared by both "${owner}" and "${catalog.plugin}"; page ids are global.`,
+        );
+      }
+      pageOwner.set(pageId, catalog.plugin);
+      pages[pageId] = {
+        id: pageId,
+        title: localized(page.title, pageId),
+        ...(page.description ? { description: localized(page.description, "") } : {}),
+        ...(page.icon ? { icon: page.icon } : {}),
+        ...(page.order !== undefined ? { order: page.order } : {}),
+        route: `/${pageId}`,
+        operations: [],
+      };
+      metadata.push({ path: `${catalog.plugin}.pages.${pageId}`, value: page });
+    }
+    for (const [key, placement] of Object.entries(web.operations).sort(([left], [right]) => left.localeCompare(right))) {
+      const definition = catalog.operations[key]!;
+      const id = moduleOperationId(catalog, key, definition);
+      const compiled = compiledByKey.get(id);
+      if (!compiled || compiled.plugin !== catalog.plugin) {
+        throw new Error(
+          `Standalone Operation "${id}" has a web placement but no compiled contract; ` +
+            "pass the catalog's lowered operations alongside the catalog.",
+        );
+      }
+      const ref: WebStandaloneOperationRef = {
+        id,
+        intent: "invoke",
+        key,
+        name: localized(definition.name, key),
+        description: localized(definition.description, ""),
+        input: { kind: "json-schema", schema: definition.input!.schema },
+        output: { kind: "json-schema", schema: definition.output!.schema },
+        effects: definition.effects,
+        reliability: {
+          idempotency: {
+            mode: definition.reliability.idempotency.mode,
+            ...(definition.reliability.idempotency.inputField
+              ? { inputField: definition.reliability.idempotency.inputField }
+              : {}),
+          },
+        },
+        confirmation: definition.confirmation,
+        rest: compiled.transports.rest,
+        auth: standaloneAuth(compiled),
+        page: placement.page,
+        ...(placement.landing ? { landing: true } : {}),
+        ...(placement.order !== undefined ? { order: placement.order } : {}),
+      };
+      operations[id] = ref;
+      refsByPage.set(placement.page, [...(refsByPage.get(placement.page) ?? []), ref]);
+      metadata.push({ path: id, value: { name: definition.name, description: definition.description } });
+    }
+  }
+  if (catalogs.length === 0) return undefined;
+  for (const [pageId, refs] of refsByPage) pages[pageId]!.operations = pageOperationOrder(refs);
+  return {
+    operations: Object.fromEntries(Object.entries(operations).sort(([left], [right]) => left.localeCompare(right))),
+    pages,
+    metadata,
+  };
+}
+
 /** Project resolved entity contracts into the versioned browser interface contract. */
 export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: WebManifestOptions = {},
+  standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
 ): WebManifestV1 {
   const resolved: Required<WebManifestOptions> = {
     requireTranslations: options.requireTranslations ?? false,
@@ -682,11 +836,20 @@ export function buildWebManifest(
   const projectable = projectableEntities(entities, resolved);
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
   const projected = projectable.map((entity) => projectEntity(entity, byName));
+  const pages = projectStandalone(standalone);
   const missing = missingUiTranslations(projected);
+  missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {
     missing.push(...missingLocalizedMetadata(entity.contract, entity.contract.entity.name));
   }
-  if (resolved.requireTranslations) for (const entity of projected) for (const operation of Object.values(entity.operations)) {
+  if (resolved.requireTranslations) for (const { path, value } of pages?.metadata ?? []) {
+    missing.push(...missingLocalizedMetadata(value, path));
+  }
+  const schemaOperations = [
+    ...projected.flatMap((entity) => Object.values(entity.operations)),
+    ...Object.values(pages?.operations ?? {}),
+  ];
+  if (resolved.requireTranslations) for (const operation of schemaOperations) {
     // Collection-query inputs carry field keys, not a JSON Schema; their labels
     // are covered by the entity field check above.
     if (operation && "input" in operation && operation.input.kind === "json-schema") missing.push(...missingSchemaUiTranslations(operation.input.schema, `${operation.id}.input`));
@@ -698,6 +861,7 @@ export function buildWebManifest(
     version: 1,
     locale: resolved.locale,
     entities: Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
+    ...(pages ? { operations: pages.operations, pages: pages.pages } : {}),
   };
 }
 

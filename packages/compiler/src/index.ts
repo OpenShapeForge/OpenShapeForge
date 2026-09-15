@@ -40,6 +40,7 @@ import {
   collectAuthoredModulePluginOperations,
   collectEntityOperations,
   collectPluginOperations,
+  CORE_OPERATION_MODULES,
   renderOperationCatalog,
 } from "./generate-operations.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
@@ -354,7 +355,14 @@ export async function collectAllArtifacts(
   }
   const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
-  assertOperationRuntimeModules(operations, ["osf-blueprints", ...moduleRegistry.modules.map((module) => module.name)]);
+  assertOperationRuntimeModules(operations, [
+    ...CORE_OPERATION_MODULES,
+    ...moduleRegistry.modules.map((module) => module.name),
+  ]);
+  // Standalone catalogs reach the web manifest as authored (bilingual names,
+  // page placement) next to their lowered contracts (resolved REST address,
+  // enforced auth); see WebStandaloneOperationsInput.
+  const standaloneWeb = { catalogs: moduleOperationCatalogs, operations };
   const operationToolProjection = auditOperationSurfaceCollisions(
     operations,
     manifest,
@@ -493,13 +501,14 @@ export async function collectAllArtifacts(
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
     ui: [
-      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : []),
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb) : []),
       ...(productWebPresent
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
             contents: renderWebManifest(buildWebManifest(
               entities,
               { locale: "nl", routeLocale: "en" },
+              standaloneWeb,
             )),
           }]
         : []),

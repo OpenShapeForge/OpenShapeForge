@@ -19,6 +19,7 @@ export type GeneratedPluginMigration = {
   version: string;
   checksum: string;
   sql: string;
+  repeatable?: true;
 };
 
 type GeneratedPluginMigrationRegistry = {
@@ -68,7 +69,8 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       !migrationVersionPattern.test(migration.version) ||
       typeof migration.sql !== "string" ||
       migration.sql.trim().length === 0 ||
-      typeof migration.checksum !== "string"
+      typeof migration.checksum !== "string" ||
+      (migration.repeatable !== undefined && migration.repeatable !== true)
     ) {
       throw new Error("Generated plugin migration registry contains an invalid entry.");
     }
@@ -173,7 +175,7 @@ export async function applyGeneratedPluginMigrations(
   const applied: string[] = [];
   for (const migration of migrations) {
     const identity = pluginMigrationLedgerVersion(migration);
-    if (!missing.has(identity)) {
+    if (!missing.has(identity) && !migration.repeatable) {
       continue;
     }
     await sql`begin`.execute(db);
@@ -182,6 +184,10 @@ export async function applyGeneratedPluginMigrations(
       await sql`
         insert into platform.schema_migrations (version, checksum, applied_by)
         values (${identity}, ${migration.checksum}, ${appliedBy})
+        on conflict (version) do update
+        set checksum = excluded.checksum,
+            applied_by = excluded.applied_by,
+            applied_at = now()
       `.execute(db);
       await sql`commit`.execute(db);
     } catch (error) {

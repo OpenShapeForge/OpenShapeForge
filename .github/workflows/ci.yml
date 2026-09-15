@@ -102,6 +102,11 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
+      - name: Foundation package unit tests
+        run: >-
+          bun test packages/operations packages/interface-web
+          packages/documents packages/preferences packages/plugin-runtime
+
       - name: Observability unit tests
         run: bun run test:observability
 
@@ -148,6 +153,26 @@ jobs:
           src/graphql/__tests__/description-projection.unit.test.ts
           src/graphql/__tests__/immutable-writability.unit.test.ts
           src/graphql/__tests__/query-hardening.unit.test.ts
+          src/auth/organization-service-identity-bearer.test.ts
+          src/auth/organization-service-identities.test.ts
+          src/auth/login-session-binding.test.ts
+          src/auth/relation-group-memberships.test.ts
+          src/auth/identity-link.test.ts
+          src/auth/identity.test.ts
+          src/auth/host-organization-session.test.ts
+          src/auth/ui-locale.test.ts
+          src/auth/api-key/ceiling.test.ts
+          src/auth/api-key/resolve.test.ts
+          src/auth/api-key/role-subset.test.ts
+          src/auth/api-key/format.test.ts
+          src/auth/__tests__/organization-binding.unit.test.ts
+          src/auth/__tests__/organization-tenant-cache-key.unit.test.ts
+          src/artifacts/rest-routes.test.ts
+          src/documents/__tests__
+          src/rest/generated-rest-session.test.ts
+          src/rest/serialize-generated-row.test.ts
+          src/graphql/context.test.ts
+          src/graphql/operation-error.test.ts
 
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.
@@ -380,6 +405,7 @@ jobs:
           cd apps/api
           bun test src/db
           bun test src/operations
+          bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
           bun test src/modules/platform-artifact-transaction.test.ts
 

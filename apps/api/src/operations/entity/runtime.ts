@@ -100,12 +100,14 @@ const entityOperations = (operationCatalog.entityOperations ?? []).map((operatio
 });
 const pluginOperations = operationCatalog.operations ?? [];
 
+type OperationAuthorizationSession = Pick<DbSessionInput, "roles"> & {
+  oauthScopes?: readonly string[];
+  credential?: string;
+};
+
 export function pluginOperationAuthAllowsOffer(
   auth: (typeof pluginOperations)[number]["auth"],
-  session: Pick<DbSessionInput, "roles"> & {
-    oauthScopes?: readonly string[];
-    credential?: string;
-  },
+  session: OperationAuthorizationSession,
 ): boolean {
   return auth.mode === "public" ||
     (auth.mode === "session" &&
@@ -426,7 +428,7 @@ export function getEntityOperationContracts(): readonly EntityOperationContract[
 
 /** Lease-protected Operations this identity may reach through the REST adapter. */
 export function restEditLeaseOperationIdsForSession(
-  session: Pick<DbSessionInput, "roles">,
+  session: OperationAuthorizationSession,
 ): string[] {
   const heldRoles = new Set(session.roles ?? []);
   const generatedIds = entityOperations
@@ -454,7 +456,7 @@ export function restEditLeaseOperationIdsForSession(
 
 /** Lease-protected YAML plugin Operations available on one interface. */
 export function pluginEditLeaseOperationIdsForSession(
-  session: Pick<DbSessionInput, "roles">,
+  session: OperationAuthorizationSession,
   transport: "rest" | "mcp",
 ): string[] {
   return pluginOperations
@@ -463,7 +465,7 @@ export function pluginEditLeaseOperationIdsForSession(
       operation.concurrency?.version?.mode === "required" &&
       operation.concurrency.editLease?.mode === "required" &&
       operation.auth.mode === "session" &&
-      sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []) &&
+      pluginOperationAuthAllowsOffer(operation.auth, session) &&
       (transport === "rest" || operation.transports.mcp.enabled)
     )
     .map(({ key }) => key);
@@ -483,7 +485,7 @@ export function entityOperationContract(operationId: string): EntityOperationCon
 /** Central acquisition entry point shared by REST, MCP and Web adapters. */
 export async function acquireEditLeaseForEntityOperation(
   db: OpenShapeForgeDatabase,
-  session: DbSessionInput,
+  session: DbSessionInput & { oauthScopes?: readonly string[]; credential?: string },
   input: { operationId: string; targetId: string },
 ): Promise<EntityEditLease> {
   const custom = pluginOperations.find((operation) => operation.key === input.operationId);
@@ -491,7 +493,7 @@ export async function acquireEditLeaseForEntityOperation(
     if (
       custom.target?.scope !== "record" ||
       custom.auth.mode !== "session" ||
-      !sessionOperationRolesAllow(custom.auth.roles, session.roles ?? []) ||
+      !pluginOperationAuthAllowsOffer(custom.auth, session) ||
       !custom.concurrency?.version ||
       !custom.concurrency.editLease
     ) {

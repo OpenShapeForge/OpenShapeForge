@@ -19,6 +19,8 @@ export type GeneratedPluginMigration = {
   version: string;
   checksum: string;
   sql: string;
+  /** Reconcile idempotent compiler DDL even when this identity was applied before. */
+  repeatable?: true;
 };
 
 export type GeneratedPluginMigrationRegistry = {
@@ -384,6 +386,7 @@ export function collectPluginMigrationRegistry(
         version: constraint.version,
         checksum: checksum(sql),
         sql,
+        ...(constraint.replaceExisting ? { repeatable: true as const } : {}),
       });
     }
   }

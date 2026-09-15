@@ -37,6 +37,7 @@ import {
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
+  versionRequired,
 } from "../../graphql/__tests__/e2e/operations.js";
 import {
   apiApp,
@@ -233,7 +234,11 @@ async function acquireLease(
   row: Record<string, unknown>,
   intent: "update" | "delete",
 ): Promise<Record<string, string>> {
-  if (!leaseRequired(table, intent)) return {};
+  if (!leaseRequired(table, intent)) {
+    if (!versionRequired(table, intent)) return {};
+    expect(row.updatedAt).toBeString();
+    return { expectedVersion: String(row.updatedAt) };
+  }
   const acquired = await callTool(identity, "osf_acquire_edit_lease", {
     operationId: operationIdFor(table, intent),
     targetId: row.id,

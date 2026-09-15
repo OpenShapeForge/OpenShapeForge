@@ -30,6 +30,7 @@ import {
   executeEntityOperation,
   fieldNameForColumn,
   getGeneratedCrudTables,
+  isGeneratedCrudOperationEnabled,
   invalidMutationControlTypeFailure,
   isCallerWritableColumn,
   isOperationWrittenColumn,
@@ -360,7 +361,8 @@ export function registerGeneratedRestRoutes(
     for (const name of [`${typeName}Input`, `${typeName}UpdateInput`]) {
       if (schemas[name]) schemas[name] = withoutCollectionInputs(schemas[name], managed);
     }
-    if (table.source?.rest && collectionMutationError(table, "create", getGeneratedCrudTables()) &&
+    if (table.source?.rest && isGeneratedCrudOperationEnabled(table, "create") &&
+      collectionMutationError(table, "create", getGeneratedCrudTables()) &&
       entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") {
       const paths = projectedSpec.paths as Record<string, Record<string, unknown>>;
       const path = paths[`${REST_MOUNT_PATH}/${table.source.rest.basePath}`];

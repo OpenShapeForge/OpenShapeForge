@@ -84,6 +84,16 @@ describe("generated GraphQL CRUD exposure", () => {
     expect(renderGeneratedMutationFields(table)).toEqual([]);
   });
 
+  test("a read-only entity with required children does not resolve a missing create Operation", () => {
+    const table = withOperations({ list: true, get: true, create: false, update: false, delete: false });
+    table.source!.authoringEntityName = "ReadOnlyCollectionFixture";
+    table.source!.graphql!.relationships = [{
+      name: "children", fieldKey: "children", target: "Relation", type: "[Relation!]!", resolve: "hasMany",
+      foreignKey: "parent_id", cardinality: { min: 1 },
+    }];
+    expect(renderGeneratedMutationFields(table)).toEqual([]);
+  });
+
   test("independent list/get flags emit only the selected read operation", () => {
     const table = withOperations({
       list: false,

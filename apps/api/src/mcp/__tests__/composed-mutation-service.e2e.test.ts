@@ -18,6 +18,7 @@ import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import type { DB } from "../../generated/db/types.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import { createDatabaseRuntime } from "../../db/connection.js";
@@ -410,7 +411,7 @@ describe("composed mutation Service on the native provider", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [workflowModule, module],
+          modules: [documentsPluginRuntime as unknown as RuntimeModule, workflowModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,

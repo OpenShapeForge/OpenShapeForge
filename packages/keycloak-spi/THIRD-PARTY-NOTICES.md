@@ -15,7 +15,7 @@ their pins are machine-checked by `bun run check:keycloak-lockstep` against
 - SHA-512: `04949c18bd2819f6134f7a8fdf446e471036241c537d451e7bf1c627d8eefb1f72374d238bf0037155e725531c587065cfabf1c3f0b7f0df86fb7138effd6bba`
 - License: **Apache-2.0** — full text below.
 - Compatibility: extension releases `>= 1.17.0` target Keycloak `>= 26.5.0`;
-  reviewed against the image's Keycloak 26.5.3 on 2026-09-03.
+  reviewed against the image's Keycloak 26.7.3 on 2026-09-15.
 - Role: registers the `apple` identity-provider factory (Sign in with Apple).
   Dormant until a realm authors `providerId: apple`; see
   [docs/identity-providers.md](../../docs/identity-providers.md).
@@ -24,7 +24,7 @@ The jar is downloaded at image build time from the GitHub release above and
 verified against the pinned SHA-512 before it is copied into the image. It is
 not vendored into this repository and not modified.
 
-## Keycloak 26.5.3 passwordless WebAuthn registration template
+## Keycloak 26.7.3 passwordless WebAuthn registration template
 
 - Project: Keycloak (https://www.keycloak.org/)
 - Source: `themes/src/main/resources/theme/keycloak.v2/login/webauthn-register.ftl`

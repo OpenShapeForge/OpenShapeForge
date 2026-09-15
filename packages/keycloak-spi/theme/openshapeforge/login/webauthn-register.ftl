@@ -1,5 +1,5 @@
 <#--
-  Derived from Keycloak 26.5.3's keycloak.v2 passwordless WebAuthn registration
+  Derived from Keycloak 26.7.3's keycloak.v2 passwordless WebAuthn registration
   template (Apache-2.0). Modified to suggest an editable, distinguishable label.
 -->
 <#import "template.ftl" as layout>
@@ -10,7 +10,6 @@
     <#if section = "title">
         title
     <#elseif section = "header">
-        <span class="${properties.kcWebAuthnKeyIcon!}"></span>
         ${msg("webauthn-registration-title")}
     <#elseif section = "form">
     <div class="${properties.kcFormClass!}">
@@ -21,6 +20,7 @@
                 <input type="hidden" id="publicKeyCredentialId" name="publicKeyCredentialId"/>
                 <input type="hidden" id="authenticatorLabel" name="authenticatorLabel"/>
                 <input type="hidden" id="transports" name="transports"/>
+                <input type="hidden" id="authenticatorAttachment" name="authenticatorAttachment"/>
                 <input type="hidden" id="error" name="error"/>
                 <@passwordCommons.logoutOtherSessions/>
             </div>
@@ -50,6 +50,7 @@
                     attestationConveyancePreference : ${attestationConveyancePreference?c},
                     authenticatorAttachment : ${authenticatorAttachment?c},
                     requireResidentKey : ${requireResidentKey?c},
+                    residentKey : ${residentKey?c},
                     userVerificationRequirement : ${userVerificationRequirement?c},
                     createTimeout : ${createTimeout?c},
                     excludeCredentialIds : ${excludeCredentialIds?c},
@@ -63,11 +64,11 @@
         </script>
 
             <@buttons.actionGroup horizontal=true>
-                <@buttons.button id="registerWebAuthn" label="doRegisterSecurityKey" class=["kcButtonPrimaryClass","kcButtonBlockClass"] />
+                <@buttons.button id="registerWebAuthn" label="doRegisterSecurityKey"/>
                 <#if !isSetRetry?has_content && isAppInitiatedAction?has_content>
                     <form class="${properties.kcFormClass!}" action="${url.loginAction}"
                           id="kc-webauthn-settings-form" method="post">
-                        <@buttons.button id="cancelWebAuthnAIA" name="cancel-aia" label="doCancel" class=["kcButtonSecondaryClass","kcButtonBlockClass"] />
+                        <@buttons.button id="cancelWebAuthnAIA" name="cancel-aia" label="doCancel" type="secondary"/>
                     </form>
                 </#if>
             </@buttons.actionGroup>

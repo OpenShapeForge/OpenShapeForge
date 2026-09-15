@@ -66,7 +66,6 @@ import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../db/session.js";
 import { registerOperationRestRoutes } from "../../operations/runtime.js";
 import {
   describe,
-  expectData,
   getRuntime,
   gql,
   registerSuiteLifecycle,
@@ -76,6 +75,14 @@ import {
   type Identity,
 } from "./e2e/harness.js";
 import { createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
+import {
+  collectionOf,
+  deleteDoc,
+  deleteVariables,
+  fetchRecord,
+  listDoc,
+} from "./e2e/gql-shapes.js";
+import { isEntityBackedCreate, placeholderControls } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -337,56 +344,45 @@ describe("control-plane provisioning", () => {
       };
       expect(provisioned.tenantId).not.toBe(tenantA.tenantId);
 
-      const table = tables.find((candidate) => candidate.tenantScoped)!;
+      // Any tenant-scoped entity whose rows the factory can create outright;
+      // the readers are shape-aware, so the choice is about RLS, not shape.
+      const table = tables.find(
+        (candidate) => candidate.tenantScoped && isEntityBackedCreate(candidate),
+      )!;
       const graphql = table.source!.graphql!;
       const mine = await createRow(table, provisioned);
       const theirs = await createRow(table, tenantA);
 
       // Neither direction: the provisioned tenant cannot see the seeded one's
       // row, and the seeded one cannot see the provisioned tenant's.
-      const crossRead = await expectData(
-        tenantA,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
-      );
-      expect(crossRead[graphql.singleQueryName]).toBeNull();
-
-      const reverseRead = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: theirs },
-      );
-      expect(reverseRead[graphql.singleQueryName]).toBeNull();
+      expect(await fetchRecord(tenantA, table, mine)).toBeNull();
+      expect(await fetchRecord(provisioned, table, theirs)).toBeNull();
 
       // And it is invisible to a LIST too, which a by-id lookup alone would miss.
-      const crossList = await expectData(
-        tenantA,
-        `query($filter: ${graphql.typeName}Filter) {
-           ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
-         }`,
-        { filter: { id: mine } },
+      const crossList = collectionOf(
+        table,
+        await gql(
+          tenantA,
+          listDoc(table, { variables: ["filter"], args: "first: 1", totalCount: true }),
+          { filter: { id: mine } },
+        ),
+        graphql.listQueryName,
       );
-      expect(crossList[graphql.listQueryName].totalCount).toBe(0);
+      expect(crossList.totalCount).toBe(0);
 
       // Sanity: the row exists for its owner, so the refusals above are about
       // isolation rather than a create that quietly failed.
-      const ownRead = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
-      );
-      expect(ownRead[graphql.singleQueryName]?.id).toBe(mine);
+      expect((await fetchRecord(provisioned, table, mine))?.id).toBe(mine);
 
-      // A cross-tenant delete must not remove it either.
-      await gql(tenantA, `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`, {
-        id: mine,
-      });
-      const stillThere = await expectData(
-        provisioned,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id: mine },
+      // A cross-tenant delete must not remove it either. The other tenant
+      // cannot hold a lease on a row it cannot see, so the attempt carries
+      // placeholder controls; whichever check refuses it, the row survives.
+      await gql(
+        tenantA,
+        deleteDoc(table),
+        deleteVariables(table, mine, placeholderControls(table, "delete")),
       );
-      expect(stillThere[graphql.singleQueryName]?.id).toBe(mine);
+      expect((await fetchRecord(provisioned, table, mine))?.id).toBe(mine);
     },
   );
 });

@@ -187,6 +187,9 @@ jobs:
       - name: Check the SPI compiles against its runtime Keycloak version
         run: bun run check:keycloak-lockstep
 
+      - name: Test the Keycloak login theme
+        run: bun test scripts/keycloak-theme.test.ts
+
       # SPI targets Java 17 (packages/keycloak-spi/pom.xml).
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:

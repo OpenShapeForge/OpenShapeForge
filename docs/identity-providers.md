@@ -243,6 +243,21 @@ derived from the gateway's `redirectUris`, because the ceremony runs on
 Keycloak's login page, not the app's. A production realm that authors none
 fails generation instead of shipping a guess.
 
+Hosts that use the immutable OpenShapeForge Keycloak image can also select its
+small child login theme:
+
+```yaml
+realm:
+  loginTheme: openshapeforge
+```
+
+The theme inherits Keycloak v2 and changes only the passwordless WebAuthn
+registration prompt. Its editable default combines the realm display name,
+the browser-reported platform and the local registration date and time, so a
+person who registers several passkeys can distinguish them later. A host that
+selects this theme must deploy the matching OpenShapeForge Keycloak image; the
+realm setting alone does not install theme files in an external Keycloak.
+
 ### Where development gets its passwords back
 
 Nowhere in the artifact. The relaxation is

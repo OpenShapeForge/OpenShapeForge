@@ -104,7 +104,7 @@ jobs:
 
       - name: Foundation package unit tests
         run: >-
-          bun test packages/operations packages/interface-web
+          bun test packages/auth packages/operations packages/interface-web
           packages/documents packages/preferences packages/plugin-runtime
 
       - name: Observability unit tests
@@ -169,6 +169,7 @@ jobs:
           src/auth/__tests__/organization-tenant-cache-key.unit.test.ts
           src/artifacts/rest-routes.test.ts
           src/documents/__tests__
+          src/rest/rest-docs.test.ts
           src/rest/generated-rest-session.test.ts
           src/rest/serialize-generated-row.test.ts
           src/graphql/context.test.ts
@@ -357,13 +358,15 @@ jobs:
     name: Database migration tests
     runs-on: ubuntu-latest
     services:
-      # Matches docker-compose.local.yml (pgvector on Postgres 17). The tests
-      # create throwaway scratch databases and provision the openshapeforge_app
+      # Exercise the documented minimum PostgreSQL version. Other end-to-end
+      # jobs remain on 17, so the release is proven on both supported majors.
+      # These tests create throwaway scratch databases and provision the
+      # openshapeforge_app
       # role through the privileged connection, so the service must run as the
       # superuser openshapeforge role. These credentials are the documented
       # local-dev-only values from AGENTS.md, never used outside CI/local dev.
       postgres:
-        image: pgvector/pgvector:pg17
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: openshapeforge
           POSTGRES_PASSWORD: openshapeforge

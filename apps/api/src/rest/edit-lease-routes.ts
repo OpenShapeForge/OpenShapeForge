@@ -12,6 +12,7 @@ import {
   renewEntityEditLease,
 } from "../operations/entity/index.js";
 import { HttpError, toHttpError } from "./http-error.js";
+import { generatedRestSession } from "./generated-rest-routes.js";
 
 export const OPERATION_LEASES_PATH = "/api/operation-leases";
 
@@ -51,15 +52,7 @@ export function registerEditLeaseRestRoutes(
     }
     return {
       db: options.db,
-      session: {
-        tenantId: resolved.tenantId,
-        userId: resolved.userId,
-        userDisplayName: resolved.userDisplayName ?? null,
-        roles: [...resolved.roles],
-        groups: [...resolved.groups],
-        relationGroupIds: [...(resolved.relationGroupIds ?? [])],
-        scope: resolved.scope,
-      },
+      session: generatedRestSession(resolved),
     };
   }
 

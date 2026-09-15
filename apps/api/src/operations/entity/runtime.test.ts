@@ -8,6 +8,7 @@ import {
   getEntityOperationContracts,
   getEntityOperationOffers,
   offerTarget,
+  pluginOperationAuthAllowsOffer,
   mutationConcurrencyGuard,
   requireCreateOperationConfirmation,
   requireOperationAcknowledgement,
@@ -21,6 +22,15 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("custom offers require one role from every canonical role group", () => {
+    const auth = {
+      mode: "session" as const,
+      roleGroups: [["Target.Create"], ["Child.Create", "Child.Admin"]],
+    };
+    expect(pluginOperationAuthAllowsOffer(auth, { roles: ["Target.Create", "Child.Admin"] })).toBe(true);
+    expect(pluginOperationAuthAllowsOffer(auth, { roles: ["Target.Create"] })).toBe(false);
+  });
+
   test("native update and delete offers bind their canonical identity and current version", () => {
     for (const intent of ["update", "delete"] as const) {
       const operation = getEntityOperationContracts().find(op => op.entityName === "Relation" && op.intent === intent)!;
@@ -256,6 +266,8 @@ describe("entity operation runtime", () => {
         roles: [update.authorization.roles[0]!],
       }),
     ).toEqual([
+      "Address.delete",
+      "Address.update",
       "ContactDetail.delete",
       "ContactDetail.update",
       "PaymentDetail.delete",

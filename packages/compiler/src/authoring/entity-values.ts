@@ -75,9 +75,17 @@ export function compileEntityValueStorage(
   };
   const addCheck = (table: TableDefinition, tag: string[], expression: string) => {
     const name = entityValueStorageName(table.schema, table.name, ...tag, "check");
+    const digest = createHash("sha256").update(expression).digest("hex").slice(0, 12);
     const constraints = table.constraints ??= [];
     if (constraints.some((constraint) => constraint.name === name)) throw new Error(`Entity value constraint collision: ${name}.`);
-    constraints.push({ compilerOwned: true, version: `0001_entity-value-${name.replaceAll("_", "-")}`, name, kind: "check", expression });
+    constraints.push({
+      compilerOwned: true,
+      replaceExisting: true,
+      version: `0001_entity-value-${name.replaceAll("_", "-")}-${digest}`,
+      name,
+      kind: "check",
+      expression,
+    });
   };
   const columnFor = (table: TableDefinition, key: string): ColumnDefinition => {
     const column = table.columns.find((column) => column.sourceField === key);

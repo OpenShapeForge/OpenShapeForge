@@ -49,7 +49,7 @@ import {
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
-import { sessionOperationRolesAllow } from "../session-authorization.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../session-authorization.js";
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
@@ -79,6 +79,7 @@ const operationCatalog = rawOperationCatalog as unknown as {
       | {
           mode: "session";
           roles?: string[];
+          roleGroups?: string[][];
           scopes?: string[];
           recordPermission?: RecordPermissionAction;
         }
@@ -98,6 +99,21 @@ const entityOperations = (operationCatalog.entityOperations ?? []).map((operatio
   return { ...operation, inputSchema: withoutCollectionInputs(operation.inputSchema, collectionManagedFields(table, getGeneratedCrudTables())) };
 });
 const pluginOperations = operationCatalog.operations ?? [];
+
+export function pluginOperationAuthAllowsOffer(
+  auth: (typeof pluginOperations)[number]["auth"],
+  session: Pick<DbSessionInput, "roles"> & {
+    oauthScopes?: readonly string[];
+    credential?: string;
+  },
+): boolean {
+  return auth.mode === "public" ||
+    (auth.mode === "session" &&
+      sessionOperationRolesAllow(auth.roles, session.roles ?? []) &&
+      sessionOperationRoleGroupsAllow(auth.roleGroups, session.roles ?? []) &&
+      (!(auth.scopes?.length) || (session.credential !== "api-key" &&
+        auth.scopes.every((scope) => session.oauthScopes?.includes(scope)))));
+}
 const entityOperationsById = new Map(
   entityOperations.map((operation) => [operation.id, operation]),
 );
@@ -586,11 +602,7 @@ export function getEntityOperationOffers(
     .filter((operation) =>
       operation.target?.entityName === entityName &&
       operation.target.scope === scope &&
-      (operation.auth.mode === "public" ||
-        (operation.auth.mode === "session" &&
-          sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []) &&
-          (!(operation.auth.scopes?.length) || (session.credential !== "api-key" &&
-            operation.auth.scopes.every(scope => session.oauthScopes?.includes(scope)))))) &&
+      pluginOperationAuthAllowsOffer(operation.auth, session) &&
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||

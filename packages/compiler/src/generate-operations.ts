@@ -859,6 +859,27 @@ function collectConstrainedReferenceCreateOperations(
 ): CompiledPluginOperation[] {
   const contracts = entities.map(({ contract }) => contract);
   const output: CompiledPluginOperation[] = [];
+  const requireNativeCreate = (
+    operation: CompiledEntityOperation | undefined,
+    label: string,
+  ): CompiledEntityOperation => {
+    if (
+      !operation ||
+      operation.implementation.type !== "entity" ||
+      !operation.authorization.roles.length ||
+      operation.effects.external !== "none" ||
+      operation.interaction.confirmation.mode !== "none" ||
+      operation.interaction.secureInput ||
+      operation.concurrency?.editLease ||
+      operation.prerequisites?.length ||
+      operation.reliability.idempotency.mode === "keyed"
+    ) {
+      throw new Error(
+        `${label} needs an unguarded native entity create Operation; custom handlers, leases, confirmation, prerequisites, keyed idempotency and secure input are unsupported.`,
+      );
+    }
+    return operation;
+  };
   for (const owner of contracts) for (const field of owner.model?.fields ?? []) {
     const constraints = field.relationship?.constraints;
     if (!constraints || !field.relationship?.target) continue;
@@ -867,12 +888,14 @@ function collectConstrainedReferenceCreateOperations(
     const collection = nested[0] ? target?.model.relationships.find(relation => relation.key === nested[0]![0]) : undefined;
     const child = collection && contracts.find(contract => contract.entity.name === collection.target);
     const parentColumn = child?.storage.columns.find(column => column.column === collection?.foreignKey);
-    const create = target?.entityOperations.create;
-    const childCreate = child?.entityOperations.create;
-    if (!target || !create || create.implementation.type !== "entity" ||
-        (nested.length > 0 && (!collection || collection.kind !== "hasMany" || !child || !parentColumn || !childCreate || childCreate.implementation.type !== "entity"))) {
+    if (!target ||
+        (nested.length > 0 && (!collection || collection.kind !== "hasMany" || !child || !parentColumn))) {
       throw new Error(`${owner.entity.name}.${field.key}: constrained reference create needs native target and collection-child create Operations.`);
     }
+    const create = requireNativeCreate(target.entityOperations.create, `${owner.entity.name}.${field.key}: target create`);
+    const childCreate = child
+      ? requireNativeCreate(child.entityOperations.create, `${owner.entity.name}.${field.key}: child create`)
+      : undefined;
     const nativeSchemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
     const nativeInput = nativeSchemas.inputSchema as JsonSchema;
     const id = constrainedReferenceCreateOperationId(owner.entity.name, field.key);

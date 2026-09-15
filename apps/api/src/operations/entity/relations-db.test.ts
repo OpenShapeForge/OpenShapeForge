@@ -9,8 +9,9 @@ import { getGeneratedCrudTables } from "./catalog.js";
 import { listGeneratedEntityRelation } from "./relations.js";
 import type { GeneratedCrudRelationship, GeneratedCrudTable } from "./types.js";
 
-const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
-const suite = adminUrl ? describe : describe.skip;
+const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+const suite = describe;
 const scratchName = `schema3_rel_${randomUUID().replaceAll("-", "")}`;
 const tenant = randomUUID(), otherTenant = randomUUID(), actor = randomUUID(), otherActor = randomUUID();
 const pageId = randomUUID(), hiddenPage = randomUUID(), foreignPage = randomUUID();

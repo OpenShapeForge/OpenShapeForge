@@ -170,6 +170,37 @@ test("materializes direct-only constrained create with server-owned values", () 
   });
 });
 
+test("constrained reference create refuses guarded target and child create Operations", () => {
+  const direct = (mutate: (create: NonNullable<CoreEntity["operations"]>[string]) => void) =>
+    fixture((owner, child) => {
+      delete owner.operations!.insertChild;
+      delete owner.operations!.moveChild;
+      owner.fields.push({
+        key: "primaryChild", semanticType: "Child", required: true,
+        relationship: { constraints: { kind: { eq: "primary" } } },
+      });
+      child.fields.push({ key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
+      mutate(child.operations!.create!);
+    });
+  expect(() => compile(direct((create) => { create.confirmation = { mode: "acknowledgement" }; }))).toThrow("target create needs an unguarded native entity create Operation");
+  expect(() => compile(direct((create) => { create.reliability.idempotency = { mode: "keyed", inputField: "requestId" }; }))).toThrow("keyed idempotency");
+
+  const membership = entity("Membership", [
+    { key: "child", semanticType: "Child", required: true },
+    { key: "groupId", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
+  ]);
+  membership.operations!.create!.confirmation = { mode: "acknowledgement" };
+  expect(() => compile(fixture((owner, child) => {
+    delete owner.operations!.insertChild;
+    delete owner.operations!.moveChild;
+    owner.fields.push({
+      key: "primaryChild", semanticType: "Child", required: true,
+      relationship: { constraints: { memberships: { any: { groupId: { eq: "10000000-0000-4000-8000-000000000099" } } } } },
+    });
+    child.fields.push({ key: "memberships", semanticType: "Membership", cardinality: "collection", relationship: { inverse: "child" } });
+  }, [membership]))).toThrow("child create needs an unguarded native entity create Operation");
+});
+
 test("refuses spoofed native metadata and a cloned native Operation without compiler provenance", () => {
   const operation = compile()[0]!;
   expect(() => collectPluginOperations([{ name: "core", operations: [{ ...operation, key: operation.id } as PluginOperationContract] }], context)).toThrow("implementation");

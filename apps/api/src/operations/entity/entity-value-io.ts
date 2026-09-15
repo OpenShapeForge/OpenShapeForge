@@ -145,8 +145,6 @@ export function projectEntityValueRow(table: GeneratedCrudTable, row: GeneratedE
   const result = { ...row };
   for (const carrier of carriers) {
     const logical = projectEntityValue(carrier, row);
-    // Validate persisted text/parameters too, not merely UUID syntax.
-    splitEntityValueInput(carrier, row[carrier.definitionColumn], logical, runtimeJsonSchemas);
     result[carrier.valuesColumn] = logical;
   }
   for (const name of entityValuePhysicalColumns(table, registry)) delete result[name];

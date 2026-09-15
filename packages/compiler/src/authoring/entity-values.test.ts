@@ -93,6 +93,20 @@ const sql = (manifest: PlatformSchemaManifest) => artifacts(manifest).find((arti
 const constraints = (manifest: PlatformSchemaManifest) => collectPluginMigrationRegistry(manifest, []).migrations.map((migration) => migration.sql).join("\n");
 
 describe("entityValue compiled storage and registry", () => {
+  it("content-addresses replaceable entity-value CHECK migrations", () => {
+    const first = compileFixture();
+    const firstChecks = table(first).constraints!.filter((constraint) => constraint.kind === "check");
+    expect(firstChecks.every((constraint) => constraint.compilerOwned && constraint.replaceExisting)).toBe(true);
+    expect(firstChecks.every((constraint) => /^0001_entity-value-.+-[a-f0-9]{12}$/.test(constraint.version))).toBe(true);
+
+    const second = compileFixture((entities) => {
+      named(entities, "Copy").fields.push({ key: "subtitle", valueType: "string" });
+    });
+    const firstVersion = firstChecks.find((constraint) => constraint.name.includes("copy_values"))!.version;
+    const secondVersion = table(second).constraints!.find((constraint) => constraint.name.includes("copy_values"))!.version;
+    expect(secondVersion).not.toBe(firstVersion);
+  });
+
   for (const [policy, value] of Object.entries({
     classification: { sensitivity: "pii" },
     authorization: { roles: { read: ["Example.Read"] } },

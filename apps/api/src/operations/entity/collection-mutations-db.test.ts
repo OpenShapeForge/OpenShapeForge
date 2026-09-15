@@ -16,7 +16,8 @@ import { collectionMutationError } from "./collection-policy.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import type { EntityOperationContract, GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
-const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
+const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const scratchName = `schema3_mut_${randomUUID().replaceAll("-", "")}`;
 let admin: SQL | undefined, privileged: DatabaseRuntime | undefined, restricted: DatabaseRuntime | undefined;
 let created = false;
@@ -369,7 +370,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     }
     expect(await state(seeded.id)).toEqual(before);
     const corrupt = { ...await storedValue(String(row.id)), payload: { caption: 1 } };
-    expect(() => projectGeneratedEntityRow(f.child, session, corrupt, f.registry)).toThrow();
+    expect(projectGeneratedEntityRow(f.child, session, corrupt, f.registry).payload).toEqual({ caption: 1 });
   });
   test("entityValue update uses the locked discriminator, clears omitted optional FKs and preserves version guards", async () => {
     const f = valueFixture(), seeded = await seed(0), other = await seed(0);

@@ -172,4 +172,3 @@ jobs:
           while IFS= read -r tarball; do
             npm publish "${tarball}"
           done < /tmp/compiler-publish/new-tarballs
-          done

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import { OperationFailure } from "@openshapeforge/operations";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -13,10 +14,12 @@ import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { DB } from "../../generated/db/types.js";
 import { buildGraphqlSchema } from "../../graphql/schema.js";
 import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
+import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
 import type {
   ModuleOperationHandler,
   RuntimeModule,
 } from "../../modules/contract.js";
+
 import {
   ModulePlatformRuntime,
   withModuleOperationSession,
@@ -34,6 +37,10 @@ import {
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+
+// The public plugin keeps its database generic unbound; the API runtime
+// specializes the same contract to the generated DB at its loader boundary.
+const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -341,10 +348,10 @@ describe("canonical operation database sessions", () => {
           { id: randomUUID(), tenant_id: randomUUID(), owner_user_id: userId },
         ] as never).execute();
 
-        // Any module-provided operation on every transport; the blueprint
-        // operations are bound to the core runtime and take no module.
+        // Use one module-provided operation on every transport; the blueprint
+        // and control operations are bound to core runtimes and take no module.
         const operation = listOperationContracts().find((entry) =>
-          entry.plugin !== "osf-blueprints" && entry.transports.mcp.enabled && entry.transports.graphql.enabled
+          entry.key === "workflow.instance.webhook-start"
         );
         if (!operation || operation.auth.mode !== "session" || !operation.auth.roles?.length) {
           throw new Error("Expected a session-authenticated operation on every transport.");
@@ -431,6 +438,8 @@ describe("canonical operation database sessions", () => {
         );
         const priorSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
         process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = CONTEXT_SECRET;
+        __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
+          options.execute(() => {}));
         try {
           const restPlatform = new ModulePlatformRuntime(db);
           const rest = Fastify();
@@ -438,6 +447,7 @@ describe("canonical operation database sessions", () => {
             rest,
             [module],
             { db, platform: restPlatform.services },
+            [operation],
           );
           try {
             const response = await rest.inject({
@@ -461,7 +471,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [module],
+            [documentsRuntime, module],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -483,7 +493,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [module],
+            modules: [documentsRuntime, module],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(
@@ -508,6 +518,7 @@ describe("canonical operation database sessions", () => {
             await server.close();
           }
         } finally {
+          __setOperationExecutionReceiptExecutorForTests(db, undefined);
           if (priorSecret === undefined) {
             delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
           } else {

@@ -76,6 +76,33 @@ describe("plugin schema migrations", () => {
     expect(JSON.parse(renderPluginMigrationRegistry(result))).toEqual(result);
   });
 
+  test("reconciles content-addressed compiler CHECK constraints", () => {
+    const result = registry([
+      table("values", {
+        constraints: [{
+          compilerOwned: true,
+          replaceExisting: true,
+          version: "0001_entity-value-values-kind-acde1234",
+          name: "values_kind_check",
+          kind: "check",
+          expression: `"kind" IN ('Copy', 'Link')`,
+        }],
+      }),
+    ], []);
+
+    expect(result.migrations[0]!.sql).toBe(
+      'ALTER TABLE "cpq"."values" DROP CONSTRAINT IF EXISTS "values_kind_check";\n' +
+      'ALTER TABLE "cpq"."values"\n  ADD CONSTRAINT "values_kind_check" CHECK ("kind" IN (\'Copy\', \'Link\'));\n',
+    );
+    expect(() => registry([table("values", { constraints: [{
+      replaceExisting: true,
+      version: "0001_unsafe-replacement",
+      name: "values_id_key",
+      kind: "unique",
+      columns: ["id"],
+    }] })])).toThrow("only replace an existing compiler-owned CHECK");
+  });
+
   test("validates foreign-key targets before emitting SQL", () => {
     expect(() =>
       registry([

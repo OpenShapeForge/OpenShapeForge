@@ -59,6 +59,12 @@ export type IndexDefinition = {
 export type TableConstraintDefinition = {
   /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
   compilerOwned?: boolean;
+  /**
+   * Reconcile a compiler-owned CHECK whose expression is content-addressed in
+   * its version. The generated migration drops the previous same-name
+   * constraint before adding the current definition.
+   */
+  replaceExisting?: boolean;
   /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
   version: string;
   /** Explicit PostgreSQL constraint name. */

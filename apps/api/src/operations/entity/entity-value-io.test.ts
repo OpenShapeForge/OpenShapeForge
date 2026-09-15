@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { assertEntityValueFieldPolicy } from "./entity-value-io.js";
+import { createEntityValueRegistry } from "../../modules/entity-value-registry.js";
+import { assertEntityValueFieldPolicy, projectEntityValueRow } from "./entity-value-io.js";
+import type { GeneratedCrudTable } from "./types.js";
 
 for (const [policy, value] of Object.entries({ classification: { sensitivity: "pii" }, authorization: { roles: ["Fixture.Read"] }, permissions: { read: ["Fixture.Read"] }, writtenBy: ["fixture"], secureInput: {}, immutable: true })) {
   for (const shape of ["own", "children", "item", "shape"] as const) {
@@ -29,4 +31,34 @@ test("entityValue rejects malformed/deep field shapes without treating JSON defa
   expect(() => assertEntityValueFieldPolicy({ key: "target", semanticType: "Target" }, { Target: { kind: "entity", shape: [{ key: "guarded", permissions: {} }] } })).not.toThrow();
   expect(() => assertEntityValueFieldPolicy({ key: "nested", children: [{ key: "target", semanticType: "Target" }] }, { Target: { kind: "entity" } })).toThrow();
   expect(() => assertEntityValueFieldPolicy({ key: "root", semanticType: "Recursive" }, { Recursive: { item: { key: "nested", semanticType: "Recursive" } } })).toThrow();
+});
+
+test("entityValue reads preserve persisted fields from an older definition while validating references", () => {
+  const id = "10000000-0000-4000-8000-000000000001";
+  const registry = createEntityValueRegistry({ version: 1, collections: [], carriers: [{
+    entityName: "Placement", fieldKey: "values", definitionField: "definitionKey",
+    schema: "erp", table: "placements", valuesColumn: "payload", definitionColumn: "definition_key",
+    definitions: { Copy: {
+      entityName: "Copy", schemaVersion: 1, definitionHash: "a".repeat(64),
+      fields: [{ key: "current", valueType: "string", required: true }],
+      valueSchema: { type: "object", required: ["current"], properties: { current: { type: "string" } }, additionalProperties: false },
+      references: [{ fieldKey: "source", targetEntity: "Resource", schema: "erp", table: "resources", column: "ev_source_id", required: true }],
+    } },
+  }] });
+  const table = {
+    schema: "erp", table: "placements", name: "erp.placements", primaryKey: "id", tenantScoped: true,
+    columns: [
+      { name: "definition_key", sourceField: "definitionKey", type: "text" },
+      { name: "payload", sourceField: "values", type: "jsonb" },
+      { name: "ev_source_id", type: "uuid" },
+    ],
+    source: { authoringEntityName: "Placement" },
+  } as GeneratedCrudTable;
+
+  expect(projectEntityValueRow(table, {
+    definition_key: "Copy", payload: { legacy: "kept" }, ev_source_id: id,
+  }, registry)).toMatchObject({ payload: { legacy: "kept", source: id } });
+  expect(() => projectEntityValueRow(table, {
+    definition_key: "Copy", payload: { legacy: "kept" }, ev_source_id: "bad",
+  }, registry)).toThrow("stored typed relationship is invalid");
 });

@@ -2,6 +2,8 @@
 
 The API is a Bun service. It expects an **external Postgres** and an
 **external OIDC issuer** (Keycloak); this directory does not provision those.
+PostgreSQL 16 or newer is required: managed database-role reconciliation uses
+the PostgreSQL 16 role-membership capabilities.
 
 ## Container image
 

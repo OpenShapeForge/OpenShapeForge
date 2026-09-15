@@ -376,7 +376,12 @@ jobs:
         run: bun run db:provision-roles
 
       - name: Migration + drift tests
-        run: cd apps/api && bun test src/db
+        run: |
+          cd apps/api
+          bun test src/db
+          bun test src/operations
+          find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
+          bun test src/modules/platform-artifact-transaction.test.ts
 
   # Software-composition analysis (issue #105). The other jobs prove the code
   # builds and behaves; nothing here proves its dependencies are free of known

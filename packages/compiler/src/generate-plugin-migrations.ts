@@ -161,6 +161,17 @@ function renderConstraintSql(
   }
 
   const tableName = `${quoteIdent(table.schema)}.${quoteIdent(table.name)}`;
+  if (
+    constraint.replaceExisting &&
+    (!constraint.compilerOwned || constraint.kind !== "check")
+  ) {
+    throw new Error(
+      `Constraint ${table.schema}.${table.name}.${constraint.name} may only replace an existing compiler-owned CHECK.`,
+    );
+  }
+  const replacement = constraint.replaceExisting
+    ? `ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraint.name)};\n`
+    : "";
   const prefix =
     `ALTER TABLE ${tableName}\n` +
     `  ADD CONSTRAINT ${quoteIdent(constraint.name)} `;
@@ -180,7 +191,7 @@ function renderConstraintSql(
       constraint.expression,
       `Check constraint ${table.schema}.${table.name}.${constraint.name}`,
     );
-    return `${prefix}CHECK (${constraint.expression});\n`;
+    return `${replacement}${prefix}CHECK (${constraint.expression});\n`;
   }
 
   const columns = `(${constraint.columns.map(quoteIdent).join(", ")})`;

@@ -12,8 +12,9 @@ import { listGeneratedEntitiesForTable } from "./entity/queries.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./entity/types.js";
 import { createConstrainedReferenceInTransaction } from "./constrained-reference-create.js";
 
-const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
-const suite = adminUrl ? describe : describe.skip;
+const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+const suite = describe;
 const scratchName = `constrained_reference_${randomUUID().replaceAll("-", "")}`;
 const tenantId = randomUUID(), userId = randomUUID();
 const allowedGroup = "10000000-0000-4000-8000-000000000099";

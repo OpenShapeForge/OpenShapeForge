@@ -43,6 +43,7 @@ import {
 import { storeElicitedValues } from "../elicitation.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import { REST_MOUNT_PATH } from "../../rest/generated-rest-routes.js";
+import { isCanonical } from "../../graphql/__tests__/e2e/operations.js";
 
 registerSuiteLifecycle();
 setDefaultTimeout(20_000);
@@ -55,6 +56,18 @@ const target = table.columns.find(
   (column) => column.sourceField === "valueJson",
 )!;
 const restBase = `${REST_MOUNT_PATH}/elicited-output-test`;
+
+// REST and MCP answer at the entity's shape: a canonical entity wraps a
+// record in `{ data, operations }` and a page in `{ data: { items: [{ data }] } }`,
+// a v1 entity serves the bare row and `{ items: [row] }`. The reads below say
+// what they want and let the shape decide where it sits.
+const canonical = isCanonical(table);
+const restRecord = (response: { body: any }) => (canonical ? response.body.data : response.body);
+const restItems = (response: { body: any }): any[] =>
+  canonical ? response.body.data.items.map((item: any) => item.data) : response.body.items;
+const mcpRecord = (call: { payload: any }) => (canonical ? call.payload.data : call.payload);
+const mcpItems = (call: { payload: any }): any[] =>
+  canonical ? call.payload.data.items.map((item: any) => item.data) : call.payload.items;
 const keyring = keyringFromEnv(
   `test:${Buffer.alloc(32, 23).toString("base64")}`,
 )!;
@@ -348,10 +361,10 @@ async function publicReadValues(id: string): Promise<unknown[]> {
     directList.rows[0]!.value_json,
     gqlGet[graphql.singleQueryName].valueJson,
     gqlList[graphql.listQueryName].edges[0].node.valueJson,
-    restGet.body.data.valueJson,
-    restList.body.data.items[0].data.valueJson,
-    mcpGet.payload.data.valueJson,
-    mcpList.payload.data.items[0].data.valueJson,
+    restRecord(restGet).valueJson,
+    restItems(restList)[0].valueJson,
+    mcpRecord(mcpGet).valueJson,
+    mcpItems(mcpList)[0].valueJson,
   ];
 }
 
@@ -405,10 +418,10 @@ test.skipIf(remoteUrl)(
       directList.rows[0]!.value_json,
       gqlGet[graphql.singleQueryName].valueJson,
       gqlList[graphql.listQueryName].edges[0].node.valueJson,
-      restGet.body.data.valueJson,
-      restList.body.data.items[0].data.valueJson,
-      mcpGet.payload.data.valueJson,
-      mcpList.payload.data.items[0].data.valueJson,
+      restRecord(restGet).valueJson,
+      restItems(restList)[0].valueJson,
+      mcpRecord(mcpGet).valueJson,
+      mcpItems(mcpList)[0].valueJson,
     ];
     expect(new Set(safeValues.map((value) => JSON.stringify(value))).size).toBe(
       1,
@@ -446,8 +459,8 @@ test.skipIf(remoteUrl)(
     expect([
       directUpdated!.value_json,
       gqlUpdated[graphql.updateMutationName].valueJson,
-      restUpdated.body.data.valueJson,
-      mcpUpdated.payload.data.valueJson,
+      restRecord(restUpdated).valueJson,
+      mcpRecord(mcpUpdated).valueJson,
     ]).toEqual(Array(4).fill(expectedConfiguration));
 
     const stored = (await storedValue(directId)) as Record<string, unknown>;
@@ -470,7 +483,7 @@ test.skipIf(remoteUrl)(
     track(absentId);
     expect(absent.value_json).toBeNull();
     expect(
-      (await rest(tenantA, "GET", `${restBase}/${absentId}`)).body.data.valueJson,
+      restRecord(await rest(tenantA, "GET", `${restBase}/${absentId}`)).valueJson,
     ).toBeNull();
 
     target.classification = "confidential";

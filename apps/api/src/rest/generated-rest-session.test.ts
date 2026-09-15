@@ -17,13 +17,5 @@ test("generated REST preserves verified login-session control metadata", () => {
     credential: "bearer",
   };
 
-  expect(generatedRestSession(resolved)).toMatchObject({
-    tenantId: resolved.tenantId,
-    userId: resolved.userId,
-    loginSessionBinding: resolved.loginSessionBinding,
-    roles: resolved.roles,
-    groups: resolved.groups,
-    relationGroupIds: resolved.relationGroupIds,
-    scope: resolved.scope,
-  });
+  expect(generatedRestSession(resolved)).toEqual(resolved);
 });

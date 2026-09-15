@@ -19,9 +19,15 @@ const reportDir = join(repoRoot, ".e2e-report");
 const junitPath = join(reportDir, "junit.xml");
 const htmlPath = join(reportDir, "index.html");
 const summaryPath = join(reportDir, "summary.md");
-// The same three suites `test:e2e` runs (apps/api package.json) — the report
-// must not gate on a subset of what the plain script gates on.
-const testFiles = ["src/graphql/__tests__", "src/rest/__tests__", "src/mcp/__tests__"];
+// The three transport suites plus the real API-key cross-transport journey.
+// Keep the customer-provisioned credential path in the same full-stack gate:
+// it depends on the PostgreSQL and Keycloak services this workflow provides.
+const testFiles = [
+  "src/graphql/__tests__",
+  "src/rest/__tests__",
+  "src/mcp/__tests__",
+  "src/auth/api-key/__tests__/api-key.e2e.test.ts",
+];
 
 mkdirSync(reportDir, { recursive: true });
 

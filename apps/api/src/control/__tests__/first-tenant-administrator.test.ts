@@ -119,7 +119,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect(rows[0]).toMatchObject({ slug: 'acme', role: 'org_admin', invited_by: `${administrator.issuer}#operator` });
     const audit = (await sql<any>`select * from platform.system_bypass_audit`.execute(owner.db)).rows;
     expect(audit).toHaveLength(2);
-    expect(audit.every(a => a.tenant_id === null && a.succeeded && a.actor_subject === `${administrator.issuer}#operator (platform-admin)` && a.reason === 'platform-mcp: invite_first_tenant_admin acme')).toBe(true);
+    expect(audit.every(a => a.tenant_id === null && a.succeeded && a.actor_subject === `${administrator.issuer}#operator (platform-admin)` && a.reason === 'platform-mcp: control.invite-first-tenant-admin acme')).toBe(true);
     expect((await sql`select * from platform.employee_invitations`.execute(runtime.db)).rows).toHaveLength(0);
   });
   it('serializes concurrent same-address retries to one mail and one invitation', async () => {

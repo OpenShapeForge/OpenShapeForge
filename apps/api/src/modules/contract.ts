@@ -69,13 +69,24 @@ import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { PlatformCatalogProvider } from "../control/platform-catalog.js";
+import type { ControlRuntime } from "../control/runtime.js";
 import type { OperationError } from "@openshapeforge/operations";
 
 /** What a module may read when building its surfaces. */
 export type ModuleRuntimeContext = ModuleRuntimeContextContract<
   OpenShapeForgeDatabase,
   ModulePlatformServices
->;
+> & {
+  /**
+   * The control plane as assembled at boot (control/runtime.ts), for the
+   * core `osf-control` Operations only: their configuration, Keycloak
+   * clients and catalog provider. Absent in a process that never assembled
+   * one, in which case every control Operation answers
+   * CONTROL_PLANE_NOT_CONFIGURED. Plugins receive the field but have no use
+   * for it; nothing in it is tenant-scoped.
+   */
+  control?: ControlRuntime | undefined;
+};
 
 /** Closed subjects whose identifiers core can resolve from trusted state. */
 export type ModuleAuthorizationSubject =

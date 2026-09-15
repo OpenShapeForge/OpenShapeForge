@@ -25,7 +25,13 @@ export type PluginSessionCredential =
   | "none"
   | "bearer"
   | "api-key"
-  | "trusted-context";
+  | "trusted-context"
+  /**
+   * A platform operator of the host's control realm: no tenant, ever. Only
+   * the host's own control Operations accept it; a plugin Operation never
+   * sees one, and a plugin must never treat it as a tenant session.
+   */
+  | "control-bearer";
 
 /** Verified by the host. A plugin must never populate this from tool input. */
 export type PluginSessionContext = {

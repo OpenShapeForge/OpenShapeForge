@@ -192,7 +192,7 @@ export async function publishUpdateNotice(
   const notice = validateUpdateNotice(input);
   return withSystemSession(
     deps.db,
-    systemSessionForAdministrator(deps.administrator, `publish_update_notice ${notice.key}`),
+    systemSessionForAdministrator(deps.administrator, `control.publish-update-notice ${notice.key}`),
     async (trx) => {
       const result = await sql<Row>`
         insert into platform.update_notices
@@ -243,7 +243,7 @@ export async function withdrawUpdateNotice(
 ): Promise<PublishedUpdateNotice | null> {
   return withSystemSession(
     deps.db,
-    systemSessionForAdministrator(deps.administrator, `withdraw_update_notice ${key}`),
+    systemSessionForAdministrator(deps.administrator, `control.withdraw-update-notice ${key}`),
     async (trx) => {
       const result = await sql<Row>`
         update platform.update_notices set withdrawn_at = now()
@@ -263,7 +263,7 @@ export async function listUpdateNotices(
 ): Promise<Array<PublishedUpdateNotice & { acknowledgedBy: number }>> {
   return withSystemSession(
     deps.db,
-    systemSessionForAdministrator(deps.administrator, "list_update_notices"),
+    systemSessionForAdministrator(deps.administrator, "control.list-update-notices"),
     async (trx) => {
       const result = await sql<Row & { acknowledged_by: string | number }>`
         select n.key, n.title, n.changed, n.assistant_changes, n.user_actions, n.service_changes,

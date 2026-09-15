@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { __resetSessionResolverForTests, resolveSessionContext } from "./identity.js";

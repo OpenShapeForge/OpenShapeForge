@@ -128,10 +128,10 @@ test("reference-data schemas are independent of Web-first versus catalog-first p
   const webFirst = entries();
   buildWebManifest(webFirst); // A caller with an empty snapshot must never poison later lowering.
   const firstCatalog = collectAuthoredEntityPluginOperations(webFirst, context, snapshot);
-  const firstWeb = buildWebManifest(webFirst, {}, snapshot);
+  const firstWeb = buildWebManifest(webFirst, {}, { catalogs: [], operations: [] }, snapshot);
   const catalogFirst = entries();
   const secondCatalog = collectAuthoredEntityPluginOperations(catalogFirst, context, snapshot);
-  const secondWeb = buildWebManifest(catalogFirst, {}, snapshot);
+  const secondWeb = buildWebManifest(catalogFirst, {}, { catalogs: [], operations: [] }, snapshot);
   expect(firstCatalog).toEqual(secondCatalog);
   expect(firstWeb).toEqual(secondWeb);
   expect(firstCatalog.find((operation) => operation.id === "Owner.insertChild")!.inputSchema).toMatchObject({ properties: { values: { properties: { body: { enum: ["hello"] } } } } });

@@ -23,7 +23,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // are the other schemaVersion 2 entities (Agreement, Address, AgreementParty);
 // every v1 -> v2 conversion therefore lowers this count by one.
 // Strict operation-authored entities use the Web manifest rather than v1 shards.
-const expectedGeneratedCrudEntityCount = 106;
+const expectedGeneratedCrudEntityCount = 105;
 
 /**
  * The realms this repository authors, by name.

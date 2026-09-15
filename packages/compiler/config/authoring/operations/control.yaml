@@ -494,7 +494,7 @@ operations:
       en: Invite first tenant administrator
       nl: Eerste tenantbeheerder uitnodigen
     description:
-      en: Invites the first org_admin by email for ONE existing active tenant, through the Keycloak organization
+      en: Invites the first organization administrator by email for ONE existing active tenant, through the Keycloak organization
         invitation flow. Repeating the same request reuses the invitation without resending. Refuses a different
         first administrator once one exists or is pending.
       nl: Nodigt per e-mail de eerste org_admin uit voor ÉÉN bestaande actieve tenant, via de Keycloak-organisatie-uitnodiging.

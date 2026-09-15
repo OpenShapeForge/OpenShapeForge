@@ -28,12 +28,13 @@ describe("entity operation runtime", () => {
       expect(entityRecordOfferBinding(operation, target)).toEqual({ binding: { target: { entityId: operation.entityId, ...target }, input: { id: target.id } } });
     }
   });
-  test("record offers retain the exact storage timestamp before public serialization", () => {
+  test("record offers normalize UTC notation without losing storage timestamp precision", () => {
     const version = "2026-09-14T20:33:26.33546+00:00";
     const row = { id: "record-367", updated_at: version };
-    expect(offerTarget(row, relation)).toEqual({ id: row.id, version, row });
+    expect(offerTarget(row, relation)).toEqual({ id: row.id, version: "2026-09-14T20:33:26.33546Z", row });
     const authored = { id: row.id, updatedAt: version };
-    expect(offerTarget(authored, relation)).toEqual({ id: row.id, version, row: authored });
+    expect(offerTarget(authored, relation)).toEqual({ id: row.id, version: "2026-09-14T20:33:26.33546Z", row: authored });
+    expect(offerTarget({ id: row.id, updatedAt: "2026-09-14T20:33:26.335461Z" }, relation).version).toBe("2026-09-14T20:33:26.335461Z");
     expect(offerTarget({ id: row.id }, relation).version).toBeUndefined();
   });
   test("uses stable interface-neutral identities for the operations authored by Relation v2", () => {

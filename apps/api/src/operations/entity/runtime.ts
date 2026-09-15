@@ -689,7 +689,7 @@ export function offerTarget(
   return {
     id,
     row,
-    ...(typeof version === "string" && version ? { version } : {}),
+    ...(typeof version === "string" && version ? { version: normalizeTimestampToken(version) } : {}),
   };
 }
 

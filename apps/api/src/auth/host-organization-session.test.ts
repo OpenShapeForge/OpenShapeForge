@@ -3,9 +3,18 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import Fastify from "fastify";
 import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler,
   type CompiledQuery, type DatabaseConnection, type QueryResult } from "kysely";
 import type { DB } from "../generated/db/types.js";
+import type { RuntimeModule } from "../modules/contract.js";
+import { ModulePlatformRuntime } from "../modules/platform.js";
+import { createControlRuntime } from "../control/runtime.js";
+import {
+  registerRuntimeOperationRestRoutes,
+  runtimeStaticOperationRegistrations,
+  type OperationContract,
+} from "../operations/runtime.js";
 import { mintApiKey } from "./api-key/format.js";
 import { __resetExchangeCacheForTests } from "./api-key/exchange.js";
 import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";
@@ -288,6 +297,67 @@ describe("explicit service credentials in host mode", () => {
     expect(queries.some((q) => q.sql.includes("from platform.tenants") && q.parameters.includes(TENANT_A))).toBe(true);
     expect(queries.some((q) => q.sql.includes("bypass_rls"))).toBe(false);
     await db.destroy();
+  });
+
+  test("shared runtime routes fall back from control to tenant authentication for a same-issuer token", async () => {
+    const { db } = serviceRegistry();
+    const operation: OperationContract = {
+      key: "records.list",
+      plugin: "records",
+      title: "List records",
+      description: "Lists tenant records.",
+      handler: "listRecords",
+      inputSchema: { type: "object", additionalProperties: false },
+      outputSchema: { type: "object", additionalProperties: true },
+      errors: [],
+      auth: { mode: "session", roles: ["Records.Read"] },
+      tenancy: { mode: "required" },
+      idempotency: { mode: "none" },
+      transports: {
+        rest: { method: "GET", path: "/api/records", response: { status: 200, kind: "json" } },
+        mcp: { enabled: false, reason: "REST discovery test." },
+        graphql: { enabled: false, reason: "REST discovery test." },
+        typescript: { enabled: false, reason: "REST discovery test." },
+      },
+    };
+    const module: RuntimeModule = {
+      name: "records",
+      operationHandlers: { listRecords: async () => ({ value: { records: [] } }) },
+    };
+    const platform = new ModulePlatformRuntime(db);
+    platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+      [module],
+      { db, platform: platform.services },
+      [operation],
+    ));
+    const control = createControlRuntime({
+      config: {
+        ok: true,
+        config: {
+          keycloak: { baseUrl: "https://identity.example.test", tenantRealm: "host", clientId: "auth-api", clientSecret: "test-only" },
+          operator: { issuer: ISSUER, jwksUri: new URL("/jwks", server.url).href, clientId: "admin-web" },
+          mcpResource: { origins: ["https://api.example.test"], clients: [] },
+        },
+      },
+      operations: [],
+    });
+    const app = Fastify();
+    registerRuntimeOperationRestRoutes(app, { db, platform: platform.services, control });
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/operations/${operation.key}`,
+        headers: Object.fromEntries(await headers({
+          ...serviceClaims,
+          resource_access: { api: { roles: ["Records.Read"] } },
+        })),
+      });
+      expect(response.statusCode).toBe(200);
+      expect((response.json() as { id: string }).id).toBe(operation.key);
+    } finally {
+      await app.close();
+      await db.destroy();
+    }
   });
 
   test("rejects missing registry, cross-realm registry, missing organization, conflicting tid and unconfigured accounts", async () => {

@@ -68,16 +68,20 @@ const rolesOf = (handler: string) => {
 };
 
 describe("the control MCP tool list", () => {
-  test("a platform_admin-only session sees every tool, under the MCP names, with the confirmed field where declared", async () => {
+  test("a platform_admin-only session sees shared reads and administrator tools, with the confirmed field where declared", async () => {
     const { client, close } = await connect(controlSessionFor(administrator, ["platform_admin"]));
     try {
       const listed = await client.listTools();
       expect(listed.tools.map((tool) => tool.name).sort()).toEqual(
-        contracts.map((contract) => contract.transports.mcp.name!).sort(),
+        contracts
+          .filter((contract) => rolesOf(contract.handler).includes("platform_admin"))
+          .map((contract) => contract.transports.mcp.name!)
+          .sort(),
       );
-      const updateTenant = listed.tools.find((tool) => tool.name === "update_tenant")!;
-      expect(updateTenant.inputSchema.properties).toHaveProperty("confirmed");
-      expect((updateTenant.inputSchema as { required?: string[] }).required).toEqual(["slug"]);
+      const retireCatalogEntry = listed.tools.find((tool) => tool.name === "retire_catalog_entry")!;
+      expect(retireCatalogEntry.inputSchema.properties).toHaveProperty("confirmed");
+      expect((retireCatalogEntry.inputSchema as { required?: string[] }).required).toEqual(["kind", "key"]);
+      expect(listed.tools.map((tool) => tool.name)).not.toContain("update_tenant");
       expect(listed.tools.find((tool) => tool.name === "list_tenants")!.inputSchema.properties).not.toHaveProperty("confirmed");
       expect(listed.tools.find((tool) => tool.name === "retire_catalog_entry")!.annotations).toMatchObject({
         readOnlyHint: false, idempotentHint: false,

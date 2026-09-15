@@ -131,7 +131,7 @@ describe("one round trip per page group", () => {
     expect(guide.body).toEqual({ guide: PLATFORM_GUIDE });
     const who = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
     expect(who.status).toBe(200);
-    expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 23, resources: 1 } });
+    expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 16, resources: 1 } });
     expect(who.body.signedInVia).toBe("Hubble control plane");
   });
 

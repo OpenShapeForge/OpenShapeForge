@@ -41,12 +41,28 @@ operations:
         properties:
           name:
             type: string
+            x-osf-i18n:
+              title:
+                en: Name
+                nl: Naam
           role:
             type: string
+            x-osf-i18n:
+              title:
+                en: Role
+                nl: Rol
           scope:
             type: string
+            x-osf-i18n:
+              title:
+                en: Scope
+                nl: Reikwijdte
           tenants:
             type: integer
+            x-osf-i18n:
+              title: &id003
+                en: Tenants
+                nl: Tenants
     auth:
       mode: control
       roles:
@@ -110,6 +126,10 @@ operations:
         properties:
           guide:
             type: string
+            x-osf-i18n:
+              title:
+                en: Guide
+                nl: Gids
         required:
         - guide
     auth:
@@ -152,9 +172,11 @@ operations:
         properties:
           tenants:
             type: array
-            items: &id003
+            items: &id004
               type: object
               additionalProperties: true
+            x-osf-i18n:
+              title: *id003
         required:
         - tenants
     auth:
@@ -189,18 +211,18 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: &id004
+          slug: &id005
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: The tenant's slug as list_tenants reports it (e.g. acme-dev).
             x-osf-i18n:
-              title: &id007
+              title: &id010
                 en: Tenant slug
                 nl: Tenant-slug
         required:
         - slug
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -237,20 +259,20 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
           name:
             type: string
             minLength: 1
             description: Human display name.
             x-osf-i18n:
-              title: &id005
+              title: &id006
                 en: Name
                 nl: Naam
         required:
         - slug
         - name
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -259,7 +281,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id006
+    effects: &id007
       data: write
       external: write
     reliability:
@@ -288,12 +310,12 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
           name:
             type: string
             minLength: 1
             x-osf-i18n:
-              title: *id005
+              title: *id006
           status:
             type: string
             enum:
@@ -317,7 +339,7 @@ operations:
         required:
         - slug
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -326,7 +348,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id007
     reliability:
       idempotency:
         mode: natural
@@ -350,7 +372,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
         required:
         - slug
     output:
@@ -360,10 +382,18 @@ operations:
         properties:
           tenant:
             type: string
+            x-osf-i18n:
+              title: &id008
+                en: Tenant
+                nl: Tenant
           blueprintTenant:
             type:
             - string
             - 'null'
+            x-osf-i18n:
+              title: &id009
+                en: Blueprint library tenant
+                nl: Blueprintbibliotheek-tenant
         required:
         - tenant
         - blueprintTenant
@@ -402,7 +432,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
           blueprintTenantSlug:
             anyOf:
             - type: string
@@ -423,12 +453,20 @@ operations:
         properties:
           tenant:
             type: string
+            x-osf-i18n:
+              title: *id008
           blueprintTenant:
             type:
             - string
             - 'null'
+            x-osf-i18n:
+              title: *id009
           changed:
             type: boolean
+            x-osf-i18n:
+              title:
+                en: Changed
+                nl: Gewijzigd
         required:
         - tenant
         - blueprintTenant
@@ -441,7 +479,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id014
+    effects: &id017
       data: write
       external: none
     reliability:
@@ -471,7 +509,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
           email:
             type: string
             format: email
@@ -483,7 +521,7 @@ operations:
         - slug
         - email
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -492,7 +530,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id007
     reliability:
       idempotency:
         mode: natural
@@ -518,11 +556,11 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
+          slug: *id005
         required:
         - slug
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -531,7 +569,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id009
+    effects: &id012
       data: read
       external: read
     reliability:
@@ -559,25 +597,25 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          tenantSlug: *id004
+          tenantSlug: *id005
           slug:
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: Immutable kebab-case path segment.
             x-osf-i18n:
-              title: *id007
+              title: *id010
           name:
             type: string
             minLength: 1
             description: Human display name.
             x-osf-i18n:
-              title: *id005
+              title: *id006
           parentOrgUnitId:
             type: string
             format: uuid
             description: Opaque parent org-unit id; omit for the tenant root.
             x-osf-i18n:
-              title: &id008
+              title: &id011
                 en: Parent organization unit
                 nl: Bovenliggende organisatie-eenheid
         required:
@@ -585,7 +623,7 @@ operations:
         - slug
         - name
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -594,7 +632,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id007
     reliability:
       idempotency:
         mode: natural
@@ -620,7 +658,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          tenantSlug: *id004
+          tenantSlug: *id005
           orgUnitId:
             type: string
             format: uuid
@@ -632,7 +670,7 @@ operations:
             type: string
             minLength: 1
             x-osf-i18n:
-              title: *id005
+              title: *id006
           parentOrgUnitId:
             anyOf:
             - type: string
@@ -640,12 +678,12 @@ operations:
             - type: 'null'
             description: New parent id, or null for the tenant root; omit to keep the current parent.
             x-osf-i18n:
-              title: *id008
+              title: *id011
         required:
         - tenantSlug
         - orgUnitId
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -654,7 +692,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id007
     reliability:
       idempotency:
         mode: natural
@@ -680,7 +718,7 @@ operations:
         type: object
         additionalProperties: false
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -689,7 +727,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id012
     reliability:
       idempotency:
         mode: natural
@@ -717,9 +755,9 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          tenantSlug: *id004
+          tenantSlug: *id005
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -728,7 +766,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id007
     reliability:
       idempotency:
         mode: natural
@@ -767,7 +805,7 @@ operations:
             type: string
             description: Exact audited action, the operation key such as control.publish-catalog-entry.
             x-osf-i18n:
-              title: &id016
+              title: &id019
                 en: Action
                 nl: Actie
           result:
@@ -807,7 +845,7 @@ operations:
           cursor:
             type: string
             x-osf-i18n:
-              title: &id010
+              title: &id013
                 en: Cursor
                 nl: Cursor
           limit:
@@ -816,11 +854,11 @@ operations:
             maximum: 200
             description: Page size, default 50.
             x-osf-i18n:
-              title: &id011
+              title: &id014
                 en: Page size
                 nl: Paginagrootte
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -854,7 +892,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: &id012
+          kind: &id015
             type: string
             enum:
             - service
@@ -875,26 +913,26 @@ operations:
                 capability:
                   en: Capability
                   nl: Capability
-          key: &id013
+          key: &id016
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: Stable catalog key, kebab-case.
             x-osf-i18n:
-              title: &id015
+              title: &id018
                 en: Key
                 nl: Sleutel
           cursor:
             type: string
             x-osf-i18n:
-              title: *id010
+              title: *id013
           limit:
             type: integer
             minimum: 1
             maximum: 200
             x-osf-i18n:
-              title: *id011
+              title: *id014
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -926,13 +964,13 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id012
-          key: *id013
+          kind: *id015
+          key: *id016
         required:
         - kind
         - key
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -966,8 +1004,8 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id012
-          key: *id013
+          kind: *id015
+          key: *id016
           definition:
             type: object
             additionalProperties: true
@@ -1002,7 +1040,7 @@ operations:
         - key
         - definition
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1010,7 +1048,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id014
+    effects: *id017
     reliability:
       idempotency:
         mode: none
@@ -1036,13 +1074,13 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id012
-          key: *id013
+          kind: *id015
+          key: *id016
         required:
         - kind
         - key
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1050,7 +1088,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id014
+    effects: *id017
     reliability:
       idempotency:
         mode: none
@@ -1076,15 +1114,15 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          slug: *id004
-          kind: *id012
-          key: *id013
+          slug: *id005
+          kind: *id015
+          key: *id016
         required:
         - slug
         - kind
         - key
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1092,7 +1130,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id014
+    effects: *id017
     reliability:
       idempotency:
         mode: natural
@@ -1125,7 +1163,7 @@ operations:
             pattern: ^[a-z][a-z0-9-]*$
             description: Stable notice key, kebab-case (e.g. day-start-v3).
             x-osf-i18n:
-              title: *id015
+              title: *id018
           title:
             type: string
             minLength: 1
@@ -1159,7 +1197,7 @@ operations:
                 action:
                   type: string
                   x-osf-i18n:
-                    title: *id016
+                    title: *id019
                 why:
                   type: string
                   x-osf-i18n:
@@ -1187,7 +1225,7 @@ operations:
         - title
         - changed
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1195,7 +1233,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id014
+    effects: *id017
     reliability:
       idempotency:
         mode: natural
@@ -1219,7 +1257,7 @@ operations:
         type: object
         additionalProperties: false
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1251,11 +1289,11 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          key: *id013
+          key: *id016
         required:
         - key
     output:
-      schema: *id003
+      schema: *id004
     auth:
       mode: control
       roles:
@@ -1263,7 +1301,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id014
+    effects: *id017
     reliability:
       idempotency:
         mode: natural

@@ -193,6 +193,10 @@ operations:
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: The tenant's slug as list_tenants reports it (e.g. acme-dev).
+            x-osf-i18n:
+              title: &id007
+                en: Tenant slug
+                nl: Tenant-slug
         required:
         - slug
     output:
@@ -238,6 +242,10 @@ operations:
             type: string
             minLength: 1
             description: Human display name.
+            x-osf-i18n:
+              title: &id005
+                en: Name
+                nl: Naam
         required:
         - slug
         - name
@@ -251,7 +259,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id005
+    effects: &id006
       data: write
       external: write
     reliability:
@@ -284,12 +292,28 @@ operations:
           name:
             type: string
             minLength: 1
+            x-osf-i18n:
+              title: *id005
           status:
             type: string
             enum:
             - active
             - inactive
             - suspended
+            x-osf-i18n:
+              title:
+                en: Status
+                nl: Status
+              enum:
+                active:
+                  en: Active
+                  nl: Actief
+                inactive:
+                  en: Inactive
+                  nl: Inactief
+                suspended:
+                  en: Suspended
+                  nl: Geschorst
         required:
         - slug
     output:
@@ -302,7 +326,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id005
+    effects: *id006
     reliability:
       idempotency:
         mode: natural
@@ -385,6 +409,10 @@ operations:
               pattern: ^[a-z][a-z0-9-]*$
             - type: 'null'
             description: The library tenant's slug, or null to clear.
+            x-osf-i18n:
+              title:
+                en: Blueprint library tenant
+                nl: Blueprintbibliotheek-tenant
         required:
         - slug
         - blueprintTenantSlug
@@ -413,7 +441,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id009
+    effects: &id014
       data: write
       external: none
     reliability:
@@ -447,6 +475,10 @@ operations:
           email:
             type: string
             format: email
+            x-osf-i18n:
+              title:
+                en: E-mail address
+                nl: E-mailadres
         required:
         - slug
         - email
@@ -460,7 +492,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id005
+    effects: *id006
     reliability:
       idempotency:
         mode: natural
@@ -499,7 +531,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: &id006
+    effects: &id009
       data: read
       external: read
     reliability:
@@ -532,14 +564,22 @@ operations:
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: Immutable kebab-case path segment.
+            x-osf-i18n:
+              title: *id007
           name:
             type: string
             minLength: 1
             description: Human display name.
+            x-osf-i18n:
+              title: *id005
           parentOrgUnitId:
             type: string
             format: uuid
             description: Opaque parent org-unit id; omit for the tenant root.
+            x-osf-i18n:
+              title: &id008
+                en: Parent organization unit
+                nl: Bovenliggende organisatie-eenheid
         required:
         - tenantSlug
         - slug
@@ -554,7 +594,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id005
+    effects: *id006
     reliability:
       idempotency:
         mode: natural
@@ -584,15 +624,23 @@ operations:
           orgUnitId:
             type: string
             format: uuid
+            x-osf-i18n:
+              title:
+                en: Organization unit
+                nl: Organisatie-eenheid
           name:
             type: string
             minLength: 1
+            x-osf-i18n:
+              title: *id005
           parentOrgUnitId:
             anyOf:
             - type: string
               format: uuid
             - type: 'null'
             description: New parent id, or null for the tenant root; omit to keep the current parent.
+            x-osf-i18n:
+              title: *id008
         required:
         - tenantSlug
         - orgUnitId
@@ -606,7 +654,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id005
+    effects: *id006
     reliability:
       idempotency:
         mode: natural
@@ -641,7 +689,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id006
+    effects: *id009
     reliability:
       idempotency:
         mode: natural
@@ -680,7 +728,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id005
+    effects: *id006
     reliability:
       idempotency:
         mode: natural
@@ -711,28 +759,66 @@ operations:
           actor:
             type: string
             description: Exact audited actor subject.
+            x-osf-i18n:
+              title:
+                en: Actor
+                nl: Actor
           action:
             type: string
             description: Exact audited action, the operation key such as control.publish-catalog-entry.
+            x-osf-i18n:
+              title: &id016
+                en: Action
+                nl: Actie
           result:
             type: string
             enum:
             - succeeded
             - failed
             - in_progress
+            x-osf-i18n:
+              title:
+                en: Result
+                nl: Resultaat
+              enum:
+                succeeded:
+                  en: Succeeded
+                  nl: Geslaagd
+                failed:
+                  en: Failed
+                  nl: Mislukt
+                in_progress:
+                  en: In progress
+                  nl: Bezig
           since:
             type: string
             format: date-time
+            x-osf-i18n:
+              title:
+                en: Since
+                nl: Vanaf
           until:
             type: string
             format: date-time
+            x-osf-i18n:
+              title:
+                en: Until
+                nl: Tot
           cursor:
             type: string
+            x-osf-i18n:
+              title: &id010
+                en: Cursor
+                nl: Cursor
           limit:
             type: integer
             minimum: 1
             maximum: 200
             description: Page size, default 50.
+            x-osf-i18n:
+              title: &id011
+                en: Page size
+                nl: Paginagrootte
     output:
       schema: *id003
     auth:
@@ -768,23 +854,45 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: &id007
+          kind: &id012
             type: string
             enum:
             - service
             - adapter
             - capability
             description: Catalog entry kind.
-          key: &id008
+            x-osf-i18n:
+              title:
+                en: Kind
+                nl: Soort
+              enum:
+                service:
+                  en: Service
+                  nl: Service
+                adapter:
+                  en: Adapter
+                  nl: Adapter
+                capability:
+                  en: Capability
+                  nl: Capability
+          key: &id013
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: Stable catalog key, kebab-case.
+            x-osf-i18n:
+              title: &id015
+                en: Key
+                nl: Sleutel
           cursor:
             type: string
+            x-osf-i18n:
+              title: *id010
           limit:
             type: integer
             minimum: 1
             maximum: 200
+            x-osf-i18n:
+              title: *id011
     output:
       schema: *id003
     auth:
@@ -818,8 +926,8 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id007
-          key: *id008
+          kind: *id012
+          key: *id013
         required:
         - kind
         - key
@@ -858,12 +966,16 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id007
-          key: *id008
+          kind: *id012
+          key: *id013
           definition:
             type: object
             additionalProperties: true
             description: The complete entry definition, exactly as the catalog stores it.
+            x-osf-i18n:
+              title:
+                en: Definition
+                nl: Definitie
           authority:
             type: string
             enum:
@@ -871,6 +983,20 @@ operations:
             - host
             - tenant_shared
             description: Who owns changes after publication.
+            x-osf-i18n:
+              title:
+                en: Authority
+                nl: Autoriteit
+              enum:
+                platform_release:
+                  en: Platform release
+                  nl: Platformrelease
+                host:
+                  en: Host
+                  nl: Host
+                tenant_shared:
+                  en: Shared by tenant
+                  nl: Gedeeld door tenant
         required:
         - kind
         - key
@@ -884,7 +1010,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id014
     reliability:
       idempotency:
         mode: none
@@ -910,8 +1036,8 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          kind: *id007
-          key: *id008
+          kind: *id012
+          key: *id013
         required:
         - kind
         - key
@@ -924,7 +1050,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id014
     reliability:
       idempotency:
         mode: none
@@ -951,8 +1077,8 @@ operations:
         additionalProperties: false
         properties:
           slug: *id004
-          kind: *id007
-          key: *id008
+          kind: *id012
+          key: *id013
         required:
         - slug
         - kind
@@ -966,7 +1092,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id014
     reliability:
       idempotency:
         mode: natural
@@ -998,18 +1124,32 @@ operations:
             type: string
             pattern: ^[a-z][a-z0-9-]*$
             description: Stable notice key, kebab-case (e.g. day-start-v3).
+            x-osf-i18n:
+              title: *id015
           title:
             type: string
             minLength: 1
+            x-osf-i18n:
+              title:
+                en: Title
+                nl: Titel
           changed:
             type: string
             minLength: 1
             description: What changed, for the assistant to put in the person's own words.
+            x-osf-i18n:
+              title:
+                en: What changed
+                nl: Wat er veranderd is
           assistantChanges:
             type: array
             items:
               type: string
             description: What an assistant now does differently. One sentence per entry.
+            x-osf-i18n:
+              title:
+                en: Assistant changes
+                nl: Veranderingen voor de assistent
           userActions:
             type: array
             items:
@@ -1018,16 +1158,30 @@ operations:
               properties:
                 action:
                   type: string
+                  x-osf-i18n:
+                    title: *id016
                 why:
                   type: string
+                  x-osf-i18n:
+                    title:
+                      en: Why
+                      nl: Waarom
               required:
               - action
             description: Steps only the person can take.
+            x-osf-i18n:
+              title:
+                en: User actions
+                nl: Acties voor de gebruiker
           serviceChanges:
             type: object
             additionalProperties:
               type: string
             description: Catalog key of each changed Service mapped to what changed on it.
+            x-osf-i18n:
+              title:
+                en: Service changes
+                nl: Veranderingen per Service
         required:
         - key
         - title
@@ -1041,7 +1195,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id014
     reliability:
       idempotency:
         mode: natural
@@ -1097,7 +1251,7 @@ operations:
         type: object
         additionalProperties: false
         properties:
-          key: *id008
+          key: *id013
         required:
         - key
     output:
@@ -1109,7 +1263,7 @@ operations:
     tenancy:
       mode: none
       description: A platform operator acts across every tenant; no tenant context exists.
-    effects: *id009
+    effects: *id014
     reliability:
       idempotency:
         mode: natural

@@ -99,10 +99,11 @@ const documentationByGraphqlType = createGraphqlDocumentationIndex(
 type CrudOperation = "list" | "get" | "create" | "update" | "delete";
 
 function operationEnabled(table: GeneratedTable, operation: CrudOperation): boolean {
+  if (table.source?.graphql?.operations?.[operation] === false ||
+    !isGeneratedCrudOperationEnabled(table, operation)) return false;
   if (operation === "create" && collectionMutationError(table, "create", getGeneratedCrudTables()) &&
     entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") return false;
-  return table.source?.graphql?.operations?.[operation] !== false &&
-    isGeneratedCrudOperationEnabled(table, operation);
+  return true;
 }
 
 export function usesCanonicalGraphqlOperations(table: GeneratedTable): boolean {
@@ -953,8 +954,10 @@ const mutationResolvers = Object.fromEntries(
 const objectResolvers = Object.fromEntries(
   tables.map((table) => {
     const graphql = assertGraphqlMetadata(table);
+    const relationNames = new Set((graphql.relationships ?? [])
+      .filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
     const fields = Object.fromEntries(
-      table.columns.map((column) => [
+      table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column))).map((column) => [
         fieldNameForColumn(column),
         (parent: Record<string, unknown>) => parent[column.name],
       ]),

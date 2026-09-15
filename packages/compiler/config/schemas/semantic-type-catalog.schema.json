@@ -14,7 +14,7 @@
         "type": "object",
         "required": ["label", "valueType"],
         "properties": {
-          "kind": { "type": "string", "enum": ["entityId"] },
+          "kind": { "type": "string", "enum": ["scalar", "entityId", "object"] },
           "label": { "type": "object" },
           "pluralLabel": { "type": "object" },
           "valueType": { "type": "string" },

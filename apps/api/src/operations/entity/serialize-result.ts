@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { fieldNameForColumn } from "./columns.js";
+import { entityValuePhysicalColumns } from "./entity-value-io.js";
+import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type {
   EntityOperationResult,
   GeneratedCrudColumn,
@@ -45,10 +47,12 @@ export function normalizeEntityStorageRow(
 export function serializeEntityRow(
   table: GeneratedCrudTable,
   row: GeneratedEntityRow,
+  entityValues = generatedEntityValues,
 ): Record<string, unknown> {
   const normalized = normalizeEntityStorageRow(table, row);
+  const hidden = entityValuePhysicalColumns(table, entityValues);
   const result = Object.fromEntries(
-    table.columns.map((column) => [fieldNameForColumn(column), normalized[column.name]]),
+    table.columns.filter((column) => !hidden.has(column.name)).map((column) => [fieldNameForColumn(column), normalized[column.name]]),
   );
   for (const field of table.source?.computedFields ?? []) result[field.field] = row[field.field];
   return result;

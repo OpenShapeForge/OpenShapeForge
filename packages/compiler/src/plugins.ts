@@ -44,6 +44,18 @@ export type PluginBaseContext = {
 
 /** A static plugin-backed Operation after compiler ownership is attached. */
 export type CompiledPluginOperation = PluginOperationContract & {
+  /** Compiler-owned native dispatch; never accepted from plugin contributions. */
+  implementation?:
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
+    | {
+        type: "constrained-reference-create";
+        targetEntityName: string;
+        collectionEntityName?: string;
+        parentField?: string;
+        targetValues: Record<string, string | number | boolean>;
+        childValues?: Record<string, string | number | boolean>;
+      };
   plugin: string;
   /** Stable canonical identity. Equal to `key` for this operation kind. */
   id: string;
@@ -185,6 +197,8 @@ export type PluginOperationAuth =
       mode: "session";
       /** Omitted means any authenticated session; [] deliberately denies all. */
       roles?: string[];
+      /** Every group requires at least one matching role; groups are combined with AND. */
+      roleGroups?: string[][];
       scopes?: string[];
       /** Current target-record permission checked in addition to roles. */
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;

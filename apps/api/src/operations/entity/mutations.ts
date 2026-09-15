@@ -3,6 +3,10 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
+import { operationFailure } from "@openshapeforge/operations";
+import { collectionMutationError } from "./collection-policy.js";
+import { entityValueCarriers, prepareEntityValueWriteInTransaction, type EntityValueIOContext } from "./entity-value-io.js";
+import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
   appendGeneratedCrudEvent,
@@ -40,12 +44,19 @@ import {
   assertRecordPermissionInTransaction,
   assertUpdateRecordPermissions,
 } from "./record-permissions.js";
+import {
+  derivedOnCreateColumn,
+  derivedSlugCandidate,
+  maxDerivedIdentifierAttempts,
+} from "./derive-on-create.js";
+import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
   session: DbSessionInput,
   table: GeneratedCrudTable,
   id: string,
+  lock = false,
 ): Promise<GeneratedEntityRow | null> {
   const tenantWhere = table.tenantScoped
     ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}`
@@ -56,6 +67,7 @@ async function fetchGeneratedRowInTransaction(
     where ${sql.id(table.primaryKey!)}::text = ${id}
       ${tenantWhere}
     limit 1
+    ${lock ? sql`for update` : sql``}
   `.execute(trx);
   return result.rows[0]?.row ?? null;
 }
@@ -73,10 +85,11 @@ export async function createGeneratedEntityForTable(
   session: DbSessionInput,
   table: GeneratedCrudTable,
   rawValues: Record<string, unknown>,
+  entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
   assertCreateRecordPermissions(table, session, rawValues);
-  const values = normalizeWritableValues(table, rawValues, "create");
-  return insertGeneratedRow(db, session, table, values);
+  const values = normalizeWritableValues(table, rawValues, "create", entityValues.registry);
+  return insertGeneratedRow(db, session, table, values, entityValues);
 }
 
 /** Role-ungated update counterpart; same contract as the create above. */
@@ -86,10 +99,12 @@ export async function updateGeneratedEntityForTable(
   table: GeneratedCrudTable,
   id: string,
   rawValues: Record<string, unknown>,
+  entityValues: EntityValueIOContext = {},
+  guard?: Parameters<typeof updateGeneratedEntity>[2]["guard"],
 ): Promise<GeneratedEntityRow | null> {
   assertUpdateRecordPermissions(table, rawValues);
-  const values = normalizeWritableValues(table, rawValues, "update");
-  return applyGeneratedRowUpdate(db, session, table, id, values);
+  const values = normalizeWritableValues(table, rawValues, "update", entityValues.registry);
+  return applyGeneratedRowUpdate(db, session, table, id, values, guard, entityValues);
 }
 
 /**
@@ -105,6 +120,7 @@ export async function mergeGeneratedEntityObjectForTable(
   field: string,
   patch: Record<string, unknown>,
 ): Promise<GeneratedEntityRow | null> {
+  if (entityValueCarriers(table).some((carrier) => carrier.fieldKey === field)) throw generatedCrudError("Entity values require a canonical whole-value update.", "BAD_USER_INPUT");
   const column = writableColumnMap(table, "update").get(field);
   if (!column || column.type !== "jsonb") {
     throw generatedCrudError(
@@ -138,6 +154,8 @@ export async function createGeneratedEntityAfterElicitation(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
+  const unsupported = collectionMutationError(table, "create", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   const column = elicitedOutputColumn(table);
   if (!column || fieldNameForColumn(column) !== input.into) {
     throw generatedCrudError(
@@ -159,6 +177,8 @@ export async function createGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
+  const unsupported = collectionMutationError(table, "create", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
   assertCreateRecordPermissions(table, session, input.values);
@@ -171,37 +191,89 @@ function insertGeneratedRow(
   session: DbSessionInput,
   table: GeneratedCrudTable,
   values: ReturnType<typeof normalizeWritableValues>,
+  entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
-  return withDbSession(db, session, async (trx, dbSession) => {
-    const columns = [...values.keys()];
-    const sqlValues = [...values.values()];
-    const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
+  return withDbSession(db, session, (trx, dbSession) => insertGeneratedRowInTransaction(trx, dbSession, table, values, entityValues)).catch((error) => {
+    throw translateDatabaseError(table, error);
+  });
+}
+
+/** Trusted transaction-owned create; the caller must gate the authored Operation first. */
+export async function createGeneratedEntityInTransaction(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  rawValues: Record<string, unknown>,
+  entityValues: EntityValueIOContext = {},
+): Promise<GeneratedEntityRow> {
+  assertCreateRecordPermissions(table, session, rawValues);
+  return insertGeneratedRowInTransaction(trx, session, table, normalizeWritableValues(table, rawValues, "create", entityValues.registry), entityValues);
+}
+
+async function insertGeneratedRowInTransaction(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  values: ReturnType<typeof normalizeWritableValues>,
+  entityValues: EntityValueIOContext = {},
+): Promise<GeneratedEntityRow> {
+  const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "create", undefined, entityValues);
+  await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
+  const derivedColumn = derivedOnCreateColumn(table);
+  const derivation = derivedColumn?.deriveOnCreate;
+  const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
+  const attempts = derivation ? maxDerivedIdentifierAttempts() : 1;
+  let row: GeneratedEntityRow | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const candidateValues = new Map(prepared);
+    if (derivedColumn && derivation) {
+      const sourceColumn = table.columns.find((column) => column.name === derivation.sourceColumn);
+      if (!sourceColumn || !candidateValues.has(sourceColumn)) {
+        throw generatedCrudError(
+          "Generated CRUD derivation metadata does not resolve to a submitted source field.",
+          "INTERNAL_SERVER_ERROR",
+        );
+      }
+      candidateValues.set(
+        derivedColumn,
+        derivedSlugCandidate(candidateValues.get(sourceColumn), attempt, derivation.maxLength),
+      );
+    }
+    const columns = [...candidateValues.keys()];
+    const sqlValues = [...candidateValues.values()];
     if (table.tenantScoped && tenantColumn) {
       columns.push(tenantColumn);
-      sqlValues.push(dbSession.tenantId);
+      sqlValues.push(session.tenantId);
     }
-
+    const conflict = derivation
+      ? sql`on conflict (${sql.join(derivation.conflictColumns.map((column) => sql.id(column)))}) do nothing`
+      : sql``;
     const result = await sql<{ row: GeneratedEntityRow }>`
       insert into ${sql.id(table.schema, table.table)}
         (${sql.join(columns.map((column) => sql.id(column.name)))})
       values
         (${sql.join(sqlValues)})
+      ${conflict}
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
+    row = result.rows[0]?.row;
+    if (row) break;
+  }
 
-    const row = result.rows[0]?.row;
-    if (!row) {
-      throw generatedCrudError("Generated entity create did not return a row.", "INTERNAL_SERVER_ERROR");
-    }
-    await appendGeneratedCrudEvent(trx, table, {
-      aggregateId: generatedCrudAggregateId(table, row),
-      eventType: "created",
-      row,
-    });
-    return projectGeneratedEntityRow(table, session, row);
-  }).catch((error) => {
-    throw translateDatabaseError(table, error);
-  });
+  if (!row) {
+    throw generatedCrudError(
+      derivation
+        ? "Generated CRUD could not allocate a unique derived identifier."
+        : "Generated entity create did not return a row.",
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
+  await appendGeneratedCrudEvent(trx, table, {
+    aggregateId: generatedCrudAggregateId(table, row),
+    eventType: "created",
+    row,
+  }, entityValues.registry);
+  return projectGeneratedEntityRow(table, session, row, entityValues.registry);
 }
 
 export async function updateGeneratedEntity(
@@ -221,6 +293,8 @@ export async function updateGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
+  const unsupported = collectionMutationError(table, "update", getGeneratedCrudTables(), input.values);
+  if (unsupported) throw operationFailure(unsupported);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
   assertUpdateRecordPermissions(table, input.values);
@@ -241,17 +315,13 @@ async function applyGeneratedRowUpdate(
     confirmationToken?: string;
     confirmationAnswer?: string;
   },
+  entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow | null> {
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
-  const assignments = [...values.entries()].map(([column, value]) =>
-    sql`${sql.id(column.name)} = ${value}`,
-  );
-  if (updatedAt) {
-    assignments.push(sql`${sql.id(updatedAt.name)} = now()`);
-  }
+  const carriers = entityValueCarriers(table, entityValues.registry);
 
   if (
-    assignments.length === 0 &&
+    values.size === 0 && !updatedAt && carriers.length === 0 &&
     !guard &&
     !table.source?.authorization?.recordPermissions
   ) {
@@ -263,6 +333,8 @@ async function applyGeneratedRowUpdate(
   }
 
   return withDbSession(db, session, async (trx) => {
+    const current = carriers.length ? await fetchGeneratedRowInTransaction(trx, session, table, id, true) : undefined;
+    if (carriers.length && !current) return null;
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, id, "edit");
     }
@@ -305,6 +377,11 @@ async function applyGeneratedRowUpdate(
       ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(guard.expectedVersion)}::timestamptz`
       : sql``;
 
+    const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
+    await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
+    const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
+    if (updatedAt) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
+
     if (assignments.length === 0) {
       const unchanged = await sql<{ row: GeneratedEntityRow }>`
         select to_jsonb(${sql.id(table.table)}.*) as row
@@ -314,7 +391,7 @@ async function applyGeneratedRowUpdate(
           ${expectedVersionWhere}
       `.execute(trx);
       if (unchanged.rows[0]) {
-        return projectGeneratedEntityRow(table, session, unchanged.rows[0].row);
+        return projectGeneratedEntityRow(table, session, unchanged.rows[0].row, entityValues.registry);
       }
       const current = await fetchGeneratedRowInTransaction(trx, session, table, id);
       if (current) {
@@ -351,8 +428,8 @@ async function applyGeneratedRowUpdate(
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",
       row,
-    });
-    return projectGeneratedEntityRow(table, session, row);
+    }, entityValues.registry);
+    return projectGeneratedEntityRow(table, session, row, entityValues.registry);
   }).catch((error) => {
     throw translateDatabaseError(table, error);
   });
@@ -374,6 +451,8 @@ export async function deleteGeneratedEntity(
   },
 ): Promise<boolean> {
   const table = readGeneratedCrudTable(input.table, "delete", session);
+  const unsupported = collectionMutationError(table, "delete", getGeneratedCrudTables());
+  if (unsupported) throw operationFailure(unsupported);
 
   return withDbSession(db, session, async (trx) => {
     if (table.source?.authorization?.recordPermissions) {

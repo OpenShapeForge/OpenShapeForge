@@ -38,6 +38,14 @@ export type GeneratedCrudColumn = {
     rest: string;
     mcp?: string;
   }[];
+  deriveOnCreate?: {
+    sourceField: string;
+    sourceColumn: string;
+    transform: "slug";
+    onConflict: "suffix";
+    conflictColumns: string[];
+    maxLength?: number;
+  };
 };
 
 export type GeneratedCrudRelationship = {
@@ -46,6 +54,22 @@ export type GeneratedCrudRelationship = {
   type: string;
   resolve: "belongsTo" | "hasMany";
   foreignKey?: string;
+  fieldKey?: string;
+  kind?: "belongsTo" | "hasMany" | "manyToMany";
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
+  sortable?: boolean;
+  positionColumn?: string;
+  via?: string;
+  viaSchema?: string;
+  mutationSupport?: "unsupported";
+  constraints?: Record<
+    string,
+    { eq: string | number | boolean } | {
+      any: Record<string, { eq: string | number | boolean }>;
+    }
+  >;
 };
 
 export type GeneratedCrudTable = {
@@ -63,7 +87,7 @@ export type GeneratedCrudTable = {
     blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
     authoringEntityName?: string;
     /** Present only for strict v2 entity authoring; absence means legacy v1. */
-    authoringVersion?: 2;
+    authoringVersion?: 2 | 3;
     computedFields?: Array<{
       field: string;
       resolver: "labelRules";

@@ -24,6 +24,9 @@ export type ReferenceDefinition = {
   table: string;
   column: string;
   onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
+  /** Composite FK columns, including tenant identity; both arrays have equal length. */
+  localColumns?: string[];
+  targetColumns?: string[];
 };
 
 export type IndexDefinition = {
@@ -54,6 +57,8 @@ export type IndexDefinition = {
  * schema migration instead.
  */
 export type TableConstraintDefinition = {
+  /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
+  compilerOwned?: boolean;
   /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
   version: string;
   /** Explicit PostgreSQL constraint name. */
@@ -287,6 +292,19 @@ export type ColumnDefinition = {
    * unaffected columns keep byte-identical output.
    */
   writtenBy?: string[];
+  /**
+   * Compiler-resolved create-time derivation. Callers never write this column;
+   * the API materializes it and uses the named unique-index columns as its
+   * race-safe ON CONFLICT target.
+   */
+  deriveOnCreate?: {
+    sourceField: string;
+    sourceColumn: string;
+    transform: "slug";
+    onConflict: "suffix";
+    conflictColumns: string[];
+    maxLength?: number;
+  };
 };
 
 export type LocalizedTextManifest = {
@@ -300,8 +318,8 @@ export type TableSourceDefinition = {
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
-  /** Present only for strict v2 entity authoring; absence means legacy v1. */
-  authoringVersion?: 2;
+  /** Present for strict entity authoring; absence means legacy v1. */
+  authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",
@@ -490,6 +508,15 @@ export type TableDefinition = {
   generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
+  /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
+  relationStorage?: {
+    sourceEntity: string;
+    fieldKey: string;
+    targetEntity: string;
+    sourceColumn: string;
+    targetColumn: string;
+    positionColumn?: string;
+  };
   /** Compound and named invariants owned by a compiler plugin. */
   constraints?: TableConstraintDefinition[];
   /** Set by the compiler when a plugin contributes versioned constraints. */
@@ -631,6 +658,7 @@ export type PlatformSchemaManifest = {
   description?: string;
   relationshipRegister?: RelationshipRegisterEntry[];
   tables: TableDefinition[];
+  entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
 };
 
 export type GeneratedArtifact = {

@@ -24,3 +24,14 @@ export function sessionOperationRolesAllow(
   const audience = new Set(held);
   return required.some((role) => audience.has(role));
 }
+
+/** Every group is an alternative set, while groups themselves are conjunctive. */
+export function sessionOperationRoleGroupsAllow(
+  required: readonly (readonly string[])[] | undefined,
+  held: readonly string[],
+): boolean {
+  if (required === undefined) return true;
+  if (required.length === 0) return false;
+  const audience = new Set(held);
+  return required.every((group) => group.length > 0 && group.some((role) => audience.has(role)));
+}

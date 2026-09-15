@@ -572,6 +572,17 @@ function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinit
 
   const constraintName = stableIdentifier(`${table.name}_${column.name}_fkey`);
   const reference = column.references;
+  const localColumns = reference.localColumns ?? [column.name];
+  const targetColumns = reference.targetColumns ?? [reference.column];
+  if (
+    (reference.localColumns === undefined) !== (reference.targetColumns === undefined) ||
+    localColumns.length === 0 || localColumns.length !== targetColumns.length ||
+    new Set(localColumns).size !== localColumns.length || new Set(targetColumns).size !== targetColumns.length ||
+    !localColumns.includes(column.name) ||
+    localColumns.some((name) => !table.columns.some((candidate) => candidate.name === name))
+  ) {
+    throw new Error(`Invalid composite foreign key ${table.schema}.${table.name}.${column.name}.`);
+  }
   const onDelete = reference.onDelete ? ` ON DELETE ${reference.onDelete}` : "";
 
   return [
@@ -587,8 +598,8 @@ function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinit
     `      AND t.relname = ${quoteSqlString(table.name)}`,
     "  ) THEN",
     `    ALTER TABLE ${tableIdent(table)}`,
-    `      ADD CONSTRAINT ${quoteIdent(constraintName)} FOREIGN KEY (${quoteIdent(column.name)})`,
-    `      REFERENCES ${quoteIdent(reference.schema)}.${quoteIdent(reference.table)}(${quoteIdent(reference.column)})${onDelete};`,
+    `      ADD CONSTRAINT ${quoteIdent(constraintName)} FOREIGN KEY (${localColumns.map(quoteIdent).join(", ")})`,
+    `      REFERENCES ${quoteIdent(reference.schema)}.${quoteIdent(reference.table)}(${targetColumns.map(quoteIdent).join(", ")})${onDelete};`,
     "  END IF;",
     "END",
     "$openshapeforge_fk$;",
@@ -596,6 +607,25 @@ function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinit
 }
 
 function renderForeignKeySql(manifest: PlatformSchemaManifest): string {
+  for (const table of manifest.tables) {
+    for (const column of table.columns) {
+      const reference = column.references;
+      if (!reference?.targetColumns) continue;
+      const target = manifest.tables.find((candidate) => candidate.schema === reference.schema && candidate.name === reference.table);
+      const targetColumns = reference.targetColumns;
+      if (!target || targetColumns.some((name, index) => {
+        const targetColumn = target.columns.find((column) => column.name === name);
+        const localColumn = table.columns.find((column) => column.name === reference.localColumns?.[index]);
+        return !targetColumn || !localColumn || targetColumn.type !== localColumn.type;
+      })) {
+        throw new Error(`Invalid composite foreign key target for ${table.schema}.${table.name}.${column.name}.`);
+      }
+      if (!target.indexes?.some((index) => index.unique && !index.where &&
+        index.columns.length === targetColumns.length && index.columns.every((name, index) => name === targetColumns[index]))) {
+        throw new Error(`Composite foreign key target ${reference.schema}.${reference.table} requires a matching unique index.`);
+      }
+    }
+  }
   return manifest.tables
     .flatMap((table) =>
       table.columns
@@ -765,6 +795,7 @@ function renderManifestJson(
     table: table.name,
     tenantScoped: table.tenantScoped,
     domainInternal: table.domainInternal === true,
+    ...(table.relationStorage ? { relationStorage: table.relationStorage } : {}),
     ...(table.tenantScoped && isGeneratedCrudEligible(table) && !table.domainInternal ? {
       realtime: {
         readPredicate: renderRowScopePredicate(table, "") ?? '"tenant_id" = app.current_tenant()',
@@ -809,6 +840,9 @@ function renderManifestJson(
       ...(column.writtenBy === undefined
         ? {}
         : { writtenBy: resolveColumnWriters(table, column, operations) }),
+      ...(column.deriveOnCreate === undefined
+        ? {}
+        : { deriveOnCreate: column.deriveOnCreate }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted
@@ -862,6 +896,9 @@ function renderManifestJson(
         // Already resolved on the rendered table above; republished here so the
         // runtime's generated-entity view carries the same one fact.
         ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
+        ...(column.deriveOnCreate === undefined
+          ? {}
+          : { deriveOnCreate: column.deriveOnCreate }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));
@@ -882,6 +919,7 @@ function renderManifestJson(
       capabilities: {
         generatedEntities,
       },
+      ...(manifest.entityValues ? { entityValues: manifest.entityValues } : {}),
       tables,
     },
     null,

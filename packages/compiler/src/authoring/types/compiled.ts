@@ -25,6 +25,7 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
+import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
 import type {
   ListColumn,
   ListFilter,
@@ -44,6 +45,7 @@ import type {
   EntityMcpOperationProjectionConfig,
   EntityRestOperationProjectionConfig,
   EntityInterfaceOperationProjectionConfig,
+  EntityWebOperationProjectionConfig,
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
@@ -90,6 +92,8 @@ export interface CompiledField {
   };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
+  entityValue?: { definitionField: string };
+  allowedDefinitions?: string[];
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
@@ -105,6 +109,8 @@ export interface CompiledField {
    * column, the way `immutable` and `classification` do.
    */
   writtenBy?: string[];
+  /** Persisted server-owned create-time derivation retained for every interface projection. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;
@@ -134,11 +140,18 @@ export interface CompiledField {
 
 export interface CompiledRelationship {
   key: string;
+  fieldKey?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: import("./field-definition.js").FieldDefinitionCardinality;
+  sortable?: boolean;
+  unique?: boolean;
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;
   foreignKey?: string;
   via?: string;
   label?: LocalizedText;
+  constraints?: import("./field-definition.js").FieldDefinitionRelationshipConstraints;
 }
 
 export interface GraphQLField {
@@ -353,7 +366,7 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
     rest?: false | EntityRestOperationProjectionConfig;
     graphql?: false | EntityGraphqlOperationProjectionConfig;
     mcp?: false | EntityMcpOperationProjectionConfig;
-    web?: false | EntityInterfaceOperationProjectionConfig;
+    web?: false | EntityWebOperationProjectionConfig;
   };
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: readonly OperationPrerequisite[];
@@ -666,7 +679,7 @@ export interface CompiledBlueprint {
 export interface CompiledEntityContract {
   blueprint?: CompiledBlueprint;
   workerAccess?: string;
-  authoringVersion: 1 | 2;
+  authoringVersion: 1 | 2 | 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {
@@ -674,6 +687,8 @@ export interface CompiledEntityContract {
     name: string;
     module: string;
     title: string;
+    /** Explicit baseEntity:false with no entity identity; usable only as a value definition. */
+    valueDefinition?: boolean;
     description?: string | LocalizedText;
     labels?: LocalizedText;
     domains: string[];
@@ -707,12 +722,13 @@ export interface CompiledEntityContract {
       rest?: false | EntityRestOperationProjectionConfig;
       graphql?: false | EntityGraphqlOperationProjectionConfig;
       mcp?: false | EntityMcpOperationProjectionConfig;
-      web?: false | EntityInterfaceOperationProjectionConfig;
+      web?: false | EntityWebOperationProjectionConfig;
     };
   }>;
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
+      fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       recordContext?: { fields: string[]; relationships?: string[] };

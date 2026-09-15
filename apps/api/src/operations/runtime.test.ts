@@ -7,6 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -39,7 +40,7 @@ import {
   type TestReceiptExecutor,
 } from "./execution-receipts.js";
 import {
-  bindOperationHandlers,
+  bindOperationHandlers as bindCanonicalOperationHandlers,
   DeclaredOperationError,
   invokeOperation,
   operationGraphqlContribution,
@@ -50,6 +51,28 @@ import {
   runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "./runtime.js";
+
+// Full-catalog transport tests need the actual modules declared by generated
+// Operations. Keep explicitly supplied unit-test catalogs isolated instead.
+// Match the runtime loader boundary: the public plugin uses an unbound Kysely
+// database generic, while the API contract specializes it to the generated DB.
+const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const workflowRuntime: RuntimeModule = (await import(new URL(
+  "../../../../examples/plugins/workflow/runtime.ts", import.meta.url,
+).pathname)).default;
+const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]>();
+function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
+  let complete = completeModuleSets.get(modules);
+  if (!complete) {
+    complete = [documentsRuntime, ...modules];
+    completeModuleSets.set(modules, complete);
+  }
+  return complete;
+}
+const bindOperationHandlers: typeof bindCanonicalOperationHandlers = (modules, operations) =>
+  operations === undefined
+    ? bindCanonicalOperationHandlers(withDocuments(modules))
+    : bindCanonicalOperationHandlers(modules, operations);
 
 const session = {
   tenantId: "tenant-a",
@@ -280,16 +303,24 @@ describe("canonical operation runtime", () => {
     expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);
     expect(() => bindOperationHandlers([{ name: "unrelated" }, { name: "workflow" }])).toThrow(/has no runtime handler/);
   });
-  test("a process without any operation module binds the core operations and no plugin ones", () => {
-    const bound = bindOperationHandlers([]);
-    const plugins = new Set([...bound.values()].map((entry) => entry.operation.plugin));
+  test("a process without any operation module binds core and native operations only", () => {
+    const bound = bindCanonicalOperationHandlers([]);
     expect(bound.has("workflow.instance.webhook-start")).toBe(false);
-    // The two core modules bind without any plugin module present.
-    expect([...plugins].every((plugin) => plugin === "osf-blueprints" || plugin === "osf-control")).toBe(true);
+    expect(bound.has("entityTypes.list")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
+    expect(
+      [...bound.values()].every(({ operation }) =>
+        operation.implementation?.type === "collection" ||
+        operation.implementation?.type === "entity-type-list" ||
+        operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "osf-blueprints" ||
+        operation.plugin === "osf-control"
+      ),
+    ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.
-    expect(() => bindOperationHandlers([{ name: "unrelated" }])).not.toThrow();
-    expect(bindOperationHandlers([{ name: "unrelated" }]).has("workflow.instance.webhook-start")).toBe(false);
+    const noOperationModule = { name: "no-operation-module" };
+    expect(() => bindCanonicalOperationHandlers([noOperationModule])).not.toThrow();
+    expect(bindCanonicalOperationHandlers([noOperationModule]).has("workflow.instance.webhook-start")).toBe(false);
   });
 
   test("validates input and handler output against the generated contract", async () => {
@@ -626,6 +657,14 @@ describe("canonical operation runtime", () => {
     const [unavailable] = runtimeStaticOperationRegistrations([module], {}, [denied]);
     expect(available!.available({ ...session, roles: [] })).toBe(true);
     expect(unavailable!.available({ ...session, roles: ["admin"] })).toBe(false);
+
+    const conjunctive: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", roleGroups: [["target-a", "target-b"], ["child"]] },
+    };
+    const [conjunctiveOffer] = runtimeStaticOperationRegistrations([module], {}, [conjunctive]);
+    expect(conjunctiveOffer!.available({ ...session, roles: ["target-b", "child"] })).toBe(true);
+    expect(conjunctiveOffer!.available({ ...session, roles: ["target-a"] })).toBe(false);
   });
 
   test("rejects a success status that differs from the canonical contract", async () => {
@@ -1326,7 +1365,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   const db = testDatabase();
   const platform = new ModulePlatformRuntime(db);
   const contribution = operationGraphqlContribution(
-    [module],
+    withDocuments([module]),
     { db, platform: platform.services },
   )?.graphql?.({});
   const resolver = contribution?.resolvers?.Mutation?.workflowStartWebhook as
@@ -1347,7 +1386,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
-    modules: [module],
+    modules: withDocuments([module]),
     modulePlatform: platform,
   });
   const client = new Client(
@@ -1404,7 +1443,7 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
-    modules: [module],
+    modules: withDocuments([module]),
     modulePlatform: platform,
   });
   const client = new Client({ name: "content-blocks-test", version: "1" }, { capabilities: {} });
@@ -1442,13 +1481,13 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
   const db = testDatabase();
   const platform = new ModulePlatformRuntime(db);
   platform.registerStaticOperations(runtimeStaticOperationRegistrations(
-    [module],
+    withDocuments([module]),
     { db, platform: platform.services },
   ));
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
-    modules: [module],
+    modules: withDocuments([module]),
     modulePlatform: platform,
     operationToolProjection: {
       mode: "searchable",
@@ -1524,7 +1563,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
     const deniedServer = __buildGeneratedMcpServerForTests({
       db,
       session: deniedSession,
-      modules: [module],
+      modules: withDocuments([module]),
       modulePlatform: platform,
       operationToolProjection: {
         mode: "searchable",
@@ -1641,7 +1680,7 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
-    modules: [providerModule],
+    modules: withDocuments([workflowRuntime, providerModule]),
     modulePlatform: platform,
   });
   const client = new Client(
@@ -1778,7 +1817,7 @@ test("MCP refuses unusable or colliding runtime provider tool keys", async () =>
     const server = __buildGeneratedMcpServerForTests({
       db,
       session,
-      modules: [providerModule],
+      modules: withDocuments([workflowRuntime, providerModule]),
       modulePlatform: platform,
     });
     const client = new Client(

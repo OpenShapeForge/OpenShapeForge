@@ -37,9 +37,10 @@
       "pattern": "^[a-z][a-z0-9._-]*$",
       "description": "Named worker allowed across tenants for this entity, only through the dedicated worker database identity."
     },
+    "baseEntity": { "type": "boolean" },
     "schemaVersion": {
       "type": "integer",
-      "enum": [1, 2]
+      "enum": [1, 2, 3]
     },
     "kind": {
       "type": "string",
@@ -613,6 +614,23 @@
   },
   "allOf": [
     {
+      "if": { "properties": { "schemaVersion": { "const": 3 } }, "required": ["schemaVersion"] },
+      "then": {
+        "properties": {
+          "relationships": false,
+          "fields": {
+            "items": {
+              "properties": {
+                "relationship": {
+                  "properties": { "kind": false, "entity": false, "foreignKey": false, "displayField": false }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "if": {
         "properties": { "schemaVersion": { "const": 1 } },
         "required": ["schemaVersion"]
@@ -628,7 +646,7 @@
     },
     {
       "if": {
-        "properties": { "schemaVersion": { "const": 2 } },
+        "properties": { "schemaVersion": { "enum": [2, 3] } },
         "required": ["schemaVersion"]
       },
       "then": {
@@ -678,6 +696,15 @@
         },
         "implementation": {
           "oneOf": [
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["type", "action", "field"],
+              "properties": {
+                "type": { "const": "collection" },
+                "action": { "enum": ["insert", "move"] },
+                "field": { "$ref": "#/$defs/fieldKey" }
+              }
+            },
             {
               "type": "object",
               "additionalProperties": false,
@@ -760,7 +787,7 @@
           "if": {
             "properties": {
               "implementation": {
-                "properties": { "type": { "const": "entity" } },
+                "properties": { "type": { "enum": ["entity", "collection"] } },
                 "required": ["type"]
               }
             },
@@ -956,6 +983,17 @@
               "uniqueItems": true,
               "items": { "type": "string", "minLength": 1 }
             },
+            "roleGroups": {
+              "description": "Conjunctive role gates. The session must hold at least one role from every non-empty group.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            },
             "scopes": {
               "type": "array",
               "uniqueItems": true,
@@ -1131,6 +1169,23 @@
         ]
       }
     },
+    "webInterfaceOperationsV2": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instructions": { "$ref": "#/$defs/localizedOrString" },
+              "resultRenderer": { "type": "string", "pattern": "^[a-z][A-Za-z0-9.-]*$" }
+            }
+          }
+        ]
+      }
+    },
     "restInterfaceOperationsV2": {
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
@@ -1199,7 +1254,7 @@
           "additionalProperties": false,
           "required": ["views"],
           "properties": {
-            "operations": { "$ref": "#/$defs/interfaceOperationsV2" },
+            "operations": { "$ref": "#/$defs/webInterfaceOperationsV2" },
             "views": { "$ref": "#/$defs/webViewsV2" }
           }
         }
@@ -1277,6 +1332,19 @@
             },
             "title": { "type": "string", "minLength": 1 },
             "subtitle": { "type": "string", "minLength": 1 },
+            "variableSources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["key", "resolver"],
+                "properties": {
+                  "key": { "type": "string", "minLength": 1 },
+                  "resolver": { "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"] },
+                  "params": { "type": "object" }
+                }
+              }
+            },
             "actions": {
               "type": "array",
               "uniqueItems": true,
@@ -1838,7 +1906,7 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["static", "referentiedata", "remote"]
+              "enum": ["static", "referentiedata", "remote", "dynamic", "entity"]
             },
             "items": {
               "type": "array",
@@ -1859,6 +1927,9 @@
               "type": "string"
             },
             "remoteUrl": {
+              "type": "string"
+            },
+            "source": {
               "type": "string"
             },
             "valueField": {
@@ -2058,7 +2129,8 @@
         },
         "label": {
           "$ref": "#/$defs/localizedText"
-        }
+        },
+        "constraints": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationshipConstraints" }
       }
     },
     "hookList": {

@@ -37,6 +37,7 @@ import type {
   CompiledFieldAuthorization,
 } from "../types/compiled.js";
 import { fieldSqlType, isCollectionField } from "./helpers.js";
+import { buildCrud } from "./crud.js";
 
 /**
  * Derive a kebab-case slug from a PascalCase entity name. Used internally as
@@ -77,8 +78,9 @@ export function buildAuthorization(
   const slug = toEntitySlug(coreEntity.entity);
   const authConfig = coreEntity.authorization;
 
-  // Entity-level CRUD roles — every op must be present and non-empty. No
-  // implicit fallbacks: the YAML is the source of truth.
+  // Only exposed mutations need entity CRUD grants. Value definitions expose
+  // plugin Operations with their own auth, not fictional standalone CRUD.
+  const enabled = buildCrud(coreEntity).operations;
   const ops: Array<"read" | "create" | "update" | "delete"> = [
     "read",
     "create",
@@ -86,6 +88,7 @@ export function buildAuthorization(
     "delete",
   ];
   for (const op of ops) {
+    if (coreEntity.schemaVersion >= 2 && op !== "read" && !enabled[op]) continue;
     const roles = authConfig.roles?.[op];
     if (!roles || roles.length === 0) {
       throw new AuthorizationCompileError(
@@ -99,9 +102,9 @@ export function buildAuthorization(
 
   const roles = {
     read: authConfig.roles.read,
-    create: authConfig.roles.create!,
-    update: authConfig.roles.update!,
-    delete: authConfig.roles.delete!,
+    create: authConfig.roles.create ?? [],
+    update: authConfig.roles.update ?? [],
+    delete: authConfig.roles.delete ?? [],
   };
 
   // Field-level authorizations — explicit only. Every field-level role must

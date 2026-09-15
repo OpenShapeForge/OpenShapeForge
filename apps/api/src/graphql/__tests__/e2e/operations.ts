@@ -2,7 +2,7 @@
 /**
  * Canonical-Operations awareness for the e2e suites.
  *
- * A v2 (`authoringVersion: 2`) entity is driven through its authored
+ * A current (`authoringVersion >= 2`) entity is driven through its authored
  * Operation contracts: an update or delete may demand a record version and an
  * edit lease, a delete may demand a typed confirmation challenge, and a create
  * may be plugin-backed with an input contract of its own. The suites derive
@@ -24,6 +24,7 @@ import {
 } from "../../generated-crud.js";
 import type { EntityOperationContract } from "../../../operations/entity/types.js";
 import { OPERATION_LEASES_PATH } from "../../../rest/edit-lease-routes.js";
+import { REST_MOUNT_PATH } from "../../../rest/rest-paths.js";
 import { apiApp, remoteUrl, type GeneratedTable, type Identity } from "./harness.js";
 
 export type Intent = "list" | "get" | "create" | "update" | "delete";
@@ -37,9 +38,9 @@ export type MutationControls = {
   confirmationAnswer?: string;
 };
 
-/** Authored as canonical Operations (v2); the only generation once conversion completes. */
+/** Authored as canonical Operations (v2 and later). */
 export function isCanonical(table: GeneratedTable): boolean {
-  return table.source?.authoringVersion === 2;
+  return (table.source?.authoringVersion ?? 1) >= 2;
 }
 
 /**
@@ -208,7 +209,30 @@ export async function acquireLease(
   intent: MutationIntent,
   options: { bearer?: string } = {},
 ): Promise<MutationControls> {
-  if (!leaseRequired(table, intent)) return {};
+  if (!leaseRequired(table, intent)) {
+    if (!versionRequired(table, intent)) return {};
+    const basePath = table.source?.rest?.basePath;
+    if (!basePath) {
+      throw new Error(
+        `${operationIdFor(table, intent)} requires a version, but the test fixture has no REST read projection.`,
+      );
+    }
+    const current = await restJson(
+      identity,
+      "GET",
+      `${REST_MOUNT_PATH}/${basePath}/${id}`,
+      undefined,
+      options,
+    );
+    const expectedVersion = current.body?.data?.updatedAt ?? current.body?.updatedAt;
+    if (current.status !== 200 || typeof expectedVersion !== "string") {
+      throw new Error(
+        `Version for ${operationIdFor(table, intent)} on ${id} was unavailable: ` +
+          `${current.status} ${JSON.stringify(current.body?.error ?? current.body)}`,
+      );
+    }
+    return { expectedVersion };
+  }
   const acquired = await requestLease(identity, table, id, intent, options);
   if (acquired.status !== 201) {
     throw new Error(

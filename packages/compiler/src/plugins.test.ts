@@ -34,9 +34,22 @@ describe("compiler plugins", () => {
     ]);
     expect(docs!.artifacts[0]!.contents).toContain("## Relation (`erp.relations`)");
     expect(first.ownedPaths.files).toContain("docs/entities.generated.md");
-    // Existing plugins use neither invariant contract. They emit no registry
-    // and gain no owner metadata, preserving the pre-contract manifest bytes.
-    expect(first.groups.pluginMigrations).toEqual([]);
+    const migrationRegistry = first.groups.pluginMigrations.find(
+      (artifact) =>
+        artifact.path === "apps/api/src/generated/plugin-migrations/registry.json",
+    );
+    expect(migrationRegistry).toBeDefined();
+    const migrations = JSON.parse(migrationRegistry!.contents) as {
+      version: number;
+      migrations: Array<{ plugin: string; sql: string }>;
+    };
+    expect(migrations.version).toBe(1);
+    expect(migrations.migrations.length).toBeGreaterThan(0);
+    expect(new Set(migrations.migrations.map(({ plugin }) => plugin))).toEqual(
+      new Set(["osf-compiler"]),
+    );
+    expect(migrations.migrations.every(({ sql }) => sql.includes("ALTER TABLE")))
+      .toBe(true);
     const operationCatalog = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path.endsWith("operations/catalog.json"),
     )!.contents) as { operations: { key: string }[] };
@@ -110,11 +123,12 @@ describe("compiler plugins", () => {
       first.groups.db.find((artifact) => artifact.path.endsWith("manifest.json"))!
         .contents,
     ) as PlatformSchemaManifest;
+    expect(manifest.tables.some((table) => table.pluginOwner !== undefined))
+      .toBe(false);
     expect(
-      manifest.tables.some(
-        (table) => table.pluginOwner !== undefined || table.constraints !== undefined,
-      ),
-    ).toBe(false);
+      manifest.tables.find((table) => table.name === "erp.blocks")?.constraints
+        ?.length,
+    ).toBeGreaterThan(0);
 
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),

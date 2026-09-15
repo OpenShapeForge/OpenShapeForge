@@ -8,6 +8,7 @@ import type {
 import type {
   LocalizedText,
   FieldValidation,
+  FieldRender,
   SemanticTypeLookupDefinition,
   EntityPermissions,
   FieldOptions,
@@ -73,6 +74,8 @@ export interface ComponentCatalog {
 }
 
 export interface SemanticTypeDefinition {
+  /** Derived from the entity corpus, never authored in the semantic-type catalog. */
+  entityIdentity?: boolean;
   /**
    * Discriminator for entity-ID semantic types. When set to `"entityId"`,
    * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,
@@ -527,6 +530,7 @@ export interface EntityOperationDefinition {
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: OperationPrerequisite[];
   implementation:
+    | { type: "collection"; action: "insert" | "move"; field: string }
     | {
         type: "entity";
         action: EntityOperationAction;
@@ -590,6 +594,11 @@ export interface EntityRestOperationProjectionConfig
   };
 }
 
+export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
+  /** Presentation only; never changes the operation result or its authorization. */
+  resultRenderer?: string;
+}
+
 export interface EntityMcpOperationProjectionConfig
   extends EntityInterfaceOperationProjectionConfig {
   name?: string;
@@ -623,6 +632,7 @@ export interface EntityWebViewDefinition {
     routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
     title: string;
     subtitle?: string;
+    variableSources?: import("./views.js").FormVariableSource[];
     actions?: string[];
     layout: {
       tabs: import("./views.js").ViewGroup[];
@@ -656,7 +666,8 @@ export interface EntityInterfacesDefinition {
     resource?: McpResourceConfig;
   };
   web?: {
-    operations?: Record<string, EntityInterfaceOperationProjection>;
+    fields?: Record<string, { render: FieldRender }>;
+    operations?: Record<string, false | EntityWebOperationProjectionConfig>;
     views: EntityWebViewDefinition;
   };
 }

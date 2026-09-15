@@ -29,6 +29,7 @@ import type {
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import { writableEntityFields } from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
 import {
   compiledFieldSchema,
@@ -231,6 +232,7 @@ function canonicalOutputDefinitions(): JsonObject {
             operation: { $ref: "#/$defs/OperationReference" },
             available: { const: true },
             concurrency: { $ref: "#/$defs/OperationConcurrency" },
+            binding: { $ref: "#/$defs/OperationTargetBinding" },
           },
         },
         {
@@ -244,6 +246,24 @@ function canonicalOutputDefinitions(): JsonObject {
           },
         },
       ],
+    },
+    OperationTargetBinding: {
+      type: "object",
+      additionalProperties: false,
+      required: ["target", "input"],
+      properties: {
+        target: {
+          type: "object",
+          additionalProperties: false,
+          required: ["entityId", "id"],
+          properties: {
+            entityId: { type: "string" },
+            id: { type: "string" },
+            version: { type: "string" },
+          },
+        },
+        input: { type: "object", additionalProperties: true },
+      },
     },
   };
 }
@@ -337,19 +357,6 @@ function entityToolOutputSchema(
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
 
-/**
- * Server-managed columns. A model must never be invited to set these: the id
- * is generated, the tenant comes from the session, and the timestamps are
- * maintained by the database. Mirrors writableColumnMap in the API's CRUD
- * layer and isWritableColumn in the OpenAPI generator.
- */
-const SERVER_MANAGED_FIELDS = new Set([
-  "id",
-  "tenantId",
-  "createdAt",
-  "updatedAt",
-]);
-
 function operationControlSchema(
   operation: CompiledEntityOperation | undefined,
 ): {
@@ -430,18 +437,16 @@ function operationControlSchema(
  * check the operation runs before writing it, so create/update must not offer
  * a way around that check. Same shape as `immutable`: the advertised schema
  * and the server's refusal both come from the one authored fact.
+ *
+ * `deriveOnCreate` is absent from both writes because the entity runtime owns
+ * its initial value and keeps it stable afterwards. The shared helper below
+ * is also used by the canonical Operation schema, preventing transport drift.
  */
 function writableFields(
   fields: CompiledField[],
   operation: "create" | "update",
 ): CompiledField[] {
-  return fields.filter(
-    (field) =>
-      !SERVER_MANAGED_FIELDS.has(field.key) &&
-      field.computed === undefined &&
-      !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
-      !(operation === "update" && field.immutable === true),
-  );
+  return writableEntityFields(fields, operation);
 }
 
 /**
@@ -699,7 +704,7 @@ function buildToolsForEntity(
       canonicalOutput?.kind === "json-schema" ? canonicalOutput.schema : output,
     );
   };
-  const v2Contract = contract.authoringVersion === 2;
+  const v2Contract = contract.authoringVersion >= 2;
   const listInput = contract.entityOperations.list?.input;
   const listPagination = listInput?.kind === "collection-query"
     ? listInput.pagination
@@ -743,7 +748,7 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => {
-    if (contract.authoringVersion === 2) {
+    if (contract.authoringVersion >= 2) {
       const canonical = contract.entityOperations[operation];
       const parts = [
         localizedText(canonical?.description) ?? fallback,
@@ -764,7 +769,7 @@ function buildToolsForEntity(
   const titled = (
     operation: McpToolDefinition["operation"],
     fallback: string,
-  ) => contract.authoringVersion === 2
+  ) => contract.authoringVersion >= 2
     ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
     : fallback;
   const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
@@ -1445,7 +1450,7 @@ export function buildMcpCatalog(
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
-          ...(field.relationship
+          ...(field.relationship?.kind && field.relationship.entity
             ? {
                 relationship: {
                   kind: field.relationship.kind,

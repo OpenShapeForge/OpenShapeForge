@@ -491,6 +491,15 @@ function addCompiledFieldMetadata(
       valueField: field.options.valueField ?? "id",
     };
   }
+  if (field.relationship?.target) {
+    schema["x-osf-reference"] = {
+      entity: field.relationship.target,
+      valueField: "id",
+      ...(field.relationship.constraints
+        ? { constraints: structuredClone(field.relationship.constraints) }
+        : {}),
+    };
+  }
 
   const descriptionParts: string[] = [];
   const fieldDescription = describeField(field);

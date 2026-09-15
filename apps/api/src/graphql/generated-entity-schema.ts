@@ -33,6 +33,7 @@ import {
 // through, so REST and future transports are covered by the same code (#164).
 import { assertOperationAllowed } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
+import { collectionMutationError } from "../operations/entity/collection-policy.js";
 import { projectGraphqlOperation } from "./operation-error.js";
 import {
   entityOperationContract,
@@ -98,12 +99,15 @@ const documentationByGraphqlType = createGraphqlDocumentationIndex(
 type CrudOperation = "list" | "get" | "create" | "update" | "delete";
 
 function operationEnabled(table: GeneratedTable, operation: CrudOperation): boolean {
-  return table.source?.graphql?.operations?.[operation] !== false &&
-    isGeneratedCrudOperationEnabled(table, operation);
+  if (table.source?.graphql?.operations?.[operation] === false ||
+    !isGeneratedCrudOperationEnabled(table, operation)) return false;
+  if (operation === "create" && collectionMutationError(table, "create", getGeneratedCrudTables()) &&
+    entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") return false;
+  return true;
 }
 
 export function usesCanonicalGraphqlOperations(table: GeneratedTable): boolean {
-  return table.source?.authoringVersion === 2;
+  return (table.source?.authoringVersion ?? 1) >= 2;
 }
 
 function projectedOperationIntents(table: GeneratedTable): GeneratedCrudExposureOperation[] {
@@ -325,7 +329,8 @@ export function renderTypeDefinition(
     (column) => !isElicitedOutputColumn(table, column),
   );
   const filterFieldNames = new Set(queryableColumns.map(fieldNameForColumn));
-  const columnFields = table.columns
+  const relationNames = new Set((graphql.relationships ?? []).filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
+  const columnFields = table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column)))
     .map((column) => {
       const field = fieldNameForColumn(column);
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
@@ -566,11 +571,23 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     editLease: EntityOperationEditLeaseConcurrency
   }
 
+  type EntityOperationTarget {
+    entityId: String!
+    id: String!
+    version: String
+  }
+
+  type EntityOperationTargetBinding {
+    target: EntityOperationTarget!
+    input: JSON!
+  }
+
   type EntityOperationOffer {
     operation: EntityOperationReference!
     available: Boolean!
     interaction: EntityOperationInteraction
     concurrency: EntityOperationConcurrency
+    binding: EntityOperationTargetBinding
     error: EntityOperationError
   }
 
@@ -937,8 +954,10 @@ const mutationResolvers = Object.fromEntries(
 const objectResolvers = Object.fromEntries(
   tables.map((table) => {
     const graphql = assertGraphqlMetadata(table);
+    const relationNames = new Set((graphql.relationships ?? [])
+      .filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
     const fields = Object.fromEntries(
-      table.columns.map((column) => [
+      table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column))).map((column) => [
         fieldNameForColumn(column),
         (parent: Record<string, unknown>) => parent[column.name],
       ]),

@@ -79,6 +79,10 @@ const contract = {
         validation: { minLength: 2, maxLength: 80 },
       }),
       field("stableCode", { immutable: true }),
+      field("generatedKey", {
+        required: true,
+        deriveOnCreate: { from: "title", transform: "slug", onConflict: "suffix" },
+      }),
       field("reviewedAt", { writtenBy: ["example.work-item.review"] }),
       field("secretValues", { valueType: "object" }),
     ],
@@ -93,6 +97,7 @@ const contract = {
     columns: [
       { field: "title", column: "title", type: "text", nullable: false, storageClass: "core" },
       { field: "stableCode", column: "stable_code", type: "text", nullable: true, storageClass: "core" },
+      { field: "generatedKey", column: "generated_key", type: "text", nullable: false, storageClass: "core" },
       { field: "reviewedAt", column: "reviewed_at", type: "timestamptz", nullable: true, storageClass: "core" },
       { field: "secretValues", column: "secret_values", type: "jsonb", nullable: true, storageClass: "core" },
       { field: "projectId", column: "project_id", type: "uuid", nullable: false, storageClass: "core" },
@@ -219,6 +224,27 @@ describe("canonical entity Operation JSON Schemas", () => {
     expect(remove.inputSchema.dependentRequired).toEqual({
       confirmationToken: ["confirmationAnswer"],
       confirmationAnswer: ["confirmationToken"],
+    });
+  });
+
+  test("accepts exact scalar and one-hop any relationship filters", () => {
+    const membershipEntity = { id: "example.Membership", name: "Membership" };
+    const membership = {
+      entity: { ...membershipEntity, title: "Membership" },
+      model: { fields: [field("groupId")], relationships: [] },
+      storage: { columns: [{ field: "groupId", column: "group_id", type: "text", nullable: false, storageClass: "core" }] },
+      entityOperations: buildEntityOperations({ entity: membershipEntity, authorization, crud: { operations: { list: true, get: false, create: false, update: false, delete: false } } }),
+    } as unknown as CompiledEntityContract;
+    const constrained = structuredClone(contract);
+    constrained.model.relationships.push({ key: "memberships", kind: "hasMany", target: "Membership", foreignKey: "work_item_id" });
+    const list = entityOperationJsonSchemas(constrained, constrained.entityOperations.list!, [...contracts, membership], {});
+    const filter = (list.inputSchema.properties as Record<string, any>).filter;
+    expect(filter.properties.title.oneOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "string" }),
+      expect.objectContaining({ type: "object", additionalProperties: false, required: ["eq"], properties: { eq: expect.objectContaining({ type: "string" }) } }),
+    ]));
+    expect(filter.properties.memberships).toMatchObject({
+      properties: { any: { properties: { groupId: { properties: { eq: { type: "string" } } } } } },
     });
   });
 

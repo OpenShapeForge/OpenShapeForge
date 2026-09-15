@@ -3,9 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
+  entityRecordOfferBinding,
   executeEntityOperation,
   getEntityOperationContracts,
   getEntityOperationOffers,
+  offerTarget,
   mutationConcurrencyGuard,
   requireCreateOperationConfirmation,
   requireOperationAcknowledgement,
@@ -19,6 +21,22 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
+  test("native update and delete offers bind their canonical identity and current version", () => {
+    for (const intent of ["update", "delete"] as const) {
+      const operation = getEntityOperationContracts().find(op => op.entityName === "Relation" && op.intent === intent)!;
+      const target = { id: "record-367", version: "2026-09-14T20:33:26.33546+00:00" };
+      expect(entityRecordOfferBinding(operation, target)).toEqual({ binding: { target: { entityId: operation.entityId, ...target }, input: { id: target.id } } });
+    }
+  });
+  test("record offers normalize UTC notation without losing storage timestamp precision", () => {
+    const version = "2026-09-14T20:33:26.33546+00:00";
+    const row = { id: "record-367", updated_at: version };
+    expect(offerTarget(row, relation)).toEqual({ id: row.id, version: "2026-09-14T20:33:26.33546Z", row });
+    const authored = { id: row.id, updatedAt: version };
+    expect(offerTarget(authored, relation)).toEqual({ id: row.id, version: "2026-09-14T20:33:26.33546Z", row: authored });
+    expect(offerTarget({ id: row.id, updatedAt: "2026-09-14T20:33:26.335461Z" }, relation).version).toBe("2026-09-14T20:33:26.335461Z");
+    expect(offerTarget({ id: row.id }, relation).version).toBeUndefined();
+  });
   test("uses stable interface-neutral identities for the operations authored by Relation v2", () => {
     expect(entityOperationRef(relation, "list")).toEqual({
       id: "Relation.list",

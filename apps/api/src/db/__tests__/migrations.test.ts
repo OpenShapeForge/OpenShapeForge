@@ -137,12 +137,15 @@ describe("generated schema migration", () => {
         expect(first.rollForward).toBeUndefined();
 
         await withDb(url, async (db) => {
-          // The ledger holds the generated-schema record and nothing else: no
-          // hand-written history is replayed on the way to a built database.
+          // The ledger holds the generated-schema record plus the immutable
+          // migrations contributed by the generated compiler-plugin registry.
+          // No unrelated hand-written history is replayed on a fresh install.
           const ledger = await sql<{ version: string }>`
             select version from platform.schema_migrations order by version
           `.execute(db);
-          expect(ledger.rows.map((row) => row.version)).toEqual([generatedSchemaMigrationVersion]);
+          expect(ledger.rows.map((row) => row.version)).toEqual(
+            [generatedSchemaMigrationVersion, ...first.pluginMigrationsApplied].sort(),
+          );
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
             manifest.checksum,
           );

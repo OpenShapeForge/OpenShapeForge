@@ -1,291 +1,107 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Template
 title: Template
-description: A reusable template definition that groups variants for different delivery channels.
 language: en
-displayTemplate: "{{slug}}"
-filterField: slug
-labels:
-  en: Template
-  nl: Template
-domains:
-  - messaging
+labels: { en: Template, nl: Template }
+domains: [documents]
 authorization:
   roles:
-    read:
-      - General.All.Read
-      - General.All.ReadWrite
-    create:
-      - Organization.All.ReadWrite
-    update:
-      - Organization.All.ReadWrite
-    delete:
-      - Organization.All.ReadWrite
-  rowAccess:
-    enabled: true
-    empty: public
+    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{name}}"
+filterField: name
+indexes:
+  - { name: templates_tenant_key_uidx, fields: [tenantId, key], unique: true }
 fields:
-  - key: slug
+  - key: key
+    label: { en: Key, nl: Sleutel }
     valueType: string
     required: true
-    label:
-      en: Slug
-      nl: Slug
-    description:
-      en: Stable functional key used by workflows and integrations.
-      nl: Stabiele functionele sleutel voor workflows en integraties.
-    validation:
-      minLength: 1
-      maxLength: 100
-      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
-    persisted:
-      column: slug
-      storageClass: core
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
+    validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
+    persisted: { column: key, storageClass: core }
   - key: name
     valueType: string
     required: true
-    label:
-      en: Name
-      nl: Naam
-    description:
-      en: Human-friendly display name of the template.
-      nl: Mensvriendelijke weergavenaam van de template.
-    validation:
-      minLength: 1
-      maxLength: 200
-    persisted:
-      column: name
-      storageClass: core
+    label: { en: Name, nl: Naam }
+    validation: { maxLength: 200 }
+    persisted: { column: name, storageClass: core }
   - key: description
     valueType: string
-    required: false
-    label:
-      en: Description
-      nl: Beschrijving
-    description:
-      en: Optional explanation of when this template should be used.
-      nl: Optionele uitleg wanneer deze template gebruikt moet worden.
-    validation:
-      maxLength: 2000
-    persisted:
-      column: description
-      storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
-  - key: category
-    valueType: string
-    required: false
-    label:
-      en: Category
-      nl: Categorie
-    description:
-      en: Functional category such as intake, reminder, billing, or case update.
-      nl: Functionele categorie zoals intake, herinnering, facturatie of dossierupdate.
-    validation:
-      maxLength: 100
-    options:
-      type: referentiedata
-      referentieGroep: NOTIFICATIECATEGORIE
-    persisted:
-      column: category
-      storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: NOTIFICATIECATEGORIE
-        clearable: true
-  - key: status
-    valueType: string
-    required: true
-    label:
-      en: Status
-      nl: Status
-    description:
-      en: Lifecycle status of the template.
-      nl: Levenscyclusstatus van de template.
-    validation:
-      minLength: 1
-      maxLength: 50
-    options:
-      type: referentiedata
-      referentieGroep: NOTIFICATIETEMPLATESTATUS
-    persisted:
-      column: status
-      storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: NOTIFICATIETEMPLATESTATUS
-        clearable: false
-  - key: defaultLanguage
-    valueType: string
-    required: false
-    label:
-      en: Default language
-      nl: Standaardtaal
-    description:
-      en: Preferred language for this template when no variant-specific locale is selected.
-      nl: Voorkeurstaal voor deze template wanneer geen variantaal is gekozen.
-    validation:
-      maxLength: 10
-    options:
-      type: referentiedata
-      referentieGroep: MESSAGINGLOCALE
-    persisted:
-      column: default_language
-      storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MESSAGINGLOCALE
-        clearable: true
-  - key: parameters
-    valueType: object
-    label:
-      en: Parameters
-      nl: Parameters
-    description:
-      en: Template parameters as Field[] definitions. These are rendered directly in the workflow inspector.
-      nl: Template parameters als Field[] definities. Deze worden direct gerenderd in de workflow inspector.
-    persisted:
-      column: parameters
-      storageClass: core
-    layoutFraction: 1
-    cardinality:
-      min: 0
-      max: "unbounded"
-    semanticType: fieldDefinition
-    authoring:
-      profile: templateParameter
-relationships:
-  - key: variants
-    kind: hasMany
-    target: TemplateVariant
-    foreignKey: template_id
-    label:
-      en: Variants
-      nl: Varianten
-ui:
-  routes:
-    list:
-      en: /templates
-      nl: /templates
-    detail:
-      en: /templates/:id
-      nl: /templates/:id
-    create:
-      en: /templates/create
-      nl: /templates/aanmaken
-    edit:
-      en: /templates/:id/edit
-      nl: /templates/:id/bewerken
-    delete:
-      en: /templates/:id/delete
-      nl: /templates/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Templates
-        nl: Templates
-      columns:
-        - key: slug
-          sortable: true
-        - key: name
-          sortable: true
-        - key: category
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: slug
-        direction: asc
-      rowLink:
-        en: /templates/:id
-        nl: /templates/:id
-    detail:
-      header:
+    label: { en: Description, nl: Omschrijving }
+    persisted: { column: description, storageClass: core }
+  - key: versions
+    label: { en: Versions, nl: Versies }
+    semanticType: TemplateVersion
+    cardinality: collection
+    relationship: { inverse: template, ownership: owned }
+operations:
+  insertVersion:
+    name: { en: Add version, nl: Versie toevoegen }
+    description: Create an owned template version atomically.
+    implementation: { type: collection, action: insert, field: versions }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  list:
+    name: List template
+    description: Read accessible template records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read template
+    description: Read one accessible template record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create template
+    description: Create a template record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update template
+    description: Update a template draft.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        route: /templates
+        title: { en: Templates, nl: Templates }
+        columns: [{ key: name, sortable: true }, { key: description }]
+      record:
+        routes: { read: "/templates/:id", create: /templates/new }
         title: "{{name}}"
-        subtitle: "{{slug}}"
-        badges:
-          - status
-          - category
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Template details
-                nl: Templategegevens
-              fields:
-                - slug
-                - name
-                - description
-                - category
-                - status
-                - defaultLanguage
-            - title:
-                en: Parameters
-                nl: Parameters
-              fields:
-                - parameters
-        - id: variants
-          label:
-            en: Variants
-            nl: Varianten
-          relationship: variants
-    form:
-      variants:
-        create:
-          title:
-            en: Create template
-            nl: Template aanmaken
-          groups:
-            - title:
-                en: Template details
-                nl: Templategegevens
-              fields:
-                - slug
-                - name
-                - description
-                - category
-                - status
-                - defaultLanguage
-            - title:
-                en: Parameters
-                nl: Parameters
-              fields:
-                - parameters
-        edit:
-          extends: create
-          title:
-            en: Edit template
-            nl: Template bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        layout:
+          tabs:
+            - id: details
+              label: { en: Details, nl: Details }
+              groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+            - id: versions
+              label: { en: Versions, nl: Versies }
+              relationship: versions
+        modes:
+          create:
+            title: { en: Create, nl: Toevoegen }
+            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+          update:
+            title: { en: Edit, nl: Bewerken }
+            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]

@@ -22,6 +22,10 @@ import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts
 import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { materializeCollectionOperations } from "./authoring/collection-operations.js";
+
+const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
+const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
 import {
   SEARCHABLE_OPERATION_TOOL_NAMES,
   operationMcpServer,
@@ -63,6 +67,7 @@ function withOperationControls(
     properties.expectedVersion = {
       type: "string",
       format: "date-time",
+      "x-osf-i18n": { title: { en: "Expected version", nl: "Verwachte versie" } },
       description: `Version from the record's ${definition.concurrency.version.field} field.`,
     };
     required.add("expectedVersion");
@@ -379,6 +384,12 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       `${where} recordPermission requires a record target with inputField.`,
     );
   }
+  if (operation.auth.mode === "session" && operation.auth.roleGroups !== undefined) {
+    if (!Array.isArray(operation.auth.roleGroups) || operation.auth.roleGroups.length === 0 ||
+        operation.auth.roleGroups.some(group => !Array.isArray(group) || group.length === 0 || group.some(role => typeof role !== "string" || !role.trim()))) {
+      throw new Error(`${where} auth.roleGroups must contain one or more non-empty role groups.`);
+    }
+  }
   if (operation.auth.mode === "custom") {
     nonEmpty(operation.auth.scheme, `${where} custom auth scheme`);
     nonEmpty(operation.auth.description, `${where} custom auth description`);
@@ -619,6 +630,7 @@ function collectOperationContracts(
       ? plugin.operations(context)
       : plugin.operations ?? [];
     for (const operation of declared) {
+      if (Object.hasOwn(operation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
       validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
@@ -657,12 +669,18 @@ function collectOperationContracts(
       if (operation.transports.mcp.enabled) mcp.add(operation.transports.mcp.name);
       if (graphqlKey) graphql.add(graphqlKey);
       if (typescriptKey) typescript.add(typescriptKey);
-      operations.push({
+      const compiled: CompiledPluginOperation = {
         ...operation,
         plugin: plugin.name,
         id: operation.key,
         intent: "invoke",
-      });
+      };
+      const native = authored ? nativeBindings.get(operation) : undefined;
+      if (native) {
+        compiled.implementation = { ...native };
+        verifiedNativeOperations.set(compiled, JSON.stringify(native));
+      }
+      operations.push(compiled);
     }
   }
   return operations.sort((left, right) => left.key.localeCompare(right.key));
@@ -702,12 +720,16 @@ function lowerCamel(value: string): string {
 export function collectAuthoredEntityPluginOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
   context: PluginBaseContext,
+  referentiedata: CoreReferentiedataSnapshot = {},
 ): CompiledPluginOperation[] {
+  materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
   for (const { contract } of entities) {
     for (const authored of contract.pluginOperations ?? []) {
       const definition = authored.definition;
-      if (definition.implementation.type !== "plugin") continue;
+      if (definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") continue;
+      const implementation = definition.implementation;
+      const pluginName = implementation.type === "collection" ? "core" : implementation.plugin;
       const restProjection = authored.interfaces.rest;
       if (restProjection === undefined || restProjection === false) {
         throw new Error(
@@ -729,7 +751,7 @@ export function collectAuthoredEntityPluginOperations(
         key: authored.id,
         title: authoredText(definition.name),
         description: authoredText(definition.description),
-        handler: definition.implementation.handler,
+        handler: implementation.type === "collection" ? "collectionMutation" : implementation.handler,
         target: {
           entityId: authored.entityId,
           entityName: authored.entityName,
@@ -759,7 +781,7 @@ export function collectAuthoredEntityPluginOperations(
           rest: {
             method: restMethod,
             path: restProjection.path ??
-              `/api/${definition.implementation.plugin}/${kebab(authored.entityName)}` +
+              `/api/${pluginName}/${kebab(authored.entityName)}` +
                 `${targetSegment}/${kebab(authored.key)}`,
             response: restProjection.response ?? { kind: "json" },
           },
@@ -794,16 +816,146 @@ export function collectAuthoredEntityPluginOperations(
           },
         },
       };
-      const current = byPlugin.get(definition.implementation.plugin) ?? [];
+      if (implementation.type === "collection") nativeBindings.set(operation, {
+        type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
+      });
+      const current = byPlugin.get(pluginName) ?? [];
       current.push(operation);
-      byPlugin.set(definition.implementation.plugin, current);
+      byPlugin.set(pluginName, current);
     }
   }
   const synthetic = [...byPlugin.entries()].map(([name, operations]) => ({
     name,
     operations,
   } satisfies CompilerPlugin));
-  return collectOperationContracts(synthetic, context, true);
+  const needsEntityTypeList = entities.some(({ contract }) =>
+    contract.model?.fields?.some(
+      (field) =>
+        field.options?.type === "dynamic" &&
+        field.options.source === "entityTypes.list",
+    ) === true
+  );
+  return [
+    ...collectOperationContracts(synthetic, context, true),
+    ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
+    ...(needsEntityTypeList
+      ? collectEntityTypeListOperation(context, entities)
+      : []),
+  ];
+}
+
+export function constrainedReferenceCreateOperationId(entityName: string, field: string): string {
+  return `core.${entityName}.${field}.create-constrained-reference`;
+}
+
+/**
+ * A constrained reference owns its exact values during creation and may need
+ * one related child write. Materialize that bounded case as a normal
+ * discoverable Operation instead of teaching YAML a procedural workflow language.
+ */
+function collectConstrainedReferenceCreateOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  referentiedata: CoreReferentiedataSnapshot,
+): CompiledPluginOperation[] {
+  const contracts = entities.map(({ contract }) => contract);
+  const output: CompiledPluginOperation[] = [];
+  for (const owner of contracts) for (const field of owner.model?.fields ?? []) {
+    const constraints = field.relationship?.constraints;
+    if (!constraints || !field.relationship?.target) continue;
+    const nested = Object.entries(constraints).filter((entry): entry is [string, { any: Record<string, { eq: string | number | boolean }> }] => "any" in entry[1]);
+    const target = contracts.find(contract => contract.entity.name === field.relationship!.target);
+    const collection = nested[0] ? target?.model.relationships.find(relation => relation.key === nested[0]![0]) : undefined;
+    const child = collection && contracts.find(contract => contract.entity.name === collection.target);
+    const parentColumn = child?.storage.columns.find(column => column.column === collection?.foreignKey);
+    const create = target?.entityOperations.create;
+    const childCreate = child?.entityOperations.create;
+    if (!target || !create || create.implementation.type !== "entity" ||
+        (nested.length > 0 && (!collection || collection.kind !== "hasMany" || !child || !parentColumn || !childCreate || childCreate.implementation.type !== "entity"))) {
+      throw new Error(`${owner.entity.name}.${field.key}: constrained reference create needs native target and collection-child create Operations.`);
+    }
+    const nativeSchemas = entityOperationJsonSchemas(target, create, contracts, referentiedata);
+    const nativeInput = nativeSchemas.inputSchema as JsonSchema;
+    const id = constrainedReferenceCreateOperationId(owner.entity.name, field.key);
+    const targetValues = Object.fromEntries(Object.entries(constraints).flatMap(([key, value]) => "eq" in value ? [[key, value.eq]] : []));
+    const nativeValues = (nativeInput.properties as Record<string, unknown> | undefined)?.values as JsonSchema | undefined;
+    const properties = Object.fromEntries(Object.entries(nativeValues?.properties ?? {}).filter(([key]) => !Object.hasOwn(targetValues, key)));
+    const required = Array.isArray(nativeValues?.required)
+      ? nativeValues.required.filter((key): key is string => typeof key === "string" && !Object.hasOwn(targetValues, key))
+      : [];
+    const { required: _nativeRequired, ...valuesWithoutRequired } = nativeValues ?? {};
+    const inputSchema: JsonSchema = {
+      ...nativeInput,
+      properties: {
+        ...(nativeInput.properties as Record<string, unknown> | undefined),
+        values: { ...valuesWithoutRequired, properties, ...(required.length > 0 ? { required } : {}) },
+      },
+    };
+    const childValues = nested[0]
+      ? Object.fromEntries(Object.entries(nested[0][1].any).map(([key, value]) => [key, value.eq]))
+      : undefined;
+    const roleGroups = [create.authorization.roles, ...(childCreate ? [childCreate.authorization.roles] : [])]
+      .map(group => [...new Set(group)].sort());
+    const raw: PluginOperationContract = {
+      key: id,
+      title: `Create ${target.entity.title} for ${owner.entity.title}`,
+      description: child
+        ? `Creates one ${target.entity.title} and its required ${child.entity.title} atomically.`
+        : `Creates one ${target.entity.title} with the required relationship values.`,
+      handler: "constrainedReferenceCreate",
+      target: { entityId: target.entity.id, entityName: target.entity.name, scope: "collection" },
+      inputSchema,
+      outputSchema: nativeSchemas.outputSchema,
+      errors: [],
+      auth: { mode: "session", roleGroups }, tenancy: { mode: "required" },
+      idempotency: { mode: "none" }, effects: { data: "write", external: "none" },
+      confirmation: { mode: "none" },
+      transports: {
+        rest: { method: "POST", path: `/api/core/reference/${kebab(owner.entity.name)}/${kebab(field.key)}`, response: { kind: "json" } },
+        mcp: { enabled: true, name: `${snake(owner.entity.name)}_${snake(field.key)}_create_reference` },
+        graphql: { enabled: true, kind: "mutation", field: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+        typescript: { enabled: true, functionName: `${lowerCamel(owner.entity.name)}${field.key[0]!.toUpperCase()}${field.key.slice(1)}CreateReference` },
+      },
+    };
+    const compiled: CompiledPluginOperation = { ...raw, plugin: "core", id, intent: "invoke" };
+    const binding: NonNullable<CompiledPluginOperation["implementation"]> = {
+      type: "constrained-reference-create", targetEntityName: target.entity.name,
+      ...(child && parentColumn && childValues ? {
+        collectionEntityName: child.entity.name, parentField: parentColumn.field, childValues,
+      } : {}),
+      targetValues,
+    };
+    compiled.implementation = binding;
+    verifiedNativeOperations.set(compiled, JSON.stringify(binding));
+    output.push(compiled);
+  }
+  return output;
+}
+
+/** Built-in model discovery follows canonical Operation authentication and transport. */
+function collectEntityTypeListOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
+  const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
+  const readRoles = [...new Set(entities.flatMap(({ contract }) => contract.authorization.roles.read))].sort();
+  const operation: PluginOperationContract = {
+    key: "entityTypes.list", title: "List entity types", description: "Search entity types readable by the current user.",
+    handler: "listEntityTypes", auth: { mode: "session", roles: readRoles }, tenancy: { mode: "required" },
+    idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      locale: { ...title("Language", "Taal"), type: "string", enum: ["en", "nl"] }, search: { ...title("Search", "Zoeken"), type: "string", maxLength: 500 }, first: { ...title("Page size", "Paginagrootte"), type: "integer", minimum: 1, maximum: 100 }, after: { ...title("Cursor", "Cursor"), type: "string" },
+    } },
+    outputSchema: { type: "object", required: ["items", "pageInfo"], properties: {
+      items: { ...title("Entity types", "Entiteitstypen"), type: "array", items: { type: "object", required: ["value", "label"], properties: { value: { ...title("Value", "Waarde"), type: "string" }, label: { ...title("Label", "Label"), type: "string" } } } },
+      pageInfo: { ...title("Pagination", "Paginering"), type: "object", required: ["hasNextPage", "endCursor"], properties: { hasNextPage: { ...title("More results", "Meer resultaten"), type: "boolean" }, endCursor: { ...title("Next cursor", "Volgende cursor"), type: ["string", "null"] } } },
+    } },
+    errors: [],
+    transports: {
+      rest: { method: "GET", path: "/api/core/entity-types", response: { kind: "json" } },
+      mcp: { enabled: true, name: "entity_types_list" },
+      graphql: { enabled: true, kind: "query", field: "entityTypesList" },
+      typescript: { enabled: true, functionName: "entityTypesList" },
+    },
+  };
+  nativeBindings.set(operation, { type: "entity-type-list", labels: Object.fromEntries(entities.map(({ contract }) => [contract.entity.name, { en: contract.entity.labels?.en ?? contract.entity.title, nl: contract.entity.labels?.nl ?? contract.entity.title }])) });
+  return collectOperationContracts([{ name: "core", operations: [operation] }], context, true);
 }
 
 /** Lower module/global YAML Operations through the same static registry. */
@@ -990,8 +1142,14 @@ export function assertOperationRuntimeModules(
   runtimeModuleNames: Iterable<string>,
 ): void {
   const available = new Set(runtimeModuleNames);
+  for (const operation of operations) {
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate"].includes(operation.handler) ||
+      verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
+      throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
+    }
+  }
   const missing = [...new Set(
-    operations.filter((operation) => !available.has(operation.plugin)).map((operation) => operation.plugin),
+    operations.filter((operation) => !operation.implementation && !available.has(operation.plugin)).map((operation) => operation.plugin),
   )].sort();
   if (missing.length > 0) {
     throw new Error(

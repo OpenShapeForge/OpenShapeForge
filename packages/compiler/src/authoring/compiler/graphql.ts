@@ -36,7 +36,7 @@ export function buildGraphQL(
   semanticTypes?: Record<string, SemanticTypeDefinition>
 ): GraphQLSection {
   const typeName = coreEntity.entity;
-  const fields: GraphQLField[] = coreEntity.fields.map((f) => {
+  const fields: GraphQLField[] = coreEntity.fields.filter((f) => !f.relationship?.target).map((f) => {
     const baseType = f.graphqlType ?? fieldGraphqlBaseType(f);
     return {
       name: f.key,
@@ -48,6 +48,7 @@ export function buildGraphQL(
   const fieldNames = new Set(fields.map((field) => field.name));
 
   for (const relationship of relationships) {
+    if (relationship.fieldKey) continue;
     if (relationship.kind !== "belongsTo") continue;
     const syntheticIdFieldName = `${relationship.key}Id`;
     if (fieldNames.has(syntheticIdFieldName)) continue;

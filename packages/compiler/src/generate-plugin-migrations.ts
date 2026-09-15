@@ -360,7 +360,7 @@ export function collectPluginMigrationRegistry(
         );
       }
       constraintNames.add(constraint.name);
-      const plugin = table.pluginOwner;
+      const plugin = constraint.compilerOwned ? "osf-compiler" : table.pluginOwner;
       if (!plugin) {
         throw new Error(
           `Table ${table.schema}.${table.name} declares versioned constraint ${constraint.name} but has no plugin owner. Table constraints are currently a compiler-plugin contract.`,

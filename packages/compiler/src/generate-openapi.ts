@@ -175,6 +175,7 @@ function isWritableColumn(
     column.name !== "created_at" &&
     column.name !== "updated_at" &&
     (column.writtenBy === undefined || column.writtenBy.length === 0) &&
+    column.deriveOnCreate === undefined &&
     !(operation === "update" && column.immutable === true)
   );
 }
@@ -578,12 +579,12 @@ export function renderOpenApiSpec(
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
   const hasCanonicalEntity = [...contractsByEntityName.values()].some(
-    (contract) => contract.authoringVersion === 2,
+    (contract) => contract.authoringVersion >= 2,
   );
   const restEditLeaseOperationIds = [...new Set(
     restTables.flatMap((table) => {
       const contract = contractsByEntityName.get(entitySchemaName(table));
-      if (contract?.authoringVersion !== 2) return [];
+      if (!contract || contract.authoringVersion < 2) return [];
       return (["list", "get", "create", "update", "delete"] as const).flatMap(
         (intent) => {
           const operation = contract.entityOperations[intent];
@@ -665,6 +666,7 @@ export function renderOpenApiSpec(
                   operation: { $ref: "#/components/schemas/OperationReference" },
                   available: { const: true },
                   concurrency: { $ref: "#/components/schemas/OperationConcurrency" },
+                  binding: { $ref: "#/components/schemas/OperationTargetBinding" },
                 },
               },
               {
@@ -678,6 +680,24 @@ export function renderOpenApiSpec(
                 },
               },
             ],
+          },
+          OperationTargetBinding: {
+            type: "object",
+            additionalProperties: false,
+            required: ["target", "input"],
+            properties: {
+              target: {
+                type: "object",
+                additionalProperties: false,
+                required: ["entityId", "id"],
+                properties: {
+                  entityId: { type: "string" },
+                  id: { type: "string" },
+                  version: { type: "string" },
+                },
+              },
+              input: { type: "object", additionalProperties: true },
+            },
           },
           OperationConcurrency: {
             type: "object",
@@ -1001,7 +1021,7 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
-    const canonical = contract?.authoringVersion === 2;
+    const canonical = !!contract && contract.authoringVersion >= 2;
     const canonicalOperationId = (
       intent: "list" | "get" | "create" | "update" | "delete",
     ): string => {

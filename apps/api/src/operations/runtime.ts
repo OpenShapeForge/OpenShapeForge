@@ -68,14 +68,22 @@ import {
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
-import { sessionOperationRolesAllow } from "./session-authorization.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
+import { nativeEntityTypeListHandler } from "./entity-type-list.js";
+import { nativeCollectionHandler } from "./collection-runtime.js";
+import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 
 export type OperationContract = {
   key: string;
+  /** Built-in executor selected only by the compiler, never request input. */
+  implementation?:
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
+    | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -103,6 +111,7 @@ export type OperationContract = {
     | {
         mode: "session";
         roles?: string[];
+        roleGroups?: string[][];
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
@@ -379,6 +388,9 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     id: entry.operation.key,
     key: entry.operation.key,
     intent: operationIntent(entry.operation),
+    ...(entry.operation.implementation?.type === "collection"
+      ? { implementation: entry.operation.implementation }
+      : {}),
     name: entry.operation.title,
     description: entry.operation.description,
     ...(entry.operation.target ? { target: entry.operation.target } : {}),
@@ -585,6 +597,18 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
       continue;
     }
+    if (operation.implementation?.type === "entity-type-list") {
+      bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "collection") {
+      bound.set(operation.key, { operation, handler: nativeCollectionHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "constrained-reference-create") {
+      bound.set(operation.key, { operation, handler: nativeConstrainedReferenceCreateHandler(operation) });
+      continue;
+    }
     if (pluginOperations === "absent") continue;
     const module = modulesByName.get(operation.plugin);
     if (!module) {
@@ -602,11 +626,11 @@ export function bindOperationHandlers(
     bound.set(operation.key, { operation, handler, ...(availability ? { availability } : {}) });
   }
   for (const module of modules) {
-    const declared = new Set(
-      knownOperations
-        .filter((operation) => operation.plugin === module.name)
-        .map((operation) => operation.handler),
-    );
+    const moduleOperations = knownOperations.filter((operation) => !operation.implementation && operation.plugin === module.name);
+    // Explicit test/embedded catalogs validate only modules represented by that
+    // catalog; production's generated catalog still validates every module.
+    if (!usesGeneratedCatalog && moduleOperations.length === 0) continue;
+    const declared = new Set(moduleOperations.map((operation) => operation.handler));
     const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
     if (extras.length > 0) {
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
@@ -649,6 +673,9 @@ export function requireOperationAuthorization(
   }
   if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
+  }
+  if (!sessionOperationRoleGroupsAllow(operation.auth.roleGroups, session.roles)) {
+    throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role group.");
   }
   const requiredScopes = operation.auth.scopes ?? [];
   if (session.credential === "api-key" && requiredScopes.length > 0) {
@@ -780,7 +807,9 @@ function customHandlerInput(
   input: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const stripped = { ...input };
-  if (operation.concurrency?.version) delete stripped.expectedVersion;
+  // Native collection execution validates the caller's original version in the
+  // already guarded transaction. Plugin handlers receive no platform controls.
+  if (operation.concurrency?.version && operation.implementation?.type !== "collection") delete stripped.expectedVersion;
   if (operation.concurrency?.editLease) delete stripped.leaseToken;
   if (operation.confirmation?.mode === "acknowledgement") delete stripped.confirmed;
   if (operation.confirmation?.mode === "challenge") {

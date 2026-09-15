@@ -32,6 +32,7 @@
  * through, so this transport inherits them by construction.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import {
   OperationFailure,
   operationErrorOf,
@@ -394,7 +395,7 @@ import {
   isMcpProjection,
   requireOperationAuthorization,
 } from "../operations/runtime.js";
-import { sessionOperationRolesAllow } from "../operations/session-authorization.js";
+import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
 export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
@@ -626,7 +627,7 @@ type Catalog = {
     auth:
       | { mode: "public" }
       | { mode: "control"; roles: string[] }
-      | { mode: "session"; roles?: string[]; scopes?: string[] };
+      | { mode: "session"; roles?: string[]; roleGroups?: string[][]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
       destructiveHint: boolean;
@@ -933,6 +934,12 @@ function toolsForSession(
     .filter((tool) =>
       sessionMayInvoke(tables.get(tool.table), tool.operation, session),
     )
+    .filter((tool) => {
+      if (tool.operation !== "create") return true;
+      const table = tables.get(tool.table)!;
+      const operation = getEntityOperationContracts().find((entry) => entry.entityName === tool.entity && entry.intent === "create");
+      return operation?.implementation?.type === "plugin" || !collectionMutationError(table, "create", [...tables.values()]);
+    })
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 
@@ -1764,7 +1771,9 @@ function describeTool(
     title: tool.title,
     description,
     inputSchema: withholdClassified(
-      tool.inputSchema as Record<string, unknown>,
+      table && (tool.operation === "create" || tool.operation === "update")
+        ? withoutCollectionInputs(tool.inputSchema as Record<string, unknown>, collectionManagedFields(table, getGeneratedCrudTables()))
+        : tool.inputSchema as Record<string, unknown>,
       classified,
     ),
     ...(tool.outputSchema
@@ -2094,6 +2103,7 @@ function describeEntityResource(
     ]),
   );
   const fields = visibleFields(entity, tables.get(entity.table), session);
+  const storageRelationships = tables.get(entity.table)?.source?.graphql?.relationships ?? [];
   const relationships = entity.relationships.filter((relationship) =>
     resourceByEntity.has(relationship.target),
   );
@@ -2126,13 +2136,16 @@ function describeEntityResource(
     // generated-entity-schema.ts.
     fields: fields.map((field) => {
       const { relationship, ...rest } = field;
+      const canonical = storageRelationships.find((entry) => entry.fieldKey === field.key);
+      const target = canonical?.target ?? entity.relationships.find((entry) => entry.key === field.key)?.target ?? relationship?.entity;
       return {
         ...rest,
-        ...(relationship && resourceByEntity.has(relationship.entity)
+        ...(relationship && target && resourceByEntity.has(target)
           ? {
               relationship: {
                 ...relationship,
-                resourceUri: resourceByEntity.get(relationship.entity),
+                entity: target,
+                resourceUri: resourceByEntity.get(target),
               },
             }
           : {}),
@@ -2140,6 +2153,7 @@ function describeEntityResource(
     }),
     relationships: relationships.map((relationship) => ({
       ...relationship,
+      ...storageRelationships.find((entry) => entry.fieldKey && entry.name === relationship.key),
       resourceUri: resourceByEntity.get(relationship.target),
     })),
     operations: tools.map((tool) => ({
@@ -3209,6 +3223,7 @@ function operationMayInvoke(
   const scopes = new Set(session.oauthScopes ?? []);
   return (
     sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
+    sessionOperationRoleGroupsAllow(tool.auth.roleGroups, session.roles) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );
 }
@@ -4161,7 +4176,7 @@ function buildServer(
         });
         if (result.intent !== "list") throw new Error("Unexpected entity result.");
         if ("error" in result) throw new OperationFailure(result.error);
-        payload = table.source?.authoringVersion === 2
+        payload = (table.source?.authoringVersion ?? 1) >= 2
           ? {
               data: {
                 ...result.data,
@@ -4202,7 +4217,7 @@ function buildServer(
               table,
               result.data,
             );
-            payload = table.source?.authoringVersion === 2
+            payload = (table.source?.authoringVersion ?? 1) >= 2
               ? { data, operations: result.operations }
               : data;
           }
@@ -7360,6 +7375,22 @@ function buildServer(
               : { allowed: true, fieldAllowlist };
           }
           if (current) return { allowed: true };
+          // Searchable projection keeps tools/list bounded, while an authored
+          // direct Operation name remains callable for integrated clients.
+          // Authorization must apply the same live handler and role checks as
+          // callTool, otherwise the platform denies a tool it will execute.
+          if (operationToolProjection.mode === "searchable") {
+            const direct = catalog.operationTools.find(
+              (tool) => tool.name === subject.name,
+            );
+            if (
+              direct &&
+              operations.has(direct.key) &&
+              operationMayInvoke(direct, session)
+            ) {
+              return { allowed: true };
+            }
+          }
           const internal = await derivedDefinition(subject.name, false);
           if (!internal) return { allowed: false, code: "NOT_FOUND" };
           const fieldAllowlist = derivedToolOutputFieldAllowlist(

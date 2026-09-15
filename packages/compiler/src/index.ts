@@ -66,12 +66,16 @@ import {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+import { validateRelationshipConstraints } from "./relationship-constraints.js";
 
 export type {
   FieldDefinition,
   FieldDefinitionAuthoringMetadata,
   FieldDefinitionCardinality,
+  FieldDefinitionDeriveOnCreate,
+  FieldDefinitionEqualityConstraint,
   FieldDefinitionRelationship,
+  FieldDefinitionRelationshipConstraints,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSemanticType,
   FieldDefinitionSemanticTypeKind,
@@ -314,6 +318,7 @@ export async function collectAllArtifacts(
   const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
+  validateRelationshipConstraints(entities);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -342,7 +347,7 @@ export async function collectAllArtifacts(
   const operations = [
     ...collectBlueprintOperations(entities),
     ...collectPluginOperations(plugins, operationContext),
-    ...collectAuthoredEntityPluginOperations(entities, operationContext),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {
@@ -501,7 +506,7 @@ export async function collectAllArtifacts(
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
     ui: [
-      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb) : []),
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb, referentiedata) : []),
       ...(productWebPresent
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
@@ -509,6 +514,7 @@ export async function collectAllArtifacts(
               entities,
               { locale: "nl", routeLocale: "en" },
               standaloneWeb,
+              referentiedata,
             )),
           }]
         : []),

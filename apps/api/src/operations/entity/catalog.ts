@@ -14,6 +14,8 @@ import {
 } from "../../graphql/generated-authz.js";
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
+import { entityValueCarriers, entityValuePhysicalColumns, projectEntityValueRow } from "./entity-value-io.js";
+import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import type {
   GeneratedCrudColumn,
   GeneratedCrudExposureOperation,
@@ -136,6 +138,7 @@ export function projectRows(
   table: GeneratedCrudTable,
   session: DbSessionInput,
   rows: GeneratedEntityRow[],
+  entityValues = generatedEntityValues,
 ): GeneratedEntityRow[] {
   const hasClassification = table.columns.some(
     (column) => column.classification,
@@ -144,10 +147,10 @@ export function projectRows(
     table.source?.secureInputOnCreate !== undefined ||
     table.source?.mcp?.elicitOnCreate !== undefined;
   const hasBigint = table.columns.some((column) => column.type === "bigint");
-  if (!hasClassification && !hasElicitedOutput && !hasBigint) {
+  if (!hasClassification && !hasElicitedOutput && !hasBigint && !entityValueCarriers(table, entityValues).length) {
     return rows;
   }
-  return rows.map((row) => projectGeneratedEntityRow(table, session, row));
+  return rows.map((row) => projectGeneratedEntityRow(table, session, row, entityValues));
 }
 
 export function elicitedOutputColumn(
@@ -179,8 +182,9 @@ export function projectGeneratedEntityRow(
   table: GeneratedCrudTable,
   session: DbSessionInput,
   row: GeneratedEntityRow,
+  entityValues = generatedEntityValues,
 ): GeneratedEntityRow {
-  const normalized = normalizeEntityStorageRow(table, row);
+  const normalized = normalizeEntityStorageRow(table, projectEntityValueRow(table, row, entityValues));
   const classified = redactRow(
     normalized,
     table.columns,
@@ -330,7 +334,9 @@ export async function appendGeneratedCrudEvent(
     eventType: "created" | "updated" | "deleted";
     row: GeneratedEntityRow;
   },
+  entityValues = generatedEntityValues,
 ) {
+  const hidden = entityValuePhysicalColumns(table, entityValues);
   await appendScopedEntityEventInTransaction(trx, {
     aggregateType: generatedCrudAggregateType(table),
     aggregateId: input.aggregateId,
@@ -340,7 +346,7 @@ export async function appendGeneratedCrudEvent(
       schema: table.schema,
       operation: input.eventType,
       ...(table.realtime ? {
-        visibility: Object.fromEntries(table.realtime.visibilityColumns.map(column => [column, input.row[column] ?? null])) as import("../../generated/db/types.js").Json,
+        visibility: Object.fromEntries(table.realtime.visibilityColumns.filter((column) => !hidden.has(column)).map(column => [column, input.row[column] ?? null])) as import("../../generated/db/types.js").Json,
       } : {}),
     },
   });

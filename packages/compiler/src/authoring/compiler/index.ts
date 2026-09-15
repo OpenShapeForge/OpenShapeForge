@@ -20,6 +20,7 @@ import type {
   CompiledViewGroup,
 } from "../types.js";
 import { resolveStorageColumns } from "./storage.js";
+import { normalizeEntityFields } from "../entity-fields.js";
 import { resolveModelFields } from "./model.js";
 import { resolveRelationships } from "./relationships.js";
 import { buildGraphQL } from "./graphql.js";
@@ -33,6 +34,7 @@ import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
 import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
+import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import {
   isCoreEntityV2,
   v2PluginOperations,
@@ -92,17 +94,24 @@ export function validateTimelineIncludes(
 }
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
+  artifacts = { ...artifacts, coreEntity: normalizeEntityFields(artifacts.coreEntity, artifacts.semanticTypes) };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
+  const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
 
-  const columns = resolveStorageColumns(coreEntity.fields, profiles, coreEntity.relationships ?? []);
-  const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const relationships = resolveRelationships(artifacts);
+  const columns = resolveStorageColumns(coreEntity.fields, profiles, relationships);
+  const modelFields = resolveModelFields(valueDefinition
+    ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.semanticTypes).fields
+    : coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
   const viewEntity = isCoreEntityV2(coreEntity)
-    ? { ...coreEntity, ui: v2WebUi(coreEntity) }
+    ? { ...coreEntity, ui: v2WebUi(coreEntity), fields: coreEntity.fields.map((field) => ({
+        ...field,
+        ...(coreEntity.interfaces?.web?.fields?.[field.key] ?? {}),
+      })) }
     : coreEntity;
   const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
@@ -132,14 +141,23 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     views,
   });
 
+  resolveDerivedOnCreateBindings({
+    entityName: coreEntity.entity,
+    fields: modelFields,
+    columns,
+    ...(coreEntity.indexes ? { indexes: coreEntity.indexes } : {}),
+    tenantScoped: coreEntity.authorization !== undefined,
+  });
+
   return {
-    authoringVersion: coreEntity.schemaVersion === 2 ? 2 : 1,
+    authoringVersion: coreEntity.schemaVersion,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
       ...entity,
       module: coreEntity.module,
       title: coreEntity.title,
+      ...(valueDefinition ? { valueDefinition: true } : {}),
       description: coreEntity.description,
       labels: coreEntity.labels,
       domains: [...(coreEntity.domains ?? [])],
@@ -164,6 +182,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
             ...(coreEntity.interfaces?.web
               ? {
                   web: {
+                    ...(coreEntity.interfaces.web.fields
+                      ? { fields: coreEntity.interfaces.web.fields }
+                      : {}),
                     operations: v2WebOperationActions(coreEntity)!,
                     ...(coreEntity.interfaces.web.views.record?.layout.context
                       ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }

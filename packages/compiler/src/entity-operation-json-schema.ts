@@ -89,7 +89,11 @@ export function entityRecordOutputSchema(
     };
     add(
       column.field,
-      column.nullable ? nullableSchema(schema) : schema,
+      {
+        ...(column.nullable ? nullableSchema(schema) : schema),
+        ...(field?.label && typeof field.label === "object"
+          ? { "x-osf-i18n": { title: field.label } } : {}),
+      },
       !column.nullable,
     );
   }
@@ -99,7 +103,13 @@ export function entityRecordOutputSchema(
     ["createdAt", { type: "string", format: "date-time" }],
     ["updatedAt", { type: "string", format: "date-time" }],
   ] as const) {
-    if (!(key in properties)) add(key, schema, true);
+    if (!(key in properties)) {
+      const labels = {
+        id: { en: "ID", nl: "ID" }, tenantId: { en: "Organization ID", nl: "Organisatie-ID" },
+        createdAt: { en: "Created at", nl: "Aangemaakt op" }, updatedAt: { en: "Updated at", nl: "Bijgewerkt op" },
+      };
+      add(key, { ...schema, "x-osf-i18n": { title: labels[key] } }, true);
+    }
   }
   return { type: "object", properties, required, additionalProperties: true };
 }
@@ -112,8 +122,10 @@ export function writableEntityFields(
   return fields.filter(
     (field) =>
       !SERVER_MANAGED_FIELDS.has(field.key) &&
+      !(field.relationship && field.cardinality === "collection") &&
       field.computed === undefined &&
       !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
+      field.deriveOnCreate === undefined &&
       !(operation === "update" && field.immutable === true),
   );
 }
@@ -252,6 +264,45 @@ function openOperationOffers(): JsonObject {
   return { type: "array", items: { type: "object", additionalProperties: true } };
 }
 
+function exactFilter(schema: JsonObject): JsonObject {
+  return {
+    type: "object",
+    properties: { eq: schema },
+    required: ["eq"],
+    additionalProperties: false,
+  };
+}
+
+function relationshipAnyFilters(
+  contract: CompiledEntityContract,
+  contracts: readonly CompiledEntityContract[],
+  referentiedata: CoreReferentiedataSnapshot,
+): JsonObject {
+  const byName = new Map(contracts.map((candidate) => [candidate.entity.name, candidate]));
+  const result: JsonObject = {};
+  for (const relationship of contract.model.relationships) {
+    if (relationship.kind !== "hasMany" || !relationship.foreignKey) continue;
+    const target = byName.get(relationship.target);
+    if (!target?.entityOperations.list) continue;
+    const properties: JsonObject = {};
+    for (const field of target.model.fields) {
+      if (field.cardinality === "collection" || field.valueType === "object") continue;
+      const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
+      delete schema.default;
+      properties[field.key] = exactFilter(schema);
+    }
+    result[relationship.key] = {
+      type: "object",
+      properties: {
+        any: { type: "object", properties, minProperties: 1, additionalProperties: false },
+      },
+      required: ["any"],
+      additionalProperties: false,
+    };
+  }
+  return result;
+}
+
 /**
  * Materialize the canonical `platform.operations.execute` input and data
  * output for one entity Operation. Interface adapters may flatten this shape,
@@ -336,11 +387,12 @@ export function entityOperationJsonSchemas(
         ) continue;
         const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
         delete schema.default;
-        filterProperties[field.key] = schema;
+        filterProperties[field.key] = { oneOf: [schema, exactFilter(schema)] };
       }
       for (const relationship of relationships) {
-        filterProperties[relationship.key] = relationship.schema;
+        filterProperties[relationship.key] = { oneOf: [relationship.schema, exactFilter(relationship.schema)] };
       }
+      Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
       const sortable = contract.model.fields
         .filter((field) =>
           field.key !== secureInputTarget &&

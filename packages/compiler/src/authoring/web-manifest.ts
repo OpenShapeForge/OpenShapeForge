@@ -11,6 +11,10 @@ import { collectBlueprintOperations } from "../blueprint-operations.js";
 import { missingLocalizedMetadata, missingSchemaUiTranslations, missingUiTranslations } from "@openshapeforge/interface-web";
 import type { CompiledEntityInfo, CompiledPluginOperation } from "../plugins.js";
 import { moduleOperationId } from "./operation-catalog.js";
+import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
+import { assertEntityValueDefinition } from "./entity-values.js";
+import { materializeCollectionOperations } from "./collection-operations.js";
+import { constrainedReferenceCreateOperationId } from "../generate-operations.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -179,7 +183,7 @@ function customOperation(
 ): WebCustomOperationRef | undefined {
   if (source.interfaces.web === false) return undefined;
   const definition = source.definition;
-  if (definition.implementation.type !== "plugin" || !definition.target ||
+  if ((definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") || !definition.target ||
     !definition.input || !definition.output) return undefined;
   const rest = source.interfaces.rest;
   return {
@@ -198,6 +202,7 @@ function customOperation(
     },
     input: { kind: "json-schema", schema: definition.input.schema },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     effects: definition.effects,
     reliability: {
       idempotency: {
@@ -214,7 +219,7 @@ function customOperation(
           rest: {
             method: rest.method ?? (definition.effects.data === "read" ? "GET" : "POST"),
             path: rest.path ??
-              `/api/${definition.implementation.plugin}/${kebab(source.entityName)}` +
+              `/api/${definition.implementation.type === "collection" ? "core" : definition.implementation.plugin}/${kebab(source.entityName)}` +
                 `${definition.target.scope === "record" ? `/:${definition.target.inputField}` : ""}` +
                 `/${kebab(source.key)}`,
             response: rest.response ?? { kind: "json" as const },
@@ -365,11 +370,12 @@ function projectableEntities(
   options: Required<WebManifestOptions>,
 ): ProjectableEntity[] {
   return entities.flatMap(({ slug, contract }) => {
+    if (contract.entity.valueDefinition) return [];
     if (contract.authoringVersion === 1 && !contract.rest) return [];
-    const exposed = contract.authoringVersion === 2
+    const exposed = contract.authoringVersion >= 2
       ? contract.interfaces?.web?.operations
       : undefined;
-    if (!contract.entityOperations.list || (contract.authoringVersion === 2 && !exposed?.list)) return [];
+    if (!contract.entityOperations.list || (contract.authoringVersion >= 2 && !exposed?.list)) return [];
     const view = contextFor(contract, options.context);
     const operations = Object.fromEntries(
       (["list", "get", "create", "update", "delete"] as const)
@@ -422,11 +428,77 @@ function projectedTextLength(field: CompiledField): { maxLength?: number } {
   return typeof value === "number" ? { maxLength: value } : {};
 }
 
+/** Logical fields shared by record screens and collection-scoped value editors. */
+function projectField(
+  field: CompiledField,
+  parent: string,
+  supports: WebFieldProjection["supports"],
+  editNested = false,
+  presentations: Record<string, { render: NonNullable<WebFieldProjection["presentation"]> }> = {},
+): WebFieldProjection {
+  const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
+  const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
+  return {
+    id: `${parent}.${field.key}`, key: field.key,
+    label: localized(field.label, field.key), description: localized(field.description, ""),
+    valueType: field.valueType,
+    cardinality: field.cardinality === "collection" ? "many" : "one",
+    required: field.required,
+    ...(presentation ? { presentation } : {}),
+    ...projectedTextLength(field),
+    ...(field.semanticType ? { semanticType: field.semanticType } : {}),
+    ...(field.relationship?.target ? { relationship: {
+      targetEntityId: field.relationship.target,
+      ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
+      ...(field.relationship.constraints
+        ? { createOperation: { id: constrainedReferenceCreateOperationId(parent.split(".")[0]!, field.key), intent: "invoke" as const } }
+        : {}),
+    } } : {}),
+    ...(field.variables ? { variables: field.variables } : {}),
+    ...(field.suggestions ? { suggestions: field.suggestions } : {}),
+    ...(field.visibility ? { visibility: field.visibility } : {}),
+    ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
+    ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
+    ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
+    ...(field.options?.type === "referentiedata" && field.options.referentieGroep
+      ? { optionSource: { type: "referentiedata" as const, group: field.options.referentieGroep } } : {}),
+    ...(field.options?.type === "entity" && field.options.source
+      ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
+    ...((field.options?.type === "remote" || field.options?.type === "dynamic") && (field.options.remoteUrl || field.options.source)
+      ? { optionSource: { type: field.options.type, source: field.options.remoteUrl ?? field.options.source! } } : {}),
+    ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
+    ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
+    supports: {
+      read: supports.read,
+      create: supports.create && !field.readOnly && !field.deriveOnCreate,
+      update: supports.update && !field.readOnly && !field.immutable && !field.deriveOnCreate,
+    },
+  };
+}
+
+function unsupportedGenericCreate(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): boolean {
+  const { contract } = source;
+  if (contract.entityOperations.create?.implementation.type !== "entity") return false;
+  if (contract.model.relationships.some((relationship) => relationship.fieldKey && relationship.kind !== "belongsTo" &&
+    typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0)) return true;
+  return [...all.values()].some((owner) => owner.contract.model.relationships.some((relationship) =>
+    relationship.fieldKey && relationship.kind === "hasMany" && relationship.target === contract.entity.name &&
+    (relationship.sortable || contract.storage.columns.some((column) => column.column === relationship.foreignKey && !column.nullable))));
+}
+
+function withoutCreate<T extends { create?: unknown }>(operations: T): Omit<T, "create"> {
+  const { create: _create, ...rest } = operations;
+  return rest;
+}
+
 function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
 ): WebEntityInterface {
-  const { contract, view, operations, customOperations } = source;
+  const { contract, view, customOperations } = source;
+  const createUnsupported = unsupportedGenericCreate(source, all);
+  const operations: ProjectableEntity["operations"] = createUnsupported ? withoutCreate(source.operations) : source.operations;
   const entityName = contract.entity.name;
   const createVariant = view?.form?.variants.create;
   const updateVariant = view?.form?.variants.edit;
@@ -435,68 +507,31 @@ function projectEntity(
       ? [contract.entityOperations.create.interaction.secureInput.into]
       : [],
   );
-  const createGroups = formGroups(createVariant, undefined, serverOwnedFields);
+  for (const field of contract.model.fields) {
+    if (field.deriveOnCreate) serverOwnedFields.add(field.key);
+  }
+  for (const relationship of contract.model.relationships) {
+    if (relationship.fieldKey && relationship.kind !== "belongsTo") serverOwnedFields.add(relationship.fieldKey);
+  }
+  for (const owner of all.values()) {
+    for (const relationship of owner.contract.model.relationships) {
+      if (!relationship.fieldKey || relationship.kind !== "hasMany" || relationship.target !== entityName) continue;
+      const inverse = contract.storage.columns.find((column) => column.column === relationship.foreignKey);
+      if (inverse) serverOwnedFields.add(inverse.field);
+    }
+  }
+  const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
+  const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
-  const nestedField = (field: CompiledField, parent: string): WebFieldProjection => ({
-    id: `${parent}.${field.key}`, key: field.key,
-    label: localized(field.label, field.key), description: localized(field.description, ""),
-    valueType: field.valueType, cardinality: field.cardinality === "collection" ? "many" : "one",
-    required: field.required,
-    ...projectedTextLength(field),
-    ...(field.options?.type === "entity" && field.options.source ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
-    ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
-    ...(field.children ? { children: field.children.map(child => nestedField(child, `${parent}.${field.key}`)) } : {}),
-    ...(field.item ? { item: nestedField(field.item, `${parent}.${field.key}`) } : {}),
-    supports: { read: true, create: false, update: false },
-  });
   const explicitFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
   const explicitFields = contract.model.fields.map((field) => {
-    const projected: WebFieldProjection = {
-      id: `${entityName}.${field.key}`,
-      key: field.key,
-      label: localized(field.label, field.key),
-      description: localized(field.description, ""),
-      valueType: field.valueType,
-      ...projectedTextLength(field),
-      ...(field.semanticType ? { semanticType: field.semanticType } : {}),
-      ...(field.variables ? { variables: field.variables } : {}),
-      ...(field.suggestions ? { suggestions: field.suggestions } : {}),
-      ...(field.options?.items?.length
-        ? {
-            options: field.options.items.map(({ value, label }) => ({
-              value,
-              label: localized(label, value),
-            })),
-          }
-        : {}),
-      ...(field.options?.type === "referentiedata" && field.options.referentieGroep
-        ? { optionSource: { type: "referentiedata" as const, group: field.options.referentieGroep } }
-        : {}),
-      ...(field.options?.type === "entity" && field.options.source
-        ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } }
-        : {}),
-      ...((field.options?.type === "remote" || field.options?.type === "dynamic") &&
-      (field.options.remoteUrl || field.options.source)
-        ? {
-            optionSource: {
-              type: field.options.type,
-              source: field.options.remoteUrl ?? field.options.source!,
-            },
-          }
-        : {}),
-      cardinality: field.cardinality === "collection" ? "many" : "one",
-      required: field.required,
-      ...(field.children ? { children: field.children.map(child => nestedField(child, `${entityName}.${field.key}`)) } : {}),
-      ...(field.item ? { item: nestedField(field.item, `${entityName}.${field.key}`) } : {}),
-      ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
-      supports: {
+    const projected = projectField(field, entityName, {
         read: true,
-        create: !field.readOnly && createFields.has(field.key),
-        update: !field.readOnly && !field.immutable && updateFields.has(field.key),
-      },
-    };
+        create: !field.readOnly && !field.deriveOnCreate && createFields.has(field.key),
+        update: !field.readOnly && !field.immutable && !field.deriveOnCreate && updateFields.has(field.key),
+    }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
   });
   const implicitRelationshipFields = contract.model.relationships.flatMap((relationship) => {
@@ -534,10 +569,19 @@ function projectEntity(
 
   const relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     const target = all.get(relationship.target);
-    if (!target || !relationship.foreignKey) return [];
+    if (!target || (!relationship.foreignKey && !relationship.via)) return [];
     const list = target.operations.list;
     const get = target.operations.get;
     const create = target.operations.create;
+    const definitions = contract.model.fields.find((field) => field.key === (relationship.fieldKey ?? relationship.key))?.allowedDefinitions;
+    const nativeOperations: Pick<WebRelationshipProjection["operations"], "insert" | "move"> = {};
+    for (const operation of contract.pluginOperations ?? []) {
+      const binding = operation.definition.implementation;
+      const projectedOperation = customOperations[operation.key];
+      if (binding.type === "collection" && binding.field === relationship.fieldKey && projectedOperation) {
+        nativeOperations[binding.action] = projectedOperation;
+      }
+    }
     const projected: WebRelationshipProjection = {
       id: `${entityName}.${relationship.key}`,
       key: relationship.key,
@@ -545,10 +589,23 @@ function projectEntity(
       kind: relationship.kind,
       targetEntityId: target.contract.entity.name,
       targetRoute: target.route,
-      foreignKey: relationship.foreignKey,
-      recordField: snakeToCamel(relationship.foreignKey),
-      operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create ? { create } : {}) },
-      ...(list ? { collection: { ...target.collection, id: `${target.contract.entity.name}.relationship.collection` } } : {}),
+      ...(relationship.foreignKey ? {
+        foreignKey: relationship.foreignKey,
+        recordField: (relationship.kind === "belongsTo" ? contract : target.contract).storage.columns.find((column) => column.column === relationship.foreignKey)?.field ?? snakeToCamel(relationship.foreignKey),
+      } : {}),
+      ...(relationship.fieldKey ? { fieldKey: relationship.fieldKey } : {}),
+      ...(definitions ? { allowedDefinitions: [...definitions].sort() } : {}),
+      ...(relationship.constraints ? { constraints: structuredClone(relationship.constraints) } : {}),
+      ...(relationship.inverse ? { inverse: relationship.inverse } : {}),
+      ...(relationship.ownership ? { ownership: relationship.ownership } : {}),
+      ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
+      ...(relationship.sortable ? { sortable: true, positionColumn: relationship.kind === "manyToMany" ? "position" : `${relationship.foreignKey}_position` } : {}),
+      ...(relationship.via ? { via: relationship.via } : {}),
+      ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
+      operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create && !relationship.fieldKey ? { create } : {}), ...nativeOperations },
+      ...(list ? { collection: { ...target.collection,
+        ...((relationship.fieldKey || unsupportedGenericCreate(target, all)) ? { operations: withoutCreate(target.collection.operations) } : {}),
+        id: `${target.contract.entity.name}.relationship.collection` } } : {}),
     };
     return [[relationship.key, projected]];
   }));
@@ -568,7 +625,7 @@ function projectEntity(
     if (!fields[key]?.supports.read) throw new Error(`${entityName}: context field ${key} is not readable.`);
   }
   for (const key of authoredContext?.relationships ?? []) {
-    if (!contract.model.relationships.some((relationship) => relationship.key === key && (relationship.kind === "belongsTo" || relationship.kind === "hasMany"))) {
+    if (!contract.model.relationships.some((relationship) => relationship.key === key)) {
       throw new Error(`${entityName}: context relationship ${key} must reference a belongsTo or hasMany relationship.`);
     }
     if (relationships[key]?.kind === "hasMany" && !tabs.some(tab => tab.relationshipId === key)) {
@@ -592,6 +649,7 @@ function projectEntity(
     kind: "record" as const,
     renderer: contract.interfaces?.web?.renderers?.record ?? "entity.record",
     preset: "inbox-main-context" as const,
+    formGroups: { create: authoredCreateGroups, update: updateGroups },
     modes,
     routes: {
       ...(modes.includes("read")
@@ -676,8 +734,12 @@ function projectEntity(
         confirmation: operation.confirmation!, rest: operation.transports.rest,
       }]),
     ) },
+    ...(createUnsupported ? { unsupportedOperations: { create: {
+      code: "RELATION_COLLECTION_MUTATION_UNSUPPORTED",
+      message: "Generic create requires an atomic collection Operation and is currently unsupported.",
+    } } } : {}),
     views: {
-      collection: source.collection,
+      collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
       ...(record ? { record } : {}),
     },
     relationships,
@@ -826,7 +888,9 @@ export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: WebManifestOptions = {},
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
+  referentiedata: CoreReferentiedataSnapshot = {},
 ): WebManifestV1 {
+  materializeCollectionOperations(entities, referentiedata);
   const resolved: Required<WebManifestOptions> = {
     requireTranslations: options.requireTranslations ?? false,
     locale: options.locale ?? "en",
@@ -834,6 +898,20 @@ export function buildWebManifest(
     routeLocale: options.routeLocale ?? options.locale ?? "en",
   };
   const projectable = projectableEntities(entities, resolved);
+  const definitions = [...new Set(entities.flatMap(({ contract }) => contract.model.fields.flatMap((field) => field.allowedDefinitions ?? [])))].sort();
+  const entityValueDefinitions = Object.fromEntries(definitions.map((name) => {
+    const definition = entities.find(({ contract }) => contract.entity.name === name)?.contract;
+    if (!definition) throw new Error(`Web entity-value definition ${name} is absent from the compiled corpus.`);
+    assertEntityValueDefinition({ contract: definition, effectiveFields: definition.model.fields });
+    const materialize = definition.pluginOperations?.find((operation) => operation.key === "materialize");
+    return [name, {
+      entityName: name,
+      label: localized(definition.entity.labels, definition.entity.title ?? name),
+      // These supports describe editing inside a carrier value, not CRUD.
+      fields: definition.model.fields.map((field) => projectField(field, name, { read: true, create: true, update: true }, true)),
+      ...(materialize ? { materializeOperationId: materialize.id } : {}),
+    }];
+  }));
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
   const projected = projectable.map((entity) => projectEntity(entity, byName));
   const pages = projectStandalone(standalone);
@@ -862,6 +940,7 @@ export function buildWebManifest(
     locale: resolved.locale,
     entities: Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
     ...(pages ? { operations: pages.operations, pages: pages.pages } : {}),
+    ...(definitions.length ? { entityValueDefinitions } : {}),
   };
 }
 

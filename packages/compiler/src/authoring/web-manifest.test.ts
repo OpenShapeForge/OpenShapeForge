@@ -151,6 +151,51 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("preserves entityValue and allowed definitions on fields and collection relationships", () => {
+    const definition = entity("Snippet", "snippet", [field("text")], coreView());
+    definition.contract.entity.valueDefinition = true;
+    definition.contract.entityOperations = {};
+    const placement = entity("Placement", "placement", [field("values", {
+      valueType: "object", semanticType: "entityValue", entityValue: { definitionField: "definitionKey" },
+    })], coreView());
+    const page = entity("Page", "page", [field("placements", {
+      semanticType: "Placement", cardinality: "collection", allowedDefinitions: ["Snippet"],
+    })], coreView(), [{ key: "placements", fieldKey: "placements", kind: "hasMany", target: "Placement", foreignKey: "page_id", ownership: "owned" }]);
+    const output = JSON.parse(renderWebManifest(buildWebManifest([page, placement, definition])));
+    expect(output.entities.Placement.fields.values.entityValue).toEqual({ definitionField: "definitionKey" });
+    expect(output.entities.Page.fields.placements.allowedDefinitions).toEqual(["Snippet"]);
+    expect(output.entities.Page.relationships.placements.allowedDefinitions).toEqual(["Snippet"]);
+    expect(output.entities.Snippet).toBeUndefined();
+    expect(output.entityValueDefinitions.Snippet).toMatchObject({ entityName: "Snippet", fields: [{ id: "Snippet.text", key: "text", supports: { read: true, create: true, update: true } }] });
+    expect(renderWebManifest(buildWebManifest([page, placement, definition]))).toBe(renderWebManifest(buildWebManifest([definition, placement, page])));
+  });
+
+  test("schema-3 uses authored relation field keys and exposes junctions read-only", () => {
+    const view = coreView();
+    view.form!.variants.create!.groups[0]!.fields = ["displayName", "owner", "related"];
+    const definition = entity("Example", "example", [field("displayName"), field("owner"), field("related", { cardinality: "collection" })], view, [
+      { key: "owner", fieldKey: "owner", kind: "belongsTo", target: "Target", foreignKey: "owner_id" },
+      { key: "related", fieldKey: "related", kind: "manyToMany", target: "Target", via: "examples_related", sortable: true, ownership: "reference", cardinality: "collection" },
+    ]);
+    definition.contract.authoringVersion = 3;
+    definition.contract.interfaces = { web: { operations: { list: true, get: true, create: true, update: true, delete: true } } };
+    definition.contract.storage.columns.push({ field: "owner", column: "owner_id", type: "uuid", nullable: true, storageClass: "core" });
+    const target = entity("Target", "target", [field("displayName")], coreView());
+    const projected = buildWebManifest([definition, target]).entities.Example!;
+    expect(projected.relationships.owner?.recordField).toBe("owner");
+    expect(projected.relationships.related).toMatchObject({ fieldKey: "related", kind: "manyToMany", via: "examples_related", positionColumn: "position", mutationSupport: "unsupported" });
+    expect(projected.relationships.related?.operations.create).toBeUndefined();
+    expect(projected.fields.related?.supports).toEqual({ read: true, create: false, update: false });
+    target.contract.model.relationships.push({ key: "examples", fieldKey: "examples", kind: "hasMany", target: "Example", foreignKey: "owner_id", ownership: "owned" });
+    definition.contract.storage.columns.find((column) => column.column === "owner_id")!.nullable = false;
+    const blocked = buildWebManifest([definition, target]).entities.Example!;
+    expect(blocked.unsupportedOperations?.create?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    expect(blocked.operations.create).toBeUndefined();
+    expect(blocked.views.collection.operations.create).toBeUndefined();
+    expect(blocked.views.record?.modes).not.toContain("create");
+    expect(blocked.views.record?.routes.create).toBeUndefined();
+    expect(blocked.fields.displayName?.supports.create).toBe(false);
+  });
   test("does not invent a context summary by copying the first detail group", () => {
     const example = entity("Example", "example", [field("displayName")], coreView());
     expect(buildWebManifest([example]).entities.Example!.views.record!.layout.context).toEqual({ groups: [], relationships: [] });

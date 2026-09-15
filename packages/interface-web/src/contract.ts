@@ -54,6 +54,8 @@ export type WebSchemaOperationRef<
   };
   input: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
   output: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
+  /** Opaque result presentation key; absent uses structured schema rendering. */
+  resultRenderer?: WebRendererKey;
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
@@ -105,6 +107,12 @@ export type WebFieldOption = {
   label: LocalizedText;
 };
 
+export type WebEqualityConstraint = { eq: string | number | boolean };
+export type WebRelationshipConstraints = Record<
+  string,
+  WebEqualityConstraint | { any: Record<string, WebEqualityConstraint> }
+>;
+
 export type WebFieldOptionSource =
   | { type: "referentiedata"; group: string }
   | { type: "entity"; source: string; valueField: string }
@@ -116,14 +124,29 @@ export type WebFieldOptionSource =
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
+  /** Explicit Web-only exception; defaults still come from the semantic registry. */
+  presentation?: { component: string; props?: Record<string, unknown> };
   id: string;
   key: string;
   label: LocalizedText;
   description: LocalizedText;
   valueType: string;
   semanticType?: string;
+  /** Logical dynamic form metadata; physical storage stays server-side. */
+  entityValue?: { definitionField: string };
+  allowedDefinitions?: string[];
+  relationship?: {
+    targetEntityId: string;
+    constraints?: WebRelationshipConstraints;
+    /** Canonical compound create used when satisfying constraints needs related writes. */
+    createOperation?: OperationReference<"invoke">;
+  };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
+  visibility?: {
+    conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
+    logic?: "and" | "or";
+  };
   options?: WebFieldOption[];
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
@@ -166,9 +189,25 @@ export type WebRelationshipProjection = {
   kind: string;
   targetEntityId: string;
   targetRoute: string;
-  foreignKey: string;
-  recordField: string;
-  operations: { list?: WebOperationRef; get?: WebOperationRef; create?: WebOperationRef };
+  foreignKey?: string;
+  recordField?: string;
+  fieldKey?: string;
+  inverse?: string;
+  ownership?: "owned" | "reference";
+  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
+  sortable?: boolean;
+  positionColumn?: string;
+  via?: string;
+  mutationSupport?: "unsupported" | "atomic";
+  allowedDefinitions?: string[];
+  constraints?: WebRelationshipConstraints;
+  operations: {
+    list?: WebOperationRef;
+    get?: WebOperationRef;
+    create?: WebOperationRef;
+    insert?: WebCustomOperationRef;
+    move?: WebCustomOperationRef;
+  };
   collection?: WebCollectionView;
 };
 
@@ -198,6 +237,8 @@ export type WebRecordView = {
     actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
+  /** Authored form layout retained even when standalone create is unavailable. */
+  formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
   layout: {
     tabs: WebRecordTab[];
@@ -223,6 +264,8 @@ export type WebEntityInterface = {
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
   operations: Record<string, WebOperationRef | WebCustomOperationRef>;
+  /** Authored Operations that cannot be submitted through the generic interface yet. */
+  unsupportedOperations?: Partial<Record<WebOperationIntent, { code: string; message: string }>>;
   views: {
     collection: WebCollectionView;
     record?: WebRecordView;
@@ -268,6 +311,13 @@ export type WebManifestV1 = {
   operations?: Record<string, WebStandaloneOperationRef>;
   /** Pages of standalone Operations keyed by page id. */
   pages?: Record<string, WebPage>;
+  /** Normal entity field definitions projected for use inside entityValue fields. */
+  entityValueDefinitions?: Record<string, {
+    entityName: string;
+    label: LocalizedText;
+    fields: WebFieldProjection[];
+    materializeOperationId?: string;
+  }>;
 };
 
 export type WebManifestOptions = {

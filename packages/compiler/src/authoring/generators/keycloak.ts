@@ -996,10 +996,10 @@ function aggregateFromEntities(
 
   const pushOperationRoles = (
     operationId: string,
-    auth: { mode: string; roles?: readonly string[] },
+    auth: { mode: string; roles?: readonly string[]; roleGroups?: readonly (readonly string[])[] },
   ) => {
     if (auth.mode !== "session") return;
-    for (const role of auth.roles ?? []) {
+    for (const role of [...(auth.roles ?? []), ...(auth.roleGroups?.flat() ?? [])]) {
       push(entityRoleClient, {
         name: role,
         description: `Invoke ${operationId}`,
@@ -1071,6 +1071,9 @@ function aggregateFromEntities(
     }
 
     for (const operation of contract.pluginOperations ?? []) {
+      // Native collection authorization is derived from the owning entity's
+      // update role set, already aggregated above. No separate authored auth.
+      if (operation.definition.implementation.type === "collection") continue;
       pushOperationRoles(operation.id, operation.definition.auth);
     }
   }

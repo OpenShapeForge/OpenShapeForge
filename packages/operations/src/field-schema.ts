@@ -164,7 +164,9 @@ function resolveFields(
       ? registry.semanticTypes?.[field.semanticType]
       : undefined;
     const authoredCardinality = field.cardinality ?? semantic?.cardinality;
-    const nested = field.shape ?? field.children ?? semantic?.shape ?? semantic?.children;
+    // An identity reference does not inline the target record (which may refer back).
+    const nested = field.shape ?? field.children ?? (semantic?.kind === "entity" && semantic.entity
+      ? undefined : semantic?.shape ?? semantic?.children);
     const item = field.item ?? semantic?.item;
     const options = resolveOptions(field);
     return {

@@ -6,6 +6,7 @@ import addFormats from "ajv-formats";
 import {
   operationFieldObjectSchema,
   operationI18nKeyword,
+  operationInputFieldsKeyword,
   operationReferenceKeyword,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
@@ -24,6 +25,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true });
     addFormats.default(ajv);
     ajv.addKeyword(operationI18nKeyword);
+    ajv.addKeyword(operationInputFieldsKeyword);
     ajv.addKeyword(operationReferenceKeyword);
     // Match canonical Operation validation: this is presentation metadata,
     // never an alternative to the artifact object's actual value constraints.

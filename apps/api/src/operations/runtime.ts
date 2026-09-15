@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationReferenceKeyword, operationI18nKeyword } from "@openshapeforge/operations";
+import { operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword } from "@openshapeforge/operations";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Transaction } from "kysely";
@@ -133,6 +133,7 @@ function operationAjv(coerceTypes = false) {
   instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
   instance.addKeyword(operationReferenceKeyword);
   instance.addKeyword(operationI18nKeyword);
+  instance.addKeyword(operationInputFieldsKeyword);
   return instance;
 }
 

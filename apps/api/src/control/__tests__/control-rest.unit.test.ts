@@ -133,6 +133,8 @@ describe("one round trip per page group", () => {
     expect(who.status).toBe(200);
     expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 16, resources: 1 } });
     expect(who.body.signedInVia).toBe("Hubble control plane");
+    const operator = await call("GET", "/api/control/v1/whoami", token([PLATFORM_OPERATOR_ROLE]));
+    expect(operator.body.role).toBe("Platform operator");
   });
 
   test("tenants: the registry read under the Operation's own output shape", async () => {

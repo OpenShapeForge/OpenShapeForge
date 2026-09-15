@@ -19,7 +19,9 @@ import {
   signedInViaLabel,
 } from "../mcp/session-info.js";
 import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js";
+import { PLATFORM_OPERATOR_ROLE } from "./authorization.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
+import { PLATFORM_ADMIN_ROLE } from "./platform-admin.js";
 import { listPlatformTenants, type PlatformCatalogDeps } from "./platform-catalog.js";
 
 export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: "1" } as const;
@@ -82,7 +84,7 @@ export const PLATFORM_SESSION_RESOURCE = {
   name: "platform-session",
   title: "Who am I",
   description:
-    "The signed-in platform administrator in plain language. Same content as the whoami tool.",
+    "The signed-in control-realm user and held platform role in plain language. Same content as the whoami tool.",
   mimeType: "application/json",
 } as const;
 
@@ -91,7 +93,7 @@ export const PLATFORM_SESSION_RESOURCE = {
 export type PlatformSessionInfo = {
   name: string | null;
   email: string | null;
-  role: "Platform administrator";
+  role: "Platform administrator" | "Platform operator" | "Platform administrator and operator";
   scope: "platform";
   /** How many tenants the platform currently has; null when the registry is unreachable. */
   tenants: number | null;
@@ -116,6 +118,7 @@ function plural(count: number, noun: string): string {
 /** Pure: the administrator's facts to the answer. Unit-tested without a database. */
 export function buildPlatformSessionInfo(input: {
   administrator: PlatformAdministrator;
+  roles: readonly string[];
   tenants: number | null;
   /** What the MCP client said at `initialize`; defaults to none. */
   client?: McpClientInfo | null;
@@ -124,6 +127,13 @@ export function buildPlatformSessionInfo(input: {
   nowMs?: number;
 }): PlatformSessionInfo {
   const { administrator, tenants, access } = input;
+  const administratorRole = input.roles.includes(PLATFORM_ADMIN_ROLE);
+  const operatorRole = input.roles.includes(PLATFORM_OPERATOR_ROLE);
+  const role = administratorRole && operatorRole
+    ? "Platform administrator and operator"
+    : operatorRole
+      ? "Platform operator"
+      : "Platform administrator";
   const nowMs = input.nowMs ?? Date.now();
   // Only what the label is derived from; the rest of the administrator's facts
   // are read straight from `administrator` below.
@@ -143,7 +153,7 @@ export function buildPlatformSessionInfo(input: {
   const connectedVia = connectedViaLabel(client);
   const who = administrator.name ?? "an unnamed administrator";
   const sentences = [
-    `You are ${who}, a platform administrator of this deployment, signed in via ${signedInVia}.`,
+    `You are ${who}, a ${role.toLowerCase()} of this deployment, signed in via ${signedInVia}.`,
     ...(connectedVia ? [`Connected through ${connectedVia}.`] : []),
     tenants === null
       ? "You act for every tenant; the tenant registry could not be counted right now."
@@ -162,7 +172,7 @@ export function buildPlatformSessionInfo(input: {
   return {
     name: administrator.name,
     email: administrator.email,
-    role: "Platform administrator",
+    role,
     scope: "platform",
     tenants,
     signedInVia,

@@ -5,11 +5,12 @@
 # schema, Kysely types, and manifest (which are gitignored, reproducible
 # artifacts). The same image runs the API (default) and the migrator:
 #   API      : docker run ... openshapeforge-api            # default CMD
+#   provision: docker run ... openshapeforge-api bun apps/api/src/db/provision-roles.ts
 #   migrate  : docker run ... openshapeforge-api bun apps/api/src/db/migrate.ts
 #
 # The Helm chart (deploy/helm/openshapeforge-api) runs migrate as a pre-upgrade
-# Job with the privileged DB URL, and the API Deployment with the restricted
-# role — see docs/api.md and SECURITY.md for the production posture.
+# Job, provisioning roles before migration, and the API Deployment with the
+# restricted role — see docs/api.md and SECURITY.md for the production posture.
 
 # Base images are pinned by DIGEST as well as tag: a tag is mutable and can be
 # repointed at different bytes without any diff here. Dependabot's docker

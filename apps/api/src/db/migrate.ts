@@ -14,9 +14,9 @@ import { renderMigrationReport } from "./migration-report.js";
 
 // Migrations run as the PRIVILEGED role (DDL, GRANT) via
 // OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL
-// role. The chain grants BOTH restricted roles — openshapeforge_app and
-// openshapeforge_worker — on every run, whether or not this deployment starts
-// a worker: the emitted queue policies name the worker role either way.
+// role. The host must provision the declared roles first (the Helm hook runs
+// provision-roles.ts immediately before this entry point); this chain verifies
+// their presence and then refreshes their grants and policies.
 // Modules are resolved before the connection opens: a plugin whose runtime half
 // will not load must not leave a migration half-run. Load failures are reported
 // with the result rather than thrown — a broken plugin costs its own seed, not

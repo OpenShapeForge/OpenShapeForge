@@ -235,16 +235,6 @@ fields:
           value:
             - temporary
             - conditional
-  - key: tenantId
-    semanticType: Tenant
-    required: true
-    readOnly: true
-    label:
-      en: Tenant
-      nl: Tenant
-    persisted:
-      column: tenant_id
-      storageClass: core
 operations:
   list:
     name: List label rule

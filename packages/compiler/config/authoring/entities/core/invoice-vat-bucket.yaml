@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: InvoiceVatBucket
 title: Invoice VAT Bucket
-description: Per-rate persisted VAT bucket on an invoice — one row per VatRate referenced on the lines. Persisted snapshot stays stable even if the VatRate is later edited.
+description: Per-rate persisted VAT bucket on an invoice — one row per VatRate referenced on the lines. Persisted
+  snapshot stays stable even if the VatRate is later edited.
 language: en
 displayTemplate: "{{vatRate.code}}"
 filterField: id
@@ -39,110 +40,26 @@ fields:
     persisted:
       column: amount_vat
       storageClass: core
-relationships:
-  - key: invoice
-    kind: belongsTo
-    target: Invoice
-    foreignKey: invoice_id
+  - key: invoiceId
     label:
       en: Invoice
       nl: Factuur
-  - key: vatRate
-    kind: belongsTo
-    target: VatRate
-    foreignKey: vat_rate_id
+    persisted:
+      column: invoice_id
+      storageClass: core
+    semanticType: Invoice
+    relationship:
+      ownership: reference
+  - key: vatRateId
     label:
       en: VAT rate
       nl: BTW-tarief
-ui:
-  routes:
-    list:
-      en: /invoice-vat-buckets
-      nl: /btw-totalen
-    detail:
-      en: /invoice-vat-buckets/:id
-      nl: /btw-totalen/:id
-    create:
-      en: /invoice-vat-buckets/create
-      nl: /btw-totalen/aanmaken
-    edit:
-      en: /invoice-vat-buckets/:id/edit
-      nl: /btw-totalen/:id/bewerken
-    delete:
-      en: /invoice-vat-buckets/:id/delete
-      nl: /btw-totalen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Invoice VAT buckets
-        nl: BTW-totalen
-      columns:
-        - key: amountBase
-          sortable: true
-        - key: amountVat
-          sortable: true
-      defaultSort:
-        key: amountBase
-        direction: desc
-      rowLink:
-        en: /invoice-vat-buckets/:id
-        nl: /btw-totalen/:id
-    detail:
-      header:
-        title: "{{amountVat}}"
-        subtitle: "{{amountBase}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Bucket totals
-                nl: Totalen per BTW-tarief
-              fields:
-                - amountBase
-                - amountVat
-    form:
-      variants:
-        create:
-          title:
-            en: Create invoice VAT bucket
-            nl: BTW-totaal aanmaken
-          groups:
-            - title:
-                en: Bucket totals
-                nl: Totalen per BTW-tarief
-              fields:
-                - amountBase
-                - amountVat
-        edit:
-          extends: create
-          title:
-            en: Edit invoice VAT bucket
-            nl: BTW-totaal bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: vat_rate_id
+      storageClass: core
+    semanticType: VatRate
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -157,3 +74,149 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Invoice VAT Bucket
+    description: List InvoiceVatBucket records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Invoice VAT Bucket
+    description: Get InvoiceVatBucket records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Invoice VAT Bucket
+    description: Create InvoiceVatBucket records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update InvoiceVatBucket records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /invoice-vat-buckets
+          nl: /btw-totalen
+        columns:
+          - key: amountBase
+            sortable: true
+          - key: amountVat
+            sortable: true
+        title:
+          en: Invoice VAT buckets
+          nl: BTW-totalen
+        defaultSort:
+          key: amountBase
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /invoice-vat-buckets/:id
+            nl: /btw-totalen/:id
+          create:
+            en: /invoice-vat-buckets/create
+            nl: /btw-totalen/aanmaken
+        title: "{{amountVat}}"
+        subtitle: "{{amountBase}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Bucket totals
+                    nl: Totalen per BTW-tarief
+                  fields:
+                    - amountBase
+                    - amountVat
+        modes:
+          create:
+            title:
+              en: Create invoice VAT bucket
+              nl: BTW-totaal aanmaken
+            groups:
+              - title:
+                  en: Bucket totals
+                  nl: Totalen per BTW-tarief
+                fields:
+                  - amountBase
+                  - amountVat
+          update:
+            title:
+              en: Edit invoice VAT bucket
+              nl: BTW-totaal bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

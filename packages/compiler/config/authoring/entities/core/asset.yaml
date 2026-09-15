@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Asset
 title: Asset
-description: Generic manageable asset (unit, building, vehicle, machine, equipment) — sector-neutral core slice; VERA partials map sector-specific Eenheid into this.
+description: Generic manageable asset (unit, building, vehicle, machine, equipment) — sector-neutral core slice; VERA
+  partials map sector-specific Eenheid into this.
 language: en
 displayTemplate: "{{code}} {{name}}"
 filterField: code
@@ -55,11 +56,10 @@ fields:
     persisted:
       column: asset_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ASSETKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ASSETKIND
+    semanticType: referenceDataCode
   - key: description
     valueType: string
     required: false
@@ -74,11 +74,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: acquiredAt
     valueType: date
     required: false
@@ -91,9 +87,6 @@ fields:
     persisted:
       column: acquired_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: decommissionedAt
     valueType: date
     required: false
@@ -106,9 +99,6 @@ fields:
     persisted:
       column: decommissioned_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -123,171 +113,55 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentAsset
-    kind: belongsTo
-    target: Asset
-    foreignKey: parent_asset_id
+  - key: parentAssetId
     label:
       en: Parent asset
       nl: Bovenliggend object
+    persisted:
+      column: parent_asset_id
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
   - key: childAssets
-    kind: hasMany
-    target: Asset
-    foreignKey: parent_asset_id
     label:
       en: Child assets
       nl: Onderliggende objecten
-  - key: assetGroup
-    kind: belongsTo
-    target: AssetGroup
-    foreignKey: asset_group_id
+    semanticType: Asset
+    cardinality: collection
+    relationship:
+      inverse: parentAssetId
+      ownership: reference
+  - key: assetGroupId
     label:
       en: Asset group
       nl: Objectgroep
-  - key: building
-    kind: belongsTo
-    target: Building
-    foreignKey: building_id
+    persisted:
+      column: asset_group_id
+      storageClass: core
+    semanticType: AssetGroup
+    relationship:
+      ownership: reference
+  - key: buildingId
     label:
       en: Building
       nl: Pand
-  - key: space
-    kind: belongsTo
-    target: Space
-    foreignKey: space_id
+    persisted:
+      column: building_id
+      storageClass: core
+    semanticType: Building
+    relationship:
+      ownership: reference
+  - key: spaceId
     label:
       en: Space
       nl: Ruimte
-ui:
-  routes:
-    list:
-      en: /assets
-      nl: /objecten
-    detail:
-      en: /assets/:id
-      nl: /objecten/:id
-    create:
-      en: /assets/create
-      nl: /objecten/aanmaken
-    edit:
-      en: /assets/:id/edit
-      nl: /objecten/:id/bewerken
-    delete:
-      en: /assets/:id/delete
-      nl: /objecten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Assets
-        nl: Objecten
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: assetKind
-          sortable: true
-        - key: acquiredAt
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /assets/:id
-        nl: /objecten/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{assetKind}}"
-        badges:
-          - assetKind
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Asset details
-                nl: Objectgegevens
-              fields:
-                - code
-                - name
-                - assetKind
-                - acquiredAt
-                - decommissionedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create asset
-            nl: Object aanmaken
-          groups:
-            - title:
-                en: Asset details
-                nl: Objectgegevens
-              fields:
-                - code
-                - name
-                - assetKind
-                - acquiredAt
-                - decommissionedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit asset
-            nl: Object bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: space_id
+      storageClass: core
+    semanticType: Space
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -302,3 +176,210 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Asset
+    description: List Asset records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Asset
+    description: Get Asset records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Asset
+    description: Create Asset records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Asset records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /assets
+          nl: /objecten
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: assetKind
+            sortable: true
+          - key: acquiredAt
+            sortable: true
+        title:
+          en: Assets
+          nl: Objecten
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /assets/:id
+            nl: /objecten/:id
+          create:
+            en: /assets/create
+            nl: /objecten/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{assetKind}}"
+        badges:
+          - assetKind
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Asset details
+                    nl: Objectgegevens
+                  fields:
+                    - code
+                    - name
+                    - assetKind
+                    - acquiredAt
+                    - decommissionedAt
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create asset
+              nl: Object aanmaken
+            groups:
+              - title:
+                  en: Asset details
+                  nl: Objectgegevens
+                fields:
+                  - code
+                  - name
+                  - assetKind
+                  - acquiredAt
+                  - decommissionedAt
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit asset
+              nl: Object bewerken
+    fields:
+      assetKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ASSETKIND
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      acquiredAt:
+        render:
+          component: DatePicker
+          props: {}
+      decommissionedAt:
+        render:
+          component: DatePicker
+          props: {}

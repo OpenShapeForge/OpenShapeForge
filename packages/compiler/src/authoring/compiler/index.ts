@@ -129,7 +129,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     crud,
     authorization,
   });
-  if (blueprint && (coreEntity.schemaVersion !== 2 ||
+  if (blueprint && (coreEntity.schemaVersion < 2 ||
       entityOperations.create?.implementation.type !== "entity" ||
       entityOperations.update?.implementation.type !== "entity")) {
     throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
@@ -185,19 +185,19 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
                     ...(coreEntity.interfaces.web.fields
                       ? { fields: coreEntity.interfaces.web.fields }
                       : {}),
-                    operations: v2WebOperationActions(coreEntity)!,
-                    ...(coreEntity.interfaces.web.views.record?.layout.context
+                    operations: v2WebOperationActions(coreEntity) ?? {},
+                    ...(coreEntity.interfaces.web.views?.record?.layout.context
                       ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
                       : {}),
-                    ...(coreEntity.interfaces.web.views.collection.actions?.length
+                    ...(coreEntity.interfaces.web.views?.collection.actions?.length
                       ? {
                           collectionActions: [
                             ...coreEntity.interfaces.web.views.collection.actions,
                           ],
                         }
                       : {}),
-                    ...(coreEntity.interfaces.web.views.collection.renderer ||
-                      coreEntity.interfaces.web.views.record?.renderer
+                    ...(coreEntity.interfaces.web.views?.collection.renderer ||
+                      coreEntity.interfaces.web.views?.record?.renderer
                       ? {
                           renderers: {
                             ...(coreEntity.interfaces.web.views.collection.renderer

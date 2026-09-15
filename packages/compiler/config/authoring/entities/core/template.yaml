@@ -8,7 +8,7 @@ labels: { en: Template, nl: Template }
 domains: [documents]
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]

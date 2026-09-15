@@ -26,7 +26,7 @@ export function materializeCollectionOperations(
       if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
-      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
+      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
       if (action === "move" && !relation.sortable) fail("move requires a sortable collection.");
       const child = contracts.find((contract) => contract.entity.name === relation.target);
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CrudReadOnly
@@ -11,13 +11,6 @@ labels:
   en: CRUD Read Only
 domains:
   - relations
-crud:
-  operations:
-    create: false
-    update: false
-    delete: false
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -37,3 +30,36 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List CRUD Read Only
+    description: List CrudReadOnly records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get CRUD Read Only
+    description: Get CrudReadOnly records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  rest: {}
+  mcp: {}

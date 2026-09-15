@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BudgetLine
@@ -41,11 +41,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: amount
     valueType: number
     required: true
@@ -59,128 +55,46 @@ fields:
     persisted:
       column: amount
       storageClass: core
-relationships:
-  - key: budget
-    kind: belongsTo
-    target: Budget
-    foreignKey: budget_id
+  - key: budgetId
     label:
       en: Budget
       nl: Begroting
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+    persisted:
+      column: budget_id
+      storageClass: core
+    semanticType: Budget
+    relationship:
+      ownership: reference
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    semanticType: FiscalPeriod
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: costDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: cost_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: costDimensionId
     label:
       en: Cost dimension
       nl: Kostendimensie
-ui:
-  routes:
-    list:
-      en: /budget-lines
-      nl: /begrotingsregels
-    detail:
-      en: /budget-lines/:id
-      nl: /begrotingsregels/:id
-    create:
-      en: /budget-lines/create
-      nl: /begrotingsregels/aanmaken
-    edit:
-      en: /budget-lines/:id/edit
-      nl: /begrotingsregels/:id/bewerken
-    delete:
-      en: /budget-lines/:id/delete
-      nl: /begrotingsregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Budget lines
-        nl: Begrotingsregels
-      columns:
-        - key: lineNumber
-          sortable: true
-        - key: description
-          sortable: true
-        - key: amount
-          sortable: true
-      defaultSort:
-        key: lineNumber
-        direction: asc
-      rowLink:
-        en: /budget-lines/:id
-        nl: /begrotingsregels/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{amount}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - amount
-    form:
-      variants:
-        create:
-          title:
-            en: Create budget line
-            nl: Begrotingsregel aanmaken
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - amount
-        edit:
-          extends: create
-          title:
-            en: Edit budget line
-            nl: Begrotingsregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -195,3 +109,160 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Budget Line
+    description: List BudgetLine records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Budget Line
+    description: Get BudgetLine records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Budget Line
+    description: Create BudgetLine records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BudgetLine records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /budget-lines
+          nl: /begrotingsregels
+        columns:
+          - key: lineNumber
+            sortable: true
+          - key: description
+            sortable: true
+          - key: amount
+            sortable: true
+        title:
+          en: Budget lines
+          nl: Begrotingsregels
+        defaultSort:
+          key: lineNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /budget-lines/:id
+            nl: /begrotingsregels/:id
+          create:
+            en: /budget-lines/create
+            nl: /begrotingsregels/aanmaken
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Line details
+                    nl: Regelgegevens
+                  fields:
+                    - lineNumber
+                    - description
+                    - amount
+        modes:
+          create:
+            title:
+              en: Create budget line
+              nl: Begrotingsregel aanmaken
+            groups:
+              - title:
+                  en: Line details
+                  nl: Regelgegevens
+                fields:
+                  - lineNumber
+                  - description
+                  - amount
+          update:
+            title:
+              en: Edit budget line
+              nl: Begrotingsregel bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

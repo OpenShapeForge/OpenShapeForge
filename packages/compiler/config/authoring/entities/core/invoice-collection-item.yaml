@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: InvoiceCollectionItem
 title: Invoice Collection Item
-description: Per-payer split of an invoice into mandate-keyed amounts. Allocates a portion of the invoice total to a specific agreement party (the payer), under a specific direct debit mandate and IBAN.
+description: Per-payer split of an invoice into mandate-keyed amounts. Allocates a portion of the invoice total to a
+  specific agreement party (the payer), under a specific direct debit mandate and IBAN.
 language: en
 displayTemplate: "{{amount}}"
 filterField: id
@@ -55,128 +56,46 @@ fields:
     persisted:
       column: payment_day
       storageClass: core
-relationships:
-  - key: invoice
-    kind: belongsTo
-    target: Invoice
-    foreignKey: invoice_id
+  - key: invoiceId
     label:
       en: Invoice
       nl: Factuur
-  - key: agreementParty
-    kind: belongsTo
-    target: AgreementParty
-    foreignKey: agreement_party_id
+    persisted:
+      column: invoice_id
+      storageClass: core
+    semanticType: Invoice
+    relationship:
+      ownership: reference
+  - key: agreementPartyId
     label:
       en: Agreement party
       nl: Overeenkomstpartij
-  - key: mandate
-    kind: belongsTo
-    target: DirectDebitMandate
-    foreignKey: mandate_id
+    persisted:
+      column: agreement_party_id
+      storageClass: core
+    semanticType: AgreementParty
+    relationship:
+      ownership: reference
+  - key: mandateId
     label:
       en: Mandate
       nl: Machtiging
-  - key: paymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: payment_method_id
+    persisted:
+      column: mandate_id
+      storageClass: core
+    semanticType: DirectDebitMandate
+    relationship:
+      ownership: reference
+  - key: paymentMethodId
     label:
       en: Payment method
       nl: Betaalwijze
-ui:
-  routes:
-    list:
-      en: /invoice-collection-items
-      nl: /factuurincasso-regels
-    detail:
-      en: /invoice-collection-items/:id
-      nl: /factuurincasso-regels/:id
-    create:
-      en: /invoice-collection-items/create
-      nl: /factuurincasso-regels/aanmaken
-    edit:
-      en: /invoice-collection-items/:id/edit
-      nl: /factuurincasso-regels/:id/bewerken
-    delete:
-      en: /invoice-collection-items/:id/delete
-      nl: /factuurincasso-regels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Invoice collection items
-        nl: Factuurincasso-regels
-      columns:
-        - key: iban
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: paymentDay
-          sortable: true
-      defaultSort:
-        key: amount
-        direction: desc
-      rowLink:
-        en: /invoice-collection-items/:id
-        nl: /factuurincasso-regels/:id
-    detail:
-      header:
-        title: "{{amount}}"
-        subtitle: "{{iban}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Collection details
-                nl: Incassogegevens
-              fields:
-                - iban
-                - amount
-                - paymentDay
-    form:
-      variants:
-        create:
-          title:
-            en: Create invoice collection item
-            nl: Factuurincasso-regel aanmaken
-          groups:
-            - title:
-                en: Collection details
-                nl: Incassogegevens
-              fields:
-                - iban
-                - amount
-                - paymentDay
-        edit:
-          extends: create
-          title:
-            en: Edit invoice collection item
-            nl: Factuurincasso-regel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: payment_method_id
+      storageClass: core
+    semanticType: PaymentMethod
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -191,3 +110,153 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Invoice Collection Item
+    description: List InvoiceCollectionItem records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Invoice Collection Item
+    description: Get InvoiceCollectionItem records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Invoice Collection Item
+    description: Create InvoiceCollectionItem records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update InvoiceCollectionItem records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /invoice-collection-items
+          nl: /factuurincasso-regels
+        columns:
+          - key: iban
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: paymentDay
+            sortable: true
+        title:
+          en: Invoice collection items
+          nl: Factuurincasso-regels
+        defaultSort:
+          key: amount
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /invoice-collection-items/:id
+            nl: /factuurincasso-regels/:id
+          create:
+            en: /invoice-collection-items/create
+            nl: /factuurincasso-regels/aanmaken
+        title: "{{amount}}"
+        subtitle: "{{iban}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Collection details
+                    nl: Incassogegevens
+                  fields:
+                    - iban
+                    - amount
+                    - paymentDay
+        modes:
+          create:
+            title:
+              en: Create invoice collection item
+              nl: Factuurincasso-regel aanmaken
+            groups:
+              - title:
+                  en: Collection details
+                  nl: Incassogegevens
+                fields:
+                  - iban
+                  - amount
+                  - paymentDay
+          update:
+            title:
+              en: Edit invoice collection item
+              nl: Factuurincasso-regel bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

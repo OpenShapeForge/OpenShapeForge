@@ -1086,6 +1086,7 @@ export type McpEntityCatalogEntry = {
      */
     field?: string;
     via?: string;
+    through?: { field: string; column: string; target: string };
     label?: string;
   }[];
 };
@@ -1472,6 +1473,7 @@ export function buildMcpCatalog(
             : {}),
           ...(column ? { field: column.key } : {}),
           ...(relationship.via ? { via: relationship.via } : {}),
+          ...(relationship.through ? { through: relationship.through } : {}),
           ...(label ? { label } : {}),
         };
       }),

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ResearchAssignment
@@ -79,11 +79,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: assignmentKind
     valueType: string
     required: false
@@ -96,11 +92,10 @@ fields:
     persisted:
       column: assignment_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RESEARCHASSIGNMENTKIND
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: RESEARCHASSIGNMENTKIND
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -113,11 +108,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RESEARCHSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: RESEARCHSTATUS
+    semanticType: referenceDataCode
   - key: channel
     valueType: string
     required: false
@@ -130,11 +124,10 @@ fields:
     persisted:
       column: channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMUNICATIONCHANNEL
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONCHANNEL
+    semanticType: referenceDataCode
   - key: completedAt
     valueType: datetime
     required: false
@@ -148,9 +141,6 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -165,41 +155,154 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: survey
-    kind: belongsTo
-    target: Survey
-    foreignKey: survey_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: surveyId
     label:
       en: Survey
       nl: Vragenlijst
-  - key: researchResult
-    kind: belongsTo
-    target: ResearchResult
-    foreignKey: research_result_id
+    persisted:
+      column: survey_id
+      storageClass: core
+    semanticType: Survey
+    relationship:
+      ownership: reference
+  - key: researchResultId
     label:
       en: Research result
       nl: Onderzoeksresultaat
+    persisted:
+      column: research_result_id
+      storageClass: core
+    semanticType: ResearchResult
+    relationship:
+      ownership: reference
   - key: measurementRequests
-    kind: hasMany
-    target: QualityMeasurementRequest
-    foreignKey: research_assignment_id
     label:
       en: Measurement requests
       nl: Metingsverzoeken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: QualityMeasurementRequest
+    cardinality: collection
+    relationship:
+      inverse: researchAssignmentId
+      ownership: reference
+operations:
+  list:
+    name: List Research Assignment
+    description: List ResearchAssignment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Research Assignment
+    description: Get ResearchAssignment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Research Assignment
+    description: Create ResearchAssignment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Research Assignment
+    description: Update ResearchAssignment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Research Assignment
+    description: Delete ResearchAssignment records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      assignmentKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RESEARCHASSIGNMENTKIND
+            clearable: true
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RESEARCHSTATUS
+            clearable: false
+      channel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: COMMUNICATIONCHANNEL
+            clearable: true
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}

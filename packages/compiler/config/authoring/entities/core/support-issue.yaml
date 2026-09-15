@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SupportIssue
@@ -62,11 +62,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 5000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: true
@@ -83,11 +79,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SUPPORTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SUPPORTSTATUS
+    semanticType: referenceDataCode
   - key: priority
     valueType: string
     required: false
@@ -103,11 +98,10 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SUPPORTPRIORITEIT
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SUPPORTPRIORITEIT
+    semanticType: referenceDataCode
   - key: category
     valueType: string
     required: false
@@ -122,11 +116,10 @@ fields:
     persisted:
       column: category
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SUPPORTCATEGORIE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SUPPORTCATEGORIE
+    semanticType: referenceDataCode
   - key: resolvedAt
     valueType: datetime
     required: false
@@ -140,9 +133,6 @@ fields:
     persisted:
       column: resolved_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: closedAt
     valueType: datetime
     required: false
@@ -156,9 +146,6 @@ fields:
     persisted:
       column: closed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: triageSummary
     valueType: string
     required: false
@@ -173,11 +160,7 @@ fields:
     persisted:
       column: triage_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 1000
+    semanticType: multilineText
   - key: triageSentiment
     valueType: string
     required: false
@@ -192,11 +175,10 @@ fields:
     persisted:
       column: triage_sentiment
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TRIAGESENTIMENT
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: TRIAGESENTIMENT
+    semanticType: referenceDataCode
   - key: triageUrgency
     valueType: string
     required: false
@@ -211,11 +193,10 @@ fields:
     persisted:
       column: triage_urgency
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TRIAGEURGENTIE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: TRIAGEURGENTIE
+    semanticType: referenceDataCode
   - key: triageAnalysis
     valueType: string
     required: false
@@ -230,11 +211,7 @@ fields:
     persisted:
       column: triage_analysis
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 5000
+    semanticType: multilineText
   - key: triagedAt
     valueType: datetime
     required: false
@@ -247,147 +224,272 @@ fields:
     persisted:
       column: triaged_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
-relationships:
-  - key: reporter
-    kind: belongsTo
-    target: Relation
-    foreignKey: reporter_relation_id
+  - key: reporterId
     label:
       en: Reporter
       nl: Melder
-  - key: assignee
-    kind: belongsTo
-    target: Account
-    foreignKey: assignee_account_id
+    persisted:
+      column: reporter_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assigneeId
     label:
       en: Assignee
       nl: Toegewezen aan
+    persisted:
+      column: assignee_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
   - key: comments
-    kind: hasMany
-    target: Comment
-    foreignKey: support_issue_id
     label:
       en: Comments
       nl: Opmerkingen
+    semanticType: Comment
+    cardinality: collection
+    relationship:
+      inverse: supportIssueId
+      ownership: reference
   - key: attachments
-    kind: hasMany
-    target: Attachment
-    foreignKey: support_issue_id
     label:
       en: Attachments
       nl: Bijlagen
-ui:
-  routes:
-    list:
-      en: /support-issues
-      nl: /support-issues
-    detail:
-      en: /support-issues/:id
-      nl: /support-issues/:id
-    create:
-      en: /support-issues/create
-      nl: /support-issues/aanmaken
-    edit:
-      en: /support-issues/:id/edit
-      nl: /support-issues/:id/bewerken
-    delete:
-      en: /support-issues/:id/delete
-      nl: /support-issues/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Support issues
-        nl: Supportverzoeken
-      columns:
-        - key: subject
-          sortable: true
-        - key: status
-          sortable: true
-        - key: priority
-          sortable: true
-        - key: category
-          sortable: true
-      defaultSort:
-        key: status
-        direction: asc
-      rowLink:
-        en: /support-issues/:id
-        nl: /support-issues/:id
-    detail:
-      header:
+    semanticType: Attachment
+    cardinality: collection
+    relationship:
+      inverse: supportIssueId
+      ownership: reference
+operations:
+  list:
+    name: List Support issue
+    description: List SupportIssue records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Support issue
+    description: Get SupportIssue records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Support issue
+    description: Create SupportIssue records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update SupportIssue records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /support-issues
+          nl: /support-issues
+        columns:
+          - key: subject
+            sortable: true
+          - key: status
+            sortable: true
+          - key: priority
+            sortable: true
+          - key: category
+            sortable: true
+        title:
+          en: Support issues
+          nl: Supportverzoeken
+        defaultSort:
+          key: status
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /support-issues/:id
+            nl: /support-issues/:id
+          create:
+            en: /support-issues/create
+            nl: /support-issues/aanmaken
         title: "{{subject}}"
         subtitle: "{{status}}"
         badges:
           - status
           - priority
           - category
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          relationships:
-            - name: comments
-            - name: attachments
-          groups:
-            - title:
-                en: Issue
-                nl: Verzoek
-              fields:
-                - subject
-                - description
-                - status
-                - priority
-                - category
-            - title:
-                en: Lifecycle
-                nl: Levenscyclus
-              fields:
-                - resolvedAt
-                - closedAt
-    form:
-      variants:
-        create:
-          title:
-            en: Create support issue
-            nl: Supportverzoek aanmaken
-          groups:
-            - title:
-                en: Issue
-                nl: Verzoek
-              fields:
-                - subject
-                - description
-                - status
-                - priority
-                - category
-        edit:
-          extends: create
-          title:
-            en: Edit support issue
-            nl: Supportverzoek bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Issue
+                    nl: Verzoek
+                  fields:
+                    - subject
+                    - description
+                    - status
+                    - priority
+                    - category
+                - title:
+                    en: Lifecycle
+                    nl: Levenscyclus
+                  fields:
+                    - resolvedAt
+                    - closedAt
+            - id: comments
+              relationship: comments
+            - id: attachments
+              relationship: attachments
+        modes:
+          create:
+            title:
+              en: Create support issue
+              nl: Supportverzoek aanmaken
+            groups:
+              - title:
+                  en: Issue
+                  nl: Verzoek
+                fields:
+                  - subject
+                  - description
+                  - status
+                  - priority
+                  - category
+          update:
+            title:
+              en: Edit support issue
+              nl: Supportverzoek bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 5000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SUPPORTSTATUS
+            clearable: false
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SUPPORTPRIORITEIT
+            clearable: true
+      category:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SUPPORTCATEGORIE
+            clearable: true
+      resolvedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      closedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      triageSummary:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 1000
+      triageSentiment:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TRIAGESENTIMENT
+            clearable: true
+      triageUrgency:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TRIAGEURGENTIE
+            clearable: true
+      triageAnalysis:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 5000
+      triagedAt:
+        render:
+          component: DateTimePicker
+          props: {}

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CostDimension
@@ -57,128 +57,25 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentCostDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: parent_cost_dimension_id
+  - key: parentCostDimensionId
     label:
       en: Parent cost dimension
       nl: Bovenliggende kostendimensie
+    persisted:
+      column: parent_cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
   - key: childCostDimensions
-    kind: hasMany
-    target: CostDimension
-    foreignKey: parent_cost_dimension_id
     label:
       en: Child cost dimensions
       nl: Onderliggende kostendimensies
-ui:
-  routes:
-    list:
-      en: /cost-dimensions
-      nl: /kostendimensies
-    detail:
-      en: /cost-dimensions/:id
-      nl: /kostendimensies/:id
-    create:
-      en: /cost-dimensions/create
-      nl: /kostendimensies/aanmaken
-    edit:
-      en: /cost-dimensions/:id/edit
-      nl: /kostendimensies/:id/bewerken
-    delete:
-      en: /cost-dimensions/:id/delete
-      nl: /kostendimensies/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Cost dimensions
-        nl: Kostendimensies
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /cost-dimensions/:id
-        nl: /kostendimensies/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: ""
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Cost dimension details
-                nl: Kostendimensiegegevens
-              fields:
-                - code
-                - name
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create cost dimension
-            nl: Kostendimensie aanmaken
-          groups:
-            - title:
-                en: Cost dimension details
-                nl: Kostendimensiegegevens
-              fields:
-                - code
-                - name
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit cost dimension
-            nl: Kostendimensie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: CostDimension
+    cardinality: collection
+    relationship:
+      inverse: parentCostDimensionId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -193,3 +90,166 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Cost Dimension
+    description: List CostDimension records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Cost Dimension
+    description: Get CostDimension records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Cost Dimension
+    description: Create CostDimension records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update CostDimension records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /cost-dimensions
+          nl: /kostendimensies
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+        title:
+          en: Cost dimensions
+          nl: Kostendimensies
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /cost-dimensions/:id
+            nl: /kostendimensies/:id
+          create:
+            en: /cost-dimensions/create
+            nl: /kostendimensies/aanmaken
+        title: "{{code}} {{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Cost dimension details
+                    nl: Kostendimensiegegevens
+                  fields:
+                    - code
+                    - name
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create cost dimension
+              nl: Kostendimensie aanmaken
+            groups:
+              - title:
+                  en: Cost dimension details
+                  nl: Kostendimensiegegevens
+                fields:
+                  - code
+                  - name
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit cost dimension
+              nl: Kostendimensie bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

@@ -51,6 +51,24 @@ function collection(contract: CompiledEntityContract, options: Record<string, un
 }
 
 describe("schema-3 field relationship storage", () => {
+  it("retains a nullable authoritative tenant column as a single FK and refuses uniqueness", () => {
+    const bindTenant = (contract: CompiledEntityContract) => {
+      if (contract.entity.name !== sourceName) return;
+      const column = contract.storage.columns.find(column => column.column === "owner_id")!;
+      Object.assign(column, { field: "scopeIdentity", column: "tenant_id", nullable: true });
+      Object.assign(contract.model.relationships[0]!, { foreignKey: "tenant_id", fieldKey: "scopeIdentity" });
+    };
+    const manifest = compileRelations(bindTenant);
+    const column = source(manifest).columns.find(column => column.name === "tenant_id")!;
+    expect(column.required).not.toBe(true);
+    expect(column.references).toEqual({ schema: "erp", table: target(manifest).name, column: "id" });
+    expect(sql(manifest)).toContain('FOREIGN KEY ("tenant_id")');
+    expect(sql(manifest)).not.toContain('FOREIGN KEY ("tenant_id", "tenant_id")');
+    expect(() => compileRelations(contract => {
+      bindTenant(contract);
+      if (contract.entity.name === sourceName) contract.model.relationships[0]!.unique = true;
+    })).toThrow("cannot be owned or unique");
+  });
   it("emits tenant-safe FKs, target uniqueness and a tenant-leading source index", () => {
     const manifest = compileRelations();
     const owner = source(manifest);
@@ -232,9 +250,8 @@ describe("schema-3 field relationship storage", () => {
     expect(() => sql(unpaired)).toThrow("Invalid composite foreign key");
   });
 
-  it("retains v1 missing-target behavior", () => {
-    const manifest = compileAuthoringBackendManifest(fixtureDir, { mode: "promote", entityAllowlist: ["rowaccess-owner"] });
-    expect(source(manifest).source?.relationshipStatus?.skippedReferences).toHaveLength(1);
-    expect(source(manifest).columns.find((column) => column.name === "owner_id")?.references).toBeUndefined();
+  it("migrated fixtures cannot retain the legacy missing-target fallback", () => {
+    expect(() => compileAuthoringBackendManifest(fixtureDir, { mode: "promote", entityAllowlist: ["rowaccess-owner"] }))
+      .toThrow("targets missing entity RowAccessOwnerTarget");
   });
 });

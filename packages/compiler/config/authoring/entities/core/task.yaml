@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Task
@@ -56,11 +56,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 5
-        maxLength: 5000
+    semanticType: multilineText
   - key: type
     valueType: string
     required: true
@@ -76,11 +72,10 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TAAKTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: TAAKTYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -96,11 +91,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TAAKSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: TAAKSTATUS
+    semanticType: referenceDataCode
   - key: priority
     valueType: string
     required: false
@@ -115,15 +109,13 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TAAKPRIORITEIT
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: TAAKPRIORITEIT
+    semanticType: referenceDataCode
   - key: workQueueId
-    valueType: string
     required: false
-    semanticType: workQueueId
+    semanticType: WorkQueue
     label:
       en: Work queue
       nl: Werkqueue
@@ -135,8 +127,11 @@ fields:
     persisted:
       column: work_queue_id
       storageClass: core
-    render:
-      component: EntityReferenceDisplay
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: startDateTime
     valueType: datetime
     required: false
@@ -149,9 +144,6 @@ fields:
     persisted:
       column: start_date_time
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueDateTime
     valueType: datetime
     required: false
@@ -164,9 +156,6 @@ fields:
     persisted:
       column: due_date_time
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
     valueType: datetime
     required: false
@@ -180,9 +169,6 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: estimatedMinutes
     valueType: integer
     required: false
@@ -221,11 +207,7 @@ fields:
     persisted:
       column: outcome
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    semanticType: multilineText
   - key: openUrl
     valueType: string
     required: false
@@ -240,8 +222,6 @@ fields:
     persisted:
       column: open_url
       storageClass: core
-    render:
-      component: Input
   - key: metadata
     valueType: object
     required: false
@@ -287,7 +267,7 @@ fields:
           nl: Toegestane rollen
         cardinality:
           min: 0
-          max: "unbounded"
+          max: unbounded
         item:
           key: role
           valueType: string
@@ -344,20 +324,13 @@ fields:
         label:
           en: Description
           nl: Beschrijving
-        render:
-          component: Textarea
-          props:
-            rows: 3
+        semanticType: multilineText
       - key: metadata
         valueType: object
         required: false
         label:
           en: Metadata
           nl: Metadata
-        render:
-          component: JsonFieldEditor
-          props:
-            rows: 8
       - key: presentation
         valueType: object
         required: false
@@ -385,7 +358,7 @@ fields:
               nl: Groepsinterpretatie
             cardinality:
               min: 0
-              max: "unbounded"
+              max: unbounded
             item:
               key: interpretation
               valueType: string
@@ -469,7 +442,7 @@ fields:
           nl: Velden
         cardinality:
           min: 0
-          max: "unbounded"
+          max: unbounded
         semanticType: fieldDefinition
         authoring:
           profile: formDefinitionField
@@ -479,13 +452,9 @@ fields:
         label:
           en: Groups
           nl: Groepen
-        render:
-          component: JsonFieldEditor
-          props:
-            rows: 12
         cardinality:
           min: 0
-          max: "unbounded"
+          max: unbounded
         item:
           key: group
           valueType: object
@@ -495,10 +464,6 @@ fields:
         label:
           en: Field config
           nl: Veldconfiguratie
-        render:
-          component: JsonFieldEditor
-          props:
-            rows: 10
       - key: actions
         valueType: object
         required: false
@@ -507,7 +472,7 @@ fields:
           nl: Acties
         cardinality:
           min: 0
-          max: "unbounded"
+          max: unbounded
         item:
           key: actionItem
           valueType: object
@@ -518,16 +483,12 @@ fields:
               label:
                 en: Key
                 nl: Sleutel
-              render:
-                component: Input
             - key: label
               valueType: string
               required: true
               label:
                 en: Button label
                 nl: Knop-label
-              render:
-                component: Input
               localized: true
             - key: description
               valueType: string
@@ -535,8 +496,6 @@ fields:
               label:
                 en: Helper text
                 nl: Hulptekst
-              render:
-                component: Input
               localized: true
             - key: icon
               valueType: string
@@ -544,8 +503,6 @@ fields:
               label:
                 en: Icon
                 nl: Icoon
-              render:
-                component: IconPicker
             - key: tone
               valueType: string
               required: false
@@ -567,34 +524,25 @@ fields:
                     label:
                       en: Destructive
                       nl: Destructief
-              render:
-                component: ReferenceSelect
-                props:
-                  clearable: false
+              semanticType: referenceDataCode
             - key: visibleWhen
               valueType: object
               required: false
               label:
                 en: Visible when
                 nl: Zichtbaar wanneer
-              render:
-                component: JsonFieldEditor
             - key: disabledWhen
               valueType: object
               required: false
               label:
                 en: Disabled when
                 nl: Uitgeschakeld wanneer
-              render:
-                component: JsonFieldEditor
             - key: disabledMessage
               valueType: string
               required: false
               label:
                 en: Disabled tooltip
                 nl: Bericht bij uitgeschakeld
-              render:
-                component: Input
               localized: true
   - key: output
     valueType: object
@@ -603,15 +551,13 @@ fields:
       en: Output
       nl: Uitvoer
     description:
-      en: Structured values from the task form (e.g. workflow-defined fields). Omit on create unless importing; set via updateTask when the user submits or saves.
-      nl: Gestructureerde waarden uit het taakformulier (bijv. workflowvelden). Bij aanmaken weglaten tenzij import; zetten via updateTask bij opslaan of afronden.
+      en: Structured values from the task form (e.g. workflow-defined fields). Omit on create unless importing; set via
+        updateTask when the user submits or saves.
+      nl: Gestructureerde waarden uit het taakformulier (bijv. workflowvelden). Bij aanmaken weglaten tenzij import; zetten
+        via updateTask bij opslaan of afronden.
     persisted:
       column: output
       storageClass: core
-    render:
-      component: JsonFieldEditor
-      props:
-        rows: 10
   - key: isBlocking
     valueType: boolean
     required: false
@@ -626,21 +572,27 @@ fields:
       column: is_blocking
       storageClass: core
   - key: caseStepId
-    valueType: string
     required: false
     readOnly: true
-    semanticType: caseStepId
+    semanticType: ProcessStep
     label:
       en: Case step ID
       nl: Zaakstap-ID
     description:
-      en: Runtime case step that created or owns this task. Technically references the current process-step table until the table is renamed.
-      nl: Runtime zaakstap die deze taak heeft aangemaakt of bezit. Verwijst technisch naar de huidige processtaptabel totdat die tabel hernoemd wordt.
+      en: Runtime case step that created or owns this task. Technically references the current process-step table until the
+        table is renamed.
+      nl: Runtime zaakstap die deze taak heeft aangemaakt of bezit. Verwijst technisch naar de huidige processtaptabel totdat
+        die tabel hernoemd wordt.
     validation:
       format: uuid
     persisted:
       column: case_step_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: caseStepActionId
     valueType: string
     required: false
@@ -656,230 +608,395 @@ fields:
     persisted:
       column: case_step_action_id
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: assignee
-    kind: belongsTo
-    target: Account
-    foreignKey: assignee_account_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assigneeId
     label:
       en: Assignee
       nl: Toegewezen aan
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: assignee_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: ownerId
     label:
       en: Owner
       nl: Eigenaar
-  - key: appointment
-    kind: belongsTo
-    target: Appointment
-    foreignKey: appointment_id
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: appointmentId
     label:
       en: Appointment
       nl: Afspraak
-  - key: contactMoment
-    kind: belongsTo
-    target: ContactMoment
-    foreignKey: contact_moment_id
+    persisted:
+      column: appointment_id
+      storageClass: core
+    semanticType: Appointment
+    relationship:
+      ownership: reference
+  - key: contactMomentId
     label:
       en: Contact moment
       nl: Contactmoment
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: contact_moment_id
+      storageClass: core
+    semanticType: ContactMoment
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: workQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: work_queue_id
-    label:
-      en: Work queue
-      nl: Werkqueue
-  - key: caseStep
-    kind: belongsTo
-    target: ProcessStep
-    foreignKey: case_step_id
-    label:
-      en: Case step
-      nl: Zaakstap
-  - key: parentTask
-    kind: belongsTo
-    target: Task
-    foreignKey: parent_task_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: parentTaskId
     label:
       en: Parent task
       nl: Hoofdtaak
+    persisted:
+      column: parent_task_id
+      storageClass: core
+    semanticType: Task
+    relationship:
+      ownership: reference
   - key: subtasks
-    kind: hasMany
-    target: Task
-    foreignKey: parent_task_id
     label:
       en: Subtasks
       nl: Subtaken
-ui:
-  routes:
-    list:
-      en: /tasks
-      nl: /taken
-    detail:
-      en: /tasks/:id
-      nl: /taken/:id
-    create:
-      en: /tasks/create
-      nl: /taken/aanmaken
-    edit:
-      en: /tasks/:id/edit
-      nl: /taken/:id/bewerken
-    delete:
-      en: /tasks/:id/delete
-      nl: /taken/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Tasks
-        nl: Taken
-      columns:
-        - key: title
-          sortable: true
-        - key: type
-          sortable: true
-        - key: status
-          sortable: true
-        - key: priority
-          sortable: true
-        - key: dueDateTime
-          sortable: true
-      defaultSort:
-        key: dueDateTime
-        direction: asc
-      rowLink:
-        en: /tasks/:id
-        nl: /taken/:id
-    detail:
-      header:
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: parentTaskId
+      ownership: reference
+operations:
+  list:
+    name: List Task
+    description: List Task records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Task
+    description: Get Task records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Task
+    description: Create Task records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Task records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+        awaitAction: true
+  web:
+    views:
+      collection:
+        route:
+          en: /tasks
+          nl: /taken
+        columns:
+          - key: title
+            sortable: true
+          - key: type
+            sortable: true
+          - key: status
+            sortable: true
+          - key: priority
+            sortable: true
+          - key: dueDateTime
+            sortable: true
+        title:
+          en: Tasks
+          nl: Taken
+        defaultSort:
+          key: dueDateTime
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /tasks/:id
+            nl: /taken/:id
+          create:
+            en: /tasks/create
+            nl: /taken/aanmaken
         title: "{{title}}"
         subtitle: "{{status}}"
         badges:
           - type
           - priority
           - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Task details
-                nl: Taakgegevens
-              fields:
-                - title
-                - description
-                - type
-                - status
-                - priority
-                - isBlocking
-            - title:
-                en: Planning
-                nl: Planning
-              fields:
-                - startDateTime
-                - dueDateTime
-                - completedAt
-                - estimatedMinutes
-                - actualMinutes
-            - title:
-                en: Outcome
-                nl: Resultaat
-              fields:
-                - outcome
-                - output
-            - title:
-                en: Integration
-                nl: Integratie
-              fields:
-                - openUrl
-                - metadata
-                - formDefinition
-        - id: subtasks
-          label:
-            en: Subtasks
-            nl: Subtaken
-          relationship: subtasks
-    form:
-      variants:
-        create:
-          title:
-            en: Create task
-            nl: Taak aanmaken
-          groups:
-            - title:
-                en: Task details
-                nl: Taakgegevens
-              fields:
-                - title
-                - description
-                - type
-                - status
-                - priority
-                - isBlocking
-            - title:
-                en: Planning
-                nl: Planning
-              fields:
-                - startDateTime
-                - dueDateTime
-                - estimatedMinutes
-            - title:
-                en: Outcome
-                nl: Resultaat
-              fields:
-                - outcome
-                - output
-            - title:
-                en: Integration
-                nl: Integratie
-              fields:
-                - openUrl
-                - metadata
-                - formDefinition
-        edit:
-          extends: create
-          title:
-            en: Edit task
-            nl: Taak bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
-      awaitAction: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Task details
+                    nl: Taakgegevens
+                  fields:
+                    - title
+                    - description
+                    - type
+                    - status
+                    - priority
+                    - isBlocking
+                - title:
+                    en: Planning
+                    nl: Planning
+                  fields:
+                    - startDateTime
+                    - dueDateTime
+                    - completedAt
+                    - estimatedMinutes
+                    - actualMinutes
+                - title:
+                    en: Outcome
+                    nl: Resultaat
+                  fields:
+                    - outcome
+                    - output
+                - title:
+                    en: Integration
+                    nl: Integratie
+                  fields:
+                    - openUrl
+                    - metadata
+                    - formDefinition
+            - id: subtasks
+              label:
+                en: Subtasks
+                nl: Subtaken
+              relationship: subtasks
+        modes:
+          create:
+            title:
+              en: Create task
+              nl: Taak aanmaken
+            groups:
+              - title:
+                  en: Task details
+                  nl: Taakgegevens
+                fields:
+                  - title
+                  - description
+                  - type
+                  - status
+                  - priority
+                  - isBlocking
+              - title:
+                  en: Planning
+                  nl: Planning
+                fields:
+                  - startDateTime
+                  - dueDateTime
+                  - estimatedMinutes
+              - title:
+                  en: Outcome
+                  nl: Resultaat
+                fields:
+                  - outcome
+                  - output
+              - title:
+                  en: Integration
+                  nl: Integratie
+                fields:
+                  - openUrl
+                  - metadata
+                  - formDefinition
+          update:
+            title:
+              en: Edit task
+              nl: Taak bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 5
+            maxLength: 5000
+      type:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TAAKTYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TAAKSTATUS
+            clearable: false
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TAAKPRIORITEIT
+            clearable: true
+      workQueueId:
+        render:
+          component: EntityReferenceDisplay
+      startDateTime:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueDateTime:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      outcome:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      openUrl:
+        render:
+          component: Input
+      formDefinition.description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+      formDefinition.metadata:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 8
+      formDefinition.groups:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 12
+      formDefinition.fieldConfig:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 10
+      formDefinition.actions.actionItem.key:
+        render:
+          component: Input
+      formDefinition.actions.actionItem.label:
+        render:
+          component: Input
+      formDefinition.actions.actionItem.description:
+        render:
+          component: Input
+      formDefinition.actions.actionItem.icon:
+        render:
+          component: IconPicker
+      formDefinition.actions.actionItem.tone:
+        render:
+          component: ReferenceSelect
+          props:
+            clearable: false
+      formDefinition.actions.actionItem.visibleWhen:
+        render:
+          component: JsonFieldEditor
+      formDefinition.actions.actionItem.disabledWhen:
+        render:
+          component: JsonFieldEditor
+      formDefinition.actions.actionItem.disabledMessage:
+        render:
+          component: Input
+      output:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 10

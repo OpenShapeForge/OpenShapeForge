@@ -354,6 +354,9 @@ interfaces:
             nl: /labelregels/aanmaken
         title: "{{name}}"
         subtitle: "{{entityType}}"
+        badges:
+          - variant
+          - active
         actions:
           - update
           - delete

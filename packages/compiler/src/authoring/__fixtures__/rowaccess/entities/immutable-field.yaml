@@ -1,12 +1,11 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ImmutableField
 title: Immutable Field
 description: >-
-  Test fixture — carries an authored immutable field (and a readOnly one that is
-  not immutable) to prove which flag reaches the manifest column. Not part of
-  the shipped slice.
+  Test fixture — carries an authored immutable field (and a readOnly one that is not immutable) to prove which flag
+  reaches the manifest column. Not part of the shipped slice.
 language: en
 displayTemplate: "{{label}}"
 filterField: label
@@ -56,3 +55,76 @@ fields:
     persisted:
       column: display_only
       storageClass: core
+operations:
+  list:
+    name: List Immutable Field
+    description: List ImmutableField records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Immutable Field
+    description: Get ImmutableField records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Immutable Field
+    description: Create ImmutableField records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Immutable Field
+    description: Update ImmutableField records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Immutable Field
+    description: Delete ImmutableField records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

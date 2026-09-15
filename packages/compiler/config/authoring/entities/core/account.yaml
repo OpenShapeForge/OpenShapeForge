@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Account
@@ -87,11 +87,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ACCOUNTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ACCOUNTSTATUS
+    semanticType: referenceDataCode
   - key: lastLoginAt
     valueType: datetime
     required: false
@@ -105,9 +104,6 @@ fields:
     persisted:
       column: last_login_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: validFrom
     valueType: datetime
     required: false
@@ -120,9 +116,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: validUntil
     valueType: datetime
     required: false
@@ -135,9 +128,6 @@ fields:
     persisted:
       column: valid_until
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: passwordChangedAt
     valueType: datetime
     required: false
@@ -151,126 +141,208 @@ fields:
     persisted:
       column: password_changed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: naturalPerson
-    kind: belongsTo
-    target: NaturalPerson
-    foreignKey: natural_person_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: naturalPersonId
     label:
       en: Natural person
       nl: Natuurlijk persoon
-ui:
-  routes:
-    list:
-      en: /accounts
-      nl: /accounts
-    detail:
-      en: /accounts/:id
-      nl: /accounts/:id
-    create:
-      en: /accounts/create
-      nl: /accounts/aanmaken
-    edit:
-      en: /accounts/:id/edit
-      nl: /accounts/:id/bewerken
-    delete:
-      en: /accounts/:id/delete
-      nl: /accounts/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Accounts
-        nl: Accounts
-      columns:
-        - key: username
-          sortable: true
-        - key: email
-          sortable: true
-        - key: status
-          sortable: true
-        - key: validUntil
-          sortable: true
-        - key: lastLoginAt
-          sortable: true
-      defaultSort:
-        key: username
-        direction: asc
-      rowLink:
-        en: /accounts/:id
-        nl: /accounts/:id
-    detail:
-      header:
+    persisted:
+      column: natural_person_id
+      storageClass: core
+    semanticType: NaturalPerson
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Account
+    description: List Account records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Account
+    description: Get Account records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Account
+    description: Create Account records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Account records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /accounts
+          nl: /accounts
+        columns:
+          - key: username
+            sortable: true
+          - key: email
+            sortable: true
+          - key: status
+            sortable: true
+          - key: validUntil
+            sortable: true
+          - key: lastLoginAt
+            sortable: true
+        title:
+          en: Accounts
+          nl: Accounts
+        defaultSort:
+          key: username
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /accounts/:id
+            nl: /accounts/:id
+          create:
+            en: /accounts/create
+            nl: /accounts/aanmaken
         title: "{{username}}"
         subtitle: "{{email}}"
         badges:
           - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Account details
-                nl: Accountgegevens
-              fields:
-                - username
-                - email
-                - status
-                - validFrom
-                - validUntil
-                - passwordChangedAt
-                - lastLoginAt
-    form:
-      variants:
-        create:
-          title:
-            en: Create account
-            nl: Account aanmaken
-          groups:
-            - title:
-                en: Account details
-                nl: Accountgegevens
-              fields:
-                - username
-                - email
-                - status
-                - validFrom
-                - validUntil
-        edit:
-          extends: create
-          title:
-            en: Edit account
-            nl: Account bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Account details
+                    nl: Accountgegevens
+                  fields:
+                    - username
+                    - email
+                    - status
+                    - validFrom
+                    - validUntil
+                    - passwordChangedAt
+                    - lastLoginAt
+        modes:
+          create:
+            title:
+              en: Create account
+              nl: Account aanmaken
+            groups:
+              - title:
+                  en: Account details
+                  nl: Accountgegevens
+                fields:
+                  - username
+                  - email
+                  - status
+                  - validFrom
+                  - validUntil
+          update:
+            title:
+              en: Edit account
+              nl: Account bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ACCOUNTSTATUS
+            clearable: false
+      lastLoginAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      validFrom:
+        render:
+          component: DateTimePicker
+          props: {}
+      validUntil:
+        render:
+          component: DateTimePicker
+          props: {}
+      passwordChangedAt:
+        render:
+          component: DateTimePicker
+          props: {}

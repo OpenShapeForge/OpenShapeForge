@@ -363,6 +363,7 @@ export type TableSourceDefinition = {
       delete: boolean;
     };
     relationships: Array<{
+      through?: { field: string; column: string; target: string };
       name: string;
       target: string;
       type: string;

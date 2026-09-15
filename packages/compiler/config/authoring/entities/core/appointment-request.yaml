@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AppointmentRequest
 title: Appointment Request
-description: A request to schedule an appointment, typically resulting in a list of candidate time slots that can be accepted into an appointment.
+description: A request to schedule an appointment, typically resulting in a list of candidate time slots that can be
+  accepted into an appointment.
 language: en
 displayTemplate: "{{code}} {{title}}"
 filterField: code
@@ -58,11 +59,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: true
@@ -75,11 +72,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: APPOINTMENTREQUESTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: APPOINTMENTREQUESTSTATUS
+    semanticType: referenceDataCode
   - key: requestedAt
     valueType: datetime
     required: true
@@ -92,9 +88,6 @@ fields:
     persisted:
       column: requested_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: respondedAt
     valueType: datetime
     required: false
@@ -107,9 +100,6 @@ fields:
     persisted:
       column: responded_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: subjectType
     valueType: string
     required: false
@@ -117,8 +107,10 @@ fields:
       en: Subject type
       nl: Type onderwerp
     description:
-      en: Discriminator describing what kind of entity the appointment request refers to (e.g. agreement, case, maintenance order).
-      nl: Discriminator die aangeeft op welk soort entiteit het afspraakverzoek betrekking heeft (bijv. overeenkomst, zaak, onderhoudsorder).
+      en: Discriminator describing what kind of entity the appointment request refers to (e.g. agreement, case, maintenance
+        order).
+      nl: Discriminator die aangeeft op welk soort entiteit het afspraakverzoek betrekking heeft (bijv. overeenkomst, zaak,
+        onderhoudsorder).
     validation:
       maxLength: 100
     persisted:
@@ -152,184 +144,35 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: appointment
-    kind: belongsTo
-    target: Appointment
-    foreignKey: appointment_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: appointmentId
     label:
       en: Appointment
       nl: Afspraak
+    persisted:
+      column: appointment_id
+      storageClass: core
+    semanticType: Appointment
+    relationship:
+      ownership: reference
   - key: options
-    kind: hasMany
-    target: AppointmentOption
-    foreignKey: appointment_request_id
     label:
       en: Options
       nl: Opties
-ui:
-  routes:
-    list:
-      en: /appointment-requests
-      nl: /afspraakverzoeken
-    detail:
-      en: /appointment-requests/:id
-      nl: /afspraakverzoeken/:id
-    create:
-      en: /appointment-requests/create
-      nl: /afspraakverzoeken/aanmaken
-    edit:
-      en: /appointment-requests/:id/edit
-      nl: /afspraakverzoeken/:id/bewerken
-    delete:
-      en: /appointment-requests/:id/delete
-      nl: /afspraakverzoeken/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Appointment requests
-        nl: Afspraakverzoeken
-      columns:
-        - key: code
-          sortable: true
-        - key: title
-          sortable: true
-        - key: status
-          sortable: true
-        - key: requestedAt
-          sortable: true
-        - key: respondedAt
-          sortable: true
-      defaultSort:
-        key: requestedAt
-        direction: desc
-      rowLink:
-        en: /appointment-requests/:id
-        nl: /afspraakverzoeken/:id
-    detail:
-      header:
-        title: "{{code}} {{title}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Request details
-                nl: Verzoekgegevens
-              fields:
-                - code
-                - title
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Timing
-                nl: Tijdlijn
-              fields:
-                - requestedAt
-                - respondedAt
-            - title:
-                en: Subject
-                nl: Onderwerp
-              fields:
-                - subjectType
-                - subjectId
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        - id: options
-          label:
-            en: Options
-            nl: Opties
-          relationship: options
-    form:
-      variants:
-        create:
-          title:
-            en: Create appointment request
-            nl: Afspraakverzoek aanmaken
-          groups:
-            - title:
-                en: Request details
-                nl: Verzoekgegevens
-              fields:
-                - code
-                - title
-                - status
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Timing
-                nl: Tijdlijn
-              fields:
-                - requestedAt
-                - respondedAt
-            - title:
-                en: Subject
-                nl: Onderwerp
-              fields:
-                - subjectType
-                - subjectId
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit appointment request
-            nl: Afspraakverzoek bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: AppointmentOption
+    cardinality: collection
+    relationship:
+      inverse: appointmentRequestId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -344,3 +187,237 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Appointment Request
+    description: List AppointmentRequest records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Appointment Request
+    description: Get AppointmentRequest records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Appointment Request
+    description: Create AppointmentRequest records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AppointmentRequest records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /appointment-requests
+          nl: /afspraakverzoeken
+        columns:
+          - key: code
+            sortable: true
+          - key: title
+            sortable: true
+          - key: status
+            sortable: true
+          - key: requestedAt
+            sortable: true
+          - key: respondedAt
+            sortable: true
+        title:
+          en: Appointment requests
+          nl: Afspraakverzoeken
+        defaultSort:
+          key: requestedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /appointment-requests/:id
+            nl: /afspraakverzoeken/:id
+          create:
+            en: /appointment-requests/create
+            nl: /afspraakverzoeken/aanmaken
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Request details
+                    nl: Verzoekgegevens
+                  fields:
+                    - code
+                    - title
+                    - status
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Timing
+                    nl: Tijdlijn
+                  fields:
+                    - requestedAt
+                    - respondedAt
+                - title:
+                    en: Subject
+                    nl: Onderwerp
+                  fields:
+                    - subjectType
+                    - subjectId
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+            - id: options
+              label:
+                en: Options
+                nl: Opties
+              relationship: options
+        modes:
+          create:
+            title:
+              en: Create appointment request
+              nl: Afspraakverzoek aanmaken
+            groups:
+              - title:
+                  en: Request details
+                  nl: Verzoekgegevens
+                fields:
+                  - code
+                  - title
+                  - status
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Timing
+                  nl: Tijdlijn
+                fields:
+                  - requestedAt
+                  - respondedAt
+              - title:
+                  en: Subject
+                  nl: Onderwerp
+                fields:
+                  - subjectType
+                  - subjectId
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit appointment request
+              nl: Afspraakverzoek bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: APPOINTMENTREQUESTSTATUS
+            clearable: false
+      requestedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      respondedAt:
+        render:
+          component: DateTimePicker
+          props: {}

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AppointmentOption
@@ -38,9 +38,6 @@ fields:
     persisted:
       column: starts_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: endsAt
     valueType: datetime
     required: true
@@ -53,9 +50,6 @@ fields:
     persisted:
       column: ends_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: location
     valueType: string
     required: false
@@ -82,11 +76,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: APPOINTMENTOPTIONSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: APPOINTMENTOPTIONSTATUS
+    semanticType: referenceDataCode
   - key: notes
     valueType: string
     required: false
@@ -101,140 +94,17 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 1000
-relationships:
-  - key: appointmentRequest
-    kind: belongsTo
-    target: AppointmentRequest
-    foreignKey: appointment_request_id
+    semanticType: multilineText
+  - key: appointmentRequestId
     label:
       en: Appointment request
       nl: Afspraakverzoek
-ui:
-  routes:
-    list:
-      en: /appointment-options
-      nl: /afspraakopties
-    detail:
-      en: /appointment-options/:id
-      nl: /afspraakopties/:id
-    create:
-      en: /appointment-options/create
-      nl: /afspraakopties/aanmaken
-    edit:
-      en: /appointment-options/:id/edit
-      nl: /afspraakopties/:id/bewerken
-    delete:
-      en: /appointment-options/:id/delete
-      nl: /afspraakopties/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Appointment options
-        nl: Afspraakopties
-      columns:
-        - key: optionNumber
-          sortable: true
-        - key: startsAt
-          sortable: true
-        - key: endsAt
-          sortable: true
-        - key: status
-          sortable: true
-        - key: location
-          sortable: false
-      defaultSort:
-        key: startsAt
-        direction: asc
-      rowLink:
-        en: /appointment-options/:id
-        nl: /afspraakopties/:id
-    detail:
-      header:
-        title: "#{{optionNumber}} {{startsAt}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Option details
-                nl: Optiegegevens
-              fields:
-                - optionNumber
-                - status
-                - location
-            - title:
-                en: Schedule
-                nl: Planning
-              fields:
-                - startsAt
-                - endsAt
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-    form:
-      variants:
-        create:
-          title:
-            en: Create appointment option
-            nl: Afspraakoptie aanmaken
-          groups:
-            - title:
-                en: Option details
-                nl: Optiegegevens
-              fields:
-                - optionNumber
-                - status
-                - location
-            - title:
-                en: Schedule
-                nl: Planning
-              fields:
-                - startsAt
-                - endsAt
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-        edit:
-          extends: create
-          title:
-            en: Edit appointment option
-            nl: Afspraakoptie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: appointment_request_id
+      storageClass: core
+    semanticType: AppointmentRequest
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -249,3 +119,202 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Appointment Option
+    description: List AppointmentOption records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Appointment Option
+    description: Get AppointmentOption records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Appointment Option
+    description: Create AppointmentOption records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AppointmentOption records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /appointment-options
+          nl: /afspraakopties
+        columns:
+          - key: optionNumber
+            sortable: true
+          - key: startsAt
+            sortable: true
+          - key: endsAt
+            sortable: true
+          - key: status
+            sortable: true
+          - key: location
+            sortable: false
+        title:
+          en: Appointment options
+          nl: Afspraakopties
+        defaultSort:
+          key: startsAt
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /appointment-options/:id
+            nl: /afspraakopties/:id
+          create:
+            en: /appointment-options/create
+            nl: /afspraakopties/aanmaken
+        title: "#{{optionNumber}} {{startsAt}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Option details
+                    nl: Optiegegevens
+                  fields:
+                    - optionNumber
+                    - status
+                    - location
+                - title:
+                    en: Schedule
+                    nl: Planning
+                  fields:
+                    - startsAt
+                    - endsAt
+                - title:
+                    en: Notes
+                    nl: Notities
+                  fields:
+                    - notes
+        modes:
+          create:
+            title:
+              en: Create appointment option
+              nl: Afspraakoptie aanmaken
+            groups:
+              - title:
+                  en: Option details
+                  nl: Optiegegevens
+                fields:
+                  - optionNumber
+                  - status
+                  - location
+              - title:
+                  en: Schedule
+                  nl: Planning
+                fields:
+                  - startsAt
+                  - endsAt
+              - title:
+                  en: Notes
+                  nl: Notities
+                fields:
+                  - notes
+          update:
+            title:
+              en: Edit appointment option
+              nl: Afspraakoptie bewerken
+    fields:
+      startsAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      endsAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: APPOINTMENTOPTIONSTATUS
+            clearable: false
+      notes:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 1000

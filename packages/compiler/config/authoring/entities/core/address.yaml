@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Address
@@ -154,28 +154,36 @@ fields:
     persisted:
       column: longitude
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: naturalPerson
-    kind: belongsTo
-    target: NaturalPerson
-    foreignKey: natural_person_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: naturalPersonId
     label:
       en: Natural person
       nl: Natuurlijk persoon
-  - key: legalEntity
-    kind: belongsTo
-    target: LegalEntity
-    foreignKey: legal_entity_id
+    persisted:
+      column: natural_person_id
+      storageClass: core
+    semanticType: NaturalPerson
+    relationship:
+      ownership: reference
+  - key: legalEntityId
     label:
       en: Legal entity
       nl: Rechtspersoon
+    persisted:
+      column: legal_entity_id
+      storageClass: core
+    semanticType: LegalEntity
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List addresses, nl: Adressen tonen }
@@ -238,7 +246,7 @@ operations:
         kind: type-current-field
         field: city
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -246,8 +254,6 @@ interfaces:
   rest: {}
   graphql: {}
   mcp:
-    # An address is reached through the relation it belongs to; the shared
-    # osf_* tools cover that without spending dedicated tool slots on it.
     tools: generic
     operations:
       update:
@@ -266,40 +272,90 @@ interfaces:
   web:
     views:
       collection:
-        route: { en: /addresses, nl: /adressen }
-        title: { en: Addresses, nl: Adressen }
+        route:
+          en: /addresses
+          nl: /adressen
+        title:
+          en: Addresses
+          nl: Adressen
         columns:
-          - { key: type, sortable: true }
-          - { key: street, sortable: true }
-          - { key: city, sortable: true }
-          - { key: postalCode, sortable: true }
-        defaultSort: { key: city, direction: asc }
+          - key: type
+            sortable: true
+          - key: street
+            sortable: true
+          - key: city
+            sortable: true
+          - key: postalCode
+            sortable: true
+        defaultSort:
+          key: city
+          direction: asc
       record:
         routes:
-          read: { en: /addresses/:id, nl: /adressen/:id }
-          create: { en: /addresses/create, nl: /adressen/aanmaken }
+          read:
+            en: /addresses/:id
+            nl: /adressen/:id
+          create:
+            en: /addresses/create
+            nl: /adressen/aanmaken
         title: "{{street}} {{houseNumber}}{{houseNumberAddition}}, {{city}}"
         subtitle: "{{type}}"
-        actions: [update, delete]
+        actions:
+          - update
+          - delete
         layout:
           context:
-            fields: [type]
-            relationships: [relation]
+            fields:
+              - type
+            relationships:
+              - relationId
           tabs:
             - id: overview
-              label: { en: Overview, nl: Overzicht }
+              label:
+                en: Overview
+                nl: Overzicht
               groups:
-                - title: { en: Address, nl: Adres }
-                  fields: [type, street, houseNumber, houseNumberAddition, postalCode, city, country]
-                - title: { en: Coordinates, nl: Coördinaten }
-                  fields: [latitude, longitude]
+                - title:
+                    en: Address
+                    nl: Adres
+                  fields:
+                    - type
+                    - street
+                    - houseNumber
+                    - houseNumberAddition
+                    - postalCode
+                    - city
+                    - country
+                - title:
+                    en: Coordinates
+                    nl: Coördinaten
+                  fields:
+                    - latitude
+                    - longitude
         modes:
           create:
-            title: { en: Create address, nl: Adres aanmaken }
+            title:
+              en: Create address
+              nl: Adres aanmaken
             groups:
-              - title: { en: Address, nl: Adres }
-                fields: [type, street, houseNumber, houseNumberAddition, postalCode, city, country]
-              - title: { en: Coordinates, nl: Coördinaten }
-                fields: [latitude, longitude]
+              - title:
+                  en: Address
+                  nl: Adres
+                fields:
+                  - type
+                  - street
+                  - houseNumber
+                  - houseNumberAddition
+                  - postalCode
+                  - city
+                  - country
+              - title:
+                  en: Coordinates
+                  nl: Coördinaten
+                fields:
+                  - latitude
+                  - longitude
           update:
-            title: { en: Edit address, nl: Adres bewerken }
+            title:
+              en: Edit address
+              nl: Adres bewerken

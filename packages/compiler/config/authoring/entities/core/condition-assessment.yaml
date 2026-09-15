@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ConditionAssessment
 title: Condition Assessment
-description: Periodic assessment of an asset's condition, scoring against a configurable scale and optionally linked to an inspection report.
+description: Periodic assessment of an asset's condition, scoring against a configurable scale and optionally linked to
+  an inspection report.
 language: en
 displayTemplate: "{{assessedAt}}"
 filterField: id
@@ -25,9 +26,6 @@ fields:
     persisted:
       column: assessed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: score
     valueType: number
     required: false
@@ -52,11 +50,10 @@ fields:
     persisted:
       column: score_scale
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ASSESSMENTSCALE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ASSESSMENTSCALE
+    semanticType: referenceDataCode
   - key: notes
     valueType: string
     required: false
@@ -71,11 +68,7 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -90,149 +83,36 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: assessedBy
-    kind: belongsTo
-    target: Relation
-    foreignKey: assessed_by_relation_id
+  - key: assessedById
     label:
       en: Assessed by
       nl: Beoordeeld door
-  - key: inspectionReport
-    kind: belongsTo
-    target: InspectionReport
-    foreignKey: inspection_report_id
+    persisted:
+      column: assessed_by_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: inspectionReportId
     label:
       en: Inspection report
       nl: Inspectierapport
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+    persisted:
+      column: inspection_report_id
+      storageClass: core
+    semanticType: InspectionReport
+    relationship:
+      ownership: reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /condition-assessments
-      nl: /conditiemetingen
-    detail:
-      en: /condition-assessments/:id
-      nl: /conditiemetingen/:id
-    create:
-      en: /condition-assessments/create
-      nl: /conditiemetingen/aanmaken
-    edit:
-      en: /condition-assessments/:id/edit
-      nl: /conditiemetingen/:id/bewerken
-    delete:
-      en: /condition-assessments/:id/delete
-      nl: /conditiemetingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Condition assessments
-        nl: Conditiemetingen
-      columns:
-        - key: assessedAt
-          sortable: true
-        - key: score
-          sortable: true
-        - key: scoreScale
-          sortable: true
-      defaultSort:
-        key: assessedAt
-        direction: desc
-      rowLink:
-        en: /condition-assessments/:id
-        nl: /conditiemetingen/:id
-    detail:
-      header:
-        title: "{{assessedAt}}"
-        subtitle: "{{score}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Assessment details
-                nl: Beoordelingsgegevens
-              fields:
-                - assessedAt
-                - score
-                - scoreScale
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create condition assessment
-            nl: Conditiemeting aanmaken
-          groups:
-            - title:
-                en: Assessment details
-                nl: Beoordelingsgegevens
-              fields:
-                - assessedAt
-                - score
-                - scoreScale
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit condition assessment
-            nl: Conditiemeting bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -247,3 +127,198 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Condition Assessment
+    description: List ConditionAssessment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Condition Assessment
+    description: Get ConditionAssessment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Condition Assessment
+    description: Create ConditionAssessment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ConditionAssessment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /condition-assessments
+          nl: /conditiemetingen
+        columns:
+          - key: assessedAt
+            sortable: true
+          - key: score
+            sortable: true
+          - key: scoreScale
+            sortable: true
+        title:
+          en: Condition assessments
+          nl: Conditiemetingen
+        defaultSort:
+          key: assessedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /condition-assessments/:id
+            nl: /conditiemetingen/:id
+          create:
+            en: /condition-assessments/create
+            nl: /conditiemetingen/aanmaken
+        title: "{{assessedAt}}"
+        subtitle: "{{score}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Assessment details
+                    nl: Beoordelingsgegevens
+                  fields:
+                    - assessedAt
+                    - score
+                    - scoreScale
+                - title:
+                    en: Notes
+                    nl: Notities
+                  fields:
+                    - notes
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create condition assessment
+              nl: Conditiemeting aanmaken
+            groups:
+              - title:
+                  en: Assessment details
+                  nl: Beoordelingsgegevens
+                fields:
+                  - assessedAt
+                  - score
+                  - scoreScale
+              - title:
+                  en: Notes
+                  nl: Notities
+                fields:
+                  - notes
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit condition assessment
+              nl: Conditiemeting bewerken
+    fields:
+      assessedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      scoreScale:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ASSESSMENTSCALE
+            clearable: true
+      notes:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

@@ -198,6 +198,7 @@ export type WebRelationshipProjection = {
   sortable?: boolean;
   positionColumn?: string;
   via?: string;
+  through?: { field: string; column: string; target: string };
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   constraints?: WebRelationshipConstraints;
@@ -240,6 +241,7 @@ export type WebRecordView = {
   /** Authored form layout retained even when standalone create is unavailable. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
+  badges?: string[];
   layout: {
     tabs: WebRecordTab[];
     context: { groups: WebFieldGroup[]; relationships: string[] };

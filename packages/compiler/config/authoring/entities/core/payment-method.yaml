@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PaymentMethod
@@ -28,11 +28,10 @@ fields:
     persisted:
       column: code
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PAYMENTMETHODCODE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PAYMENTMETHODCODE
+    semanticType: referenceDataCode
   - key: name
     valueType: string
     required: true
@@ -86,123 +85,6 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-ui:
-  routes:
-    list:
-      en: /payment-methods
-      nl: /betaalwijzen
-    detail:
-      en: /payment-methods/:id
-      nl: /betaalwijzen/:id
-    create:
-      en: /payment-methods/create
-      nl: /betaalwijzen/aanmaken
-    edit:
-      en: /payment-methods/:id/edit
-      nl: /betaalwijzen/:id/bewerken
-    delete:
-      en: /payment-methods/:id/delete
-      nl: /betaalwijzen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Payment methods
-        nl: Betaalwijzen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: requiresIban
-          sortable: true
-        - key: requiresMandate
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /payment-methods/:id
-        nl: /betaalwijzen/:id
-    detail:
-      header:
-        title: "{{name}}"
-        subtitle: "{{code}}"
-        badges:
-          - code
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Payment method details
-                nl: Betaalwijzegegevens
-              fields:
-                - code
-                - name
-                - requiresIban
-                - requiresMandate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create payment method
-            nl: Betaalwijze aanmaken
-          groups:
-            - title:
-                en: Payment method details
-                nl: Betaalwijzegegevens
-              fields:
-                - code
-                - name
-                - requiresIban
-                - requiresMandate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit payment method
-            nl: Betaalwijze bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
 authorization:
   roles:
     read:
@@ -217,3 +99,184 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Payment Method
+    description: List PaymentMethod records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Payment Method
+    description: Get PaymentMethod records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Payment Method
+    description: Create PaymentMethod records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update PaymentMethod records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /payment-methods
+          nl: /betaalwijzen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: requiresIban
+            sortable: true
+          - key: requiresMandate
+            sortable: true
+        title:
+          en: Payment methods
+          nl: Betaalwijzen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /payment-methods/:id
+            nl: /betaalwijzen/:id
+          create:
+            en: /payment-methods/create
+            nl: /betaalwijzen/aanmaken
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - code
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Payment method details
+                    nl: Betaalwijzegegevens
+                  fields:
+                    - code
+                    - name
+                    - requiresIban
+                    - requiresMandate
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create payment method
+              nl: Betaalwijze aanmaken
+            groups:
+              - title:
+                  en: Payment method details
+                  nl: Betaalwijzegegevens
+                fields:
+                  - code
+                  - name
+                  - requiresIban
+                  - requiresMandate
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit payment method
+              nl: Betaalwijze bewerken
+    fields:
+      code:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PAYMENTMETHODCODE
+            clearable: false

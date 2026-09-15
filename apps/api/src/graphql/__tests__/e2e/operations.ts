@@ -34,6 +34,7 @@ export type MutationIntent = "update" | "delete";
 export type MutationControls = {
   expectedVersion?: string;
   leaseToken?: string;
+  confirmed?: boolean;
   confirmationToken?: string;
   confirmationAnswer?: string;
 };
@@ -81,6 +82,13 @@ export function leaseRequired(table: GeneratedTable, intent: MutationIntent): bo
   return operationContractFor(table, intent)?.concurrency?.editLease !== undefined;
 }
 
+export function acknowledgementRequired(
+  table: GeneratedTable,
+  intent: MutationIntent,
+): boolean {
+  return operationContractFor(table, intent)?.interaction.confirmation.mode === "acknowledgement";
+}
+
 /** The field a `type-current-field` challenge asks the caller to retype, if any. */
 export function challengeFieldFor(
   table: GeneratedTable,
@@ -110,6 +118,9 @@ export function challengeAnswerFor(
       `${operationIdFor(table, intent)} challenge field ${field} is empty on the record.`,
     );
   }
+  if (typeof value === "object" && !Array.isArray(value) && "id" in value) {
+    return String((value as { id: unknown }).id);
+  }
   return String(value);
 }
 
@@ -128,6 +139,7 @@ export function placeholderControls(
       ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
       : {}),
     ...(leaseRequired(table, intent) ? { leaseToken: "e2e-placeholder-lease" } : {}),
+    ...(acknowledgementRequired(table, intent) ? { confirmed: true } : {}),
   };
 }
 

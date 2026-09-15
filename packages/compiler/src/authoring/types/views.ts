@@ -21,6 +21,7 @@ export interface Relationship {
 
 export interface ListColumn {
   key: string;
+  label?: LocalizedText;
   sortable?: boolean;
 }
 

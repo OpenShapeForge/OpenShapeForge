@@ -32,6 +32,7 @@ import {
   untrackRow,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import {
+  acknowledgementRequired,
   challengeAnswerFor,
   isCanonical,
   isEntityBackedCreate,
@@ -339,7 +340,13 @@ async function createMcpRow(
   overrides: Record<string, unknown> = {},
   depth = 0,
 ): Promise<string> {
-  if (!isCanonical(table)) return createRow(table, identity, overrides, depth);
+  // A relationship exposed by an MCP entity may target a readable entity
+  // that intentionally has no MCP mutation projection of its own. Seed that
+  // dependency through the shared database fixture instead of inventing a
+  // tool the catalog does not advertise.
+  if (!table.source?.mcp || !isCanonical(table)) {
+    return createRow(table, identity, overrides, depth);
+  }
   const created = await callTool(
     identity,
     toolNameFor(table, "create"),
@@ -775,6 +782,9 @@ describe("generated MCP server", () => {
     expect(resource.fields).toHaveLength(source!.fields.length);
     expect(resource).not.toHaveProperty("jsonSchema");
     expect(resource.operations.length).toBeGreaterThan(0);
+    const storageRelationships = tables.find(
+      (table) => table.source?.authoringEntityName === source!.entity,
+    )?.source?.graphql?.relationships ?? [];
     expect(resource.relationships).toEqual(
       source!.relationships
         .filter((relationship) =>
@@ -786,6 +796,9 @@ describe("generated MCP server", () => {
           )!;
           return {
             ...relationship,
+            ...storageRelationships.find(
+              (entry) => entry.fieldKey && entry.name === relationship.key,
+            ),
             resourceUri: `osf://schema/entities/${target.slug}`,
           };
         }),
@@ -941,7 +954,10 @@ describe("generated MCP server", () => {
       }
 
       const lease = await acquireLease(table, tenantA, row, "delete");
-      let deleteControls: Record<string, string> = { ...lease };
+      let deleteControls: Record<string, string | boolean> = {
+        ...lease,
+        ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
+      };
       const first = await call(tenantA, "delete", { id: row.id, ...deleteControls });
       let deleted = first;
       if (toolError(first.body)?.includes("CONFIRMATION_REQUIRED")) {

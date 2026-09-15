@@ -17,6 +17,7 @@ import {
   resolveSessionContext,
   SessionAuthenticationUnavailableError,
 } from "../auth/identity.js";
+import { usesHostOrganizationContext } from "../config/host-organization.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { GraphqlContext } from "../graphql/context.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -1625,9 +1626,18 @@ export function registerRuntimeOperationRestRoutes(
     // credential stays on the tenant path. A control token that does not
     // verify gets the same 401 as any other stranger.
     const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
-    const controlSession = control && bearerIssuerOf(headers) === control.operator.issuer
-      ? await resolveControlSession(headers, control).catch(() => undefined)
-      : undefined;
+    let controlSession: TrustedSessionContext | undefined;
+    if (control && bearerIssuerOf(headers) === control.operator.issuer) {
+      try {
+        controlSession = await resolveControlSession(headers, control);
+      } catch (error) {
+        // Only host-organization mode deliberately gives control and tenant
+        // credentials one issuer. In a separate-realm deployment this token
+        // was unambiguously routed to the control verifier, so preserve its
+        // refusal instead of retrying it against an unrelated tenant realm.
+        if (!usesHostOrganizationContext()) throw controlSessionHttpError(error);
+      }
+    }
     // Host-organization deployments intentionally use one issuer for both
     // control and tenant tokens. A same-issuer token that is not a control
     // credential must therefore still get the ordinary tenant verifier; the

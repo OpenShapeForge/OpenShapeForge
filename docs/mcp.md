@@ -226,12 +226,14 @@ another path is `403`.
 ### The platform administrator resource
 
 `/api/control/mcp` is a different server on the same transport plumbing: the
-control plane's MCP for a platform administrator, who has no tenant. It
+control plane's MCP for a control-realm user, who has no tenant. It
 authenticates against the **control** realm (its metadata document names that
-realm as authorization server), requires the realm role `platform_admin`, and
-offers a deliberately bounded set of tools for tenant inventory, integration
-catalog administration, update notices, first-administrator bootstrap and the
-safe platform audit projection. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
+realm as authorization server), requires `platform_admin` or
+`platform-operator`, and exposes only the Operations allowed by the user's
+roles. `platform-operator` owns tenant lifecycle, organization changes and
+reconciliation; `platform_admin` owns catalog administration, update notices
+and audit; both can inspect shared platform state. See
+[api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
 
 ## Tool surface
 

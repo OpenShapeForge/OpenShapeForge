@@ -210,6 +210,24 @@ describe("canonical entity operations", () => {
       interaction: { confirmation: remove.confirmation },
     });
 
+    const implementation = remove.implementation;
+    if (implementation.type !== "plugin") throw new Error("Expected plugin implementation");
+    delete implementation.action;
+    source.crud.operations.delete = false;
+    remove.effects.data = "write";
+    remove.auth = { mode: "session", roleGroups: [["Relations.Delete"], ["Relations.Read"]] };
+    remove.tenancy = { mode: "required" };
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    remove.auth.roleGroups![1] = ["Relations.Hidden"];
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /operation role\(s\) that cannot read it: "Relations.Hidden"/,
+    );
+    implementation.action = "delete";
+    source.crud.operations.delete = true;
+    delete remove.auth;
+    delete remove.tenancy;
+    remove.effects.data = "delete";
+
     remove.effects.data = "write";
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must declare delete data effects/,

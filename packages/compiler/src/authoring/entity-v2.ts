@@ -622,7 +622,11 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       }
       const operationRoles: string[] | undefined = action
         ? entity.authorization?.roles[action as "update" | "delete"] ?? []
-        : operation.auth?.mode === "session" ? operation.auth.roles : [];
+        : operation.auth?.mode === "session"
+          ? operation.auth.roles === undefined && operation.auth.roleGroups === undefined
+            ? undefined
+            : [...new Set([...(operation.auth.roles ?? []), ...(operation.auth.roleGroups?.flat() ?? [])])]
+          : [];
       const entityReadRoles = entity.authorization?.roles.read ?? [];
       const fieldReadRoles = challengeField.authorization?.roles.read ?? [];
       const effectiveReadRoles = fieldReadRoles.length > 0

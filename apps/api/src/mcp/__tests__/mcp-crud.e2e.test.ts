@@ -361,10 +361,10 @@ async function createArgs(
 /** The property schemas one entity's create advertises, keyed by property name. */
 function createSchemaProperties(
   table: McpTable,
-): Record<string, { enum?: unknown[]; maxLength?: number }> {
+): Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> {
   const tool = catalogTool(table, "create");
   return (
-    (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; maxLength?: number }> })
+    (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> })
       .properties ?? {}
   );
 }
@@ -376,14 +376,21 @@ function createSchemaProperties(
  */
 function schemaSample(
   column: (typeof tables)[number]["columns"][number],
-  schema: { enum?: unknown[]; maxLength?: number } | undefined,
+  schema: { enum?: unknown[]; maxLength?: number; pattern?: string } | undefined,
   marker: string,
 ): unknown {
   if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
-  const sample = sampleValue(column, marker);
-  return typeof sample === "string" && schema?.maxLength !== undefined
-    ? sample.slice(0, schema.maxLength)
-    : sample;
+  const rawSample = sampleValue(column, marker);
+  if (typeof rawSample !== "string") return rawSample;
+  let sample: string = rawSample;
+  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
+    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
+    if (!new RegExp(schema.pattern).test(identifier)) {
+      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
+    }
+    sample = identifier;
+  }
+  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
 }
 
 /** Sample create arguments: required scalars plus real rows for required FKs.
@@ -985,14 +992,17 @@ describe("generated MCP server", () => {
     if (isEntityBackedCreate(table)) {
       test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
         // The schema says additionalProperties:false; the server must agree.
-        const { body } = await call(tenantA, "create", { definitelyNotAField: "x" });
+        const valid = await createArgs(table, tenantA);
+        const { body } = await call(tenantA, "create", { ...valid, definitelyNotAField: "x" });
         expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
         expect(toolError(body)).toMatch(/definitelyNotAField/);
       });
 
       test(`${prefix}: rejects a server-managed field on create`, async () => {
         // Silently dropping `id` would let a model believe it chose the id.
+        const valid = await createArgs(table, tenantA);
         const { body } = await call(tenantA, "create", {
+          ...valid,
           id: "00000000-0000-0000-0000-000000000001",
         });
         expect(toolError(body)).toMatch(/BAD_USER_INPUT/);

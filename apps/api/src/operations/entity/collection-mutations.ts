@@ -126,12 +126,19 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       insertValues = { ...request.values, [fieldNameForColumn(foreignKey!)]: request.id };
       // Validate the authored create values, with only the inverse injected by the server.
       const schema = (createOp.inputSchema?.properties as Record<string, unknown> | undefined)?.values;
-      if (!schema || typeof schema !== "object") unsupported("An authored child create-values schema is required.");
+      if (!schema || typeof schema !== "object" || Array.isArray(schema)) unsupported("An authored child create-values schema is required.");
+      const objectSchema = schema as Record<string, unknown>;
       let valid;
       try {
         // $ref values are rooted in the authored operation, not its values
         // subtree. Preserve the bundled definitions when validating that part.
-        valid = ajv.compile({ ...schema, ...(createOp.inputSchema?.$defs ? { $defs: createOp.inputSchema.$defs } : {}) })(insertValues);
+        const definitions = createOp.inputSchema?.$defs;
+        valid = ajv.compile({
+          ...objectSchema,
+          ...(definitions && typeof definitions === "object" && !Array.isArray(definitions)
+            ? { $defs: definitions }
+            : {}),
+        })(insertValues);
       } catch { unsupported("The child create-values schema cannot be validated safely."); }
       if (!valid) invalid("Child values do not satisfy the authored create schema.");
     }

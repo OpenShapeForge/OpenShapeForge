@@ -63,6 +63,15 @@ export function readMigrateDatabaseUrl(env: NodeJS.ProcessEnv = process.env): st
   return databaseUrl;
 }
 
+/**
+ * The CLUSTER ADMINISTRATOR connection used only for role provisioning and
+ * explicit password rotation. An absent or empty value deliberately falls
+ * back to the migrate connection for legacy single-privileged-role hosts.
+ */
+export function readAdminDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return env.OPENSHAPEFORGE_ADMIN_DATABASE_URL?.trim() || readMigrateDatabaseUrl(env);
+}
+
 export function createDatabaseRuntime(
   options: DatabaseRuntimeOptions = {},
 ): DatabaseRuntime {

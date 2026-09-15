@@ -121,23 +121,24 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
 export type ProvisionOptions = {
   /** Password per login role, keyed by contract key. Required for login roles that do not exist yet. */
   passwords: Partial<Record<DatabaseRoleContract["key"], string>>;
+  /** Existing login roles whose passwords must be rotated explicitly. */
+  rotatePasswords?: Partial<Record<DatabaseRoleContract["key"], boolean>>;
   /** The migrate role that must become a member of the definer roles. */
   migratorRole?: string;
 };
 
-export type ProvisionResult = { created: string[]; granted: string[]; unchanged: string[] };
+export type ProvisionResult = { created: string[]; rotated: string[]; granted: string[]; unchanged: string[] };
 
 /**
  * Satisfy the contract as an ADMINISTRATOR connection (CREATEROLE). Idempotent:
- * existing roles are left untouched — attributes and passwords are the
- * operator's, never silently rewritten — and memberships are granted only
- * when missing.
+ * existing roles are left untouched unless their password is explicitly
+ * selected for rotation, and memberships are granted only when missing.
  */
 export async function provisionDatabaseRoles(
   admin: OpenShapeForgeDatabase,
   options: ProvisionOptions,
 ): Promise<ProvisionResult> {
-  const result: ProvisionResult = { created: [], granted: [], unchanged: [] };
+  const result: ProvisionResult = { created: [], rotated: [], granted: [], unchanged: [] };
   const before = await readRoles(admin);
   for (const role of DATABASE_ROLES) {
     const name = identifier(role.name);
@@ -164,6 +165,13 @@ export async function provisionDatabaseRoles(
         `.execute(admin);
       }
       result.created.push(role.name);
+    } else if (role.login && options.rotatePasswords?.[role.key]) {
+      const password = options.passwords[role.key];
+      if (!password) {
+        throw new Error(`A password is required to rotate login role ${role.name} (${role.key}).`);
+      }
+      await sql`alter role ${sql.ref(name)} login password ${sql.lit(password)}`.execute(admin);
+      result.rotated.push(role.name);
     } else {
       result.unchanged.push(role.name);
     }

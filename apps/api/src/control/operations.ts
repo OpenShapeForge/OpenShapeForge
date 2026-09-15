@@ -44,6 +44,7 @@ import {
   FirstAdministratorError,
   inviteFirstTenantAdministrator,
 } from "./first-tenant-administrator.js";
+import { manageTenantInvitations } from "./tenant-invitations.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import { KeycloakSpiError } from "./keycloak-spi-client.js";
 import { listOrgUnits, parseOrgUnitUpdate, updateOrgUnit } from "./org-unit-registry.js";
@@ -251,6 +252,54 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
         correlationId: context.correlationId,
       },
       { slug: requireSlug(input, "slug"), email: String(input.email ?? "") },
+    ),
+  listTenantInvitations: (input, context) =>
+    manageTenantInvitations(
+      {
+        db: context.db,
+        administrator: context.session.administrator,
+        ...(context.runtime.clients
+          ? { firstAdministrator: context.runtime.clients.firstAdministrator }
+          : {}),
+        log: context.log,
+        correlationId: context.correlationId,
+      },
+      "list",
+      { slug: requireSlug(input, "slug") },
+    ),
+  revokeTenantInvitation: (input, context) =>
+    manageTenantInvitations(
+      {
+        db: context.db,
+        administrator: context.session.administrator,
+        ...(context.runtime.clients
+          ? { firstAdministrator: context.runtime.clients.firstAdministrator }
+          : {}),
+        log: context.log,
+        correlationId: context.correlationId,
+      },
+      "revoke",
+      {
+        slug: requireSlug(input, "slug"),
+        invitationId: String(input.invitationId ?? ""),
+      },
+    ),
+  resendTenantInvitation: (input, context) =>
+    manageTenantInvitations(
+      {
+        db: context.db,
+        administrator: context.session.administrator,
+        ...(context.runtime.clients
+          ? { firstAdministrator: context.runtime.clients.firstAdministrator }
+          : {}),
+        log: context.log,
+        correlationId: context.correlationId,
+      },
+      "resend",
+      {
+        slug: requireSlug(input, "slug"),
+        invitationId: String(input.invitationId ?? ""),
+      },
     ),
   getTenantOrganizationTree: (input, context) =>
     listOrgUnits(controlDeps(context), requireSlug(input, "slug")),

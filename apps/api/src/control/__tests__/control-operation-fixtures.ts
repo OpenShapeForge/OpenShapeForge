@@ -138,6 +138,27 @@ const AUTHORED: readonly Authored[] = [
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/first-administrator", status: 200 }, mcp: "invite_first_tenant_admin",
   },
   {
+    id: "control.list-tenant-invitations", handler: "listTenantInvitations", title: "List tenant invitations",
+    description: "Lists outstanding invitations and unresolved pending role assignments for one tenant without returning invitation links.",
+    roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug }, required: ["slug"] },
+    rest: { method: "GET", path: "/api/control/v1/tenants/:slug/invitations", status: 200 }, mcp: "list_tenant_invitations",
+  },
+  {
+    id: "control.revoke-tenant-invitation", handler: "revokeTenantInvitation", title: "Revoke tenant invitation",
+    description: "Revokes an outstanding invitation and its pending role assignment without removing an accepted member.",
+    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    input: { properties: { slug, invitationId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" } }, required: ["slug", "invitationId"] },
+    rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations/:invitationId/revoke", status: 200 }, mcp: "revoke_tenant_invitation",
+  },
+  {
+    id: "control.resend-tenant-invitation", handler: "resendTenantInvitation", title: "Resend tenant invitation",
+    description: "Explicitly resends an outstanding invitation while preserving its recipient and pending role.",
+    roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "none", acknowledgement: true,
+    input: { properties: { slug, invitationId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" } }, required: ["slug", "invitationId"] },
+    rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations/:invitationId/resend", status: 200 }, mcp: "resend_tenant_invitation",
+  },
+  {
     id: "control.get-tenant-organization-tree", handler: "getTenantOrganizationTree", title: "Get organization tree",
     description: "The complete bounded sub-organization tree of ONE tenant beneath its Keycloak Organization, with the opaque org-unit ids used to create or move children. Never returns members or credentials.",
     roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",

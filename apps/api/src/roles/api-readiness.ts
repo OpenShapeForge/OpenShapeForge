@@ -15,9 +15,6 @@ import {
 } from "../db/schema-drift.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { ModuleRegistry } from "../modules/registry.js";
-import { createVersionedMigrationLedgerVerifier } from "../db/migrations/versioned-runner.js";
-import { versionedMigrations } from "../db/migrations/versioned/index.js";
-import { createPluginMigrationLedgerVerifier } from "../db/migrations/generated-plugin-migrations.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 const READINESS_CHECK_NAME = /^[a-z][a-z0-9_]*$/;
@@ -27,13 +24,14 @@ const CORE_READINESS_CHECK_NAMES = [
   "runtime_modules",
 ] as const;
 
+/**
+ * The schema dependency has one question in the reset model — was this
+ * database built from the bundled manifest? — so these are the only codes
+ * the schema check can raise.
+ */
 export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_BEHIND",
   "GENERATED_SCHEMA_UNMIGRATED",
-  "VERSIONED_LEDGER_MISMATCH",
-  "VERSIONED_LEDGER_MISSING",
-  "PLUGIN_MIGRATION_LEDGER_MISMATCH",
-  "PLUGIN_MIGRATION_LEDGER_MISSING",
 ]);
 
 function readinessError(code: string): Error {
@@ -197,9 +195,6 @@ export function createApiReadinessChecks(
   modules: ModuleRegistry,
   baseChecks?: readonly ReadinessCheck[],
 ): ReadinessCheck[] {
-  const verifyVersionedLedger =
-    createVersionedMigrationLedgerVerifier(versionedMigrations);
-  const verifyPluginLedger = createPluginMigrationLedgerVerifier();
   const checks: ReadinessCheck[] = baseChecks ? [...baseChecks] : [
     {
       name: "database",
@@ -220,22 +215,6 @@ export function createApiReadinessChecks(
             drift.status === "behind"
               ? "GENERATED_SCHEMA_BEHIND"
               : "GENERATED_SCHEMA_UNMIGRATED",
-          );
-        }
-        const versioned = await verifyVersionedLedger(databaseRuntime.db);
-        if (!versioned.ready) {
-          throw readinessError(
-            versioned.mismatched.length > 0
-              ? "VERSIONED_LEDGER_MISMATCH"
-              : "VERSIONED_LEDGER_MISSING",
-          );
-        }
-        const pluginMigrations = await verifyPluginLedger(databaseRuntime.db);
-        if (!pluginMigrations.ready) {
-          throw readinessError(
-            pluginMigrations.mismatched.length > 0
-              ? "PLUGIN_MIGRATION_LEDGER_MISMATCH"
-              : "PLUGIN_MIGRATION_LEDGER_MISSING",
           );
         }
       },

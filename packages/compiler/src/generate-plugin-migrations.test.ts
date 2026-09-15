@@ -294,29 +294,6 @@ describe("plugin schema migrations", () => {
       ["cpq-extra", "0001_install-trigger"],
     ]);
   });
-
-  test("binds an explicit pre-generated cutover phase into the immutable registry", () => {
-    const sql = "ALTER TABLE workflow.definitions RENAME TO workflow_definitions;\n";
-    const result = registry([], [{
-      name: "cpq",
-      schemaMigrations: [{
-        version: "0001_move-definition-owner",
-        phase: "beforeGenerated",
-        sql,
-      }],
-    }]);
-
-    expect(result.migrations[0]).toEqual({
-      plugin: "cpq",
-      version: "0001_move-definition-owner",
-      phase: "beforeGenerated",
-      checksum: createHash("sha256").update(`beforeGenerated\0${sql}`).digest("hex"),
-      sql,
-    });
-    expect(result.migrations[0]!.checksum).not.toBe(
-      createHash("sha256").update(sql).digest("hex"),
-    );
-  });
 });
 
 describe("composite column-level keys", () => {

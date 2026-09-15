@@ -497,7 +497,7 @@ export type ManifestSchemaDiff = {
  *
  * `tables` defaults to the bundled manifest; it is a parameter so the drift
  * classification can be exercised against a purpose-built schema in tests
- * (same reason MigrationChainOptions.versioned exists). Production callers
+ * (same reason MigrationChainOptions.pluginMigrations exists). Production callers
  * never pass it.
  */
 export async function diffManifestAgainstDatabase(

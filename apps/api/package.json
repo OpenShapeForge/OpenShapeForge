@@ -10,7 +10,6 @@
     "db:migrate": "bun src/db/migrate.ts",
     "db:reset": "bun src/db/reset.ts",
     "db:provision-roles": "bun src/db/provision-roles.ts",
-    "db:migration:new": "bun src/db/migrations/new-migration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "bun test src/graphql/__tests__ src/rest/__tests__ src/mcp/__tests__",
     "test:migrations": "bun test src/db"

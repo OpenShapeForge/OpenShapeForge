@@ -47,8 +47,8 @@ docker run --rm -p 3001:3001 \
   -e OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=... \
   ghcr.io/openshapeforge/openshapeforge-api:0.1.0
 
-# Migrate (privileged role; provisions the restricted app role, rolls the
-# generated schema forward, applies versioned migrations)
+# Migrate (privileged role; builds an empty database from the compiled
+# manifest, rolls a built one forward additively, re-applies the invariants)
 docker run --rm \
   -e OPENSHAPEFORGE_MIGRATE_DATABASE_URL=postgres://openshapeforge:...@host:5432/openshapeforge \
   ghcr.io/openshapeforge/openshapeforge-api:0.1.0 \
@@ -320,8 +320,9 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
 
 - Bring your own Postgres and Keycloak; point the chart at them.
 - The migration Job is a Helm hook — on `helm upgrade` it runs before the new
-  pods roll. Additive schema changes roll forward automatically; non-additive
-  changes require a versioned migration (see `../docs/migrations.md`).
+  pods roll. Additive schema changes roll forward automatically; a
+  non-additive change means rebuilding the database from the manifest
+  (`bun run db:reset`, see `../docs/migrations.md`).
 - **Upgrading past the worker role (#223) needs one new value.**
   `database.workerPassword` is required whenever the chart manages the Secret,
   even on an install that runs no worker: the emitted RLS policies name

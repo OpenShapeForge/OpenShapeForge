@@ -258,7 +258,8 @@ tables:
       - { name: tenant_id, type: uuid, required: true }
       # Nullable → roots. Self-referential FK to platform.org_unit(id); RESTRICT
       # so a parent cannot be deleted while children reference it (the closure
-      # trigger relies on reparent/remove-first — see the versioned migration).
+      # trigger relies on reparent/remove-first — see
+      # apps/api/src/db/migrations/core-invariants.ts).
       - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
       - { name: name, type: text, required: true }
       # This unit's segment of the Keycloak Organization path: the SPI's
@@ -302,8 +303,9 @@ tables:
         unique: true
         where: '"keycloak_organization_id" IS NOT NULL'
 
-  # Transitive-closure table maintained by the org_unit trigger (versioned
-  # migration). Self-row (u,u,0) per unit; (a,d,k) for every ancestor a of d at
+  # Transitive-closure table maintained by the org_unit trigger (a core
+  # invariant, apps/api/src/db/migrations/core-invariants.ts). Self-row (u,u,0)
+  # per unit; (a,d,k) for every ancestor a of d at
   # distance k. descendants(x) = SELECT descendant_id WHERE ancestor_id = x;
   # ancestors(x) = SELECT ancestor_id WHERE descendant_id = x.
   - schema: platform

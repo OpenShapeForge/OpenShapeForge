@@ -26,12 +26,39 @@ function assertNames({ table, name }: Constraint): void {
   if (!identifier.test(name)) throw new Error(`Invalid constraint name: ${name}`);
 }
 
-/** The DO block that adds `definition` under `name` unless it already exists. */
-function ensureConstraintSql(constraint: Constraint, definition: string): string {
+/**
+ * The DO block that adds `definition` under `name` unless it already exists.
+ *
+ * With `columns`, a constraint of that name whose key columns differ is
+ * dropped first: the generated schema emits a single-column foreign key
+ * under the same name a core invariant later widens to a tenant-qualified
+ * compound key, and the generated DO block — which guards by name alone —
+ * then leaves the compound one in place on every later apply.
+ */
+function ensureConstraintSql(
+  constraint: Constraint,
+  definition: string,
+  columns?: readonly string[],
+): string {
   assertNames(constraint);
+  const replaceIfColumnsDiffer = columns
+    ? `
+      if exists (
+        select 1 from pg_constraint c
+        where c.conrelid = '${constraint.table}'::regclass
+          and c.conname = '${constraint.name}'
+          and (
+            select array_agg(a.attname::text order by k.ordinality)
+            from unnest(c.conkey) with ordinality as k(attnum, ordinality)
+            join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+          ) <> array[${columns.map((column) => `'${column}'`).join(", ")}]::text[]
+      ) then
+        alter table ${constraint.table} drop constraint ${constraint.name};
+      end if;`
+    : "";
   return `
     do $$
-    begin
+    begin${replaceIfColumnsDiffer}
       if not exists (
         select 1 from pg_constraint
         where conrelid = '${constraint.table}'::regclass
@@ -78,6 +105,7 @@ export async function ensureForeignKey(
       ensureConstraintSql(
         constraint,
         `foreign key (${constraint.columns.join(", ")}) references ${constraint.references.table} (${constraint.references.columns.join(", ")})${actions}`,
+        constraint.columns,
       ),
     )
     .execute(db);

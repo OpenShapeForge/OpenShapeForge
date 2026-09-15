@@ -31,14 +31,6 @@ export function renderMigrationReport(
     checksum: result.checksum,
     applied: result.applied,
     ...(result.rollForward === undefined ? {} : { rollForward: result.rollForward }),
-    ...(result.versionedApplied.length === 0
-      ? {}
-      : { versionedApplied: result.versionedApplied }),
-    // Loud on purpose: reconciling a checksum is a rare, reviewed event
-    // and an operator should see it in the migrate output, not infer it.
-    ...(result.versionedReconciled.length === 0
-      ? {}
-      : { versionedReconciled: result.versionedReconciled }),
     ...(result.pluginMigrationsApplied.length === 0
       ? {}
       : { pluginMigrationsApplied: result.pluginMigrationsApplied }),

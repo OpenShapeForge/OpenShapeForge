@@ -284,7 +284,9 @@ describe("canonical operation runtime", () => {
     const bound = bindOperationHandlers([]);
     const plugins = new Set([...bound.values()].map((entry) => entry.operation.plugin));
     expect(bound.has("workflow.instance.webhook-start")).toBe(false);
-    expect([...plugins].every((plugin) => plugin === "osf-blueprints")).toBe(true);
+    // The two core modules bind without any plugin module present.
+    expect([...plugins].every((plugin) => plugin === "osf-blueprints" || plugin === "osf-control")).toBe(true);
+    expect(bound.has("control.list-tenants")).toBe(true);
     // Once any operation module is present, every plugin operation must bind.
     expect(() => bindOperationHandlers([{ name: "unrelated" }])).not.toThrow();
     expect(bindOperationHandlers([{ name: "unrelated" }]).has("workflow.instance.webhook-start")).toBe(false);

@@ -713,7 +713,7 @@ operations:
             description: Exact audited actor subject.
           action:
             type: string
-            description: Exact action name, such as publishCatalogEntry.
+            description: Exact audited action, the operation key such as control.publish-catalog-entry.
           result:
             type: string
             enum:
@@ -867,8 +867,9 @@ operations:
           authority:
             type: string
             enum:
-            - platform
-            - tenant
+            - platform_release
+            - host
+            - tenant_shared
             description: Who owns changes after publication.
         required:
         - kind

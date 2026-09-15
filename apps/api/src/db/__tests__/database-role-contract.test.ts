@@ -10,7 +10,14 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
-import { DATABASE_ROLES, databaseRole, provisionDatabaseRoles, renderProvisioningSql, verifyDatabaseRoles } from "../database-roles.js";
+import {
+  DATABASE_ROLES,
+  databaseRole,
+  provisionDatabaseRoles,
+  renderProvisioningSql,
+  verifyDatabaseRoles,
+  type DatabaseRoleContract,
+} from "../database-roles.js";
 import { runMigrationChain } from "../migration-chain.js";
 
 const ADMIN_URL =
@@ -141,6 +148,44 @@ describe("database role contract", () => {
           migratorRole,
         }),
       );
+    }
+  }, TEST_TIMEOUT);
+
+  test("repairs a PostgreSQL 16+ CREATEROLE self-grant into usable membership", async () => {
+    const creatorRole = `osf_contract_creator_${suffix}`;
+    const childRole = `osf_contract_child_${suffix}`;
+    const creatorPassword = `creator-${suffix}`;
+    const contracts = DATABASE_ROLES as DatabaseRoleContract[];
+    const originalContracts = [...contracts];
+    let creator: DatabaseRuntime | undefined;
+    try {
+      await admin.unsafe(`
+        create role ${creatorRole} login password '${creatorPassword}'
+          createrole nosuperuser nocreatedb nobypassrls;
+      `);
+      creator = createDatabaseRuntime({
+        databaseUrl: url(creatorRole, creatorPassword),
+        maxConnections: 1,
+      });
+      contracts.splice(0, contracts.length, {
+        key: "blueprintReader",
+        name: childRole,
+        login: false,
+        migratorMember: true,
+        purpose: "exercise PostgreSQL CREATEROLE self-grant semantics",
+      });
+
+      const provisioned = await creator.db.connection().execute((db) =>
+        provisionDatabaseRoles(db, { passwords: {}, migratorRole: creatorRole }),
+      );
+      expect(provisioned.created).toEqual([childRole]);
+      expect(provisioned.granted).toEqual([`${childRole} -> ${creatorRole}`]);
+      await creator.db.connection().execute((db) => verifyDatabaseRoles(db));
+    } finally {
+      contracts.splice(0, contracts.length, ...originalContracts);
+      await creator?.close();
+      await admin.unsafe(`drop role if exists ${childRole}`);
+      await admin.unsafe(`drop role if exists ${creatorRole}`);
     }
   }, TEST_TIMEOUT);
 });

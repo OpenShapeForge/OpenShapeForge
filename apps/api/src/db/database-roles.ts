@@ -75,7 +75,7 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
   if (names.length === 0) return new Map();
   const result = await sql<RoleRow>`
     select rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreaterole,
-      pg_has_role(current_user, rolname, 'MEMBER') as member
+      pg_has_role(current_user, rolname, 'USAGE') as member
     from pg_roles
     where rolname in (${sql.join(names)})
   `.execute(db);
@@ -172,7 +172,7 @@ export async function provisionDatabaseRoles(
     if (role.migratorMember && options.migratorRole) {
       const migrator = identifier(options.migratorRole);
       const membership = await sql<{ member: boolean; superuser: boolean }>`
-        select pg_has_role(${migrator}, ${name}, 'MEMBER') as member,
+        select pg_has_role(${migrator}, ${name}, 'USAGE') as member,
           (select rolsuper from pg_roles where rolname = ${migrator}) as superuser
       `.execute(admin);
       const row = membership.rows[0];

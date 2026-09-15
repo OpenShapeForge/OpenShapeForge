@@ -631,6 +631,7 @@ export interface EntityWebViewDefinition {
     routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
     title: string;
     subtitle?: string;
+    variableSources?: import("./views.js").FormVariableSource[];
     actions?: string[];
     layout: {
       tabs: import("./views.js").ViewGroup[];

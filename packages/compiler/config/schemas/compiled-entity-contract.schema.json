@@ -589,7 +589,7 @@
                   "key": { "type": "string" },
                   "resolver": {
                     "type": "string",
-                    "enum": ["entityFields", "templateParameters", "workflowGraphVariables"]
+                    "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"]
                   },
                   "params": { "type": "object" }
                 }

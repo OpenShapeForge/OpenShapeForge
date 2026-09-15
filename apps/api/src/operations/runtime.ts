@@ -65,12 +65,13 @@ import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
+import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 
 export type OperationContract = {
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
-  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
+  implementation?: { type: "collection"; entityName: string; field: string; action: "insert" | "move" } | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
   intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
@@ -530,7 +531,7 @@ export function operationModulesConfigured(
   modules: readonly Pick<RuntimeModule, "name">[],
   operations: readonly OperationContract[] = catalog.operations,
 ): boolean {
-  if (operations.some((operation) => operation.implementation?.type === "collection")) return true;
+  if (operations.some((operation) => operation.implementation?.type === "collection" || operation.implementation?.type === "entity-type-list")) return true;
   const plugins = new Set(operations.map((operation) => operation.plugin));
   return modules.some((module) => plugins.has(module.name));
 }
@@ -552,6 +553,10 @@ export function bindOperationHandlers(
       throw new Error(
         `Canonical operation id "${operation.key}" is duplicated at runtime.`,
       );
+    }
+    if (operation.implementation?.type === "entity-type-list") {
+      bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
+      continue;
     }
     if (operation.implementation?.type === "collection") {
       bound.set(operation.key, { operation, handler: nativeCollectionHandler(operation) });

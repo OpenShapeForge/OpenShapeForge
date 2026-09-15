@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: VatRate
@@ -40,11 +40,10 @@ fields:
     persisted:
       column: vat_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: VATTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: VATTYPE
+    semanticType: referenceDataCode
   - key: percentage
     valueType: number
     required: true
@@ -72,9 +71,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
     valueType: date
     required: false
@@ -87,9 +83,6 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: description
     valueType: string
     required: false
@@ -104,11 +97,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -123,152 +112,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: costDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: cost_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: costDimensionId
     label:
       en: Cost dimension
       nl: Kostendimensie
-ui:
-  routes:
-    list:
-      en: /vat-rates
-      nl: /btw-tarieven
-    detail:
-      en: /vat-rates/:id
-      nl: /btw-tarieven/:id
-    create:
-      en: /vat-rates/create
-      nl: /btw-tarieven/aanmaken
-    edit:
-      en: /vat-rates/:id/edit
-      nl: /btw-tarieven/:id/bewerken
-    delete:
-      en: /vat-rates/:id/delete
-      nl: /btw-tarieven/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: VAT rates
-        nl: BTW-tarieven
-      columns:
-        - key: code
-          sortable: true
-        - key: vatType
-          sortable: true
-        - key: percentage
-          sortable: true
-        - key: validFrom
-          sortable: true
-        - key: validTo
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /vat-rates/:id
-        nl: /btw-tarieven/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{vatType}}"
-        badges:
-          - vatType
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: VAT rate details
-                nl: BTW-tariefgegevens
-              fields:
-                - code
-                - vatType
-                - percentage
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create VAT rate
-            nl: BTW-tarief aanmaken
-          groups:
-            - title:
-                en: VAT rate details
-                nl: BTW-tariefgegevens
-              fields:
-                - code
-                - vatType
-                - percentage
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit VAT rate
-            nl: BTW-tarief bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -283,3 +146,212 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List VAT Rate
+    description: List VatRate records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get VAT Rate
+    description: Get VatRate records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create VAT Rate
+    description: Create VatRate records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update VatRate records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /vat-rates
+          nl: /btw-tarieven
+        columns:
+          - key: code
+            sortable: true
+          - key: vatType
+            sortable: true
+          - key: percentage
+            sortable: true
+          - key: validFrom
+            sortable: true
+          - key: validTo
+            sortable: true
+        title:
+          en: VAT rates
+          nl: BTW-tarieven
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /vat-rates/:id
+            nl: /btw-tarieven/:id
+          create:
+            en: /vat-rates/create
+            nl: /btw-tarieven/aanmaken
+        title: "{{code}}"
+        subtitle: "{{vatType}}"
+        badges:
+          - vatType
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: VAT rate details
+                    nl: BTW-tariefgegevens
+                  fields:
+                    - code
+                    - vatType
+                    - percentage
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create VAT rate
+              nl: BTW-tarief aanmaken
+            groups:
+              - title:
+                  en: VAT rate details
+                  nl: BTW-tariefgegevens
+                fields:
+                  - code
+                  - vatType
+                  - percentage
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit VAT rate
+              nl: BTW-tarief bewerken
+    fields:
+      vatType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: VATTYPE
+            clearable: false
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

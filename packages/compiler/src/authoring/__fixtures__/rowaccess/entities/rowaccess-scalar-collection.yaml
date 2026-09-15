@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RowaccessScalarCollection
@@ -6,10 +6,10 @@ title: Scalar owner fixture
 language: en
 authorization:
   roles:
-    read: [Records.All.Read]
-    create: [Records.All.Manage]
-    update: [Records.All.Manage]
-    delete: [Records.All.Manage]
+    read: [ Records.All.Read ]
+    create: [ Records.All.Manage ]
+    update: [ Records.All.Manage ]
+    delete: [ Records.All.Manage ]
   rowAccess:
     enabled: true
     empty: restricted
@@ -22,3 +22,76 @@ fields:
     validation: { format: uuid }
     label: { en: Owner }
     persisted: { column: owner_id, storageClass: core }
+operations:
+  list:
+    name: List Scalar owner fixture
+    description: List RowaccessScalarCollection records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Scalar owner fixture
+    description: Get RowaccessScalarCollection records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Scalar owner fixture
+    description: Create RowaccessScalarCollection records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Scalar owner fixture
+    description: Update RowaccessScalarCollection records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Scalar owner fixture
+    description: Delete RowaccessScalarCollection records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

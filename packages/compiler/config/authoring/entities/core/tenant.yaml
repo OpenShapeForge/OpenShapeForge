@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Tenant
@@ -74,11 +74,7 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TENANTSTATUS
-        clearable: false
+    semanticType: referenceDataCode
   - key: tenantKind
     valueType: string
     required: true
@@ -109,11 +105,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: avatarStorageLocation
     valueType: string
     required: false
@@ -128,8 +120,6 @@ fields:
     persisted:
       column: avatar_storage_location
       storageClass: core
-    render:
-      component: FileUpload
   - key: externalCode
     valueType: string
     required: false
@@ -144,129 +134,207 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
   - key: tenantSettings
-    kind: hasMany
-    target: TenantSetting
-    foreignKey: tenant_id
     label:
       en: Tenant settings
       nl: Tenantinstellingen
+    semanticType: TenantSetting
+    cardinality: collection
+    relationship:
+      inverse: tenantId
+      ownership: reference
   - key: organizationPermissions
-    kind: hasMany
-    target: OrganizationPermission
-    foreignKey: target_tenant_id
     label:
       en: Organization permissions
       nl: Organisatierechten
+    semanticType: OrganizationPermission
+    cardinality: collection
+    relationship:
+      inverse: targetTenantId
+      ownership: reference
   - key: userOrganizationPermissions
-    kind: hasMany
-    target: UserOrganizationPermission
-    foreignKey: target_tenant_id
     label:
       en: User organization permissions
       nl: Gebruikersrechten per organisatie
-ui:
-  routes:
-    list:
-      en: /tenants
-      nl: /tenants
-    detail:
-      en: /tenants/:id
-      nl: /tenants/:id
-    create:
-      en: /tenants/create
-      nl: /tenants/aanmaken
-    edit:
-      en: /tenants/:id/edit
-      nl: /tenants/:id/bewerken
-    delete:
-      en: /tenants/:id/delete
-      nl: /tenants/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Tenants
-        nl: Tenants
-      columns:
-        - key: slug
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: slug
-        direction: asc
-      rowLink:
-        en: /tenants/:id
-        nl: /tenants/:id
-    detail:
-      header:
+    semanticType: UserOrganizationPermission
+    cardinality: collection
+    relationship:
+      inverse: targetTenantId
+      ownership: reference
+operations:
+  list:
+    name: List Tenant
+    description: List Tenant records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Tenant
+    description: Get Tenant records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Tenant
+    description: Create Tenant records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Tenant records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: false
+        getOne: false
+        list: false
+        update: false
+        delete: false
+  web:
+    views:
+      collection:
+        route:
+          en: /tenants
+          nl: /tenants
+        columns:
+          - key: slug
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+        title:
+          en: Tenants
+          nl: Tenants
+        defaultSort:
+          key: slug
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /tenants/:id
+            nl: /tenants/:id
+          create:
+            en: /tenants/create
+            nl: /tenants/aanmaken
         title: "{{name}}"
         subtitle: "{{slug}}"
         badges:
           - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Tenant details
-                nl: Tenantgegevens
-              fields:
-                - slug
-                - name
-                - status
-                - description
-                - avatarStorageLocation
-        - id: settings
-          label:
-            en: Settings
-            nl: Instellingen
-          relationship: tenantSettings
-    form:
-      variants:
-        create:
-          title:
-            en: Create tenant
-            nl: Tenant aanmaken
-          groups:
-            - title:
-                en: Tenant details
-                nl: Tenantgegevens
-              fields:
-                - slug
-                - name
-                - status
-                - description
-                - avatarStorageLocation
-        edit:
-          extends: create
-          title:
-            en: Edit tenant
-            nl: Tenant bewerken
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: false
-      list: false
-      update: false
-      delete: false
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Tenant details
+                    nl: Tenantgegevens
+                  fields:
+                    - slug
+                    - name
+                    - status
+                    - description
+                    - avatarStorageLocation
+            - id: settings
+              label:
+                en: Settings
+                nl: Instellingen
+              relationship: tenantSettings
+        modes:
+          create:
+            title:
+              en: Create tenant
+              nl: Tenant aanmaken
+            groups:
+              - title:
+                  en: Tenant details
+                  nl: Tenantgegevens
+                fields:
+                  - slug
+                  - name
+                  - status
+                  - description
+                  - avatarStorageLocation
+          update:
+            title:
+              en: Edit tenant
+              nl: Tenant bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TENANTSTATUS
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+      avatarStorageLocation:
+        render:
+          component: FileUpload

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SurveyQuestion
@@ -60,11 +60,10 @@ fields:
     persisted:
       column: question_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SURVEYQUESTIONKIND
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SURVEYQUESTIONKIND
+    semanticType: referenceDataCode
   - key: description
     valueType: string
     required: false
@@ -79,11 +78,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 4000
+    semanticType: multilineText
   - key: subject
     valueType: string
     required: false
@@ -96,11 +91,10 @@ fields:
     persisted:
       column: subject
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SURVEYQUESTIONSUBJECT
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SURVEYQUESTIONSUBJECT
+    semanticType: referenceDataCode
   - key: origin
     valueType: string
     required: false
@@ -113,11 +107,10 @@ fields:
     persisted:
       column: origin
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SURVEYQUESTIONORIGIN
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SURVEYQUESTIONORIGIN
+    semanticType: referenceDataCode
   - key: sequenceNumber
     valueType: integer
     required: false
@@ -145,7 +138,6 @@ fields:
       column: external_code
       storageClass: core
   - key: surveyId
-    valueType: string
     required: false
     label:
       en: Survey ID
@@ -153,14 +145,18 @@ fields:
     description:
       en: Identifier of the survey this question belongs to.
       nl: Identifier van de vragenlijst waar deze vraag bij hoort.
-    semanticType: surveyId
+    semanticType: Survey
     persisted:
       column: survey_id
       storageClass: core
     validation:
       format: uuid
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: parentQuestionId
-    valueType: string
     required: false
     label:
       en: Parent question ID
@@ -168,50 +164,143 @@ fields:
     description:
       en: Identifier of the parent question for follow-up logic.
       nl: Identifier van de bovenliggende vraag voor vervolgvraag-logica.
-    semanticType: surveyQuestionId
+    semanticType: SurveyQuestion
     persisted:
       column: parent_question_id
       storageClass: core
     validation:
       format: uuid
-relationships:
-  - key: survey
-    kind: belongsTo
-    target: Survey
-    foreignKey: survey_id
-    label:
-      en: Survey
-      nl: Vragenlijst
-  - key: parentQuestion
-    kind: belongsTo
-    target: SurveyQuestion
-    foreignKey: parent_question_id
-    label:
-      en: Parent question
-      nl: Bovenliggende vraag
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: childQuestions
-    kind: hasMany
-    target: SurveyQuestion
-    foreignKey: parent_question_id
     label:
       en: Follow-up questions
       nl: Vervolgvragen
+    semanticType: SurveyQuestion
+    cardinality: collection
+    relationship:
+      inverse: parentQuestionId
+      ownership: reference
   - key: answers
-    kind: hasMany
-    target: SurveyAnswer
-    foreignKey: survey_question_id
     label:
       en: Answers
       nl: Antwoorden
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list:
-        enabled: true
-        defaultSort:
-          field: sequenceNumber
-          direction: asc
-      update: true
-      delete: true
+    semanticType: SurveyAnswer
+    cardinality: collection
+    relationship:
+      inverse: questionId
+      ownership: reference
+operations:
+  list:
+    name: List Survey Question
+    description: List SurveyQuestion records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Survey Question
+    description: Get SurveyQuestion records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Survey Question
+    description: Create SurveyQuestion records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Survey Question
+    description: Update SurveyQuestion records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Survey Question
+    description: Delete SurveyQuestion records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list:
+          enabled: true
+          defaultSort:
+            field: sequenceNumber
+            direction: asc
+        update: true
+        delete: true
+  web:
+    fields:
+      questionKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SURVEYQUESTIONKIND
+            clearable: true
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000
+      subject:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SURVEYQUESTIONSUBJECT
+            clearable: true
+      origin:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SURVEYQUESTIONORIGIN
+            clearable: true

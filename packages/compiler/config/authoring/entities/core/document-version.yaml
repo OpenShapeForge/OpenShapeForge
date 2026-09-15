@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DocumentVersion
@@ -94,28 +94,45 @@ fields:
     required: false
     readOnly: true
     immutable: true
-    label: { en: Artifact, nl: Bestandreferentie }
+    label:
+      en: Artifact
+      nl: Bestandreferentie
     description:
       en: Opaque identity of the storage-managed file bound to this version.
       nl: Ondoorzichtige referentie naar het door opslag beheerde bestand van deze versie.
-    validation: { format: uuid }
-    persisted: { column: artifact_id, storageClass: core }
+    validation:
+      format: uuid
+    persisted:
+      column: artifact_id
+      storageClass: core
   - key: artifactVersion
     valueType: integer
     required: false
     readOnly: true
     immutable: true
-    label: { en: Artifact version, nl: Bestandreferentieversie }
-    validation: { min: 1, max: 9007199254740991 }
-    persisted: { column: artifact_version, storageClass: core }
+    label:
+      en: Artifact version
+      nl: Bestandreferentieversie
+    validation:
+      min: 1
+      max: 9007199254740991
+    persisted:
+      column: artifact_version
+      storageClass: core
   - key: byteSize
     valueType: integer
     required: false
     readOnly: true
     immutable: true
-    label: { en: File size in bytes, nl: Bestandsgrootte in bytes }
-    validation: { min: 0, max: 9007199254740991 }
-    persisted: { column: byte_size, storageClass: core }
+    label:
+      en: File size in bytes
+      nl: Bestandsgrootte in bytes
+    validation:
+      min: 0
+      max: 9007199254740991
+    persisted:
+      column: byte_size
+      storageClass: core
   - key: mimeType
     valueType: string
     required: false
@@ -177,7 +194,6 @@ fields:
       column: change_summary
       storageClass: core
   - key: documentId
-    valueType: string
     required: true
     readOnly: true
     immutable: true
@@ -187,27 +203,27 @@ fields:
     description:
       en: Immutable identifier of the document that owns this version.
       nl: Onveranderlijke identifier van het document waartoe deze versie behoort.
-    semanticType: documentId
+    semanticType: Document
     validation:
       format: uuid
     persisted:
       column: document_id
       storageClass: core
-relationships:
-  - key: document
-    kind: belongsTo
-    target: Document
-    foreignKey: document_id
-    label:
-      en: Document
-      nl: Document
-  - key: account
-    kind: belongsTo
-    target: Account
-    foreignKey: account_id
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
+  - key: accountId
     label:
       en: Account
       nl: Account
+    persisted:
+      column: account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List document versions, nl: Documentversies tonen }
@@ -363,21 +379,21 @@ interfaces:
         subtitle: "{{status}}"
         layout:
           context:
-            fields: [isMajorVersion, createdBy, mimeType, byteSize]
-            relationships: [document, account]
+            fields: [ isMajorVersion, createdBy, mimeType, byteSize ]
+            relationships: [ documentId, accountId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Version, nl: Versie }
-                  fields: [versionLabel, status, isMajorVersion, createdBy, changeSummary]
+                  fields: [ versionLabel, status, isMajorVersion, createdBy, changeSummary ]
                 - title: { en: File, nl: Bestand }
-                  fields: [fileName, mimeType, byteSize]
+                  fields: [ fileName, mimeType, byteSize ]
                 - title: { en: File integrity, nl: Bestandsintegriteit }
-                  fields: [checksum]
+                  fields: [ checksum ]
         modes:
           create:
             title: { en: Add document version, nl: Documentversie toevoegen }
             groups:
               - title: { en: Version, nl: Versie }
-                fields: [versionLabel, status, changeSummary]
+                fields: [ versionLabel, status, changeSummary ]

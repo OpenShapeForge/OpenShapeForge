@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProjectBudgetLine
@@ -41,11 +41,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: amount
     valueType: number
     required: true
@@ -59,128 +55,46 @@ fields:
     persisted:
       column: amount
       storageClass: core
-relationships:
-  - key: project
-    kind: belongsTo
-    target: Project
-    foreignKey: project_id
+  - key: projectId
     label:
       en: Project
       nl: Project
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+    persisted:
+      column: project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    semanticType: FiscalPeriod
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: costDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: cost_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: costDimensionId
     label:
       en: Cost dimension
       nl: Kostendimensie
-ui:
-  routes:
-    list:
-      en: /project-budget-lines
-      nl: /projectbudgetregels
-    detail:
-      en: /project-budget-lines/:id
-      nl: /projectbudgetregels/:id
-    create:
-      en: /project-budget-lines/create
-      nl: /projectbudgetregels/aanmaken
-    edit:
-      en: /project-budget-lines/:id/edit
-      nl: /projectbudgetregels/:id/bewerken
-    delete:
-      en: /project-budget-lines/:id/delete
-      nl: /projectbudgetregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Project budget lines
-        nl: Projectbudgetregels
-      columns:
-        - key: lineNumber
-          sortable: true
-        - key: description
-          sortable: true
-        - key: amount
-          sortable: true
-      defaultSort:
-        key: lineNumber
-        direction: asc
-      rowLink:
-        en: /project-budget-lines/:id
-        nl: /projectbudgetregels/:id
-    detail:
-      header:
-        title: "{{description}}"
-        subtitle: "{{amount}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - amount
-    form:
-      variants:
-        create:
-          title:
-            en: Create project budget line
-            nl: Projectbudgetregel aanmaken
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - amount
-        edit:
-          extends: create
-          title:
-            en: Edit project budget line
-            nl: Projectbudgetregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: cost_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -195,3 +109,160 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project Budget Line
+    description: List ProjectBudgetLine records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project Budget Line
+    description: Get ProjectBudgetLine records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project Budget Line
+    description: Create ProjectBudgetLine records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ProjectBudgetLine records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /project-budget-lines
+          nl: /projectbudgetregels
+        columns:
+          - key: lineNumber
+            sortable: true
+          - key: description
+            sortable: true
+          - key: amount
+            sortable: true
+        title:
+          en: Project budget lines
+          nl: Projectbudgetregels
+        defaultSort:
+          key: lineNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /project-budget-lines/:id
+            nl: /projectbudgetregels/:id
+          create:
+            en: /project-budget-lines/create
+            nl: /projectbudgetregels/aanmaken
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Line details
+                    nl: Regelgegevens
+                  fields:
+                    - lineNumber
+                    - description
+                    - amount
+        modes:
+          create:
+            title:
+              en: Create project budget line
+              nl: Projectbudgetregel aanmaken
+            groups:
+              - title:
+                  en: Line details
+                  nl: Regelgegevens
+                fields:
+                  - lineNumber
+                  - description
+                  - amount
+          update:
+            title:
+              en: Edit project budget line
+              nl: Projectbudgetregel bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

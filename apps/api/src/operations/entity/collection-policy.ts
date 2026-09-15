@@ -10,7 +10,9 @@ export function collectionManagedFields(table: GeneratedCrudTable, tables: reado
   }
   for (const owner of tables) {
     for (const relationship of owner.source?.graphql?.relationships ?? []) {
-      if (!relationship.fieldKey || relationship.resolve === "belongsTo" || relationship.target !== table.source?.graphql?.typeName || relationship.via) continue;
+      if (!relationship.fieldKey || relationship.resolve === "belongsTo" ||
+        relationship.target !== table.source?.graphql?.typeName || relationship.via ||
+        relationship.ownership !== "owned") continue;
       for (const name of [relationship.foreignKey, relationship.positionColumn]) {
         const column = table.columns.find((column) => column.name === name);
         if (column) { fields.add(column.name); fields.add(fieldNameForColumn(column)); }
@@ -38,7 +40,8 @@ export function collectionMutationError(
   const affectsCollection = operation === "delete" && (
     collections.some((relationship) => relationship.ownership === "owned") ||
     tables.some((owner) => owner.source?.graphql?.relationships?.some((relationship) =>
-      relationship.fieldKey && relationship.resolve !== "belongsTo" && relationship.target === table.source?.graphql?.typeName))
+      relationship.fieldKey && relationship.resolve !== "belongsTo" &&
+      relationship.target === table.source?.graphql?.typeName && relationship.ownership === "owned"))
   );
   if (!explicit && !required && !affectsCollection) return undefined;
   return {

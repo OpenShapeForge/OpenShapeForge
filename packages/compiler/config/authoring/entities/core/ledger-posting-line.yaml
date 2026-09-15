@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: LedgerPostingLine
 title: Ledger Posting Line
-description: Journal entry line. Single debit or credit movement against a ledger account, optionally tagged with analytical dimensions.
+description: Journal entry line. Single debit or credit movement against a ledger account, optionally tagged with
+  analytical dimensions.
 language: en
 displayTemplate: "{{lineNumber}}: {{amount}}"
 filterField: description
@@ -39,11 +40,10 @@ fields:
     persisted:
       column: side
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: LEDGERSIDE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: LEDGERSIDE
+    semanticType: referenceDataCode
   - key: amount
     valueType: number
     required: true
@@ -71,155 +71,76 @@ fields:
     persisted:
       column: description
       storageClass: core
-relationships:
-  - key: ledgerPosting
-    kind: belongsTo
-    target: LedgerPosting
-    foreignKey: ledger_posting_id
+  - key: ledgerPostingId
     label:
       en: Ledger posting
       nl: Boeking
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: ledger_posting_id
+      storageClass: core
+    semanticType: LedgerPosting
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: dimension1
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_1_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: dimension1Id
     label:
       en: Cost dimension 1
       nl: Kostendimensie 1
-  - key: dimension2
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_2_id
+    persisted:
+      column: dimension_1_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: dimension2Id
     label:
       en: Cost dimension 2
       nl: Kostendimensie 2
-  - key: vatDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: vat_dimension_id
+    persisted:
+      column: dimension_2_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: vatDimensionId
     label:
       en: VAT dimension
       nl: BTW-dimensie
-ui:
-  routes:
-    list:
-      en: /ledger-posting-lines
-      nl: /boekingsregels
-    detail:
-      en: /ledger-posting-lines/:id
-      nl: /boekingsregels/:id
-    create:
-      en: /ledger-posting-lines/create
-      nl: /boekingsregels/aanmaken
-    edit:
-      en: /ledger-posting-lines/:id/edit
-      nl: /boekingsregels/:id/bewerken
-    delete:
-      en: /ledger-posting-lines/:id/delete
-      nl: /boekingsregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Ledger posting lines
-        nl: Boekingsregels
-      columns:
-        - key: lineNumber
-          sortable: true
-        - key: side
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: description
-          sortable: true
-      defaultSort:
-        key: lineNumber
-        direction: asc
-      rowLink:
-        en: /ledger-posting-lines/:id
-        nl: /boekingsregels/:id
-    detail:
-      header:
-        title: "{{lineNumber}}: {{amount}}"
-        subtitle: "{{description}}"
-        badges:
-          - side
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - side
-                - amount
-                - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create ledger posting line
-            nl: Boekingsregel aanmaken
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - side
-                - amount
-                - description
-        edit:
-          extends: create
-          title:
-            en: Edit ledger posting line
-            nl: Boekingsregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: vat_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -234,3 +155,166 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Ledger Posting Line
+    description: List LedgerPostingLine records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Ledger Posting Line
+    description: Get LedgerPostingLine records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Ledger Posting Line
+    description: Create LedgerPostingLine records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update LedgerPostingLine records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /ledger-posting-lines
+          nl: /boekingsregels
+        columns:
+          - key: lineNumber
+            sortable: true
+          - key: side
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: description
+            sortable: true
+        title:
+          en: Ledger posting lines
+          nl: Boekingsregels
+        defaultSort:
+          key: lineNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /ledger-posting-lines/:id
+            nl: /boekingsregels/:id
+          create:
+            en: /ledger-posting-lines/create
+            nl: /boekingsregels/aanmaken
+        title: "{{lineNumber}}: {{amount}}"
+        subtitle: "{{description}}"
+        badges:
+          - side
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Line details
+                    nl: Regelgegevens
+                  fields:
+                    - lineNumber
+                    - side
+                    - amount
+                    - description
+        modes:
+          create:
+            title:
+              en: Create ledger posting line
+              nl: Boekingsregel aanmaken
+            groups:
+              - title:
+                  en: Line details
+                  nl: Regelgegevens
+                fields:
+                  - lineNumber
+                  - side
+                  - amount
+                  - description
+          update:
+            title:
+              en: Edit ledger posting line
+              nl: Boekingsregel bewerken
+    fields:
+      side:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: LEDGERSIDE
+            clearable: false

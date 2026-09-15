@@ -37,7 +37,7 @@ export type OperationFieldOptions = {
 
 export type OperationFieldDefinition = {
   key: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType?: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   required?: boolean;
   label?: OperationLocalizedText;
@@ -58,6 +58,8 @@ export type OperationFieldDefinition = {
 };
 
 export type OperationFieldSemanticType = {
+  kind?: string;
+  entity?: string;
   valueType: OperationFieldDefinition["valueType"];
   cardinality?: OperationFieldDefinition["cardinality"];
   label?: OperationLocalizedText;
@@ -85,7 +87,7 @@ export type OperationFieldSchemaOptions = {
 
 type ResolvedOperationField = {
   key: string;
-  valueType: OperationFieldDefinition["valueType"];
+  valueType: NonNullable<OperationFieldDefinition["valueType"]>;
   cardinality: "single" | "collection";
   cardinalityBounds?: { min?: number; max?: number | "unbounded" };
   required: boolean;
@@ -162,12 +164,14 @@ function resolveFields(
       ? registry.semanticTypes?.[field.semanticType]
       : undefined;
     const authoredCardinality = field.cardinality ?? semantic?.cardinality;
-    const nested = field.shape ?? field.children ?? semantic?.shape ?? semantic?.children;
+    // An identity reference does not inline the target record (which may refer back).
+    const nested = field.shape ?? field.children ?? (semantic?.kind === "entity" && semantic.entity
+      ? undefined : semantic?.shape ?? semantic?.children);
     const item = field.item ?? semantic?.item;
     const options = resolveOptions(field);
     return {
       key: field.key,
-      valueType: field.valueType,
+      valueType: field.valueType ?? semantic?.valueType ?? "string",
       cardinality: cardinalityOf(authoredCardinality),
       ...(authoredCardinality && typeof authoredCardinality === "object"
         ? { cardinalityBounds: { ...authoredCardinality } }
@@ -183,7 +187,11 @@ function resolveFields(
         ? { validation: field.validation ?? semantic!.validation! }
         : {}),
       ...(options ? { options } : {}),
-      ...(field.relationship ? { relationship: field.relationship } : {}),
+      ...(semantic?.kind === "entity" && semantic.entity
+        ? { relationship: { entity: semantic.entity } }
+        : field.relationship
+          ? { relationship: field.relationship }
+          : {}),
       ...(field.computed ? { computed: field.computed } : {}),
       ...(nested ? { children: resolveFields(nested, registry) } : {}),
       ...(item ? { item: resolveFields([item], registry)[0] } : {}),
@@ -300,6 +308,9 @@ function fieldSchema(
         })
       : constrainedType(field);
   const title = localizedText(field.label);
+  if (field.relationship?.entity) {
+    schema["x-osf-reference"] = { entity: field.relationship.entity };
+  }
   if (title) schema.title = title;
   const values = enumeration(field, registry);
   if (values) schema.enum = values.values;

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AddressAssignment
@@ -54,9 +54,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -69,9 +66,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: isPrimary
     valueType: boolean
     required: false
@@ -98,139 +92,215 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    semanticType: multilineText
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: address
-    kind: belongsTo
-    target: Address
-    foreignKey: address_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: addressId
     label:
       en: Address
       nl: Adres
-  - key: relationRole
-    kind: belongsTo
-    target: RelationRole
-    foreignKey: relation_role_id
+    persisted:
+      column: address_id
+      storageClass: core
+    semanticType: Address
+    relationship:
+      ownership: reference
+  - key: relationRoleId
     label:
       en: Relation role
       nl: Relatierol
-ui:
-  routes:
-    list:
-      en: /address-assignments
-      nl: /adrestoewijzingen
-    detail:
-      en: /address-assignments/:id
-      nl: /adrestoewijzingen/:id
-    create:
-      en: /address-assignments/create
-      nl: /adrestoewijzingen/aanmaken
-    edit:
-      en: /address-assignments/:id/edit
-      nl: /adrestoewijzingen/:id/bewerken
-    delete:
-      en: /address-assignments/:id/delete
-      nl: /adrestoewijzingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Address Assignments
-        nl: Adrestoewijzingen
-      columns:
-        - key: type
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-        - key: isPrimary
-          sortable: true
-      defaultSort:
-        key: type
-        direction: asc
-      rowLink:
-        en: /address-assignments/:id
-        nl: /adrestoewijzingen/:id
-    detail:
-      header:
+    persisted:
+      column: relation_role_id
+      storageClass: core
+    semanticType: RelationRole
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Address Assignment
+    description: List AddressAssignment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Address Assignment
+    description: Get AddressAssignment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Address Assignment
+    description: Create AddressAssignment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AddressAssignment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /address-assignments
+          nl: /adrestoewijzingen
+        columns:
+          - key: type
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+          - key: isPrimary
+            sortable: true
+        title:
+          en: Address Assignments
+          nl: Adrestoewijzingen
+        defaultSort:
+          key: type
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /address-assignments/:id
+            nl: /adrestoewijzingen/:id
+          create:
+            en: /address-assignments/create
+            nl: /adrestoewijzingen/aanmaken
         title: "{{type}}"
         subtitle: "{{startDate}} – {{endDate}}"
         badges:
           - type
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Assignment
-                nl: Toewijzing
-              fields:
-                - type
-                - startDate
-                - endDate
-                - isPrimary
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-    form:
-      variants:
-        create:
-          title:
-            en: Create address assignment
-            nl: Adrestoewijzing aanmaken
-          groups:
-            - title:
-                en: Assignment
-                nl: Toewijzing
-              fields:
-                - type
-                - startDate
-                - endDate
-                - isPrimary
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-        edit:
-          extends: create
-          title:
-            en: Edit address assignment
-            nl: Adrestoewijzing bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Assignment
+                    nl: Toewijzing
+                  fields:
+                    - type
+                    - startDate
+                    - endDate
+                    - isPrimary
+                - title:
+                    en: Notes
+                    nl: Notities
+                  fields:
+                    - notes
+        modes:
+          create:
+            title:
+              en: Create address assignment
+              nl: Adrestoewijzing aanmaken
+            groups:
+              - title:
+                  en: Assignment
+                  nl: Toewijzing
+                fields:
+                  - type
+                  - startDate
+                  - endDate
+                  - isPrimary
+              - title:
+                  en: Notes
+                  nl: Notities
+                fields:
+                  - notes
+          update:
+            title:
+              en: Edit address assignment
+              nl: Adrestoewijzing bewerken
+    fields:
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      notes:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

@@ -13,6 +13,7 @@ import {
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
+import { operationErrorOf } from "@openshapeforge/operations";
 import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
@@ -118,20 +119,34 @@ function projectedOperationIntents(table: GeneratedTable): GeneratedCrudExposure
     .filter((intent) => operations[intent] !== false && operationEnabled(table, intent));
 }
 
+function operationContractForSchema(
+  table: GeneratedTable,
+  intent: "create" | "update" | "delete",
+) {
+  try {
+    return entityOperationContract(entityOperationRef(table, intent).id);
+  } catch (error) {
+    if (operationErrorOf(error)?.code === "GENERATED_CRUD_NOT_ENABLED") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 function operationControlFields(
   table: GeneratedTable,
   intent: "create" | "update" | "delete",
 ): string[] {
   if (!usesCanonicalGraphqlOperations(table) || !operationEnabled(table, intent)) return [];
-  const operation = entityOperationContract(entityOperationRef(table, intent).id);
+  const operation = operationContractForSchema(table, intent);
   return [
     ...(intent === "create" && table.source?.blueprint ? ["      blueprintId: String"] : []),
-    ...(operation.concurrency?.version ? ["      expectedVersion: String!"] : []),
-    ...(operation.concurrency?.editLease ? ["      leaseToken: String!"] : []),
-    ...(operation.interaction.confirmation.mode === "acknowledgement"
+    ...(operation?.concurrency?.version ? ["      expectedVersion: String!"] : []),
+    ...(operation?.concurrency?.editLease ? ["      leaseToken: String!"] : []),
+    ...(operation?.interaction.confirmation.mode === "acknowledgement"
       ? ["      confirmed: Boolean!"]
       : []),
-    ...(operation.interaction.confirmation.mode === "challenge"
+    ...(operation?.interaction.confirmation.mode === "challenge"
       ? ["      confirmationToken: String", "      confirmationAnswer: String"]
       : []),
   ];
@@ -143,7 +158,7 @@ function canonicalRecordResultType(graphql: GraphqlMetadata): string {
 
 function mutationInputType(table: GeneratedTable, intent: "create" | "update"): string {
   const graphql = assertGraphqlMetadata(table);
-  if (usesCanonicalGraphqlOperations(table) && entityOperationContract(entityOperationRef(table, intent).id).implementation?.type === "plugin") return "JSON";
+  if (usesCanonicalGraphqlOperations(table) && operationContractForSchema(table, intent)?.implementation?.type === "plugin") return "JSON";
   return `${intent === "create" ? "Create" : "Update"}${graphql.typeName}Input`;
 }
 
@@ -342,7 +357,8 @@ export function renderTypeDefinition(
       relationshipReadEnabled(relationship, tablesByGraphqlType.get(relationship.target))
     )
     .flatMap((relationship) => [
-      `      ${relationship.name}: ${relationFieldType(relationship)}`,
+      `${renderDescription(fieldDocumentation.get(relationship.name)?.description, "      ")}` +
+        `      ${relationship.name}: ${relationFieldType(relationship)}`,
       `      ${relationship.name}Aggregate: AggregateResult!`,
     ]);
   // Create and update inputs are rendered from the CRUD layer's caller

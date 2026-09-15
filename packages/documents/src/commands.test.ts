@@ -173,6 +173,7 @@ describe("Document commands", () => {
       "materializeFields",
       "materializeTemplate",
       "createDocumentFromTemplate",
+      "renderSnapshot",
     ]);
   });
 

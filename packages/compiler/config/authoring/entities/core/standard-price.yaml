@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: StandardPrice
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: unitId
     valueType: string
     required: false
@@ -101,9 +97,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
     valueType: date
     required: false
@@ -116,9 +109,6 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -133,137 +123,6 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-ui:
-  routes:
-    list:
-      en: /standard-prices
-      nl: /standaardprijzen
-    detail:
-      en: /standard-prices/:id
-      nl: /standaardprijzen/:id
-    create:
-      en: /standard-prices/create
-      nl: /standaardprijzen/aanmaken
-    edit:
-      en: /standard-prices/:id/edit
-      nl: /standaardprijzen/:id/bewerken
-    delete:
-      en: /standard-prices/:id/delete
-      nl: /standaardprijzen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Standard prices
-        nl: Standaardprijzen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: validFrom
-          sortable: true
-        - key: validTo
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /standard-prices/:id
-        nl: /standaardprijzen/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{amount}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Standard price details
-                nl: Standaardprijsgegevens
-              fields:
-                - code
-                - name
-                - unitId
-                - amount
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create standard price
-            nl: Standaardprijs aanmaken
-          groups:
-            - title:
-                en: Standard price details
-                nl: Standaardprijsgegevens
-              fields:
-                - code
-                - name
-                - unitId
-                - amount
-                - validFrom
-                - validTo
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit standard price
-            nl: Standaardprijs bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
 authorization:
   roles:
     read:
@@ -278,3 +137,206 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Standard Price
+    description: List StandardPrice records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Standard Price
+    description: Get StandardPrice records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Standard Price
+    description: Create StandardPrice records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update StandardPrice records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /standard-prices
+          nl: /standaardprijzen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: validFrom
+            sortable: true
+          - key: validTo
+            sortable: true
+        title:
+          en: Standard prices
+          nl: Standaardprijzen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /standard-prices/:id
+            nl: /standaardprijzen/:id
+          create:
+            en: /standard-prices/create
+            nl: /standaardprijzen/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{amount}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Standard price details
+                    nl: Standaardprijsgegevens
+                  fields:
+                    - code
+                    - name
+                    - unitId
+                    - amount
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create standard price
+              nl: Standaardprijs aanmaken
+            groups:
+              - title:
+                  en: Standard price details
+                  nl: Standaardprijsgegevens
+                fields:
+                  - code
+                  - name
+                  - unitId
+                  - amount
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit standard price
+              nl: Standaardprijs bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

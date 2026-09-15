@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SlaPolicy
@@ -63,11 +63,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: true
@@ -77,11 +73,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SLAPOLICYSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SLAPOLICYSTATUS
+    semanticType: referenceDataCode
   - key: targetEntity
     valueType: string
     required: true
@@ -91,11 +86,10 @@ fields:
     persisted:
       column: target_entity
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SLAPOLICYTARGETENTITY
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SLAPOLICYTARGETENTITY
+    semanticType: referenceDataCode
   - key: firstResponseMinutes
     valueType: integer
     required: false
@@ -173,33 +167,132 @@ fields:
     persisted:
       column: auto_close_on_resolution
       storageClass: core
-relationships:
-  - key: escalationQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: escalation_queue_id
+  - key: escalationQueueId
     label:
       en: Escalation queue
       nl: Escalatiequeue
+    persisted:
+      column: escalation_queue_id
+      storageClass: core
+    semanticType: WorkQueue
+    relationship:
+      ownership: reference
   - key: cases
-    kind: hasMany
-    target: Case
-    foreignKey: sla_policy_id
     label:
       en: Cases
       nl: Zaken
+    semanticType: Case
+    cardinality: collection
+    relationship:
+      inverse: slaPolicyId
+      ownership: reference
   - key: milestones
-    kind: hasMany
-    target: Milestone
-    foreignKey: sla_policy_id
     label:
       en: Milestones
       nl: Mijlpalen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: Milestone
+    cardinality: collection
+    relationship:
+      inverse: slaPolicyId
+      ownership: reference
+operations:
+  list:
+    name: List SLA Policy
+    description: List SlaPolicy records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get SLA Policy
+    description: Get SlaPolicy records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create SLA Policy
+    description: Create SlaPolicy records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update SLA Policy
+    description: Update SlaPolicy records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete SLA Policy
+    description: Delete SlaPolicy records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SLAPOLICYSTATUS
+            clearable: false
+      targetEntity:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SLAPOLICYTARGETENTITY
+            clearable: false

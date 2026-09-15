@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AgreementParty
@@ -27,15 +27,10 @@ authorization:
     enabled: true
     empty: public
 fields:
-  # The two ends of the party are authored as explicit fields rather than left
-  # to the belongsTo columns: a party without an agreement or a relation is
-  # meaningless, so both are required and fixed at creation. The relationships
-  # below reuse these columns; storage emits no second FK column for them.
   - key: agreementId
-    valueType: string
     required: true
     immutable: true
-    semanticType: agreementId
+    semanticType: Agreement
     label:
       en: Agreement
       nl: Overeenkomst
@@ -47,22 +42,33 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: relationId
-    valueType: string
     required: true
     immutable: true
-    semanticType: relationId
+    semanticType: Relation
     label:
       en: Relation
       nl: Relatie
     description:
-      en: Relation that is the party. Set on creation and immutable afterwards; end this party and add another to change who takes part.
-      nl: Relatie die de partij is. Wordt bij aanmaken gezet en kan daarna niet wijzigen; beëindig deze partij en voeg een nieuwe toe om de deelnemer te wijzigen.
+      en: Relation that is the party. Set on creation and immutable afterwards; end this party and add another to change who
+        takes part.
+      nl: Relatie die de partij is. Wordt bij aanmaken gezet en kan daarna niet wijzigen; beëindig deze partij en voeg een
+        nieuwe toe om de deelnemer te wijzigen.
     validation:
       format: uuid
     persisted:
       column: relation_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: partyRole
     valueType: string
     required: true
@@ -152,8 +158,12 @@ fields:
       en: Share percentage
       nl: Aandeelpercentage
     description:
-      en: Percentage of the agreement this party is responsible for (0-100). For role=payer parties on a billable sub-agreement, the active payer shares MUST sum to 100 within rounding tolerance; rounding remainders are absorbed by the primary payer.
-      nl: Percentage van de overeenkomst waarvoor deze partij verantwoordelijk is (0-100). Voor partijen met rol=payer op een factureerbare subovereenkomst MOETEN de actieve aandelen tot 100 sommeren binnen afrondingstolerantie; afrondingsverschillen worden opgevangen door de primaire betaler.
+      en: Percentage of the agreement this party is responsible for (0-100). For role=payer parties on a billable
+        sub-agreement, the active payer shares MUST sum to 100 within rounding tolerance; rounding remainders are
+        absorbed by the primary payer.
+      nl: Percentage van de overeenkomst waarvoor deze partij verantwoordelijk is (0-100). Voor partijen met rol=payer op een
+        factureerbare subovereenkomst MOETEN de actieve aandelen tot 100 sommeren binnen afrondingstolerantie;
+        afrondingsverschillen worden opgevangen door de primaire betaler.
     validation:
       min: 0
       max: 100
@@ -167,8 +177,10 @@ fields:
       en: Primary payer
       nl: Primaire betaler
     description:
-      en: When true, this payer absorbs split-rounding remainders so per-payer collection totals add up to the invoice total exactly. Exactly one active payer per billable sub-agreement should be flagged primary.
-      nl: Indien aangevinkt vangt deze betaler afrondingsverschillen op zodat de som van debiteurensplits exact gelijk is aan het factuurtotaal. Per factureerbare subovereenkomst is precies één actieve betaler primair.
+      en: When true, this payer absorbs split-rounding remainders so per-payer collection totals add up to the invoice total
+        exactly. Exactly one active payer per billable sub-agreement should be flagged primary.
+      nl: Indien aangevinkt vangt deze betaler afrondingsverschillen op zodat de som van debiteurensplits exact gelijk is aan
+        het factuurtotaal. Per factureerbare subovereenkomst is precies één actieve betaler primair.
     defaultValue: false
     persisted:
       column: primary_payer
@@ -202,49 +214,46 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
-    label:
-      en: Agreement
-      nl: Overeenkomst
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
-    label:
-      en: Relation
-      nl: Relatie
-  - key: contractAddress
-    kind: belongsTo
-    target: Address
-    foreignKey: contract_address_id
+  - key: contractAddressId
     label:
       en: Contract address
       nl: Contractadres
-  - key: addressAssignment
-    kind: belongsTo
-    target: AddressAssignment
-    foreignKey: address_assignment_id
+    persisted:
+      column: contract_address_id
+      storageClass: core
+    semanticType: Address
+    relationship:
+      ownership: reference
+  - key: addressAssignmentId
     label:
       en: Address assignment
       nl: Adrestoewijzing
-  - key: paymentDetail
-    kind: belongsTo
-    target: PaymentDetail
-    foreignKey: payment_detail_id
+    persisted:
+      column: address_assignment_id
+      storageClass: core
+    semanticType: AddressAssignment
+    relationship:
+      ownership: reference
+  - key: paymentDetailId
     label:
       en: Payment detail
       nl: Betaalgegevens
-  - key: preferredPaymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: preferred_payment_method_id
+    persisted:
+      column: payment_detail_id
+      storageClass: core
+    semanticType: PaymentDetail
+    relationship:
+      ownership: reference
+  - key: preferredPaymentMethodId
     label:
       en: Preferred payment method
       nl: Voorkeursbetaalwijze
+    persisted:
+      column: preferred_payment_method_id
+      storageClass: core
+    semanticType: PaymentMethod
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List agreement parties, nl: Overeenkomstpartijen tonen }
@@ -307,7 +316,7 @@ operations:
         kind: type-current-field
         field: partyRole
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -315,9 +324,6 @@ interfaces:
   rest: {}
   graphql: {}
   mcp:
-    # A party is reached through its Agreement or Relation, not looked up on
-    # its own; the shared osf_* tools cover that without spending dedicated
-    # tool slots on a child entity.
     tools: generic
     operations:
       update:
@@ -336,62 +342,164 @@ interfaces:
   web:
     views:
       collection:
-        route: { en: /agreement-parties, nl: /overeenkomstpartijen }
-        title: { en: Agreement parties, nl: Overeenkomstpartijen }
+        route:
+          en: /agreement-parties
+          nl: /overeenkomstpartijen
+        title:
+          en: Agreement parties
+          nl: Overeenkomstpartijen
         columns:
-          - { key: partyRole, sortable: true }
-          - { key: name, sortable: true }
-          - { key: status, sortable: true }
-          - { key: startDate, sortable: true }
-          - { key: endDate, sortable: true }
-        defaultSort: { key: startDate, direction: desc }
+          - key: partyRole
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        defaultSort:
+          key: startDate
+          direction: desc
       record:
         routes:
-          read: { en: /agreement-parties/:id, nl: /overeenkomstpartijen/:id }
-          create: { en: /agreement-parties/create, nl: /overeenkomstpartijen/aanmaken }
+          read:
+            en: /agreement-parties/:id
+            nl: /overeenkomstpartijen/:id
+          create:
+            en: /agreement-parties/create
+            nl: /overeenkomstpartijen/aanmaken
         title: "{{name || partyRole}}"
         subtitle: "{{status}}"
-        actions: [update, delete]
+        actions:
+          - update
+          - delete
         layout:
           context:
-            fields: [partyRole, status]
-            relationships: [agreement, relation, contractAddress]
+            fields:
+              - partyRole
+              - status
+            relationships:
+              - agreementId
+              - relationId
+              - contractAddressId
           tabs:
             - id: overview
-              label: { en: Overview, nl: Overzicht }
+              label:
+                en: Overview
+                nl: Overzicht
               groups:
-                - title: { en: Participation, nl: Deelname }
-                  fields: [agreementId, relationId]
-                - title: { en: Role details, nl: Rolgegevens }
-                  fields: [partyRole, status, name, startDate, endDate]
-                - title: { en: Description, nl: Omschrijving }
-                  fields: [description]
-                - title: { en: Share and payment, nl: Aandeel en betaling }
-                  fields: [sharePercentage, primaryPayer, paymentDay]
-                - title: { en: Source, nl: Herkomst }
-                  fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                - title:
+                    en: Participation
+                    nl: Deelname
+                  fields:
+                    - agreementId
+                    - relationId
+                - title:
+                    en: Role details
+                    nl: Rolgegevens
+                  fields:
+                    - partyRole
+                    - status
+                    - name
+                    - startDate
+                    - endDate
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Share and payment
+                    nl: Aandeel en betaling
+                  fields:
+                    - sharePercentage
+                    - primaryPayer
+                    - paymentDay
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
         modes:
           create:
-            title: { en: Create agreement party, nl: Overeenkomstpartij aanmaken }
+            title:
+              en: Create agreement party
+              nl: Overeenkomstpartij aanmaken
             groups:
-              - title: { en: Participation, nl: Deelname }
-                fields: [agreementId, relationId]
-              - title: { en: Role details, nl: Rolgegevens }
-                fields: [partyRole, status, name, startDate, endDate]
-              - title: { en: Description, nl: Omschrijving }
-                fields: [description]
-              - title: { en: Share and payment, nl: Aandeel en betaling }
-                fields: [sharePercentage, primaryPayer, paymentDay]
-              - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+              - title:
+                  en: Participation
+                  nl: Deelname
+                fields:
+                  - agreementId
+                  - relationId
+              - title:
+                  en: Role details
+                  nl: Rolgegevens
+                fields:
+                  - partyRole
+                  - status
+                  - name
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Share and payment
+                  nl: Aandeel en betaling
+                fields:
+                  - sharePercentage
+                  - primaryPayer
+                  - paymentDay
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
           update:
-            title: { en: Edit agreement party, nl: Overeenkomstpartij bewerken }
+            title:
+              en: Edit agreement party
+              nl: Overeenkomstpartij bewerken
             groups:
-              - title: { en: Role details, nl: Rolgegevens }
-                fields: [partyRole, status, name, startDate, endDate]
-              - title: { en: Description, nl: Omschrijving }
-                fields: [description]
-              - title: { en: Share and payment, nl: Aandeel en betaling }
-                fields: [sharePercentage, primaryPayer, paymentDay]
-              - title: { en: Source, nl: Herkomst }
-                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+              - title:
+                  en: Role details
+                  nl: Rolgegevens
+                fields:
+                  - partyRole
+                  - status
+                  - name
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Share and payment
+                  nl: Aandeel en betaling
+                fields:
+                  - sharePercentage
+                  - primaryPayer
+                  - paymentDay
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration

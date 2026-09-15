@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProjectRole
@@ -25,11 +25,10 @@ fields:
     persisted:
       column: role_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROJECTROLE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROJECTROLE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: false
@@ -42,11 +41,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ROLEASSIGNMENTSTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ROLEASSIGNMENTSTATUS
+    semanticType: referenceDataCode
   - key: name
     valueType: string
     required: false
@@ -75,11 +73,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: startDate
     valueType: date
     required: false
@@ -92,9 +86,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -107,9 +98,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: allocationPercentage
     valueType: number
     required: false
@@ -152,165 +140,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: project
-    kind: belongsTo
-    target: Project
-    foreignKey: project_id
+  - key: projectId
     label:
       en: Project
       nl: Project
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-ui:
-  routes:
-    list:
-      en: /project-roles
-      nl: /projectrollen
-    detail:
-      en: /project-roles/:id
-      nl: /projectrollen/:id
-    create:
-      en: /project-roles/create
-      nl: /projectrollen/aanmaken
-    edit:
-      en: /project-roles/:id/edit
-      nl: /projectrollen/:id/bewerken
-    delete:
-      en: /project-roles/:id/delete
-      nl: /projectrollen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Project roles
-        nl: Projectrollen
-      columns:
-        - key: roleType
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-      defaultSort:
-        key: startDate
-        direction: desc
-      rowLink:
-        en: /project-roles/:id
-        nl: /projectrollen/:id
-    detail:
-      header:
-        title: "{{name || roleType}}"
-        subtitle: "{{status}}"
-        badges:
-          - roleType
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - roleType
-                - status
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Allocation and rate
-                nl: Inzet en tarief
-              fields:
-                - allocationPercentage
-                - hourlyRate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create project role
-            nl: Projectrol aanmaken
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - roleType
-                - status
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Allocation and rate
-                nl: Inzet en tarief
-              fields:
-                - allocationPercentage
-                - hourlyRate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit project role
-            nl: Projectrol bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -325,3 +174,231 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project Role
+    description: List ProjectRole records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project Role
+    description: Get ProjectRole records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project Role
+    description: Create ProjectRole records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ProjectRole records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /project-roles
+          nl: /projectrollen
+        columns:
+          - key: roleType
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        title:
+          en: Project roles
+          nl: Projectrollen
+        defaultSort:
+          key: startDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /project-roles/:id
+            nl: /projectrollen/:id
+          create:
+            en: /project-roles/create
+            nl: /projectrollen/aanmaken
+        title: "{{name || roleType}}"
+        subtitle: "{{status}}"
+        badges:
+          - roleType
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Role details
+                    nl: Rolgegevens
+                  fields:
+                    - roleType
+                    - status
+                    - name
+                    - startDate
+                    - endDate
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Allocation and rate
+                    nl: Inzet en tarief
+                  fields:
+                    - allocationPercentage
+                    - hourlyRate
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create project role
+              nl: Projectrol aanmaken
+            groups:
+              - title:
+                  en: Role details
+                  nl: Rolgegevens
+                fields:
+                  - roleType
+                  - status
+                  - name
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Allocation and rate
+                  nl: Inzet en tarief
+                fields:
+                  - allocationPercentage
+                  - hourlyRate
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit project role
+              nl: Projectrol bewerken
+    fields:
+      roleType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROJECTROLE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ROLEASSIGNMENTSTATUS
+            clearable: true
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}

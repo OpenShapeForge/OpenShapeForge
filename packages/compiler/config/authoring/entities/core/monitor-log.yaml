@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MonitorLog
@@ -40,11 +40,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: MONITORLOGSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: MONITORLOGSTATUS
+    semanticType: referenceDataCode
   - key: startedAt
     valueType: datetime
     required: true
@@ -57,9 +56,6 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: endedAt
     valueType: datetime
     required: false
@@ -72,9 +68,6 @@ fields:
     persisted:
       column: ended_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -89,131 +82,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /monitor-logs
-      nl: /monitorlogs
-    detail:
-      en: /monitor-logs/:id
-      nl: /monitorlogs/:id
-    create:
-      en: /monitor-logs/create
-      nl: /monitorlogs/aanmaken
-    edit:
-      en: /monitor-logs/:id/edit
-      nl: /monitorlogs/:id/bewerken
-    delete:
-      en: /monitor-logs/:id/delete
-      nl: /monitorlogs/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Monitor logs
-        nl: Monitorlogs
-      columns:
-        - key: code
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startedAt
-          sortable: true
-        - key: endedAt
-          sortable: true
-      defaultSort:
-        key: startedAt
-        direction: desc
-      rowLink:
-        en: /monitor-logs/:id
-        nl: /monitorlogs/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Log details
-                nl: Loggegevens
-              fields:
-                - code
-                - status
-                - startedAt
-                - endedAt
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create monitor log
-            nl: Monitorlog aanmaken
-          groups:
-            - title:
-                en: Log details
-                nl: Loggegevens
-              fields:
-                - code
-                - status
-                - startedAt
-                - endedAt
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit monitor log
-            nl: Monitorlog bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -228,3 +106,192 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Monitor Log
+    description: List MonitorLog records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Monitor Log
+    description: Get MonitorLog records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Monitor Log
+    description: Create MonitorLog records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MonitorLog records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /monitor-logs
+          nl: /monitorlogs
+        columns:
+          - key: code
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startedAt
+            sortable: true
+          - key: endedAt
+            sortable: true
+        title:
+          en: Monitor logs
+          nl: Monitorlogs
+        defaultSort:
+          key: startedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /monitor-logs/:id
+            nl: /monitorlogs/:id
+          create:
+            en: /monitor-logs/create
+            nl: /monitorlogs/aanmaken
+        title: "{{code}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Log details
+                    nl: Loggegevens
+                  fields:
+                    - code
+                    - status
+                    - startedAt
+                    - endedAt
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create monitor log
+              nl: Monitorlog aanmaken
+            groups:
+              - title:
+                  en: Log details
+                  nl: Loggegevens
+                fields:
+                  - code
+                  - status
+                  - startedAt
+                  - endedAt
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit monitor log
+              nl: Monitorlog bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: MONITORLOGSTATUS
+            clearable: false
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      endedAt:
+        render:
+          component: DateTimePicker
+          props: {}

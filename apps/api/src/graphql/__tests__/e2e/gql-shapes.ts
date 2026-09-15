@@ -19,6 +19,7 @@
 import { expect } from "bun:test";
 import { gql, type GeneratedTable, type GqlResponse, type Identity } from "./harness.js";
 import {
+  acknowledgementRequired,
   acquireLease,
   challengeAnswerFor,
   challengeFieldFor,
@@ -146,7 +147,15 @@ export function deleteVariables(
   id: string,
   controls: MutationControls = {},
 ): Record<string, unknown> {
-  return isCanonical(table) ? { input: { id, ...controls } } : { id };
+  return isCanonical(table)
+    ? {
+        input: {
+          id,
+          ...controls,
+          ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
+        },
+      }
+    : { id };
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +313,10 @@ async function withConfirmation(
 ): Promise<GqlResponse> {
   const graphql = graphqlOf(table);
   const field = intent === "update" ? graphql.updateMutationName : graphql.deleteMutationName;
-  const first = await run(controls);
+  const first = await run({
+    ...controls,
+    ...(acknowledgementRequired(table, intent) ? { confirmed: true } : {}),
+  });
   const error = operationErrorOf(table, first, field);
   if (error?.code !== "CONFIRMATION_REQUIRED") return first;
   const challengeToken = error.data?.confirmation?.challengeToken as string | undefined;
@@ -314,7 +326,16 @@ async function withConfirmation(
   // The challenge names one field; read it back so the answer is the value
   // the server will hash, not the value the test believes it planted.
   const challenged = challengeFieldFor(table, intent);
-  const row = await fetchRecord(identity, table, id, `id ${challenged ?? ""}`, auth);
+  const relationshipField = table.source?.graphql?.relationships?.some(
+    (relationship) => relationship.fieldKey === challenged,
+  ) === true;
+  const row = await fetchRecord(
+    identity,
+    table,
+    id,
+    `id ${challenged ?? ""}${challenged && relationshipField ? " { id }" : ""}`,
+    auth,
+  );
   return run({
     ...controls,
     confirmationToken: challengeToken,

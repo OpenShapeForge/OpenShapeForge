@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BillingRun
 title: Billing Run
-description: Durable run-level ledger for one execution of the prolongation engine. Holds request-level idempotency, summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem.
+description: Durable run-level ledger for one execution of the prolongation engine. Holds request-level idempotency,
+  summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem.
 language: en
 displayTemplate: "{{mode}} @ {{billUpToDate}}"
 filterField: idempotencyKey
@@ -26,8 +27,10 @@ fields:
       en: Idempotency key
       nl: Idempotentiesleutel
     description:
-      en: Stable request-level key. Replays of the same key resolve to the same BillingRun (status and summaries are append-only after completion).
-      nl: Stabiele sleutel op verzoekniveau. Herhalingen met dezelfde sleutel vinden dezelfde BillingRun terug (status en samenvattingen zijn append-only na afronding).
+      en: Stable request-level key. Replays of the same key resolve to the same BillingRun (status and summaries are
+        append-only after completion).
+      nl: Stabiele sleutel op verzoekniveau. Herhalingen met dezelfde sleutel vinden dezelfde BillingRun terug (status en
+        samenvattingen zijn append-only na afronding).
     validation:
       minLength: 1
       maxLength: 200
@@ -47,11 +50,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGRUNSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGRUNSTATUS
+    semanticType: referenceDataCode
   - key: mode
     valueType: string
     required: true
@@ -65,11 +67,10 @@ fields:
     persisted:
       column: mode
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGRUNMODE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGRUNMODE
+    semanticType: referenceDataCode
   - key: billUpToDate
     valueType: date
     required: true
@@ -82,9 +83,6 @@ fields:
     persisted:
       column: bill_up_to_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: agreementFilter
     valueType: object
     required: false
@@ -93,7 +91,8 @@ fields:
       nl: Overeenkomstenfilter
     description:
       en: Snapshot of the condition-builder expression that selected eligible agreements (frozen at run start for replay).
-      nl: Snapshot van de condition-builder-expressie waarmee de in aanmerking komende overeenkomsten zijn geselecteerd (bij runstart vastgezet voor herhaling).
+      nl: Snapshot van de condition-builder-expressie waarmee de in aanmerking komende overeenkomsten zijn geselecteerd (bij
+        runstart vastgezet voor herhaling).
     persisted:
       column: agreement_filter
       storageClass: core
@@ -221,133 +220,6 @@ fields:
     persisted:
       column: triggered_by
       storageClass: core
-relationships: []
-ui:
-  routes:
-    list:
-      en: /billing-runs
-      nl: /facturatie-runs
-    detail:
-      en: /billing-runs/:id
-      nl: /facturatie-runs/:id
-    create:
-      en: /billing-runs/create
-      nl: /facturatie-runs/aanmaken
-    edit:
-      en: /billing-runs/:id/edit
-      nl: /facturatie-runs/:id/bewerken
-    delete:
-      en: /billing-runs/:id/delete
-      nl: /facturatie-runs/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Billing runs
-        nl: Facturatie-runs
-      columns:
-        - key: status
-          sortable: true
-        - key: mode
-          sortable: true
-        - key: billUpToDate
-          sortable: true
-        - key: agreementsPlanned
-          sortable: true
-        - key: invoicesProduced
-          sortable: true
-        - key: totalAmount
-          sortable: true
-        - key: startedAt
-          sortable: true
-      defaultSort:
-        key: startedAt
-        direction: desc
-      rowLink:
-        en: /billing-runs/:id
-        nl: /facturatie-runs/:id
-    detail:
-      header:
-        title: "{{mode}}"
-        subtitle: "{{status}}"
-        badges:
-          - mode
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Run details
-                nl: Run-gegevens
-              fields:
-                - status
-                - mode
-                - billUpToDate
-                - dryRun
-                - maxAgreementsPerWorker
-                - idempotencyKey
-                - triggeredBy
-            - title:
-                en: Counts
-                nl: Aantallen
-              fields:
-                - agreementsPlanned
-                - agreementsCompleted
-                - agreementsFailed
-                - invoicesProduced
-                - totalAmount
-            - title:
-                en: Timeline
-                nl: Tijdlijn
-              fields:
-                - startedAt
-                - completedAt
-            - title:
-                en: Filter snapshot
-                nl: Filter-snapshot
-              fields:
-                - agreementFilter
-            - title:
-                en: Failures
-                nl: Mislukkingen
-              fields:
-                - failures
-    form:
-      variants:
-        create:
-          title:
-            en: Create billing run
-            nl: Facturatie-run aanmaken
-          groups:
-            - title:
-                en: Run details
-                nl: Run-gegevens
-              fields:
-                - status
-                - mode
-                - billUpToDate
-                - dryRun
-                - maxAgreementsPerWorker
-                - idempotencyKey
-                - triggeredBy
-        edit:
-          extends: create
-          title:
-            en: Edit billing run
-            nl: Facturatie-run bewerken
-workflow:
-  nodes:
-    actions:
-      getOne: true
-      list: true
 authorization:
   roles:
     read:
@@ -362,3 +234,206 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Billing Run
+    description: List BillingRun records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Billing Run
+    description: Get BillingRun records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Billing Run
+    description: Create BillingRun records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BillingRun records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Billing Run
+    description: Delete BillingRun records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        getOne: true
+        list: true
+  web:
+    views:
+      collection:
+        route:
+          en: /billing-runs
+          nl: /facturatie-runs
+        columns:
+          - key: status
+            sortable: true
+          - key: mode
+            sortable: true
+          - key: billUpToDate
+            sortable: true
+          - key: agreementsPlanned
+            sortable: true
+          - key: invoicesProduced
+            sortable: true
+          - key: totalAmount
+            sortable: true
+          - key: startedAt
+            sortable: true
+        title:
+          en: Billing runs
+          nl: Facturatie-runs
+        defaultSort:
+          key: startedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /billing-runs/:id
+            nl: /facturatie-runs/:id
+          create:
+            en: /billing-runs/create
+            nl: /facturatie-runs/aanmaken
+        title: "{{mode}}"
+        subtitle: "{{status}}"
+        badges:
+          - mode
+          - status
+        actions:
+          - update
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Run details
+                    nl: Run-gegevens
+                  fields:
+                    - status
+                    - mode
+                    - billUpToDate
+                    - dryRun
+                    - maxAgreementsPerWorker
+                    - idempotencyKey
+                    - triggeredBy
+                - title:
+                    en: Counts
+                    nl: Aantallen
+                  fields:
+                    - agreementsPlanned
+                    - agreementsCompleted
+                    - agreementsFailed
+                    - invoicesProduced
+                    - totalAmount
+                - title:
+                    en: Timeline
+                    nl: Tijdlijn
+                  fields:
+                    - startedAt
+                    - completedAt
+                - title:
+                    en: Filter snapshot
+                    nl: Filter-snapshot
+                  fields:
+                    - agreementFilter
+                - title:
+                    en: Failures
+                    nl: Mislukkingen
+                  fields:
+                    - failures
+        modes:
+          create:
+            title:
+              en: Create billing run
+              nl: Facturatie-run aanmaken
+            groups:
+              - title:
+                  en: Run details
+                  nl: Run-gegevens
+                fields:
+                  - status
+                  - mode
+                  - billUpToDate
+                  - dryRun
+                  - maxAgreementsPerWorker
+                  - idempotencyKey
+                  - triggeredBy
+          update:
+            title:
+              en: Edit billing run
+              nl: Facturatie-run bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGRUNSTATUS
+            clearable: false
+      mode:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGRUNMODE
+            clearable: false
+      billUpToDate:
+        render:
+          component: DatePicker
+          props: {}

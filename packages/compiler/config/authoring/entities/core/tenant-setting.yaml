@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: TenantSetting
@@ -12,9 +12,6 @@ labels:
   nl: Tenantinstelling
 domains:
   - core
-# Tenant settings may contain provider keys and other secret values. They are
-# managed only by targeted settings APIs, never by generated CRUD.
-crud: false
 authorization:
   roles:
     read:
@@ -75,11 +72,7 @@ fields:
     persisted:
       column: value_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: TENANTSETTINGVALUETYPE
-        clearable: false
+    semanticType: referenceDataCode
   - key: valueText
     valueType: string
     required: false
@@ -94,11 +87,6 @@ fields:
     persisted:
       column: value_text
       storageClass: core
-    render:
-      component: Input
-      props:
-        type: password
-        autoComplete: off
     visibility:
       conditions:
         - field: valueType
@@ -116,10 +104,6 @@ fields:
     persisted:
       column: value_json
       storageClass: core
-    render:
-      component: JsonFieldEditor
-      props:
-        rows: 10
     visibility:
       conditions:
         - field: valueType
@@ -152,115 +136,113 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
-relationships:
-  - key: tenant
-    kind: belongsTo
-    target: Tenant
-    foreignKey: tenant_id
-    label:
-      en: Tenant
-      nl: Tenant
-ui:
-  routes:
-    list:
-      en: /tenant-settings
-      nl: /tenant-settings
-    detail:
-      en: /tenant-settings/:id
-      nl: /tenant-settings/:id
-    create:
-      en: /tenant-settings/create
-      nl: /tenant-settings/aanmaken
-    edit:
-      en: /tenant-settings/:id/edit
-      nl: /tenant-settings/:id/bewerken
-    delete:
-      en: /tenant-settings/:id/delete
-      nl: /tenant-settings/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Tenant settings
-        nl: Tenantinstellingen
-      columns:
-        - key: namespace
-          sortable: true
-        - key: key
-          sortable: true
-        - key: valueType
-          sortable: true
-        - key: isSecret
-          sortable: true
-      defaultSort:
-        key: namespace
-        direction: asc
-      rowLink:
-        en: /tenant-settings/:id
-        nl: /tenant-settings/:id
-    detail:
-      header:
+    semanticType: multilineText
+  - key: tenantId
+    semanticType: Tenant
+    readOnly: true
+    required: false
+    label: { en: Tenant, nl: Tenant }
+    persisted: { column: tenant_id, storageClass: core }
+    relationship: { ownership: reference }
+operations: {}
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /tenant-settings
+          nl: /tenant-settings
+        columns:
+          - key: namespace
+            sortable: true
+          - key: key
+            sortable: true
+          - key: valueType
+            sortable: true
+          - key: isSecret
+            sortable: true
+        title:
+          en: Tenant settings
+          nl: Tenantinstellingen
+        defaultSort:
+          key: namespace
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /tenant-settings/:id
+            nl: /tenant-settings/:id
+          create:
+            en: /tenant-settings/create
+            nl: /tenant-settings/aanmaken
         title: "{{namespace}}.{{key}}"
         subtitle: "{{valueType}}"
         badges:
           - isSecret
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: setting-details
-          title:
-            en: Setting details
-            nl: Instellingsgegevens
-          fields:
-            - namespace
-            - key
-            - valueType
-            - isSecret
-            - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create tenant setting
-            nl: Tenantinstelling aanmaken
-          groups:
-            - title:
+        actions: []
+        layout:
+          tabs:
+            - id: setting-details
+              title:
                 en: Setting details
                 nl: Instellingsgegevens
               fields:
                 - namespace
                 - key
                 - valueType
-                - valueText
-                - valueJson
                 - isSecret
                 - description
-        edit:
-          extends: create
-          title:
-            en: Edit tenant setting
-            nl: Tenantinstelling bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        modes:
+          create:
+            title:
+              en: Create tenant setting
+              nl: Tenantinstelling aanmaken
+            groups:
+              - title:
+                  en: Setting details
+                  nl: Instellingsgegevens
+                fields:
+                  - namespace
+                  - key
+                  - valueType
+                  - valueText
+                  - valueJson
+                  - isSecret
+                  - description
+          update:
+            title:
+              en: Edit tenant setting
+              nl: Tenantinstelling bewerken
+    fields:
+      valueType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: TENANTSETTINGVALUETYPE
+            clearable: false
+      valueText:
+        render:
+          component: Input
+          props:
+            type: password
+            autoComplete: off
+      valueJson:
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 10
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500

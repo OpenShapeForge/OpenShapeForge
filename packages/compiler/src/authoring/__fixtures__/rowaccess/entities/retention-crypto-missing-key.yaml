@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RetentionCryptoMissingKey
@@ -38,3 +38,76 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List Retention Crypto Missing Key
+    description: List RetentionCryptoMissingKey records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Retention Crypto Missing Key
+    description: Get RetentionCryptoMissingKey records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Retention Crypto Missing Key
+    description: Create RetentionCryptoMissingKey records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Retention Crypto Missing Key
+    description: Update RetentionCryptoMissingKey records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Retention Crypto Missing Key
+    description: Delete RetentionCryptoMissingKey records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

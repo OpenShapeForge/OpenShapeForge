@@ -57,17 +57,32 @@ const target = table.columns.find(
 )!;
 const restBase = `${REST_MOUNT_PATH}/elicited-output-test`;
 
-// REST and MCP answer at the entity's shape: a canonical entity wraps a
-// record in `{ data, operations }` and a page in `{ data: { items: [{ data }] } }`,
-// a v1 entity serves the bare row and `{ items: [row] }`. The reads below say
-// what they want and let the shape decide where it sits.
+// REST and GraphQL answer at the entity's shape. An injected MCP fixture has
+// no advertised output schema and therefore retains the legacy bare payload,
+// while a generated canonical tool wraps it. Normalize the actual MCP payload
+// rather than inferring its projection from the entity authoring version.
 const canonical = isCanonical(table);
 const restRecord = (response: { body: any }) => (canonical ? response.body.data : response.body);
 const restItems = (response: { body: any }): any[] =>
   canonical ? response.body.data.items.map((item: any) => item.data) : response.body.items;
-const mcpRecord = (call: { payload: any }) => (canonical ? call.payload.data : call.payload);
-const mcpItems = (call: { payload: any }): any[] =>
-  canonical ? call.payload.data.items.map((item: any) => item.data) : call.payload.items;
+const mcpRecord = (call: { payload: any }) => call.payload?.data ?? call.payload;
+const mcpItems = (call: { payload: any }): any[] => {
+  const items = call.payload?.data?.items ?? call.payload?.items ?? [];
+  return items.map((item: any) => item?.data ?? item);
+};
+const gqlRecordSelection = (fields: string) =>
+  canonical ? `data { ${fields} } error { code message }` : fields;
+const gqlListSelection = (fields: string) => canonical
+  ? `data { items { data { ${fields} } } } error { code message }`
+  : `edges { node { ${fields} } }`;
+const gqlRecord = (data: Record<string, any>, key: string) =>
+  canonical ? data[key].data : data[key];
+const gqlItems = (data: Record<string, any>, key: string): any[] =>
+  canonical ? data[key].data.items.map((item: any) => item.data) : data[key].edges.map((edge: any) => edge.node);
+const gqlFailureCode = (result: Record<string, any>, key: string) =>
+  canonical
+    ? result.data?.[key]?.error?.code
+    : result.errors?.[0]?.extensions?.code;
 const keyring = keyringFromEnv(
   `test:${Buffer.alloc(32, 23).toString("base64")}`,
 )!;
@@ -340,13 +355,13 @@ async function publicReadValues(id: string): Promise<unknown[]> {
   });
   const gqlGet = await expectData(
     tenantA,
-    `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { valueJson } }`,
+    `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { ${gqlRecordSelection("valueJson")} } }`,
     { id },
   );
   const gqlList = await expectData(
     tenantA,
     `query($filter: PreferenceFilter) {
-      ${graphql.listQueryName}(filter: $filter) { edges { node { valueJson } } }
+      ${graphql.listQueryName}(filter: $filter) { ${gqlListSelection("valueJson")} }
     }`,
     { filter: { id } },
   );
@@ -359,8 +374,8 @@ async function publicReadValues(id: string): Promise<unknown[]> {
   return [
     directGet!.value_json,
     directList.rows[0]!.value_json,
-    gqlGet[graphql.singleQueryName].valueJson,
-    gqlList[graphql.listQueryName].edges[0].node.valueJson,
+    gqlRecord(gqlGet, graphql.singleQueryName).valueJson,
+    gqlItems(gqlList, graphql.listQueryName)[0].valueJson,
     restRecord(restGet).valueJson,
     restItems(restList)[0].valueJson,
     mcpRecord(mcpGet).valueJson,
@@ -394,13 +409,13 @@ test.skipIf(remoteUrl)(
     });
     const gqlGet = await expectData(
       tenantA,
-      `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id description valueJson } }`,
+      `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { ${gqlRecordSelection("id description valueJson")} } }`,
       { id: directId },
     );
     const gqlList = await expectData(
       tenantA,
       `query($filter: PreferenceFilter) {
-        ${graphql.listQueryName}(filter: $filter) { edges { node { id description valueJson } } }
+        ${graphql.listQueryName}(filter: $filter) { ${gqlListSelection("id description valueJson")} }
       }`,
       { filter: { id: directId } },
     );
@@ -416,8 +431,8 @@ test.skipIf(remoteUrl)(
     const safeValues = [
       directGet!.value_json,
       directList.rows[0]!.value_json,
-      gqlGet[graphql.singleQueryName].valueJson,
-      gqlList[graphql.listQueryName].edges[0].node.valueJson,
+      gqlRecord(gqlGet, graphql.singleQueryName).valueJson,
+      gqlItems(gqlList, graphql.listQueryName)[0].valueJson,
       restRecord(restGet).valueJson,
       restItems(restList)[0].valueJson,
       mcpRecord(mcpGet).valueJson,
@@ -440,7 +455,7 @@ test.skipIf(remoteUrl)(
     const gqlUpdated = await expectData(
       tenantA,
       `mutation($input: UpdatePreferenceInput!) {
-        ${graphql.updateMutationName}(input: $input) { id valueJson }
+        ${graphql.updateMutationName}(input: $input) { ${gqlRecordSelection("id valueJson")} }
       }`,
       { input: { id: directId, description: "visible sibling" } },
     );
@@ -458,7 +473,7 @@ test.skipIf(remoteUrl)(
     });
     expect([
       directUpdated!.value_json,
-      gqlUpdated[graphql.updateMutationName].valueJson,
+      gqlRecord(gqlUpdated, graphql.updateMutationName).valueJson,
       restRecord(restUpdated).valueJson,
       mcpRecord(mcpUpdated).valueJson,
     ]).toEqual(Array(4).fill(expectedConfiguration));
@@ -550,21 +565,21 @@ test.skipIf(remoteUrl)(
       const graphqlCreate = await gql(
         tenantA,
         `mutation($input: CreatePreferenceInput!) {
-          ${graphql.createMutationName}(input: $input) { id }
+          ${graphql.createMutationName}(input: $input) { ${gqlRecordSelection("id")} }
         }`,
         { input: { ...values(`graphql-${marker}`, false), valueJson } },
       );
-      expect(graphqlCreate.errors?.[0]?.extensions?.code).toBe(
+      expect(gqlFailureCode(graphqlCreate, graphql.createMutationName)).toBe(
         "BAD_USER_INPUT",
       );
       const graphqlUpdate = await gql(
         tenantA,
         `mutation($input: UpdatePreferenceInput!) {
-          ${graphql.updateMutationName}(input: $input) { id }
+          ${graphql.updateMutationName}(input: $input) { ${gqlRecordSelection("id")} }
         }`,
         { input: { id: protectedId, valueJson } },
       );
-      expect(graphqlUpdate.errors?.[0]?.extensions?.code).toBe(
+      expect(gqlFailureCode(graphqlUpdate, graphql.updateMutationName)).toBe(
         "BAD_USER_INPUT",
       );
 

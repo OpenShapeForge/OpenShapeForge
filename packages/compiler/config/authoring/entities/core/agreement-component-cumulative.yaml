@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AgreementComponentCumulative
 title: Agreement Component Cumulative
-description: Projection — cumulative invoiced amount per agreement component, fiscal period, and source invoice. Populated by the audit/timeline service from invoice events. UIs must never write directly.
+description: Projection — cumulative invoiced amount per agreement component, fiscal period, and source invoice.
+  Populated by the audit/timeline service from invoice events. UIs must never write directly.
 language: en
 displayTemplate: "{{postedAt}}"
 filterField: id
@@ -104,190 +105,106 @@ fields:
     persisted:
       column: posted_at
       storageClass: core
-relationships:
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: agreementComponent
-    kind: belongsTo
-    target: AgreementComponent
-    foreignKey: agreement_component_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
+  - key: agreementComponentId
     label:
       en: Agreement component
       nl: Overeenkomstcomponent
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+    persisted:
+      column: agreement_component_id
+      storageClass: core
+    semanticType: AgreementComponent
+    relationship:
+      ownership: reference
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: invoice
-    kind: belongsTo
-    target: Invoice
-    foreignKey: invoice_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    semanticType: FiscalPeriod
+    relationship:
+      ownership: reference
+  - key: invoiceId
     label:
       en: Invoice
       nl: Factuur
-  - key: vatRate
-    kind: belongsTo
-    target: VatRate
-    foreignKey: vat_rate_id
+    persisted:
+      column: invoice_id
+      storageClass: core
+    semanticType: Invoice
+    relationship:
+      ownership: reference
+  - key: vatRateId
     label:
       en: VAT rate
       nl: BTW-tarief
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: vat_rate_id
+      storageClass: core
+    semanticType: VatRate
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: componentDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: component_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: componentDimensionId
     label:
       en: Component dimension
       nl: Componentdimensie
-  - key: dimension1
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_1_id
+    persisted:
+      column: component_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: dimension1Id
     label:
       en: Cost dimension 1
       nl: Kostendimensie 1
-  - key: dimension2
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_2_id
+    persisted:
+      column: dimension_1_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: dimension2Id
     label:
       en: Cost dimension 2
       nl: Kostendimensie 2
-  - key: vatDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: vat_dimension_id
+    persisted:
+      column: dimension_2_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: vatDimensionId
     label:
       en: VAT dimension
       nl: BTW-dimensie
-ui:
-  routes:
-    list:
-      en: /agreement-component-cumulatives
-      nl: /component-cumulatieven
-    detail:
-      en: /agreement-component-cumulatives/:id
-      nl: /component-cumulatieven/:id
-    create:
-      en: /agreement-component-cumulatives/create
-      nl: /component-cumulatieven/aanmaken
-    edit:
-      en: /agreement-component-cumulatives/:id/edit
-      nl: /component-cumulatieven/:id/bewerken
-    delete:
-      en: /agreement-component-cumulatives/:id/delete
-      nl: /component-cumulatieven/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Component cumulatives
-        nl: Component cumulatieven
-      columns:
-        - key: postedAt
-          sortable: true
-        - key: quantity
-          sortable: true
-        - key: amountBase
-          sortable: true
-        - key: amountVat
-          sortable: true
-        - key: amountTotal
-          sortable: true
-      defaultSort:
-        key: postedAt
-        direction: desc
-      rowLink:
-        en: /agreement-component-cumulatives/:id
-        nl: /component-cumulatieven/:id
-    detail:
-      header:
-        title: "{{postedAt}}"
-        subtitle: "{{amountTotal}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Cumulative details
-                nl: Cumulatiegegevens
-              fields:
-                - postedAt
-                - quantity
-                - unitId
-                - unitPrice
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-    form:
-      variants:
-        create:
-          title:
-            en: Create component cumulative
-            nl: Component cumulatief aanmaken
-          groups:
-            - title:
-                en: Cumulative details
-                nl: Cumulatiegegevens
-              fields:
-                - postedAt
-                - quantity
-                - unitId
-                - unitPrice
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-        edit:
-          extends: create
-          title:
-            en: Edit component cumulative
-            nl: Component cumulatief bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: vat_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -302,3 +219,173 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Agreement Component Cumulative
+    description: List AgreementComponentCumulative records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Agreement Component Cumulative
+    description: Get AgreementComponentCumulative records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Agreement Component Cumulative
+    description: Create AgreementComponentCumulative records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AgreementComponentCumulative records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /agreement-component-cumulatives
+          nl: /component-cumulatieven
+        columns:
+          - key: postedAt
+            sortable: true
+          - key: quantity
+            sortable: true
+          - key: amountBase
+            sortable: true
+          - key: amountVat
+            sortable: true
+          - key: amountTotal
+            sortable: true
+        title:
+          en: Component cumulatives
+          nl: Component cumulatieven
+        defaultSort:
+          key: postedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /agreement-component-cumulatives/:id
+            nl: /component-cumulatieven/:id
+          create:
+            en: /agreement-component-cumulatives/create
+            nl: /component-cumulatieven/aanmaken
+        title: "{{postedAt}}"
+        subtitle: "{{amountTotal}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Cumulative details
+                    nl: Cumulatiegegevens
+                  fields:
+                    - postedAt
+                    - quantity
+                    - unitId
+                    - unitPrice
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - amountBase
+                    - amountVat
+                    - amountTotal
+        modes:
+          create:
+            title:
+              en: Create component cumulative
+              nl: Component cumulatief aanmaken
+            groups:
+              - title:
+                  en: Cumulative details
+                  nl: Cumulatiegegevens
+                fields:
+                  - postedAt
+                  - quantity
+                  - unitId
+                  - unitPrice
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - amountBase
+                  - amountVat
+                  - amountTotal
+          update:
+            title:
+              en: Edit component cumulative
+              nl: Component cumulatief bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

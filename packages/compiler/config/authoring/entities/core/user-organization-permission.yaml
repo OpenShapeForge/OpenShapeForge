@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: UserOrganizationPermission
@@ -102,133 +102,205 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: employee
-    kind: belongsTo
-    target: Employee
-    foreignKey: employee_id
+  - key: employeeId
     label:
       en: Employee
       nl: Medewerker
-  - key: targetTenant
-    kind: belongsTo
-    target: Tenant
-    foreignKey: target_tenant_id
+    persisted:
+      column: employee_id
+      storageClass: core
+    semanticType: Employee
+    relationship:
+      ownership: reference
+  - key: targetTenantId
     label:
       en: Target tenant
       nl: Doeltenant
-  - key: targetOrgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: target_org_unit_id
+    persisted:
+      column: target_tenant_id
+      storageClass: core
+    semanticType: Tenant
+    relationship:
+      ownership: reference
+  - key: targetOrgUnitId
     label:
       en: Target org unit
       nl: Doeleenheid
-ui:
-  routes:
-    list:
-      en: /user-organization-permissions
-      nl: /gebruikersrechten-per-organisatie
-    detail:
-      en: /user-organization-permissions/:id
-      nl: /gebruikersrechten-per-organisatie/:id
-    create:
-      en: /user-organization-permissions/create
-      nl: /gebruikersrechten-per-organisatie/aanmaken
-    edit:
-      en: /user-organization-permissions/:id/edit
-      nl: /gebruikersrechten-per-organisatie/:id/bewerken
-    delete:
-      en: /user-organization-permissions/:id/delete
-      nl: /gebruikersrechten-per-organisatie/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: User organization permissions
-        nl: Gebruikersrechten per organisatie
-      columns:
-        - key: clientId
-          sortable: true
-        - key: permissionName
-          sortable: true
-        - key: targetScopeKind
-          sortable: true
-      defaultSort:
-        key: permissionName
-        direction: asc
-      rowLink:
-        en: /user-organization-permissions/:id
-        nl: /gebruikersrechten-per-organisatie/:id
-    detail:
-      header:
+    persisted:
+      column: target_org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List User Organization Permission
+    description: List UserOrganizationPermission records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get User Organization Permission
+    description: Get UserOrganizationPermission records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create User Organization Permission
+    description: Create UserOrganizationPermission records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update User Organization Permission
+    description: Update UserOrganizationPermission records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete User Organization Permission
+    description: Delete UserOrganizationPermission records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /user-organization-permissions
+          nl: /gebruikersrechten-per-organisatie
+        columns:
+          - key: clientId
+            sortable: true
+          - key: permissionName
+            sortable: true
+          - key: targetScopeKind
+            sortable: true
+        title:
+          en: User organization permissions
+          nl: Gebruikersrechten per organisatie
+        defaultSort:
+          key: permissionName
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /user-organization-permissions/:id
+            nl: /gebruikersrechten-per-organisatie/:id
+          create:
+            en: /user-organization-permissions/create
+            nl: /gebruikersrechten-per-organisatie/aanmaken
         title: "{{permissionName}}"
         subtitle: "{{clientId}}"
         badges:
           - effect
           - targetScopeKind
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-    form:
-      variants:
-        create:
-          title:
-            en: Create user organization permission
-            nl: Gebruikersrecht per organisatie aanmaken
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-        edit:
-          title:
-            en: Edit user organization permission
-            nl: Gebruikersrecht per organisatie bewerken
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
+        actions: []
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Permission
+                    nl: Recht
+                  fields:
+                    - targetScopeKind
+                    - clientId
+                    - permissionName
+                    - effect
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+        modes:
+          create:
+            title:
+              en: Create user organization permission
+              nl: Gebruikersrecht per organisatie aanmaken
+            groups:
+              - title:
+                  en: Permission
+                  nl: Recht
+                fields:
+                  - targetScopeKind
+                  - clientId
+                  - permissionName
+                  - effect
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+          update:
+            title:
+              en: Edit user organization permission
+              nl: Gebruikersrecht per organisatie bewerken
+            groups:
+              - title:
+                  en: Permission
+                  nl: Recht
+                fields:
+                  - targetScopeKind
+                  - clientId
+                  - permissionName
+                  - effect
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization

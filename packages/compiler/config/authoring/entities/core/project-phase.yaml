@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProjectPhase
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: true
@@ -74,11 +70,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROJECTPHASESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROJECTPHASESTATUS
+    semanticType: referenceDataCode
   - key: sequence
     valueType: integer
     required: true
@@ -105,9 +100,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -120,140 +112,16 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
-relationships:
-  - key: project
-    kind: belongsTo
-    target: Project
-    foreignKey: project_id
+  - key: projectId
     label:
       en: Project
       nl: Project
-ui:
-  routes:
-    list:
-      en: /project-phases
-      nl: /projectfasen
-    detail:
-      en: /project-phases/:id
-      nl: /projectfasen/:id
-    create:
-      en: /project-phases/create
-      nl: /projectfasen/aanmaken
-    edit:
-      en: /project-phases/:id/edit
-      nl: /projectfasen/:id/bewerken
-    delete:
-      en: /project-phases/:id/delete
-      nl: /projectfasen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Project phases
-        nl: Projectfasen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: sequence
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-      defaultSort:
-        key: sequence
-        direction: asc
-      rowLink:
-        en: /project-phases/:id
-        nl: /projectfasen/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Phase details
-                nl: Fasegegevens
-              fields:
-                - code
-                - name
-                - status
-                - sequence
-            - title:
-                en: Period
-                nl: Periode
-              fields:
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create project phase
-            nl: Projectfase aanmaken
-          groups:
-            - title:
-                en: Phase details
-                nl: Fasegegevens
-              fields:
-                - code
-                - name
-                - status
-                - sequence
-            - title:
-                en: Period
-                nl: Periode
-              fields:
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-        edit:
-          extends: create
-          title:
-            en: Edit project phase
-            nl: Projectfase bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -268,3 +136,204 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project Phase
+    description: List ProjectPhase records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project Phase
+    description: Get ProjectPhase records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project Phase
+    description: Create ProjectPhase records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ProjectPhase records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /project-phases
+          nl: /projectfasen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: sequence
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+        title:
+          en: Project phases
+          nl: Projectfasen
+        defaultSort:
+          key: sequence
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /project-phases/:id
+            nl: /projectfasen/:id
+          create:
+            en: /project-phases/create
+            nl: /projectfasen/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Phase details
+                    nl: Fasegegevens
+                  fields:
+                    - code
+                    - name
+                    - status
+                    - sequence
+                - title:
+                    en: Period
+                    nl: Periode
+                  fields:
+                    - startDate
+                    - endDate
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+        modes:
+          create:
+            title:
+              en: Create project phase
+              nl: Projectfase aanmaken
+            groups:
+              - title:
+                  en: Phase details
+                  nl: Fasegegevens
+                fields:
+                  - code
+                  - name
+                  - status
+                  - sequence
+              - title:
+                  en: Period
+                  nl: Periode
+                fields:
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+          update:
+            title:
+              en: Edit project phase
+              nl: Projectfase bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROJECTPHASESTATUS
+            clearable: false
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}

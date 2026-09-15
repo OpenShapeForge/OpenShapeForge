@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RelationRole
@@ -42,11 +42,10 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RELATIONROLETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONROLETYPE
+    semanticType: referenceDataCode
   - key: name
     valueType: string
     required: false
@@ -75,11 +74,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: false
@@ -120,9 +115,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -135,167 +127,253 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: contextRelation
-    kind: belongsTo
-    target: Relation
-    foreignKey: context_relation_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: contextRelationId
     label:
       en: Context relation
       nl: Contextrelatie
+    persisted:
+      column: context_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
   - key: contactDetails
-    kind: hasMany
-    target: ContactDetail
-    foreignKey: relation_role_id
     label:
       en: Contact details
       nl: Contactgegevens
+    semanticType: ContactDetail
+    cardinality: collection
+    relationship:
+      inverse: relationRoleId
+      ownership: reference
   - key: contactMoments
-    kind: hasMany
-    target: ContactMoment
-    foreignKey: relation_role_id
     label:
       en: Contact moments
       nl: Contactmomenten
+    semanticType: ContactMoment
+    cardinality: collection
+    relationship:
+      inverse: relationRoleId
+      ownership: reference
   - key: addressAssignments
-    kind: hasMany
-    target: AddressAssignment
-    foreignKey: relation_role_id
     label:
       en: Address assignments
       nl: Adrestoewijzingen
-ui:
-  routes:
-    list:
-      en: /relation-roles
-      nl: /relatierollen
-    detail:
-      en: /relation-roles/:id
-      nl: /relatierollen/:id
-    create:
-      en: /relation-roles/create
-      nl: /relatierollen/aanmaken
-    edit:
-      en: /relation-roles/:id/edit
-      nl: /relatierollen/:id/bewerken
-    delete:
-      en: /relation-roles/:id/delete
-      nl: /relatierollen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Relation Roles
-        nl: Relatierollen
-      columns:
-        - key: type
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-      defaultSort:
-        key: type
-        direction: asc
-      rowLink:
-        en: /relation-roles/:id
-        nl: /relatierollen/:id
-    detail:
-      header:
+    semanticType: AddressAssignment
+    cardinality: collection
+    relationship:
+      inverse: relationRoleId
+      ownership: reference
+operations:
+  list:
+    name: List Relation Role
+    description: List RelationRole records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Relation Role
+    description: Get RelationRole records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Relation Role
+    description: Create RelationRole records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update RelationRole records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /relation-roles
+          nl: /relatierollen
+        columns:
+          - key: type
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        title:
+          en: Relation Roles
+          nl: Relatierollen
+        defaultSort:
+          key: type
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /relation-roles/:id
+            nl: /relatierollen/:id
+          create:
+            en: /relation-roles/create
+            nl: /relatierollen/aanmaken
         title: "{{name || type}}"
         subtitle: "{{status}}"
         badges:
           - type
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - type
-                - name
-                - status
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-    form:
-      variants:
-        create:
-          title:
-            en: Create relation role
-            nl: Relatierol aanmaken
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - type
-                - name
-                - status
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-        edit:
-          extends: create
-          title:
-            en: Edit relation role
-            nl: Relatierol bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Role details
+                    nl: Rolgegevens
+                  fields:
+                    - type
+                    - name
+                    - status
+                    - startDate
+                    - endDate
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+        modes:
+          create:
+            title:
+              en: Create relation role
+              nl: Relatierol aanmaken
+            groups:
+              - title:
+                  en: Role details
+                  nl: Rolgegevens
+                fields:
+                  - type
+                  - name
+                  - status
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+          update:
+            title:
+              en: Edit relation role
+              nl: Relatierol bewerken
+    fields:
+      type:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: RELATIONROLETYPE
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}

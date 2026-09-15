@@ -1,9 +1,11 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Agreement
 title: Agreement
-description: Canonical contract-management agreement linked to a primary relation and optionally to a parent agreement. Hierarchy is strict — every billable agreement is a sub agreement (role=sub) hanging under a non-billable master umbrella (role=master). Billing schedules and components attach only to sub agreements.
+description: Canonical contract-management agreement linked to a primary relation and optionally to a parent agreement.
+  Hierarchy is strict — every billable agreement is a sub agreement (role=sub) hanging under a non-billable master
+  umbrella (role=master). Billing schedules and components attach only to sub agreements.
 language: en
 displayTemplate: "{{code}}"
 filterField: code
@@ -50,7 +52,8 @@ fields:
       nl: Hierarchierol
     description:
       en: Whether this agreement is a non-billable master umbrella or a billable sub agreement under a master.
-      nl: Bepaalt of dit een niet-factureerbare hoofdovereenkomst (master) is of een factureerbare subovereenkomst (sub) onder een master.
+      nl: Bepaalt of dit een niet-factureerbare hoofdovereenkomst (master) is of een factureerbare subovereenkomst (sub) onder
+        een master.
     defaultValue: sub
     persisted:
       column: role
@@ -270,42 +273,54 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: parentAgreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: parent_agreement_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: parentAgreementId
     label:
       en: Parent agreement
       nl: Bovenliggende overeenkomst
+    persisted:
+      column: parent_agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
   - key: childAgreements
-    kind: hasMany
-    target: Agreement
-    foreignKey: parent_agreement_id
     label:
       en: Child agreements
       nl: Onderliggende overeenkomsten
+    semanticType: Agreement
+    cardinality: collection
+    relationship:
+      inverse: parentAgreementId
+      ownership: reference
   - key: parties
-    kind: hasMany
-    target: AgreementParty
-    foreignKey: agreement_id
     label:
       en: Parties
       nl: Partijen
+    semanticType: AgreementParty
+    cardinality: collection
+    relationship:
+      inverse: agreementId
+      ownership: reference
 operations:
   list:
     name: { en: List agreements, nl: Overeenkomsten tonen }
@@ -368,7 +383,7 @@ operations:
         kind: type-current-field
         field: code
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -380,57 +395,146 @@ interfaces:
   web:
     views:
       collection:
-        route: { en: /agreements, nl: /overeenkomsten }
-        title: { en: Agreements, nl: Overeenkomsten }
+        route:
+          en: /agreements
+          nl: /overeenkomsten
+        title:
+          en: Agreements
+          nl: Overeenkomsten
         columns:
-          - { key: code, sortable: true }
-          - { key: agreementType, sortable: true }
-          - { key: role, sortable: true }
-          - { key: status, sortable: true }
-          - { key: startDate, sortable: true }
-          - { key: endDate, sortable: true }
-        defaultSort: { key: code, direction: asc }
+          - key: code
+            sortable: true
+          - key: agreementType
+            sortable: true
+          - key: role
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        defaultSort:
+          key: code
+          direction: asc
       record:
         routes:
-          read: { en: /agreements/:id, nl: /overeenkomsten/:id }
-          create: { en: /agreements/new, nl: /overeenkomsten/nieuw }
+          read:
+            en: /agreements/:id
+            nl: /overeenkomsten/:id
+          create:
+            en: /agreements/new
+            nl: /overeenkomsten/nieuw
         title: "{{code}}"
         subtitle: "{{agreementType}}"
-        actions: [update, delete]
+        actions:
+          - update
+          - delete
         layout:
           context:
-            fields: [status, role, startDate, endDate]
-            relationships: [relation, case, parentAgreement]
+            fields:
+              - status
+              - role
+              - startDate
+              - endDate
+            relationships:
+              - relationId
+              - caseId
+              - parentAgreementId
           tabs:
             - id: overview
-              label: { en: Overview, nl: Overzicht }
+              label:
+                en: Overview
+                nl: Overzicht
               groups:
-                - title: { en: Agreement, nl: Overeenkomst }
-                  fields: [code, role, agreementType, agreementSubType, status]
-                - title: { en: Term, nl: Looptijd }
-                  fields: [startDate, endDate, billingStartDate, billingEndDate, noticeDate, noticeTerm]
-                - title: { en: Dispatch, nl: Verzending }
-                  fields: [conceptSentAt, sentAt, dispatchStatus]
-                - title: { en: Termination, nl: Beëindiging }
-                  fields: [terminationReason, terminationReasonDetail]
-                - title: { en: References, nl: Referenties }
-                  fields: [sequenceNumber, externalCode]
+                - title:
+                    en: Agreement
+                    nl: Overeenkomst
+                  fields:
+                    - code
+                    - role
+                    - agreementType
+                    - agreementSubType
+                    - status
+                - title:
+                    en: Term
+                    nl: Looptijd
+                  fields:
+                    - startDate
+                    - endDate
+                    - billingStartDate
+                    - billingEndDate
+                    - noticeDate
+                    - noticeTerm
+                - title:
+                    en: Dispatch
+                    nl: Verzending
+                  fields:
+                    - conceptSentAt
+                    - sentAt
+                    - dispatchStatus
+                - title:
+                    en: Termination
+                    nl: Beëindiging
+                  fields:
+                    - terminationReason
+                    - terminationReasonDetail
+                - title:
+                    en: References
+                    nl: Referenties
+                  fields:
+                    - sequenceNumber
+                    - externalCode
             - id: childAgreements
-              label: { en: Child agreements, nl: Onderliggende overeenkomsten }
+              label:
+                en: Child agreements
+                nl: Onderliggende overeenkomsten
               relationship: childAgreements
         modes:
           create:
-            title: { en: Create agreement, nl: Overeenkomst aanmaken }
+            title:
+              en: Create agreement
+              nl: Overeenkomst aanmaken
             groups:
-              - title: { en: Agreement, nl: Overeenkomst }
-                fields: [code, role, agreementType, agreementSubType, status]
-              - title: { en: Term, nl: Looptijd }
-                fields: [startDate, endDate, billingStartDate, billingEndDate, noticeDate, noticeTerm]
-              - title: { en: Dispatch, nl: Verzending }
-                fields: [conceptSentAt, sentAt, dispatchStatus]
-              - title: { en: Termination, nl: Beëindiging }
-                fields: [terminationReason, terminationReasonDetail]
-              - title: { en: References, nl: Referenties }
-                fields: [sequenceNumber, externalCode]
+              - title:
+                  en: Agreement
+                  nl: Overeenkomst
+                fields:
+                  - code
+                  - role
+                  - agreementType
+                  - agreementSubType
+                  - status
+              - title:
+                  en: Term
+                  nl: Looptijd
+                fields:
+                  - startDate
+                  - endDate
+                  - billingStartDate
+                  - billingEndDate
+                  - noticeDate
+                  - noticeTerm
+              - title:
+                  en: Dispatch
+                  nl: Verzending
+                fields:
+                  - conceptSentAt
+                  - sentAt
+                  - dispatchStatus
+              - title:
+                  en: Termination
+                  nl: Beëindiging
+                fields:
+                  - terminationReason
+                  - terminationReasonDetail
+              - title:
+                  en: References
+                  nl: Referenties
+                fields:
+                  - sequenceNumber
+                  - externalCode
           update:
-            title: { en: Update agreement, nl: Overeenkomst wijzigen }
+            title:
+              en: Update agreement
+              nl: Overeenkomst wijzigen

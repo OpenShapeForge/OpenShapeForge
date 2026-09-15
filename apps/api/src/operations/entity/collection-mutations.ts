@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationI18nKeyword, operationReferenceKeyword } from "@openshapeforge/operations";
+import { operationI18nKeyword, operationInputFieldsKeyword, operationReferenceKeyword } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
@@ -32,6 +32,7 @@ export type CollectionMutationResult = { parent: GeneratedEntityRow; childId: st
 const ajv = new Ajv2020.default({ strict: true, allErrors: true });
 (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
 ajv.addKeyword(operationI18nKeyword);
+ajv.addKeyword(operationInputFieldsKeyword);
 ajv.addKeyword(operationReferenceKeyword);
 ajv.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
 ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });

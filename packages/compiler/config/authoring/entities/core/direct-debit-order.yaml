@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: DirectDebitOrder
@@ -52,9 +52,6 @@ fields:
     persisted:
       column: execution_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: sequenceType
     valueType: string
     required: true
@@ -67,11 +64,10 @@ fields:
     persisted:
       column: sequence_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SEPASEQUENCETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SEPASEQUENCETYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -84,11 +80,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DIRECTDEBITORDERSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: DIRECTDEBITORDERSTATUS
+    semanticType: referenceDataCode
   - key: endToEndId
     valueType: string
     required: false
@@ -117,147 +112,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: mandate
-    kind: belongsTo
-    target: DirectDebitMandate
-    foreignKey: mandate_id
+  - key: mandateId
     label:
       en: Mandate
       nl: Machtiging
-  - key: paymentOrder
-    kind: belongsTo
-    target: PaymentOrder
-    foreignKey: payment_order_id
+    persisted:
+      column: mandate_id
+      storageClass: core
+    semanticType: DirectDebitMandate
+    relationship:
+      ownership: reference
+  - key: paymentOrderId
     label:
       en: Payment order
       nl: Betaalopdracht
-ui:
-  routes:
-    list:
-      en: /direct-debit-orders
-      nl: /incasso-opdrachten
-    detail:
-      en: /direct-debit-orders/:id
-      nl: /incasso-opdrachten/:id
-    create:
-      en: /direct-debit-orders/create
-      nl: /incasso-opdrachten/aanmaken
-    edit:
-      en: /direct-debit-orders/:id/edit
-      nl: /incasso-opdrachten/:id/bewerken
-    delete:
-      en: /direct-debit-orders/:id/delete
-      nl: /incasso-opdrachten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Direct debit orders
-        nl: Incasso-opdrachten
-      columns:
-        - key: endToEndId
-          sortable: true
-        - key: iban
-          sortable: true
-        - key: amount
-          sortable: true
-        - key: executionDate
-          sortable: true
-        - key: status
-          sortable: true
-        - key: sequenceType
-          sortable: true
-      defaultSort:
-        key: executionDate
-        direction: desc
-      rowLink:
-        en: /direct-debit-orders/:id
-        nl: /incasso-opdrachten/:id
-    detail:
-      header:
-        title: "{{endToEndId}}"
-        subtitle: "{{amount}}"
-        badges:
-          - status
-          - sequenceType
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Order details
-                nl: Opdrachtgegevens
-              fields:
-                - endToEndId
-                - iban
-                - amount
-                - executionDate
-                - status
-                - sequenceType
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create direct debit order
-            nl: Incasso-opdracht aanmaken
-          groups:
-            - title:
-                en: Order details
-                nl: Opdrachtgegevens
-              fields:
-                - endToEndId
-                - iban
-                - amount
-                - executionDate
-                - status
-                - sequenceType
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit direct debit order
-            nl: Incasso-opdracht bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: payment_order_id
+      storageClass: core
+    semanticType: PaymentOrder
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -272,3 +146,203 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Direct Debit Order
+    description: List DirectDebitOrder records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Direct Debit Order
+    description: Get DirectDebitOrder records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Direct Debit Order
+    description: Create DirectDebitOrder records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update DirectDebitOrder records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /direct-debit-orders
+          nl: /incasso-opdrachten
+        columns:
+          - key: endToEndId
+            sortable: true
+          - key: iban
+            sortable: true
+          - key: amount
+            sortable: true
+          - key: executionDate
+            sortable: true
+          - key: status
+            sortable: true
+          - key: sequenceType
+            sortable: true
+        title:
+          en: Direct debit orders
+          nl: Incasso-opdrachten
+        defaultSort:
+          key: executionDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /direct-debit-orders/:id
+            nl: /incasso-opdrachten/:id
+          create:
+            en: /direct-debit-orders/create
+            nl: /incasso-opdrachten/aanmaken
+        title: "{{endToEndId}}"
+        subtitle: "{{amount}}"
+        badges:
+          - status
+          - sequenceType
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Order details
+                    nl: Opdrachtgegevens
+                  fields:
+                    - endToEndId
+                    - iban
+                    - amount
+                    - executionDate
+                    - status
+                    - sequenceType
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create direct debit order
+              nl: Incasso-opdracht aanmaken
+            groups:
+              - title:
+                  en: Order details
+                  nl: Opdrachtgegevens
+                fields:
+                  - endToEndId
+                  - iban
+                  - amount
+                  - executionDate
+                  - status
+                  - sequenceType
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit direct debit order
+              nl: Incasso-opdracht bewerken
+    fields:
+      executionDate:
+        render:
+          component: DatePicker
+          props: {}
+      sequenceType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SEPASEQUENCETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: DIRECTDEBITORDERSTATUS
+            clearable: false

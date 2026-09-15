@@ -139,6 +139,7 @@ export interface CompiledField {
 }
 
 export interface CompiledRelationship {
+  through?: { field: string; column: string; target: string };
   key: string;
   fieldKey?: string;
   inverse?: string;
@@ -167,6 +168,7 @@ export interface GraphQLField {
 }
 
 export interface GraphQLRelationship {
+  through?: { field: string; column: string; target: string };
   name: string;
   target: string;
   type: string;

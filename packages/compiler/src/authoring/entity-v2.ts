@@ -7,6 +7,7 @@ import type {
   RestConfig,
   UIDefinition,
 } from "./types.js";
+import { fieldCardinality } from "./compiler/helpers.js";
 
 export function isCoreEntityV2(entity: CoreEntity): boolean {
   return entity.schemaVersion === 2 || entity.schemaVersion === 3;
@@ -63,7 +64,7 @@ export function v2PluginOperations(entity: CoreEntity) {
         ...(entity.interfaces?.rest ? { rest: projection("rest") } : {}),
         ...(entity.interfaces?.graphql ? { graphql: projection("graphql") } : {}),
         ...(entity.interfaces?.mcp ? { mcp: projection("mcp") } : {}),
-        ...(entity.interfaces?.web ? { web: projection("web") } : {}),
+        ...(entity.interfaces?.web?.views ? { web: projection("web") } : {}),
       },
     }];
   });
@@ -131,7 +132,7 @@ const WEB_RENDERER_KEY = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
 export function v2RestConfig(entity: CoreEntity): RestConfig | undefined {
   if (!entity.interfaces?.rest) return undefined;
-  return { operations: completeProjectedActions(entity, "rest") };
+  return { ...(entity.interfaces.rest.basePath ? { basePath: entity.interfaces.rest.basePath } : {}), operations: completeProjectedActions(entity, "rest") };
 }
 
 export function v2McpConfig(entity: CoreEntity): McpConfig | undefined {
@@ -153,7 +154,7 @@ export function v2McpConfig(entity: CoreEntity): McpConfig | undefined {
 export function v2WebOperationActions(
   entity: CoreEntity,
 ): Partial<Record<CrudOperationKey, boolean>> | undefined {
-  if (!entity.interfaces?.web) return undefined;
+  if (!entity.interfaces?.web?.views) return undefined;
   return projectedActions(entity, "web");
 }
 
@@ -172,7 +173,7 @@ export function v2GraphqlOperationActions(
  */
 export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
   const web = entity.interfaces?.web;
-  if (!web) return undefined;
+  if (!web?.views) return undefined;
   const collection = web.views.collection;
   const record = web.views.record;
   const presentations: NonNullable<UIDefinition["presentations"]> = {
@@ -195,6 +196,7 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
       header: {
         title: record.title,
         ...(record.subtitle ? { subtitle: record.subtitle } : {}),
+        ...(record.badges?.length ? { badges: record.badges } : {}),
       },
       actions: (record.actions ?? []).map((key) => {
         const implementation = entity.operations![key]!.implementation;
@@ -231,10 +233,14 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
 
 export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   if (!isCoreEntityV2(entity)) return;
-  if (!entity.operations || Object.keys(entity.operations).length === 0) {
+  if (!entity.operations || (Object.keys(entity.operations).length === 0 &&
+    (entity.schemaVersion !== 3 || (entity.baseEntity === false && !entity.fields.some(field => field.key === "id"))))) {
     throw new Error(`${origin} schemaVersion 2 must declare at least one operation.`);
   }
   v2OperationByAction(entity);
+  if (!entity.interfaces || (entity.schemaVersion === 2 && !Object.keys(entity.interfaces).length)) {
+    throw new Error(`${origin} requires explicit interface declarations.`);
+  }
 
   const fieldsByKey = new Map(entity.fields.map((field) => [field.key, field]));
   for (const field of entity.fields) {
@@ -248,6 +254,14 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   }
 
   for (const [operationKey, operation] of v2OperationEntries(entity)) {
+    for (const [inputKey, property] of Object.entries(operation.input?.schema?.properties ?? {})) {
+      if (!property || typeof property !== "object" || Array.isArray(property) || !("x-osf-inputFields" in property)) continue;
+      const source = (property as Record<string, unknown>)["x-osf-inputFields"];
+      const field = typeof source === "string" ? fieldsByKey.get(source) : undefined;
+      if (operation.target?.scope !== "record" || !field || field.semanticType !== "fieldDefinition" || fieldCardinality(field) !== "collection") {
+        throw new Error(`${origin} Operation ${operationKey} input ${inputKey}: x-osf-inputFields must reference a fieldDefinition collection on its target record.`);
+      }
+    }
     if (operation.implementation.type === "collection") {
       const implementation = operation.implementation;
       if (entity.schemaVersion !== 3 || !["insert", "move"].includes(implementation.action) ||
@@ -714,9 +728,30 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
 
   const web = entity.interfaces?.web;
   if (web) {
+    const variableSources = web.views?.record?.variableSources ?? [];
+    if (new Set(variableSources.map(source => source.key)).size !== variableSources.length) throw new Error(`${origin} duplicate Web variable source key.`);
+    for (const source of variableSources) {
+      if (source.params?.sourceField && !fieldsByKey.has(String(source.params.sourceField))) throw new Error(`${origin} Web variable source ${source.key} references unknown sourceField.`);
+    }
+    const paths = new Set<string>();
+    const visitPaths = (fields: readonly CoreEntity["fields"][number][], parent = "") => {
+      for (const field of fields) {
+        const path = parent ? `${parent}.${field.key}` : field.key;
+        paths.add(path);
+        visitPaths(field.children ?? field.shape ?? [], path);
+        if (field.item) visitPaths([field.item], path);
+      }
+    };
+    visitPaths(entity.fields);
+    for (const key of Object.keys(web.fields ?? {})) {
+      if (!paths.has(key)) throw new Error(`${origin} Web presentation refers to unknown field ${key}.`);
+    }
+    for (const key of web.views?.record?.badges ?? []) {
+      if (!fieldsByKey.has(key)) throw new Error(`${origin} badge refers to unknown field ${key}.`);
+    }
     for (const [scope, renderer] of [
-      ["collection", web.views.collection.renderer],
-      ["record", web.views.record?.renderer],
+      ["collection", web.views?.collection.renderer],
+      ["record", web.views?.record?.renderer],
     ] as const) {
       if (renderer !== undefined &&
         (renderer.length > 128 || !WEB_RENDERER_KEY.test(renderer))) {
@@ -727,8 +762,8 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       }
     }
     const actionLists = [
-      ["collection", web.views.collection.actions ?? []],
-      ["record", web.views.record?.actions ?? []],
+      ["collection", web.views?.collection.actions ?? []],
+      ["record", web.views?.record?.actions ?? []],
     ] as const;
     for (const [scope, operationKeys] of actionLists) {
       for (const operationKey of operationKeys) {

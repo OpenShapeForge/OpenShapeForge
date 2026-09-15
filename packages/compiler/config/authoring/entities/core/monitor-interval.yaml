@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MonitorInterval
@@ -56,110 +56,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
-ui:
-  routes:
-    list:
-      en: /monitor-intervals
-      nl: /monitorintervallen
-    detail:
-      en: /monitor-intervals/:id
-      nl: /monitorintervallen/:id
-    create:
-      en: /monitor-intervals/create
-      nl: /monitorintervallen/aanmaken
-    edit:
-      en: /monitor-intervals/:id/edit
-      nl: /monitorintervallen/:id/bewerken
-    delete:
-      en: /monitor-intervals/:id/delete
-      nl: /monitorintervallen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Monitor intervals
-        nl: Monitorintervallen
-      columns:
-        - key: code
-          sortable: true
-        - key: intervalSeconds
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /monitor-intervals/:id
-        nl: /monitorintervallen/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{intervalSeconds}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Interval details
-                nl: Intervalgegevens
-              fields:
-                - code
-                - intervalSeconds
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create monitor interval
-            nl: Monitorinterval aanmaken
-          groups:
-            - title:
-                en: Interval details
-                nl: Intervalgegevens
-              fields:
-                - code
-                - intervalSeconds
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-        edit:
-          extends: create
-          title:
-            en: Edit monitor interval
-            nl: Monitorinterval bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: multilineText
 authorization:
   roles:
     read:
@@ -174,3 +71,166 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Monitor Interval
+    description: List MonitorInterval records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Monitor Interval
+    description: Get MonitorInterval records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Monitor Interval
+    description: Create MonitorInterval records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MonitorInterval records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /monitor-intervals
+          nl: /monitorintervallen
+        columns:
+          - key: code
+            sortable: true
+          - key: intervalSeconds
+            sortable: true
+        title:
+          en: Monitor intervals
+          nl: Monitorintervallen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /monitor-intervals/:id
+            nl: /monitorintervallen/:id
+          create:
+            en: /monitor-intervals/create
+            nl: /monitorintervallen/aanmaken
+        title: "{{code}}"
+        subtitle: "{{intervalSeconds}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Interval details
+                    nl: Intervalgegevens
+                  fields:
+                    - code
+                    - intervalSeconds
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+        modes:
+          create:
+            title:
+              en: Create monitor interval
+              nl: Monitorinterval aanmaken
+            groups:
+              - title:
+                  en: Interval details
+                  nl: Intervalgegevens
+                fields:
+                  - code
+                  - intervalSeconds
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+          update:
+            title:
+              en: Edit monitor interval
+              nl: Monitorinterval bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

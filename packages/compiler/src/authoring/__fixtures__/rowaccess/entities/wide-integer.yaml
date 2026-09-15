@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: WideInteger
@@ -13,10 +13,10 @@ domains:
   - governance
 authorization:
   roles:
-    read: [Records.All.Read]
-    create: [Records.All.Manage]
-    update: [Records.All.Manage]
-    delete: [Records.All.Manage]
+    read: [ Records.All.Read ]
+    create: [ Records.All.Manage ]
+    update: [ Records.All.Manage ]
+    delete: [ Records.All.Manage ]
 fields:
   - key: label
     valueType: string
@@ -50,3 +50,76 @@ fields:
     validation: { format: uuid }
     label: { en: External identity }
     persisted: { column: reference_id, storageClass: core }
+operations:
+  list:
+    name: List Wide Integer
+    description: List WideInteger records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Wide Integer
+    description: Get WideInteger records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Wide Integer
+    description: Create WideInteger records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Wide Integer
+    description: Update WideInteger records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Wide Integer
+    description: Delete WideInteger records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

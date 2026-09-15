@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseFile
@@ -72,11 +72,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 5
-        maxLength: 8000
+    semanticType: multilineText
   - key: caseFileType
     valueType: string
     required: true
@@ -86,11 +82,10 @@ fields:
     persisted:
       column: case_file_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILETYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -100,11 +95,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILESTATUS
+    semanticType: referenceDataCode
   - key: confidentiality
     valueType: string
     required: false
@@ -114,11 +108,10 @@ fields:
     persisted:
       column: confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILECONFIDENTIALITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILECONFIDENTIALITY
+    semanticType: referenceDataCode
   - key: archiveStatus
     valueType: string
     required: false
@@ -128,11 +121,10 @@ fields:
     persisted:
       column: archive_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEFILEARCHIVESTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEFILEARCHIVESTATUS
+    semanticType: referenceDataCode
   - key: openedAt
     valueType: datetime
     required: false
@@ -142,9 +134,6 @@ fields:
     persisted:
       column: opened_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: closedAt
     valueType: datetime
     required: false
@@ -154,9 +143,6 @@ fields:
     persisted:
       column: closed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: archiveActionAt
     valueType: datetime
     required: false
@@ -166,9 +152,6 @@ fields:
     persisted:
       column: archive_action_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: retentionUntil
     valueType: date
     required: false
@@ -178,9 +161,6 @@ fields:
     persisted:
       column: retention_until
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: aiSummary
     valueType: string
     required: false
@@ -193,11 +173,7 @@ fields:
     persisted:
       column: ai_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 8000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -209,55 +185,195 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: primaryRelation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: primaryRelationId
     label:
       en: Primary relation
       nl: Primaire relatie
-  - key: parentCaseFile
-    kind: belongsTo
-    target: CaseFile
-    foreignKey: parent_case_file_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: parentCaseFileId
     label:
       en: Parent case file
       nl: Hoofddossier
+    persisted:
+      column: parent_case_file_id
+      storageClass: core
+    semanticType: CaseFile
+    relationship:
+      ownership: reference
   - key: childCaseFiles
-    kind: hasMany
-    target: CaseFile
-    foreignKey: parent_case_file_id
     label:
       en: Child case files
       nl: Onderliggende dossiers
+    semanticType: CaseFile
+    cardinality: collection
+    relationship:
+      inverse: parentCaseFileId
+      ownership: reference
   - key: cases
-    kind: hasMany
-    target: Case
-    foreignKey: case_file_id
     label:
       en: Cases
       nl: Zaken
+    semanticType: Case
+    cardinality: collection
+    relationship:
+      inverse: caseFileId
+      ownership: reference
   - key: processes
-    kind: hasMany
-    target: Process
-    foreignKey: case_file_id
     label:
       en: Processes
       nl: Processen
+    semanticType: Process
+    cardinality: collection
+    relationship:
+      inverse: caseFileId
+      ownership: reference
   - key: documents
-    kind: hasMany
-    target: Document
-    foreignKey: case_file_id
     label:
       en: Documents
       nl: Documenten
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: Document
+    cardinality: collection
+    relationship:
+      inverse: caseFileId
+      ownership: reference
+operations:
+  list:
+    name: List Case file
+    description: List CaseFile records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case file
+    description: Get CaseFile records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case file
+    description: Create CaseFile records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case file
+    description: Update CaseFile records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case file
+    description: Delete CaseFile records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 5
+            maxLength: 8000
+      caseFileType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILESTATUS
+            clearable: false
+      confidentiality:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILECONFIDENTIALITY
+            clearable: true
+      archiveStatus:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEFILEARCHIVESTATUS
+            clearable: true
+      openedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      closedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      archiveActionAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      retentionUntil:
+        render:
+          component: DatePicker
+          props: {}
+      aiSummary:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 8000

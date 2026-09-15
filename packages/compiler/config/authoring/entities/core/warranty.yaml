@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Warranty
@@ -42,11 +42,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: startDate
     valueType: date
     required: true
@@ -59,9 +55,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: true
@@ -74,9 +67,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -91,142 +81,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: supplier
-    kind: belongsTo
-    target: Relation
-    foreignKey: supplier_relation_id
+  - key: supplierId
     label:
       en: Supplier
       nl: Leverancier
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+    persisted:
+      column: supplier_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /warranties
-      nl: /garanties
-    detail:
-      en: /warranties/:id
-      nl: /garanties/:id
-    create:
-      en: /warranties/create
-      nl: /garanties/aanmaken
-    edit:
-      en: /warranties/:id/edit
-      nl: /garanties/:id/bewerken
-    delete:
-      en: /warranties/:id/delete
-      nl: /garanties/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Warranties
-        nl: Garanties
-      columns:
-        - key: code
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-      defaultSort:
-        key: endDate
-        direction: asc
-      rowLink:
-        en: /warranties/:id
-        nl: /garanties/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{endDate}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Warranty details
-                nl: Garantiegegevens
-              fields:
-                - code
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create warranty
-            nl: Garantie aanmaken
-          groups:
-            - title:
-                en: Warranty details
-                nl: Garantiegegevens
-              fields:
-                - code
-                - startDate
-                - endDate
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit warranty
-            nl: Garantie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -241,3 +115,196 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Warranty
+    description: List Warranty records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Warranty
+    description: Get Warranty records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Warranty
+    description: Create Warranty records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Warranty records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /warranties
+          nl: /garanties
+        columns:
+          - key: code
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        title:
+          en: Warranties
+          nl: Garanties
+        defaultSort:
+          key: endDate
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /warranties/:id
+            nl: /garanties/:id
+          create:
+            en: /warranties/create
+            nl: /garanties/aanmaken
+        title: "{{code}}"
+        subtitle: "{{endDate}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Warranty details
+                    nl: Garantiegegevens
+                  fields:
+                    - code
+                    - startDate
+                    - endDate
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create warranty
+              nl: Garantie aanmaken
+            groups:
+              - title:
+                  en: Warranty details
+                  nl: Garantiegegevens
+                fields:
+                  - code
+                  - startDate
+                  - endDate
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit warranty
+              nl: Garantie bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

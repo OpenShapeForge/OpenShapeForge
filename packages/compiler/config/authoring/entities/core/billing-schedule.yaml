@@ -1,9 +1,11 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BillingSchedule
 title: Billing Schedule
-description: Cadence and run-cursor configuration that drives prolongation for a billable sub-agreement. One BillingSchedule per active billable agreement; controls when the prolongation engine considers the agreement due. Line-level billed-through cursors stay on AgreementComponent.
+description: Cadence and run-cursor configuration that drives prolongation for a billable sub-agreement. One
+  BillingSchedule per active billable agreement; controls when the prolongation engine considers the agreement due.
+  Line-level billed-through cursors stay on AgreementComponent.
 language: en
 displayTemplate: "{{period}}"
 filterField: period
@@ -27,11 +29,10 @@ fields:
     persisted:
       column: period
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGPERIOD
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGPERIOD
+    semanticType: referenceDataCode
   - key: startDay
     valueType: integer
     required: false
@@ -75,11 +76,10 @@ fields:
     persisted:
       column: invoice_mode
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: BILLINGAMOUNTTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: BILLINGAMOUNTTYPE
+    semanticType: referenceDataCode
   - key: nextProlongationDate
     valueType: date
     required: false
@@ -87,14 +87,13 @@ fields:
       en: Next prolongation date
       nl: Volgende prolongatiedatum
     description:
-      en: Agreement-level due-run cursor. The prolongation engine selects this schedule when nextProlongationDate <= billUpToDate.
-      nl: Cursor voor volgende prolongatie op overeenkomstniveau. De prolongatiemotor selecteert dit schema wanneer volgende prolongatiedatum <= bill-up-to datum.
+      en: Agreement-level due-run cursor. The prolongation engine selects this schedule when nextProlongationDate <=
+        billUpToDate.
+      nl: Cursor voor volgende prolongatie op overeenkomstniveau. De prolongatiemotor selecteert dit schema wanneer volgende
+        prolongatiedatum <= bill-up-to datum.
     persisted:
       column: next_prolongation_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endProlongationDate
     valueType: date
     required: false
@@ -107,9 +106,6 @@ fields:
     persisted:
       column: end_prolongation_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: lastProlongationAt
     valueType: datetime
     required: false
@@ -136,134 +132,16 @@ fields:
     persisted:
       column: source
       storageClass: core
-relationships:
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-ui:
-  routes:
-    list:
-      en: /billing-schedules
-      nl: /facturatieschemas
-    detail:
-      en: /billing-schedules/:id
-      nl: /facturatieschemas/:id
-    create:
-      en: /billing-schedules/create
-      nl: /facturatieschemas/aanmaken
-    edit:
-      en: /billing-schedules/:id/edit
-      nl: /facturatieschemas/:id/bewerken
-    delete:
-      en: /billing-schedules/:id/delete
-      nl: /facturatieschemas/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Billing schedules
-        nl: Facturatieschemas
-      columns:
-        - key: period
-          sortable: true
-        - key: nextProlongationDate
-          sortable: true
-        - key: endProlongationDate
-          sortable: true
-        - key: lastProlongationAt
-          sortable: true
-      defaultSort:
-        key: nextProlongationDate
-        direction: asc
-      rowLink:
-        en: /billing-schedules/:id
-        nl: /facturatieschemas/:id
-    detail:
-      header:
-        title: "{{period}}"
-        subtitle: "{{nextProlongationDate}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Cadence
-                nl: Cadans
-              fields:
-                - period
-                - startDay
-                - variableDays
-                - invoiceMode
-            - title:
-                en: Cursors
-                nl: Cursors
-              fields:
-                - nextProlongationDate
-                - endProlongationDate
-                - lastProlongationAt
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - source
-    form:
-      variants:
-        create:
-          title:
-            en: Create billing schedule
-            nl: Facturatieschema aanmaken
-          groups:
-            - title:
-                en: Cadence
-                nl: Cadans
-              fields:
-                - period
-                - startDay
-                - variableDays
-                - invoiceMode
-            - title:
-                en: Cursors
-                nl: Cursors
-              fields:
-                - nextProlongationDate
-                - endProlongationDate
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - source
-        edit:
-          extends: create
-          title:
-            en: Edit billing schedule
-            nl: Facturatieschema bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -278,3 +156,201 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Billing Schedule
+    description: List BillingSchedule records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Billing Schedule
+    description: Get BillingSchedule records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Billing Schedule
+    description: Create BillingSchedule records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BillingSchedule records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /billing-schedules
+          nl: /facturatieschemas
+        columns:
+          - key: period
+            sortable: true
+          - key: nextProlongationDate
+            sortable: true
+          - key: endProlongationDate
+            sortable: true
+          - key: lastProlongationAt
+            sortable: true
+        title:
+          en: Billing schedules
+          nl: Facturatieschemas
+        defaultSort:
+          key: nextProlongationDate
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /billing-schedules/:id
+            nl: /facturatieschemas/:id
+          create:
+            en: /billing-schedules/create
+            nl: /facturatieschemas/aanmaken
+        title: "{{period}}"
+        subtitle: "{{nextProlongationDate}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Cadence
+                    nl: Cadans
+                  fields:
+                    - period
+                    - startDay
+                    - variableDays
+                    - invoiceMode
+                - title:
+                    en: Cursors
+                    nl: Cursors
+                  fields:
+                    - nextProlongationDate
+                    - endProlongationDate
+                    - lastProlongationAt
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - source
+        modes:
+          create:
+            title:
+              en: Create billing schedule
+              nl: Facturatieschema aanmaken
+            groups:
+              - title:
+                  en: Cadence
+                  nl: Cadans
+                fields:
+                  - period
+                  - startDay
+                  - variableDays
+                  - invoiceMode
+              - title:
+                  en: Cursors
+                  nl: Cursors
+                fields:
+                  - nextProlongationDate
+                  - endProlongationDate
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - source
+          update:
+            title:
+              en: Edit billing schedule
+              nl: Facturatieschema bewerken
+    fields:
+      period:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGPERIOD
+            clearable: false
+      invoiceMode:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: BILLINGAMOUNTTYPE
+            clearable: false
+      nextProlongationDate:
+        render:
+          component: DatePicker
+          props: {}
+      endProlongationDate:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

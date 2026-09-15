@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Building
 title: Building
-description: Generic building (a Pand-equivalent in the VERA profile) — a physical structure that may host multiple assets and spaces.
+description: Generic building (a Pand-equivalent in the VERA profile) — a physical structure that may host multiple
+  assets and spaces.
 language: en
 displayTemplate: "{{code}} {{name}}"
 filterField: code
@@ -57,11 +58,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: constructionYear
     valueType: integer
     required: false
@@ -91,135 +88,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: address
-    kind: belongsTo
-    target: Address
-    foreignKey: address_id
+  - key: addressId
     label:
       en: Address
       nl: Adres
-ui:
-  routes:
-    list:
-      en: /buildings
-      nl: /panden
-    detail:
-      en: /buildings/:id
-      nl: /panden/:id
-    create:
-      en: /buildings/create
-      nl: /panden/aanmaken
-    edit:
-      en: /buildings/:id/edit
-      nl: /panden/:id/bewerken
-    delete:
-      en: /buildings/:id/delete
-      nl: /panden/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Buildings
-        nl: Panden
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: constructionYear
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /buildings/:id
-        nl: /panden/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{constructionYear}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Building details
-                nl: Pandgegevens
-              fields:
-                - code
-                - name
-                - constructionYear
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create building
-            nl: Pand aanmaken
-          groups:
-            - title:
-                en: Building details
-                nl: Pandgegevens
-              fields:
-                - code
-                - name
-                - constructionYear
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit building
-            nl: Pand bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: address_id
+      storageClass: core
+    semanticType: Address
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -234,3 +112,188 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Building
+    description: List Building records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Building
+    description: Get Building records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Building
+    description: Create Building records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Building records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /buildings
+          nl: /panden
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: constructionYear
+            sortable: true
+        title:
+          en: Buildings
+          nl: Panden
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /buildings/:id
+            nl: /panden/:id
+          create:
+            en: /buildings/create
+            nl: /panden/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{constructionYear}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Building details
+                    nl: Pandgegevens
+                  fields:
+                    - code
+                    - name
+                    - constructionYear
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create building
+              nl: Pand aanmaken
+            groups:
+              - title:
+                  en: Building details
+                  nl: Pandgegevens
+                fields:
+                  - code
+                  - name
+                  - constructionYear
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit building
+              nl: Pand bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

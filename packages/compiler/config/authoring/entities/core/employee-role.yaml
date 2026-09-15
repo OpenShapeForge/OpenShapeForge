@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: EmployeeRole
 title: Employee Role
-description: Role assignment for an employee — captures kind, position, org unit, manager line, allocation, and validity period (canonical role pattern, FK to Employee).
+description: Role assignment for an employee — captures kind, position, org unit, manager line, allocation, and validity
+  period (canonical role pattern, FK to Employee).
 language: en
 displayTemplate: "{{roleKind}}"
 filterField: roleKind
@@ -25,11 +26,10 @@ fields:
     persisted:
       column: role_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: EMPLOYEEROLEKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: EMPLOYEEROLEKIND
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: false
@@ -42,11 +42,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ROLEASSIGNMENTSTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ROLEASSIGNMENTSTATUS
+    semanticType: referenceDataCode
   - key: name
     valueType: string
     required: false
@@ -75,11 +74,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: startDate
     valueType: date
     required: false
@@ -92,9 +87,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -107,9 +99,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: allocationPercentage
     valueType: number
     required: false
@@ -139,168 +128,46 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: employee
-    kind: belongsTo
-    target: Employee
-    foreignKey: employee_id
+  - key: employeeId
     label:
       en: Employee
       nl: Medewerker
-  - key: orgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: org_unit_id
+    persisted:
+      column: employee_id
+      storageClass: core
+    semanticType: Employee
+    relationship:
+      ownership: reference
+  - key: orgUnitId
     label:
       en: Org unit
       nl: Organisatorische eenheid
-  - key: position
-    kind: belongsTo
-    target: Position
-    foreignKey: position_id
+    persisted:
+      column: org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
+  - key: positionId
     label:
       en: Position
       nl: Functie
-  - key: reportsTo
-    kind: belongsTo
-    target: EmployeeRole
-    foreignKey: reports_to_employee_role_id
+    persisted:
+      column: position_id
+      storageClass: core
+    semanticType: Position
+    relationship:
+      ownership: reference
+  - key: reportsToId
     label:
       en: Reports to
       nl: Rapporteert aan
-ui:
-  routes:
-    list:
-      en: /employee-roles
-      nl: /medewerkerrollen
-    detail:
-      en: /employee-roles/:id
-      nl: /medewerkerrollen/:id
-    create:
-      en: /employee-roles/create
-      nl: /medewerkerrollen/aanmaken
-    edit:
-      en: /employee-roles/:id/edit
-      nl: /medewerkerrollen/:id/bewerken
-    delete:
-      en: /employee-roles/:id/delete
-      nl: /medewerkerrollen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Employee roles
-        nl: Medewerkerrollen
-      columns:
-        - key: roleKind
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-      defaultSort:
-        key: startDate
-        direction: desc
-      rowLink:
-        en: /employee-roles/:id
-        nl: /medewerkerrollen/:id
-    detail:
-      header:
-        title: "{{name || roleKind}}"
-        subtitle: "{{status}}"
-        badges:
-          - roleKind
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - roleKind
-                - status
-                - name
-                - startDate
-                - endDate
-                - allocationPercentage
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create employee role
-            nl: Medewerkerrol aanmaken
-          groups:
-            - title:
-                en: Role details
-                nl: Rolgegevens
-              fields:
-                - roleKind
-                - status
-                - name
-                - startDate
-                - endDate
-                - allocationPercentage
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit employee role
-            nl: Medewerkerrol bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: reports_to_employee_role_id
+      storageClass: core
+    semanticType: EmployeeRole
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -315,3 +182,220 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Employee Role
+    description: List EmployeeRole records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Employee Role
+    description: Get EmployeeRole records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Employee Role
+    description: Create EmployeeRole records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update EmployeeRole records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /employee-roles
+          nl: /medewerkerrollen
+        columns:
+          - key: roleKind
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+        title:
+          en: Employee roles
+          nl: Medewerkerrollen
+        defaultSort:
+          key: startDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /employee-roles/:id
+            nl: /medewerkerrollen/:id
+          create:
+            en: /employee-roles/create
+            nl: /medewerkerrollen/aanmaken
+        title: "{{name || roleKind}}"
+        subtitle: "{{status}}"
+        badges:
+          - roleKind
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Role details
+                    nl: Rolgegevens
+                  fields:
+                    - roleKind
+                    - status
+                    - name
+                    - startDate
+                    - endDate
+                    - allocationPercentage
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create employee role
+              nl: Medewerkerrol aanmaken
+            groups:
+              - title:
+                  en: Role details
+                  nl: Rolgegevens
+                fields:
+                  - roleKind
+                  - status
+                  - name
+                  - startDate
+                  - endDate
+                  - allocationPercentage
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit employee role
+              nl: Medewerkerrol bewerken
+    fields:
+      roleKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: EMPLOYEEROLEKIND
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ROLEASSIGNMENTSTATUS
+            clearable: true
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}

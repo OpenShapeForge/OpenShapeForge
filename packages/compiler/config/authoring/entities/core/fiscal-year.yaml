@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: FiscalYear
@@ -40,9 +40,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: true
@@ -55,9 +52,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: status
     valueType: string
     required: true
@@ -70,11 +64,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: FISCALPERIODSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: FISCALPERIODSTATUS
+    semanticType: referenceDataCode
   - key: externalCode
     valueType: string
     required: false
@@ -89,123 +82,6 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-ui:
-  routes:
-    list:
-      en: /fiscal-years
-      nl: /boekjaren
-    detail:
-      en: /fiscal-years/:id
-      nl: /boekjaren/:id
-    create:
-      en: /fiscal-years/create
-      nl: /boekjaren/aanmaken
-    edit:
-      en: /fiscal-years/:id/edit
-      nl: /boekjaren/:id/bewerken
-    delete:
-      en: /fiscal-years/:id/delete
-      nl: /boekjaren/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Fiscal years
-        nl: Boekjaren
-      columns:
-        - key: code
-          sortable: true
-        - key: startDate
-          sortable: true
-        - key: endDate
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: code
-        direction: desc
-      rowLink:
-        en: /fiscal-years/:id
-        nl: /boekjaren/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Fiscal year details
-                nl: Boekjaargegevens
-              fields:
-                - code
-                - startDate
-                - endDate
-                - status
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create fiscal year
-            nl: Boekjaar aanmaken
-          groups:
-            - title:
-                en: Fiscal year details
-                nl: Boekjaargegevens
-              fields:
-                - code
-                - startDate
-                - endDate
-                - status
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit fiscal year
-            nl: Boekjaar bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
 authorization:
   roles:
     read:
@@ -220,3 +96,192 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Fiscal Year
+    description: List FiscalYear records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Fiscal Year
+    description: Get FiscalYear records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Fiscal Year
+    description: Create FiscalYear records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update FiscalYear records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /fiscal-years
+          nl: /boekjaren
+        columns:
+          - key: code
+            sortable: true
+          - key: startDate
+            sortable: true
+          - key: endDate
+            sortable: true
+          - key: status
+            sortable: true
+        title:
+          en: Fiscal years
+          nl: Boekjaren
+        defaultSort:
+          key: code
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /fiscal-years/:id
+            nl: /boekjaren/:id
+          create:
+            en: /fiscal-years/create
+            nl: /boekjaren/aanmaken
+        title: "{{code}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Fiscal year details
+                    nl: Boekjaargegevens
+                  fields:
+                    - code
+                    - startDate
+                    - endDate
+                    - status
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create fiscal year
+              nl: Boekjaar aanmaken
+            groups:
+              - title:
+                  en: Fiscal year details
+                  nl: Boekjaargegevens
+                fields:
+                  - code
+                  - startDate
+                  - endDate
+                  - status
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit fiscal year
+              nl: Boekjaar bewerken
+    fields:
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: FISCALPERIODSTATUS
+            clearable: false

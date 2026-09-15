@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Attachment
@@ -84,12 +84,6 @@ fields:
     persisted:
       column: storage_location
       storageClass: core
-    render:
-      component: FileUpload
-      props:
-        fileNameField: fileName
-        mimeTypeField: mimeType
-        checksumField: checksum
   - key: checksum
     valueType: string
     required: false
@@ -105,104 +99,173 @@ fields:
     persisted:
       column: checksum
       storageClass: core
-relationships:
-  - key: supportIssue
-    kind: belongsTo
-    target: SupportIssue
-    foreignKey: support_issue_id
+  - key: supportIssueId
     label:
       en: Support issue
       nl: Supportverzoek
-ui:
-  routes:
-    list:
-      en: /attachments
-      nl: /attachments
-    detail:
-      en: /attachments/:id
-      nl: /attachments/:id
-    create:
-      en: /attachments/create
-      nl: /attachments/aanmaken
-    edit:
-      en: /attachments/:id/edit
-      nl: /attachments/:id/bewerken
-    delete:
-      en: /attachments/:id/delete
-      nl: /attachments/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Attachments
-        nl: Bijlagen
-      columns:
-        - key: fileName
-          sortable: true
-        - key: mimeType
-          sortable: true
-        - key: sizeBytes
-          sortable: true
-        - key: createdAt
-          sortable: true
-      defaultSort:
-        key: createdAt
-        direction: desc
-      rowLink:
-        en: /attachments/:id
-        nl: /attachments/:id
-    detail:
-      header:
+    persisted:
+      column: support_issue_id
+      storageClass: core
+    semanticType: SupportIssue
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Attachment
+    description: List Attachment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Attachment
+    description: Get Attachment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Attachment
+    description: Create Attachment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Attachment
+    description: Update Attachment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /attachments
+          nl: /attachments
+        columns:
+          - key: fileName
+            sortable: true
+          - key: mimeType
+            sortable: true
+          - key: sizeBytes
+            sortable: true
+          - key: createdAt
+            sortable: true
+        title:
+          en: Attachments
+          nl: Bijlagen
+        defaultSort:
+          key: createdAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /attachments/:id
+            nl: /attachments/:id
+          create:
+            en: /attachments/create
+            nl: /attachments/aanmaken
         title: "{{fileName}}"
         subtitle: "{{mimeType}}"
         badges:
           - mimeType
-      actions:
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: File
-                nl: Bestand
-              fields:
-                - fileName
-                - mimeType
-                - sizeBytes
-                - storageLocation
-                - checksum
-                - createdAt
-    form:
-      variants:
-        create:
-          title:
-            en: Upload attachment
-            nl: Bijlage uploaden
-          groups:
-            - title:
-                en: File
-                nl: Bestand
-              fields:
-                - storageLocation
-        edit:
-          extends: create
-          title:
-            en: Edit attachment
-            nl: Bijlage bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: File
+                    nl: Bestand
+                  fields:
+                    - fileName
+                    - mimeType
+                    - sizeBytes
+                    - storageLocation
+                    - checksum
+                    - createdAt
+        modes:
+          create:
+            title:
+              en: Upload attachment
+              nl: Bijlage uploaden
+            groups:
+              - title:
+                  en: File
+                  nl: Bestand
+                fields:
+                  - storageLocation
+          update:
+            title:
+              en: Edit attachment
+              nl: Bijlage bewerken
+    fields:
+      storageLocation:
+        render:
+          component: FileUpload
+          props:
+            fileNameField: fileName
+            mimeTypeField: mimeType
+            checksumField: checksum

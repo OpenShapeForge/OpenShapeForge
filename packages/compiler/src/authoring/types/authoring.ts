@@ -623,7 +623,7 @@ export interface EntityWebViewDefinition {
     title?: LocalizedText;
     /** Ordered collection-scoped plugin Operations shown by Web consumers. */
     actions?: string[];
-    columns: { key: string; sortable?: boolean }[];
+    columns: { key: string; label?: LocalizedText; sortable?: boolean }[];
     defaultSort?: { key: string; direction: "asc" | "desc" };
   };
   record?: {
@@ -632,6 +632,7 @@ export interface EntityWebViewDefinition {
     routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
     title: string;
     subtitle?: string;
+    badges?: string[];
     variableSources?: import("./views.js").FormVariableSource[];
     actions?: string[];
     layout: {
@@ -647,7 +648,9 @@ export interface EntityWebViewDefinition {
 }
 
 export interface EntityInterfacesDefinition {
+  workflow?: CoreEntity["workflow"];
   rest?: {
+    basePath?: string;
     operations?: Record<
       string,
       false | EntityRestOperationProjectionConfig
@@ -668,7 +671,7 @@ export interface EntityInterfacesDefinition {
   web?: {
     fields?: Record<string, { render: FieldRender }>;
     operations?: Record<string, false | EntityWebOperationProjectionConfig>;
-    views: EntityWebViewDefinition;
+    views?: EntityWebViewDefinition;
   };
 }
 

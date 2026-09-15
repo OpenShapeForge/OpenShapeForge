@@ -125,22 +125,22 @@ describe("requireEntityOperation", () => {
   });
 
   test("relationship traversal gates the TARGET entity's read roles before any DB use", async () => {
-    // The guard is the first statement of listGeneratedEntityRelation, so a
-    // null db proves the deny path rejects before any transaction could open.
+    // Resolve a real compiler-owned traversal first; the role guard then runs
+    // before any transaction, so a null db proves the denial is DB-free.
+    const relationship = table.source?.graphql?.relationships?.[0];
+    const targetTable = getGeneratedCrudTables().find(
+      (candidate) => candidate.source?.graphql?.typeName === relationship?.target,
+    );
+    expect(relationship).toBeDefined();
+    expect(targetTable).toBeDefined();
     const attempt = listGeneratedEntityRelation(
       null as unknown as OpenShapeForgeDatabase,
       noRoleSession,
       {
         parent: {},
         parentTable: table,
-        relationship: {
-          name: "anything",
-          target: "Anything",
-          type: "T",
-          resolve: "hasMany",
-          foreignKey: "relation_id",
-        },
-        targetTable: table,
+        relationship: relationship!,
+        targetTable: targetTable!,
       },
     );
     await expect(attempt).rejects.toMatchObject({

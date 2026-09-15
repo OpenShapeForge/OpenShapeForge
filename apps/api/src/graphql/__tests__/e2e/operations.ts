@@ -24,6 +24,7 @@ import {
 } from "../../generated-crud.js";
 import type { EntityOperationContract } from "../../../operations/entity/types.js";
 import { OPERATION_LEASES_PATH } from "../../../rest/edit-lease-routes.js";
+import { REST_MOUNT_PATH } from "../../../rest/rest-paths.js";
 import { apiApp, remoteUrl, type GeneratedTable, type Identity } from "./harness.js";
 
 export type Intent = "list" | "get" | "create" | "update" | "delete";
@@ -208,7 +209,30 @@ export async function acquireLease(
   intent: MutationIntent,
   options: { bearer?: string } = {},
 ): Promise<MutationControls> {
-  if (!leaseRequired(table, intent)) return {};
+  if (!leaseRequired(table, intent)) {
+    if (!versionRequired(table, intent)) return {};
+    const basePath = table.source?.rest?.basePath;
+    if (!basePath) {
+      throw new Error(
+        `${operationIdFor(table, intent)} requires a version, but the test fixture has no REST read projection.`,
+      );
+    }
+    const current = await restJson(
+      identity,
+      "GET",
+      `${REST_MOUNT_PATH}/${basePath}/${id}`,
+      undefined,
+      options,
+    );
+    const expectedVersion = current.body?.data?.updatedAt ?? current.body?.updatedAt;
+    if (current.status !== 200 || typeof expectedVersion !== "string") {
+      throw new Error(
+        `Version for ${operationIdFor(table, intent)} on ${id} was unavailable: ` +
+          `${current.status} ${JSON.stringify(current.body?.error ?? current.body)}`,
+      );
+    }
+    return { expectedVersion };
+  }
   const acquired = await requestLease(identity, table, id, intent, options);
   if (acquired.status !== 201) {
     throw new Error(

@@ -582,7 +582,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
         payload: JSON.stringify({
           query:
-            "mutation { createRelation(input: { displayName: \"perm-matrix\" }) { data { id } error { code } } }",
+            "mutation { createRelation(input: { displayName: \"perm-matrix\", relationType: \"person\" }) { data { id } error { code } } }",
         }),
       });
 
@@ -651,7 +651,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
         url: "/api/graphql",
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
         payload: JSON.stringify({
-          query: "mutation { createRelation(input: { displayName: \"split\" }) { data { id } error { code } } }",
+          query: "mutation { createRelation(input: { displayName: \"split\", relationType: \"person\" }) { data { id } error { code } } }",
         }),
       });
 

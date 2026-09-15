@@ -38,9 +38,14 @@ export function splitEntityValueInput(
   const valid = schemas.validate(definition.valueSchema, values);
   if (!valid.valid) throw operationFailure(valid.error);
   const references: Array<{ fieldKey: string; entityName: string; id: string }> = [];
-  const columns = Object.fromEntries(Object.values(carrier.definitions).flatMap((definition) => definition.references.map((reference) => [reference.column, null]))) as Record<string, string | null>;
+  const columns = Object.fromEntries(Object.values(carrier.definitions).flatMap((definition) => definition.references.flatMap((reference) => [[reference.column, null], ...(reference.parameterColumn ? [[reference.parameterColumn, null]] : [])]))) as Record<string, string | null>;
   for (const reference of definition.references) {
     const value = Object.hasOwn(raw, reference.fieldKey) ? raw[reference.fieldKey] : undefined;
+    if (object(value)) {
+      if (!reference.parameterColumn || Object.keys(value).length !== 1 || typeof value.parameter !== "string" || !/^[a-z][A-Za-z0-9]{0,127}$/.test(value.parameter)) invalid(`The ${reference.fieldKey} parameter binding is invalid.`);
+      columns[reference.parameterColumn!] = value.parameter as string;
+      continue;
+    }
     if (value === null || value === undefined) {
       if (reference.required) invalid(`The ${reference.fieldKey} relationship is required.`);
       columns[reference.column] = null;
@@ -65,6 +70,12 @@ export function projectEntityValue(
   for (const reference of definition.references) {
     if (Object.hasOwn(value, reference.fieldKey)) invalid("A stored relationship cannot be embedded in JSON values.");
     const id = row[reference.column] ?? null;
+    const parameter = reference.parameterColumn ? row[reference.parameterColumn] ?? null : null;
+    if (parameter !== null) {
+      if (id !== null || typeof parameter !== "string" || !/^[a-z][A-Za-z0-9]{0,127}$/.test(parameter)) invalid("A stored parameter binding is invalid.");
+      value[reference.fieldKey] = { parameter };
+      continue;
+    }
     if (id === null && reference.required || id !== null && (typeof id !== "string" || !uuid.test(id))) invalid("A stored typed relationship is invalid.");
     value[reference.fieldKey] = id;
   }

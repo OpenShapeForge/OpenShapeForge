@@ -46,7 +46,7 @@ function fixture(entityValues = createEntityValueRegistry({ version: 1, carriers
   const catalog = { tables: [parent, child], operations, entityValues };
   return { parent, child, operations, execute: createCollectionMutationExecutor(catalog) };
 }
-function valueFixture(allowed = ["Include", "Text"]) {
+function valueFixture(allowed = ["Include", "Text"], parameterBindings = false) {
   const registry = createEntityValueRegistry({ version: 1, carriers: [{
     entityName: "Block", fieldKey: "values", definitionField: "definitionKey", schema: "erp", table: "blocks", valuesColumn: "payload", definitionColumn: "definition_key",
     definitions: {
@@ -54,7 +54,8 @@ function valueFixture(allowed = ["Include", "Text"]) {
         fields: [{ key: "parameters", valueType: "object", defaultValue: {} }],
         valueSchema: { type: "object", properties: { parameters: { type: "object", properties: { label: { type: "string" } }, additionalProperties: false } }, required: ["parameters"], additionalProperties: false },
         references: [
-          { fieldKey: "version", targetEntity: "TemplateVariant", schema: "erp", table: "template_variants", column: "ev_values_include_version_id", required: true },
+          { fieldKey: "version", targetEntity: "TemplateVariant", schema: "erp", table: "template_variants", column: "ev_values_include_version_id", required: true,
+            ...(parameterBindings ? { parameterColumn: "ev_values_include_version_parameter" } : {}) },
           { fieldKey: "alternate", targetEntity: "TemplateVariant", schema: "erp", table: "template_variants", column: "ev_values_include_alternate_id", required: false },
         ],
       },
@@ -67,6 +68,7 @@ function valueFixture(allowed = ["Include", "Text"]) {
   const f = fixture(registry);
   f.child.columns.push(column("definition_key", "text", { sourceField: "definitionKey", immutable: true }), column("payload", "jsonb", { sourceField: "values" }),
     column("ev_values_include_version_id", "uuid", { required: false }), column("ev_values_include_alternate_id", "uuid", { required: false }));
+  if (parameterBindings) f.child.columns.push(column("ev_values_include_version_parameter", "text", { required: false }));
   f.operations.find((op) => op.entityName === "Block" && op.intent === "create")!.inputSchema = {
     type: "object", properties: { values: { type: "object", properties: {
       title: { type: "string" }, parent: { type: "string", format: "uuid" }, definitionKey: { type: "string", enum: ["Include", "Text"] }, values: { type: "object" },
@@ -127,12 +129,13 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
       create table erp.blocks(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, title text not null,
         updated_at timestamptz not null default clock_timestamp(), permissions jsonb, parent_id uuid not null, parent_id_position integer not null,
         definition_key text, version_number integer, payload jsonb, ev_values_include_version_id uuid, ev_values_include_alternate_id uuid,
+        ev_values_include_version_parameter text check(ev_values_include_version_parameter is null or ev_values_include_version_parameter ~ '^[a-z][A-Za-z0-9]{0,127}$'),
         foreign key(tenant_id,ev_values_include_version_id) references erp.template_variants(tenant_id,id),
         foreign key(tenant_id,ev_values_include_alternate_id) references erp.template_variants(tenant_id,id),
         check(definition_key is null or definition_key in ('Include','Text')),
         check(definition_key is null or (payload is not null and jsonb_typeof(payload)='object')),
-        check(definition_key<>'Include' or ev_values_include_version_id is not null),
-        check(definition_key<>'Text' or (ev_values_include_version_id is null and ev_values_include_alternate_id is null)),
+        check(definition_key<>'Include' or num_nonnulls(ev_values_include_version_id,ev_values_include_version_parameter)=1),
+        check(definition_key<>'Text' or (ev_values_include_version_id is null and ev_values_include_alternate_id is null and ev_values_include_version_parameter is null)),
         check(definition_key<>'Include' or payload - array['parameters']::text[] = '{}'::jsonb),
         check(definition_key<>'Text' or payload - array['caption']::text[] = '{}'::jsonb),
         unique(tenant_id,id), foreign key(tenant_id,parent_id) references erp.template_variants(tenant_id,id));
@@ -359,6 +362,20 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     expect(JSON.stringify(output)).not.toContain("ev_values_include");
     const events = await sql<{ payload: unknown }>`select payload from platform.entity_events`.execute(privileged!.db);
     expect(JSON.stringify(events.rows)).not.toContain("ev_values_include");
+  });
+  test("symbolic references round-trip through CRUD and PostgreSQL enforces exclusive fixed/bound storage", async () => {
+    const f = valueFixture(undefined, true), seeded = await seed(0);
+    const row = await insertValue(f, seeded.id, { version: { parameter: "version" } });
+    const raw = await storedValue(String(row.id));
+    expect(raw.payload).toEqual({ parameters: {} });
+    expect(raw.ev_values_include_version_id).toBeNull();
+    expect(raw.ev_values_include_version_parameter).toBe("version");
+    expect(row.payload).toEqual({ parameters: {}, version: { parameter: "version" }, alternate: null });
+    expect(JSON.stringify(row)).not.toContain("ev_values_include");
+    await expect(sql`update erp.blocks set ev_values_include_version_id=${seeded.id}::uuid where id=${row.id}::uuid`.execute(privileged!.db)).rejects.toThrow();
+    await expect(sql`update erp.blocks set ev_values_include_version_parameter=null where id=${row.id}::uuid`.execute(privileged!.db)).rejects.toThrow();
+    await expect(sql`update erp.blocks set ev_values_include_version_parameter='invalid.path' where id=${row.id}::uuid`.execute(privileged!.db)).rejects.toThrow();
+    expect(await storedValue(String(row.id))).toEqual(raw);
   });
   test("entityValue text-only values receive canonical defaults and validation too", async () => {
     const f = valueFixture(), seeded = await seed(0);

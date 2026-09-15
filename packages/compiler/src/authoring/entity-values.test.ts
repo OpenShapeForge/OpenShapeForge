@@ -107,6 +107,19 @@ describe("entityValue compiled storage and registry", () => {
     expect(secondVersion).not.toBe(firstVersion);
   });
 
+  it("compiles opt-in symbolic arguments alongside real foreign keys with exclusive storage", () => {
+    const manifest = compileFixture(entities => {
+      named(entities, "Placement").fields.find(field => field.key === "values")!.entityValue!.parameterBindings = true;
+    });
+    const reference = carrier(manifest).definitions.Link!.references[0]!;
+    expect(reference.parameterColumn).toBeDefined();
+    expect(table(manifest).columns.find(column => column.name === reference.parameterColumn)?.type).toBe("text");
+    const generated = sql(manifest) + constraints(manifest);
+    expect(generated).toContain(`num_nonnulls("${reference.column}", "${reference.parameterColumn}") = 1`);
+    expect(generated).toContain(`FOREIGN KEY`);
+    expect(generated).toContain(reference.column);
+    expect(carrier(compileFixture()).definitions.Link!.references[0]!.parameterColumn).toBeUndefined();
+  });
   for (const [policy, value] of Object.entries({
     classification: { sensitivity: "pii" },
     authorization: { roles: { read: ["Example.Read"] } },

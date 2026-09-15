@@ -700,7 +700,7 @@ export async function diffManifestAgainstDatabase(
 
   const manifestTableNames = new Set(tables.map((table) => table.name));
   for (const tableName of liveTableNames) {
-    if (!manifestTableNames.has(tableName)) {
+    if (!manifestTableNames.has(tableName) && !nonManifestManagedTables.has(tableName)) {
       nonAdditive.push(
         `${tableName}: table exists in the database but is not in the generated manifest`,
       );

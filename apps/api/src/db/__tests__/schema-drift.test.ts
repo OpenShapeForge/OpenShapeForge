@@ -113,11 +113,9 @@ describe("checkGeneratedSchemaDrift", () => {
 });
 
 describe("findUndeclaredDatabaseSchema", () => {
-  // No table is exempt: the runtime bookkeeping tables are manifest-declared
-  // like every other, so a table the declared set does not name is foreign
-  // whatever it is called — the reset model has one source of truth per table
-  // and nothing for readiness to look the other way on.
-  test("reports every platform table the declared set does not name", async () => {
+  // Dedicated runtime migrations are declarations too; readiness exempts
+  // precisely those known tables while still reporting an unknown table.
+  test("exempts migration-owned platform tables but reports unknown tables", async () => {
     await sql`create table platform.operation_execution_receipts (id uuid primary key)`.execute(runtime.db);
     await sql`create table platform.preference_definitions (namespace text, key text, definition jsonb, primary key (namespace, key))`.execute(runtime.db);
     await sql`create table platform.unknown_receipts (id uuid primary key)`.execute(runtime.db);
@@ -126,10 +124,7 @@ describe("findUndeclaredDatabaseSchema", () => {
       schema: "platform",
       columns: [{ name: "version" }, { name: "checksum" }, { name: "applied_at" }, { name: "applied_by" }],
     }]);
-    expect(result.tables).toEqual([
-      "platform.operation_execution_receipts",
-      "platform.unknown_receipts",
-    ]);
+    expect(result.tables).toEqual(["platform.unknown_receipts"]);
     expect(result.columns).toEqual([]);
     await sql`drop table platform.unknown_receipts`.execute(runtime.db);
     await sql`drop table platform.operation_execution_receipts`.execute(runtime.db);

@@ -4,33 +4,68 @@
   "title": "Operation Catalog",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "kind", "plugin", "operations", "interfaces"],
+  "required": [
+    "schemaVersion",
+    "kind",
+    "plugin",
+    "operations",
+    "interfaces"
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "kind": { "const": "operationCatalog" },
-    "plugin": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "schemaVersion": {
+      "const": 1
+    },
+    "kind": {
+      "const": "operationCatalog"
+    },
+    "plugin": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
     "operations": {
       "type": "object",
       "minProperties": 1,
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$"
+      },
       "additionalProperties": {
         "allOf": [
-          { "$ref": "core-entity.schema.json#/$defs/entityOperationV2" },
+          {
+            "$ref": "core-entity.schema.json#/$defs/entityOperationV2"
+          },
           {
             "properties": {
               "implementation": {
-                "properties": { "type": { "const": "plugin" } },
-                "required": ["type"]
+                "properties": {
+                  "type": {
+                    "const": "plugin"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
               }
             },
             "allOf": [
-              { "not": { "required": ["target"] } },
+              {
+                "not": {
+                  "required": [
+                    "target"
+                  ]
+                }
+              },
               {
                 "not": {
                   "properties": {
-                    "implementation": { "required": ["action"] }
+                    "implementation": {
+                      "required": [
+                        "action"
+                      ]
+                    }
                   },
-                  "required": ["implementation"]
+                  "required": [
+                    "implementation"
+                  ]
                 }
               }
             ]
@@ -39,10 +74,89 @@
       }
     },
     "interfaces": {
-      "allOf": [
-        { "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2" },
-        { "not": { "required": ["web"] } }
-      ]
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "rest": {
+          "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/rest"
+        },
+        "graphql": {
+          "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/graphql"
+        },
+        "mcp": {
+          "$ref": "core-entity.schema.json#/$defs/entityInterfacesV2/properties/mcp"
+        },
+        "web": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pages",
+            "operations"
+          ],
+          "description": "Standalone (non-entity) operations projected to the web as pages: each page lists the operations it shows, in order; a landing operation runs when the page opens.",
+          "properties": {
+            "pages": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "$ref": "core-entity.schema.json#/$defs/localizedText"
+                  },
+                  "description": {
+                    "$ref": "core-entity.schema.json#/$defs/localizedText"
+                  },
+                  "icon": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "operations": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[a-z][A-Za-z0-9]*$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "page"
+                ],
+                "properties": {
+                  "page": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "landing": {
+                    "type": "boolean",
+                    "description": "Runs on page open and shows its result first; only for read operations without required input."
+                  },
+                  "order": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

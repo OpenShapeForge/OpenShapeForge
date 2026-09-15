@@ -1146,7 +1146,10 @@ export function operationOpenApiPaths(
             ? sessionSecuritySchemes.map((scheme) => ({
                 [scheme]: scheme === "oauth2Auth" ? sessionScopes : [],
               }))
-            : [{ [operation.auth.scheme]: [] }],
+            : operation.auth.mode === "control"
+              // A control-realm bearer: its own scheme, never the tenant session's.
+              ? [{ controlBearerAuth: [] }]
+              : [{ [operation.auth.scheme]: [] }],
         "x-osf-operation": {
           key: operation.key,
           handler: operation.handler,

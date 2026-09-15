@@ -661,13 +661,35 @@ export interface EntityInterfacesDefinition {
   };
 }
 
+/** One web page of standalone Operations (a menu entry without an entity). */
+export interface OperationCatalogWebPage {
+  title: LocalizedText;
+  description?: LocalizedText;
+  /** Battery icon key, e.g. `buildings`. */
+  icon?: string;
+  order?: number;
+}
+
+/** Where a standalone Operation appears on the web. */
+export interface OperationCatalogWebOperation {
+  page: string;
+  /** Runs when the page opens and shows its result first; read operations without required input only. */
+  landing?: boolean;
+  order?: number;
+}
+
+export interface OperationCatalogWebInterface {
+  pages: Record<string, OperationCatalogWebPage>;
+  operations: Record<string, OperationCatalogWebOperation>;
+}
+
 /** YAML-owned module/global Operations that have no honest entity target. */
 export interface OperationCatalogDefinition {
   schemaVersion: 1;
   kind: "operationCatalog";
   plugin: string;
   operations: Record<string, EntityOperationDefinition>;
-  interfaces: Omit<EntityInterfacesDefinition, "web">;
+  interfaces: Omit<EntityInterfacesDefinition, "web"> & { web?: OperationCatalogWebInterface };
 }
 
 export interface CoreEntity {

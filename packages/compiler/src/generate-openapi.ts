@@ -1594,6 +1594,15 @@ export function renderOpenApiSpec(
             ? { description: documentation.bearerDescription }
             : {}),
         },
+        // Control-realm operators: a bearer the platform's control realm issued,
+        // carried by Operations with `auth.mode: control`. Distinct from the
+        // tenant session bearer above; the two realms never vouch for each other.
+        controlBearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "Control-realm operator token (platform administration).",
+        },
         ...(oauth2
           ? {
               oauth2Auth: {

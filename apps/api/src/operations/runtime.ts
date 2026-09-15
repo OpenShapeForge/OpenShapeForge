@@ -92,6 +92,7 @@ export type OperationContract = {
   }[];
   auth:
     | { mode: "public" }
+    | { mode: "control"; roles: string[] }
     | {
         mode: "session";
         roles?: string[];

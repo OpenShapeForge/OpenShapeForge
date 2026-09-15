@@ -932,6 +932,21 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["mode", "roles"],
+          "description": "A control-realm operator: the bearer is verified against the platform's control realm (not a tenant realm) and must hold one of the listed realm roles. No tenant context exists; tenancy must be none.",
+          "properties": {
+            "mode": { "const": "control" },
+            "roles": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["mode"],
           "properties": {
             "mode": { "const": "session" },

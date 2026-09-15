@@ -230,11 +230,44 @@ export type WebEntityInterface = {
   relationships: Record<string, WebRelationshipProjection>;
 };
 
+/**
+ * A standalone Operation: authored in an operation catalog rather than on an
+ * entity, so it has no record target. It is shown on a page, executed through
+ * its REST projection with the caller's own session, and — when it is a
+ * landing operation — run as soon as its page opens.
+ */
+export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "target"> & {
+  /** Who may invoke it; the web hides what the session cannot invoke. */
+  auth:
+    | { mode: "public" }
+    | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
+    | { mode: "control"; roles: readonly string[] };
+  page: string;
+  landing?: boolean;
+  order?: number;
+};
+
+/** A page of standalone Operations: a menu entry that is not an entity. */
+export type WebPage = {
+  id: string;
+  title: LocalizedText;
+  description?: LocalizedText;
+  icon?: string;
+  order?: number;
+  route: string;
+  /** Operation ids in display order; the landing operation, if any, first. */
+  operations: string[];
+};
+
 export type WebManifestV1 = {
   contract: "openshapeforge.web-manifest";
   version: 1;
   locale: "en" | "nl";
   entities: Record<string, WebEntityInterface>;
+  /** Standalone Operations keyed by canonical id; absent when none are projected. */
+  operations?: Record<string, WebStandaloneOperationRef>;
+  /** Pages of standalone Operations keyed by page id. */
+  pages?: Record<string, WebPage>;
 };
 
 export type WebManifestOptions = {

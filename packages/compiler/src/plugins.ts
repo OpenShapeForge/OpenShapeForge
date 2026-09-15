@@ -173,6 +173,15 @@ export type PluginOperationError = {
 export type PluginOperationAuth =
   | { mode: "public" }
   | {
+      /**
+       * A control-realm operator: the bearer is verified against the
+       * platform's control realm, never a tenant realm, and must hold one of
+       * these realm roles. No tenant context exists; tenancy must be `none`.
+       */
+      mode: "control";
+      roles: string[];
+    }
+  | {
       mode: "session";
       /** Omitted means any authenticated session; [] deliberately denies all. */
       roles?: string[];

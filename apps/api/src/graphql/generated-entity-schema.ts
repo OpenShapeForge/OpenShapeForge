@@ -570,11 +570,23 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     editLease: EntityOperationEditLeaseConcurrency
   }
 
+  type EntityOperationTarget {
+    entityId: String!
+    id: String!
+    version: String
+  }
+
+  type EntityOperationTargetBinding {
+    target: EntityOperationTarget!
+    input: JSON!
+  }
+
   type EntityOperationOffer {
     operation: EntityOperationReference!
     available: Boolean!
     interaction: EntityOperationInteraction
     concurrency: EntityOperationConcurrency
+    binding: EntityOperationTargetBinding
     error: EntityOperationError
   }
 

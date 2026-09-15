@@ -665,6 +665,7 @@ export function renderOpenApiSpec(
                   operation: { $ref: "#/components/schemas/OperationReference" },
                   available: { const: true },
                   concurrency: { $ref: "#/components/schemas/OperationConcurrency" },
+                  binding: { $ref: "#/components/schemas/OperationTargetBinding" },
                 },
               },
               {
@@ -678,6 +679,24 @@ export function renderOpenApiSpec(
                 },
               },
             ],
+          },
+          OperationTargetBinding: {
+            type: "object",
+            additionalProperties: false,
+            required: ["target", "input"],
+            properties: {
+              target: {
+                type: "object",
+                additionalProperties: false,
+                required: ["entityId", "id"],
+                properties: {
+                  entityId: { type: "string" },
+                  id: { type: "string" },
+                  version: { type: "string" },
+                },
+              },
+              input: { type: "object", additionalProperties: true },
+            },
           },
           OperationConcurrency: {
             type: "object",

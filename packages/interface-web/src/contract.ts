@@ -124,6 +124,8 @@ export type WebFieldOptionSource =
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
+  /** Explicit Web-only exception; defaults still come from the semantic registry. */
+  presentation?: { component: string; props?: Record<string, unknown> };
   id: string;
   key: string;
   label: LocalizedText;

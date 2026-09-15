@@ -29292,6 +29292,11 @@
           },
           "valueType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "validation": {
             "pattern": "^[a-z][a-z0-9.-]*$",
             "maxLength": 100

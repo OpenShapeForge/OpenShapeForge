@@ -8,6 +8,7 @@ import type {
 import type {
   LocalizedText,
   FieldValidation,
+  FieldRender,
   SemanticTypeLookupDefinition,
   EntityPermissions,
   FieldOptions,
@@ -665,6 +666,7 @@ export interface EntityInterfacesDefinition {
     resource?: McpResourceConfig;
   };
   web?: {
+    fields?: Record<string, { render: FieldRender }>;
     operations?: Record<string, false | EntityWebOperationProjectionConfig>;
     views: EntityWebViewDefinition;
   };

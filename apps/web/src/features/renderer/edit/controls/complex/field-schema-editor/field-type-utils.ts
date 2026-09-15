@@ -42,7 +42,7 @@ export function getFieldTypeKey(field: Field): CompilerAuthorableFieldType {
       ? FIELD_DEFINITION_SEMANTIC_COLLECTION_TYPE
       : "collection";
   }
-  return field.valueType;
+  return field.valueType as CompilerAuthorableFieldType;
 }
 
 export function getFieldSelectionTypeKey(selection: {

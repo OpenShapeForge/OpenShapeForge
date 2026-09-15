@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 
-export type FieldValueType = Field["valueType"];
+export type FieldValueType = NonNullable<Field["valueType"]>;
 export type FieldCardinality = NonNullable<Field["cardinality"]>;
 
 export type FieldRuntimeKind =
@@ -55,13 +55,13 @@ export function fieldRuntimeKind(field: Field): FieldRuntimeKind {
   if (isFieldDefinitionCollection(field)) return "fieldArray";
   if (isFieldCollection(field)) return "array";
   if (field.valueType === "string" && field.validation?.format === "uuid") return "uuid";
-  return field.valueType;
+  return field.valueType as FieldValueType;
 }
 
 export function fieldShapeKind(field: Field): FieldShapeKind {
   if (isFieldCollection(field)) return "collection";
   if (field.valueType === "string" && field.validation?.format === "uuid") return "uuid";
-  return field.valueType;
+  return field.valueType as FieldValueType;
 }
 
 export function fieldAcceptsValueType(

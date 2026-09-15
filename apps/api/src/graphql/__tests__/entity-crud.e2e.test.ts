@@ -42,7 +42,12 @@ import {
   updateDoc,
   updateRecord,
 } from "./e2e/gql-shapes.js";
-import { isEntityBackedCreate, leaseRequired, requestLease } from "./e2e/operations.js";
+import {
+  isEntityBackedCreate,
+  leaseRequired,
+  placeholderControls,
+  requestLease,
+} from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -202,7 +207,11 @@ for (const table of tables) {
       });
     } else {
       test("delete of a nonexistent row returns false", async () => {
-        const result = await gql(tenantA, deleteDoc(table), deleteVariables(table, randomUUID()));
+        const result = await gql(
+          tenantA,
+          deleteDoc(table),
+          deleteVariables(table, randomUUID(), placeholderControls(table, "delete")),
+        );
         expect(deletedOf(table, result)).toBe(false);
       });
     }

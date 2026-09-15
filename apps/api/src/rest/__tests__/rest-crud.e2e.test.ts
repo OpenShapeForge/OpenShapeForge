@@ -143,7 +143,15 @@ async function acquireLease(
   id: string,
   intent: "update" | "delete",
 ): Promise<Record<string, string>> {
-  if (!leaseRequired(table, intent)) return {};
+  if (!leaseRequired(table, intent)) {
+    if (!versionRequired(table, intent)) return {};
+    const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
+    const current = await rest(identity, "GET", `${base}/${id}`);
+    expect(current.status).toBe(200);
+    const expectedVersion = recordPayload(table, current)?.updatedAt;
+    expect(expectedVersion).toBeString();
+    return { expectedVersion };
+  }
   const acquired = await requestLease(table, identity, id, intent);
   expect(acquired.status).toBe(201);
   return {
@@ -519,7 +527,11 @@ for (const table of restTables) {
       // service is where NOT_FOUND surfaces.
       const response = leaseRequired(table, "update")
         ? await requestLease(table, tenantA, missingId, "update")
-        : await rest(tenantA, "PATCH", `${base}/${missingId}`, {});
+        : await rest(tenantA, "PATCH", `${base}/${missingId}`, {
+            ...(versionRequired(table, "update")
+              ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
+              : {}),
+          });
       expect(response.status).toBe(404);
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
@@ -546,7 +558,11 @@ for (const table of restTables) {
 
         const again = leaseRequired(table, "delete")
           ? await requestLease(table, tenantA, id, "delete")
-          : await rest(tenantA, "DELETE", `${base}/${id}`);
+          : await rest(tenantA, "DELETE", `${base}/${id}`, {
+              ...(versionRequired(table, "delete")
+                ? { expectedVersion: "2026-01-01T00:00:00.000Z" }
+                : {}),
+            });
         expect(again.status).toBe(404);
       });
     } else {

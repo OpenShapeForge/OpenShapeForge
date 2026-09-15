@@ -127,7 +127,7 @@ describe("calling a control tool", () => {
       const who = await client.callTool({ name: "whoami", arguments: {} });
       expect(who.isError).not.toBe(true);
       expect(who.structuredContent).toMatchObject({
-        role: "Platform administrator",
+        role: "Platform operator",
         scope: "platform",
         tenants: 0,
         connectedVia: "Claude Code 2.1.0",

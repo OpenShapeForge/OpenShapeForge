@@ -35,6 +35,7 @@ describe("buildPlatformSessionInfo", () => {
   it("describes a platform administrator with platform scope and a tenant count, and no identifiers", () => {
     const info = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       sessionIdleDays: 14,
@@ -60,6 +61,7 @@ describe("buildPlatformSessionInfo", () => {
   it("names the MCP client that opened the session, and stays silent without one", () => {
     const info = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
       access: { tools: 9, resources: 1 },
@@ -69,6 +71,7 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.summary).toContain("signed in via Codex. Connected through Claude Code 2.1.0.");
     const silent = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       nowMs: NOW,
@@ -81,6 +84,7 @@ describe("buildPlatformSessionInfo", () => {
   it("names the admin gateway as the Hubble control plane and copes with an unreadable registry", () => {
     const info = buildPlatformSessionInfo({
       administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
+      roles: ["platform_admin"],
       tenants: null,
       access: { tools: 9, resources: 1 },
       nowMs: NOW,
@@ -88,5 +92,27 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.signedInVia).toBe("Hubble control plane");
     expect(info.accessTokenExpiresAt).toBeUndefined();
     expect(info.summary).toContain("could not be counted");
+  });
+
+  it("distinguishes operator-only and combined control sessions", () => {
+    const operator = buildPlatformSessionInfo({
+      administrator,
+      roles: ["platform-operator"],
+      tenants: 1,
+      access: { tools: 8, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(operator.role).toBe("Platform operator");
+    expect(operator.summary).toContain("a platform operator of this deployment");
+
+    const combined = buildPlatformSessionInfo({
+      administrator,
+      roles: ["platform_admin", "platform-operator"],
+      tenants: 1,
+      access: { tools: 23, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(combined.role).toBe("Platform administrator and operator");
+    expect(combined.summary).toContain("a platform administrator and operator of this deployment");
   });
 });

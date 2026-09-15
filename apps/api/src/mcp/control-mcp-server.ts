@@ -339,6 +339,7 @@ function buildPlatformServer(input: {
     }
     const info = buildPlatformSessionInfo({
       administrator,
+      roles: input.session.roles,
       tenants: await listPlatformTenantsCount(catalog),
       client: input.client,
       access: access(),

@@ -139,6 +139,24 @@ async function rejectsCode(work: Promise<unknown>, code: TemplateContentError["c
 }
 
 describe("canonical content snapshots", () => {
+  test("resolves typed symbolic entity arguments while preserving template provenance", async () => {
+    const block: ContentBlock = { id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } };
+    const f = fixture([block]);
+    f.versions.root = { ...f.versions.root!, parameters: { record: { valueType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    const run = () => materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, f.resolvers);
+    const snapshot = await run();
+    expect(f.calls.entity).toBe(1);
+    expect(snapshot.templates[0]!.version.variants[0]!.blocks[0]!.references.record).toEqual({ parameter: "record" });
+    f.versions.root = { ...f.versions.root, parameters: { record: { valueType: "string", relationship: { target: "OtherRecord" } } } };
+    await rejectsCode(run(), "DEPENDENCY_INVALID");
+    expect(f.calls.entity).toBe(1);
+  });
+
+  test("rejects entity arguments whose target record is inaccessible", async () => {
+    const f = fixture([{ id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } }]);
+    f.versions.root = { ...f.versions.root!, parameters: { record: { valueType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    await expect(materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, { ...f.resolvers, resolveEntity: () => null })).rejects.toBeInstanceOf(TemplateContentError);
+  });
   test("canonicalization sorts objects but preserves collection order", async () => {
     expect(canonicalJson({ z: 1, a: [2, 1] })).toBe('{"a":[2,1],"z":1}');
     expect(await hashCanonicalJson({ b: true, a: 1 })).toBe(

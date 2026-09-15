@@ -22,12 +22,13 @@
  *   3b. plugin cutovers       — immutable compiler-plugin migrations that
  *      must transform legacy ownership before generated drift is evaluated.
  *   4. generated roll-forward — manifest-driven schema apply/diff.
- *   4b. plugin invariants     — immutable compiler-plugin constraints,
- *      functions, triggers, and other DDL, after contributed tables exist.
- *   4c. identity link         — runtime-owned platform.identities /
+ *   4b. identity link         — runtime-owned platform.identities /
  *      platform.identity_relations (idempotent DDL, like step 2); after the
  *      generated step because they reference platform.tenants and
- *      erp.relations.
+ *      erp.relations, and before plugin invariants that may reference them.
+ *   4c. plugin invariants     — immutable compiler-plugin constraints,
+ *      functions, and triggers, after contributed and runtime-owned tables
+ *      exist.
  *   4d. employee invitations  — runtime-owned platform.employee_invitations
  *      (idempotent DDL, same reasoning); references platform.tenants only, so
  *      it could run before 4c, but sits next to it because both are the
@@ -145,12 +146,12 @@ export async function runMigrationChain(
     options.appliedBy,
   );
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  await applyIdentityLinkMigration(db);
   const afterGenerated = await applyGeneratedPluginMigrations(
     db,
     afterGeneratedPluginMigrations,
     options.appliedBy,
   );
-  await applyIdentityLinkMigration(db);
   await applyEmployeeInvitationsMigration(db);
   await applyOrganizationRelationLinkMigration(db);
   await applyOnboardingMigration(db);

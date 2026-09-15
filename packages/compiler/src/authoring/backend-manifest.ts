@@ -34,6 +34,7 @@ import { resolveModelFields } from "./compiler/model.js";
 import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
+import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -929,7 +930,15 @@ function compileFieldRelationStorage(
       throw new Error(`Conflicting field relationships for ${tableKey(source)}.${column.name}.`);
     }
     column.type = "uuid";
-    const composite = source.tenantScoped && target.tenantScoped;
+    // This column already IS the caller's authoritative tenant identity and
+    // is set exclusively by the verified session. Preserve its ordinary FK
+    // and authored nullability; prepending it again would change the target
+    // constraint to (tenant_id, tenant_id) rather than scope another value.
+    const tenancyIdentity = source.tenantScoped && column.name === "tenant_id";
+    if (tenancyIdentity && (unique || onDelete)) {
+      throw new Error(`Server-managed tenant identity ${tableKey(source)}.${column.name} cannot be owned or unique through a relationship.`);
+    }
+    const composite = source.tenantScoped && target.tenantScoped && !tenancyIdentity;
     const deleteAction = onDelete ?? previous?.onDelete;
     column.references = {
       schema: target.schema, table: target.name, column: "id",
@@ -945,7 +954,7 @@ function compileFieldRelationStorage(
       }
       addIndex(target, ["tenant_id", "id"], true);
     }
-    addIndex(source, source.tenantScoped ? ["tenant_id", column.name] : [column.name], unique);
+    addIndex(source, source.tenantScoped && !tenancyIdentity ? ["tenant_id", column.name] : [column.name], unique);
     if (source.schema !== target.schema && !isRelationshipRegistered(register,
       { schema: source.schema, table: source.name, column: column.name }, column.references)) {
       register.push({
@@ -972,6 +981,18 @@ function compileFieldRelationStorage(
       } else if (relationship.kind === "hasMany") {
         const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
+        if (relationship.through) {
+          const intermediate = byEntity.get(relationship.through.target);
+          const local = table.columns.find(column => column.name === relationship.through!.column);
+          if (!intermediate || !local || local.type !== "uuid" || column.type !== "uuid") {
+            throw new Error(`Invalid inverse traversal storage for ${candidate.contract.entity.name}.${relationship.key}.`);
+          }
+          // Both references point at the intermediate identity, never at the
+          // outer entity. No extra column, junction or ownership is introduced.
+          attachReference(table, local, intermediate.table);
+          attachReference(target.table, column, intermediate.table);
+          continue;
+        }
         attachReference(target.table, column, table, false, relationship.ownership === "owned" ? "CASCADE" : undefined);
         if (relationship.sortable) {
           const positionName = `${column.name}_position`;
@@ -1248,6 +1269,25 @@ export function compileAuthoringBackendManifest(
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 
     const compiledIndexes = compileEntityIndexes(candidate, tenantScoped, columnsByField);
+    for (const binding of resolveDerivedOnCreateBindings({
+      entityName: candidate.contract.entity.name,
+      fields: candidate.contract.model.fields,
+      columns: candidate.contract.storage.columns,
+      ...(candidate.contract.entity.indexes
+        ? { indexes: candidate.contract.entity.indexes }
+        : {}),
+      tenantScoped,
+    })) {
+      const target = columnsByField.get(binding.targetField)!;
+      target.deriveOnCreate = {
+        sourceField: binding.sourceField,
+        sourceColumn: binding.sourceColumn,
+        transform: binding.transform,
+        onConflict: binding.onConflict,
+        conflictColumns: binding.conflictColumns,
+        ...(binding.maxLength === undefined ? {} : { maxLength: binding.maxLength }),
+      };
+    }
 
     // Row-level access → rowScope translation (§B.3) + fail-closed guards (§C).
     const rowAccess = candidate.contract.authorization?.rowAccess;
@@ -1339,6 +1379,7 @@ export function compileAuthoringBackendManifest(
                 return {
                   fieldKey: normalized.fieldKey, kind: normalized.kind,
                   ...(normalized.inverse ? { inverse: normalized.inverse } : {}),
+                  ...(normalized.through ? { through: normalized.through } : {}),
                   ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
                   ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),

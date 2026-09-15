@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Address
@@ -42,11 +42,10 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ADDRESSTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ADDRESSTYPE
+    semanticType: referenceDataCode
   - key: street
     valueType: string
     required: false
@@ -61,11 +60,6 @@ fields:
     persisted:
       column: street
       storageClass: core
-    render:
-      component: AddressAutocomplete
-      props:
-        provider: bag
-        country: NL
   - key: houseNumber
     valueType: string
     required: false
@@ -149,15 +143,6 @@ fields:
     persisted:
       column: latitude
       storageClass: core
-    render:
-      component: MapPicker
-      props:
-        defaultZoom: 13
-        defaultCenter:
-          - 52.0907
-          - 5.1214
-        geocodeProvider: nominatim
-        coordinateField: latitude
   - key: longitude
     valueType: number
     required: false
@@ -170,151 +155,240 @@ fields:
     persisted:
       column: longitude
       storageClass: core
-    render:
-      component: MapPicker
-      props:
-        defaultZoom: 13
-        defaultCenter:
-          - 52.0907
-          - 5.1214
-        geocodeProvider: nominatim
-        coordinateField: longitude
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: naturalPerson
-    kind: belongsTo
-    target: NaturalPerson
-    foreignKey: natural_person_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: naturalPersonId
     label:
       en: Natural person
       nl: Natuurlijk persoon
-  - key: legalEntity
-    kind: belongsTo
-    target: LegalEntity
-    foreignKey: legal_entity_id
+    persisted:
+      column: natural_person_id
+      storageClass: core
+    semanticType: NaturalPerson
+    relationship:
+      ownership: reference
+  - key: legalEntityId
     label:
       en: Legal entity
       nl: Rechtspersoon
-ui:
-  routes:
-    list:
-      en: /addresses
-      nl: /adressen
-    detail:
-      en: /addresses/:id
-      nl: /adressen/:id
-    create:
-      en: /addresses/create
-      nl: /adressen/aanmaken
-    edit:
-      en: /addresses/:id/edit
-      nl: /adressen/:id/bewerken
-    delete:
-      en: /addresses/:id/delete
-      nl: /adressen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Addresses
-        nl: Adressen
-      columns:
-        - key: type
-          sortable: true
-        - key: street
-          sortable: true
-        - key: city
-          sortable: true
-        - key: postalCode
-          sortable: true
-      defaultSort:
-        key: city
-        direction: asc
-      rowLink:
-        en: /addresses/:id
-        nl: /adressen/:id
-    detail:
-      header:
+    persisted:
+      column: legal_entity_id
+      storageClass: core
+    semanticType: LegalEntity
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Address
+    description: List Address records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Address
+    description: Get Address records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Address
+    description: Create Address records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Address records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /addresses
+          nl: /adressen
+        columns:
+          - key: type
+            sortable: true
+          - key: street
+            sortable: true
+          - key: city
+            sortable: true
+          - key: postalCode
+            sortable: true
+        title:
+          en: Addresses
+          nl: Adressen
+        defaultSort:
+          key: city
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /addresses/:id
+            nl: /adressen/:id
+          create:
+            en: /addresses/create
+            nl: /adressen/aanmaken
         title: "{{street}} {{houseNumber}}{{houseNumberAddition}}, {{city}}"
         subtitle: "{{type}}"
         badges:
           - type
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Address
-                nl: Adres
-              fields:
-                - type
-                - street
-                - houseNumber
-                - houseNumberAddition
-                - postalCode
-                - city
-                - country
-            - title:
-                en: Coordinates
-                nl: Coördinaten
-              fields:
-                - latitude
-                - longitude
-    form:
-      variants:
-        create:
-          title:
-            en: Create address
-            nl: Adres aanmaken
-          groups:
-            - title:
-                en: Address
-                nl: Adres
-              fields:
-                - type
-                - street
-                - houseNumber
-                - houseNumberAddition
-                - postalCode
-                - city
-                - country
-            - title:
-                en: Coordinates
-                nl: Coördinaten
-              fields:
-                - latitude
-                - longitude
-        edit:
-          extends: create
-          title:
-            en: Edit address
-            nl: Adres bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Address
+                    nl: Adres
+                  fields:
+                    - type
+                    - street
+                    - houseNumber
+                    - houseNumberAddition
+                    - postalCode
+                    - city
+                    - country
+                - title:
+                    en: Coordinates
+                    nl: Coördinaten
+                  fields:
+                    - latitude
+                    - longitude
+        modes:
+          create:
+            title:
+              en: Create address
+              nl: Adres aanmaken
+            groups:
+              - title:
+                  en: Address
+                  nl: Adres
+                fields:
+                  - type
+                  - street
+                  - houseNumber
+                  - houseNumberAddition
+                  - postalCode
+                  - city
+                  - country
+              - title:
+                  en: Coordinates
+                  nl: Coördinaten
+                fields:
+                  - latitude
+                  - longitude
+          update:
+            title:
+              en: Edit address
+              nl: Adres bewerken
+    fields:
+      type:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ADDRESSTYPE
+            clearable: false
+      street:
+        render:
+          component: AddressAutocomplete
+          props:
+            provider: bag
+            country: NL
+      latitude:
+        render:
+          component: MapPicker
+          props:
+            defaultZoom: 13
+            defaultCenter:
+              - 52.0907
+              - 5.1214
+            geocodeProvider: nominatim
+            coordinateField: latitude
+      longitude:
+        render:
+          component: MapPicker
+          props:
+            defaultZoom: 13
+            defaultCenter:
+              - 52.0907
+              - 5.1214
+            geocodeProvider: nominatim
+            coordinateField: longitude

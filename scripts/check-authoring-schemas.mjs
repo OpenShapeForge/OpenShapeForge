@@ -30,6 +30,7 @@ import { readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authoringLayerDirs } from "../packages/compiler/src/authoring/layers.ts";
+import { checkCoreEntityV3, readYamlCorpus } from "./core-entity-v3.ts";
 import {
   createAuthoringValidator,
   SCHEMA_BY_KIND,
@@ -37,6 +38,12 @@ import {
 } from "../packages/compiler/src/authoring/schema-validation.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+const versionGate = checkCoreEntityV3(readYamlCorpus(repoRoot));
+if (versionGate.failures.length) {
+  console.error(`coreEntity v3 cutover: ${versionGate.old} old YAMLs, ${versionGate.failures.length} violations\n${versionGate.failures.join("\n")}`);
+  process.exit(1);
+}
 
 /**
  * Authoring files each mapped schema is expected to validate, exactly.

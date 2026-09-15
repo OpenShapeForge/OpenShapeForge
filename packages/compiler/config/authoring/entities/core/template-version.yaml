@@ -8,7 +8,7 @@ labels: { en: Template version, nl: Template version }
 domains: [documents]
 authorization:
   roles:
-    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
+    read: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
@@ -45,6 +45,56 @@ fields:
     cardinality: collection
     relationship: { inverse: version, ownership: owned }
 operations:
+  renderSnapshot:
+    name: { en: Render frozen content, nl: Vastgelegde inhoud weergeven }
+    description:
+      en: Render a supplied immutable content snapshot to plain text for its selected channel without reading templates or source records. A checksum proves consistency, not approval or permission to deliver.
+      nl: Geef een aangeleverde onveranderlijke inhoudssnapshot weer als tekst voor het gekozen kanaal, zonder templates of bronrecords te lezen. Een checksum bewijst consistentie, niet goedkeuring of toestemming voor verzending.
+    implementation: { type: plugin, plugin: documents, handler: renderSnapshot }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [snapshot]
+        properties:
+          snapshot:
+            type: object
+            x-osf-i18n: { title: { en: Frozen content, nl: Vastgelegde inhoud } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [channel, locale, mediaType, body, snapshotHash, renderingVersion, contentHash]
+        properties:
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+          locale:
+            type: string
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+          mediaType: { type: string, const: text/plain }
+          body:
+            type: string
+            x-osf-i18n: { title: { en: Content, nl: Inhoud } }
+          snapshotHash:
+            type: string
+            pattern: "^[a-f0-9]{64}$"
+            x-osf-i18n: { title: { en: Snapshot checksum, nl: Snapshotchecksum } }
+          renderingVersion: { type: string, const: osf-entity-fields-text-v1 }
+          contentHash:
+            type: string
+            pattern: "^[a-f0-9]{64}$"
+            x-osf-i18n: { title: { en: Content checksum, nl: Inhoudschecksum } }
+    errors: []
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   insertVariant:
     name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
     description: Create an owned channel and language variant atomically.
@@ -80,10 +130,11 @@ operations:
             x-osf-i18n: { title: { en: Language, nl: Taal } }
           parameters:
             type: object
+            x-osf-inputFields: parameters
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
-    auth: { mode: session, roles: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
@@ -124,6 +175,7 @@ operations:
             x-osf-i18n: { title: { en: Language, nl: Taal } }
           parameters:
             type: object
+            x-osf-inputFields: parameters
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
           documentId:
             type: string
@@ -205,6 +257,7 @@ interfaces:
     operations:
       materialize: { method: POST, path: "/api/template-content/versions/:templateVersionId/materialize" }
       createDocument: { method: POST, path: "/api/template-content/versions/:templateVersionId/create-document", response: { status: 201, kind: json } }
+      renderSnapshot: { method: POST, path: /api/template-content/render-snapshot }
   graphql: {}
   mcp: { tools: generic }
   web:

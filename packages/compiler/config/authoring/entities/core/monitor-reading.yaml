@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MonitorReading
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: read_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: value
     valueType: number
     required: true
@@ -54,107 +51,16 @@ fields:
     persisted:
       column: unit_id
       storageClass: core
-relationships:
-  - key: monitorMeasurement
-    kind: belongsTo
-    target: MonitorMeasurement
-    foreignKey: monitor_measurement_id
+  - key: monitorMeasurementId
     label:
       en: Monitor measurement
       nl: Monitormeting
-ui:
-  routes:
-    list:
-      en: /monitor-readings
-      nl: /monitorwaarden
-    detail:
-      en: /monitor-readings/:id
-      nl: /monitorwaarden/:id
-    create:
-      en: /monitor-readings/create
-      nl: /monitorwaarden/aanmaken
-    edit:
-      en: /monitor-readings/:id/edit
-      nl: /monitorwaarden/:id/bewerken
-    delete:
-      en: /monitor-readings/:id/delete
-      nl: /monitorwaarden/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Monitor readings
-        nl: Monitorwaarden
-      columns:
-        - key: readAt
-          sortable: true
-        - key: value
-          sortable: true
-        - key: unitId
-          sortable: true
-      defaultSort:
-        key: readAt
-        direction: desc
-      rowLink:
-        en: /monitor-readings/:id
-        nl: /monitorwaarden/:id
-    detail:
-      header:
-        title: "{{readAt}}"
-        subtitle: "{{value}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Reading details
-                nl: Waardegegevens
-              fields:
-                - readAt
-                - value
-                - unitId
-    form:
-      variants:
-        create:
-          title:
-            en: Create monitor reading
-            nl: Monitorwaarde aanmaken
-          groups:
-            - title:
-                en: Reading details
-                nl: Waardegegevens
-              fields:
-                - readAt
-                - value
-                - unitId
-        edit:
-          extends: create
-          title:
-            en: Edit monitor reading
-            nl: Monitorwaarde bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: monitor_measurement_id
+      storageClass: core
+    semanticType: MonitorMeasurement
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -169,3 +75,158 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Monitor Reading
+    description: List MonitorReading records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Monitor Reading
+    description: Get MonitorReading records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Monitor Reading
+    description: Create MonitorReading records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MonitorReading records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /monitor-readings
+          nl: /monitorwaarden
+        columns:
+          - key: readAt
+            sortable: true
+          - key: value
+            sortable: true
+          - key: unitId
+            sortable: true
+        title:
+          en: Monitor readings
+          nl: Monitorwaarden
+        defaultSort:
+          key: readAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /monitor-readings/:id
+            nl: /monitorwaarden/:id
+          create:
+            en: /monitor-readings/create
+            nl: /monitorwaarden/aanmaken
+        title: "{{readAt}}"
+        subtitle: "{{value}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Reading details
+                    nl: Waardegegevens
+                  fields:
+                    - readAt
+                    - value
+                    - unitId
+        modes:
+          create:
+            title:
+              en: Create monitor reading
+              nl: Monitorwaarde aanmaken
+            groups:
+              - title:
+                  en: Reading details
+                  nl: Waardegegevens
+                fields:
+                  - readAt
+                  - value
+                  - unitId
+          update:
+            title:
+              en: Edit monitor reading
+              nl: Monitorwaarde bewerken
+    fields:
+      readAt:
+        render:
+          component: DateTimePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

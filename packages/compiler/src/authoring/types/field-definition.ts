@@ -45,6 +45,10 @@ export interface FieldDefinitionRelationship {
   kind?: "belongsTo" | "hasMany" | "manyToMany";
   entity?: string;
   inverse?: string;
+  /** Read-only inverse traversal through a local, single entity reference. */
+  via?: string;
+  /** Compiler-derived join source, not an authored SQL/storage choice. */
+  through?: { field: string; column: string; target: string };
   ownership?: "owned" | "reference";
   /** Compiler-derived identity; not authored twice beside semanticType. */
   target?: string;
@@ -63,6 +67,19 @@ export interface FieldDefinitionSuggestions {
    * indirection for forms that declare their own variable sources.
    */
   sourceKey?: string;
+}
+
+/**
+ * A persisted value owned by the entity runtime rather than by callers.
+ *
+ * The deliberately small vocabulary keeps this declarative: the source is
+ * another field on the same entity, `slug` is the only transformation, and a
+ * conflicting value is resolved under a compiler-verified unique index.
+ */
+export interface FieldDefinitionDeriveOnCreate {
+  from: string;
+  transform: "slug";
+  onConflict: "suffix";
 }
 
 export interface FieldDefinitionRuntimeMetadata {
@@ -92,7 +109,7 @@ export interface FieldDefinition {
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
   /** A typed embedded entity value; relational leaves are lowered to real foreign keys. */
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   required?: boolean;
@@ -120,6 +137,8 @@ export interface FieldDefinition {
    * A name that matches no compiled operation fails the build.
    */
   writtenBy?: string[];
+  /** Server-owned, persisted value derived once when the entity is created. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label?: LocalizedText;
   description?: LocalizedText;
   placeholder?: LocalizedText;

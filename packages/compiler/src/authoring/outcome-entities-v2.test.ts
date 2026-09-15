@@ -22,7 +22,7 @@ const expected = {
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
     ],
-    relationships: ["relation", "agreement"],
+    relationships: ["relationId", "agreementId"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "quote-line": {
@@ -33,8 +33,8 @@ const expected = {
       "quantity", "unitId", "unitPrice", "amountBase", "amountVat", "amountTotal",
     ],
     relationships: [
-      "quote", "agreementComponent", "vatRate", "ledgerAccount",
-      "componentDimension", "dimension1", "dimension2", "vatDimension",
+      "quoteId", "agreementComponentId", "vatRateId", "ledgerAccountId",
+      "componentDimensionId", "dimension1Id", "dimension2Id", "vatDimensionId",
     ],
     operations: ["list", "get", "create", "update", "delete"],
   },
@@ -48,7 +48,7 @@ const expected = {
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
       "externalCode",
     ],
-    relationships: ["relation", "case", "parentAgreement", "childAgreements"],
+    relationships: ["relationId", "caseId", "parentAgreementId", "childAgreements"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "agreement-milestone": {
@@ -58,7 +58,7 @@ const expected = {
       "sourceOrganization", "sourceAdministration", "description", "basisAmount",
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],
-    relationships: ["agreement", "producedInvoice"],
+    relationships: ["agreementId", "producedInvoiceId"],
     operations: ["list", "get", "update", "delete"],
   },
 } as const;
@@ -72,13 +72,13 @@ function compileOutcome(slug: keyof typeof expected): CompiledEntityInfo {
   };
 }
 
-describe("strict-v2 outcome entities", () => {
+describe("field-relational outcome entities", () => {
   test("preserves the four canonical models, rights and operation subsets", () => {
     for (const [slug, contractExpected] of Object.entries(expected)) {
       const contract = compileOutcome(slug as keyof typeof expected).contract;
-      expect(contract.authoringVersion).toBe(2);
+      expect(contract.authoringVersion).toBe(3);
       expect(contract.entity.name).toBe(contractExpected.entity);
-      expect(contract.model.fields.map(({ key }) => key)).toEqual([...contractExpected.fields]);
+      expect(contract.model.fields.map(({ key }) => key)).toEqual([...contractExpected.fields, ...contractExpected.relationships]);
       expect(contract.model.relationships.map(({ key }) => key)).toEqual(
         [...contractExpected.relationships],
       );
@@ -173,7 +173,7 @@ describe("strict-v2 outcome entities", () => {
   test("projects authored opaque Web renderer keys while retaining defaults", () => {
     const source = loadEntity(authoringDir, "quote");
     const web = source.coreEntity?.interfaces?.web;
-    if (!web?.views.record) throw new Error("Quote must declare both Web views");
+    if (!web?.views?.record) throw new Error("Quote must declare both Web views");
     web.views.collection.renderer = "finance.quote.collection";
     web.views.record.renderer = "finance.quote.record";
     assertV2Authoring(source.coreEntity, "quote.yaml");
@@ -218,7 +218,7 @@ describe("strict-v2 outcome entities", () => {
       reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
       confirmation: { mode: "none" },
     };
-    artifacts.coreEntity.interfaces!.web!.views.collection.actions = ["compose"];
+    artifacts.coreEntity.interfaces!.web!.views!.collection.actions = ["compose"];
     assertV2Authoring(artifacts.coreEntity, "quote.yaml");
 
     const contract = compile(artifacts);

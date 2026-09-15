@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseStatusEvent
@@ -36,11 +36,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASESTATUS
+    semanticType: referenceDataCode
   - key: statusReason
     valueType: string
     required: false
@@ -61,9 +60,6 @@ fields:
     persisted:
       column: entered_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: exitedAt
     valueType: datetime
     required: false
@@ -73,9 +69,6 @@ fields:
     persisted:
       column: exited_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: actorId
     valueType: string
     required: false
@@ -96,11 +89,10 @@ fields:
     persisted:
       column: actor_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEACTORTYPE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEACTORTYPE
+    semanticType: referenceDataCode
   - key: source
     valueType: string
     required: false
@@ -110,11 +102,10 @@ fields:
     persisted:
       column: source
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASESTATUSEVENTSOURCE
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASESTATUSEVENTSOURCE
+    semanticType: referenceDataCode
   - key: note
     valueType: string
     required: false
@@ -126,31 +117,139 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
-relationships:
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    semanticType: multilineText
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: account
-    kind: belongsTo
-    target: Account
-    foreignKey: account_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: accountId
     label:
       en: Account
       nl: Account
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Case Status Event
+    description: List CaseStatusEvent records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Status Event
+    description: Get CaseStatusEvent records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Status Event
+    description: Create CaseStatusEvent records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Status Event
+    description: Update CaseStatusEvent records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Status Event
+    description: Delete CaseStatusEvent records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTATUS
+            clearable: false
+      enteredAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      exitedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      actorType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEACTORTYPE
+            clearable: true
+      source:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASESTATUSEVENTSOURCE
+            clearable: true
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000

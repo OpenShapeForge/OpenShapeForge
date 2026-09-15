@@ -172,6 +172,7 @@ function isWritableColumn(
     column.name !== "created_at" &&
     column.name !== "updated_at" &&
     (column.writtenBy === undefined || column.writtenBy.length === 0) &&
+    column.deriveOnCreate === undefined &&
     !(operation === "update" && column.immutable === true)
   );
 }

@@ -86,6 +86,20 @@ describe("one relational field contract", () => {
   test("refuses identity aliases as untracked foreign IDs", () => {
     expect(() => normalizeEntityFields(entity("Article", [{ key: "pageId", semanticType: "pageId", persisted: { column: "page_id", storageClass: "core" } }]), catalog())).toThrow("use the entity semanticType");
   });
+  test("inline identifier values retain scalar semantics without claiming a foreign key", () => {
+    const source = entity("Article", [{ key: "configuration", valueType: "object", children: [{ key: "pageId", semanticType: "pageId", options: { type: "remote", remoteUrl: "/pages" } }] }]);
+    const normalized = normalizeEntityFields(source, catalog());
+    expect(normalized.fields[0]?.children?.[0]).toMatchObject({ semanticType: "pageId", valueType: "string", validation: { format: "uuid" }, options: { remoteUrl: "/pages" } });
+    expect(normalized.fields[0]?.children?.[0]?.relationship).toBeUndefined();
+    expect(normalized.fields[0]?.children?.[0]?.persisted).toBeUndefined();
+    for (const invalid of [{ persisted: { column: "page_id", storageClass: "core" } }, { relationship: { ownership: "reference" } }]) {
+      const guarded = structuredClone(source);
+      Object.assign(guarded.fields[0]!.children![0]!, invalid);
+      expect(() => normalizeEntityFields(guarded, catalog())).toThrow("inline identifier values cannot declare relational storage");
+    }
+    source.fields[0]!.children![0]!.semanticType = "Page";
+    expect(() => normalizeEntityFields(source, catalog())).toThrow("not IDs inside JSON");
+  });
   test("cannot hide an entity reference inside an object semantic type", () => {
     const types = { ...catalog(), hiddenReference: { label: { en: "Hidden" }, valueType: "object" as const, shape: [{ key: "page", semanticType: "Page" }] } };
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", semanticType: "hiddenReference" }]), types)).toThrow("not IDs inside JSON");

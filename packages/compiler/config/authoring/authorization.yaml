@@ -223,6 +223,7 @@ clientRoles:
   erp-provider:
     - General.All.ReadWrite
     - General.All.Read
+    - Templates.Read
     - CaseFile.All.ReadWrite
     - Energy.All.ReadWrite
     - Finance.All.ReadWrite

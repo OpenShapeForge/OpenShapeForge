@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ContactMoment
@@ -49,11 +49,10 @@ fields:
     persisted:
       column: channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMUNICATIONCHANNEL
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONCHANNEL
+    semanticType: referenceDataCode
   - key: type
     valueType: string
     required: false
@@ -96,11 +95,10 @@ fields:
     persisted:
       column: direction
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMUNICATIONDIRECTION
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONDIRECTION
+    semanticType: referenceDataCode
   - key: subject
     valueType: string
     required: false
@@ -129,11 +127,7 @@ fields:
     persisted:
       column: content
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 10000
+    semanticType: multilineText
   - key: occurredAt
     valueType: datetime
     required: true
@@ -146,156 +140,243 @@ fields:
     persisted:
       column: occurred_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: relationRole
-    kind: belongsTo
-    target: RelationRole
-    foreignKey: relation_role_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: relationRoleId
     label:
       en: Relation role
       nl: Relatierol
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: relation_role_id
+      storageClass: core
+    semanticType: RelationRole
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
   - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: contact_moment_id
     label:
       en: Tasks
       nl: Taken
-ui:
-  routes:
-    list:
-      en: /contact-moments
-      nl: /contactmomenten
-    detail:
-      en: /contact-moments/:id
-      nl: /contactmomenten/:id
-    create:
-      en: /contact-moments/create
-      nl: /contactmomenten/aanmaken
-    edit:
-      en: /contact-moments/:id/edit
-      nl: /contactmomenten/:id/bewerken
-    delete:
-      en: /contact-moments/:id/delete
-      nl: /contactmomenten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Contact Moments
-        nl: Contactmomenten
-      columns:
-        - key: type
-          sortable: true
-        - key: channel
-          sortable: true
-        - key: direction
-          sortable: true
-        - key: subject
-          sortable: true
-        - key: occurredAt
-          sortable: true
-      defaultSort:
-        key: occurredAt
-        direction: desc
-      rowLink:
-        en: /contact-moments/:id
-        nl: /contactmomenten/:id
-    detail:
-      header:
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: contactMomentId
+      ownership: reference
+operations:
+  list:
+    name: List Contact Moment
+    description: List ContactMoment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Contact Moment
+    description: Get ContactMoment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Contact Moment
+    description: Create ContactMoment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ContactMoment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /contact-moments
+          nl: /contactmomenten
+        columns:
+          - key: type
+            sortable: true
+          - key: channel
+            sortable: true
+          - key: direction
+            sortable: true
+          - key: subject
+            sortable: true
+          - key: occurredAt
+            sortable: true
+        title:
+          en: Contact Moments
+          nl: Contactmomenten
+        defaultSort:
+          key: occurredAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /contact-moments/:id
+            nl: /contactmomenten/:id
+          create:
+            en: /contact-moments/create
+            nl: /contactmomenten/aanmaken
         title: "{{subject}}"
         subtitle: "{{channel}} — {{occurredAt}}"
         badges:
           - channel
           - direction
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Contact details
-                nl: Contactgegevens
-              fields:
-                - type
-                - detailType
-                - channel
-                - direction
-                - occurredAt
-                - subject
-            - title:
-                en: Content
-                nl: Inhoud
-              fields:
-                - content
-        - id: tasks
-          label:
-            en: Tasks
-            nl: Taken
-          relationship: tasks
-    form:
-      variants:
-        create:
-          title:
-            en: Create contact moment
-            nl: Contactmoment aanmaken
-          groups:
-            - title:
-                en: Contact details
-                nl: Contactgegevens
-              fields:
-                - type
-                - detailType
-                - channel
-                - direction
-                - occurredAt
-                - subject
-            - title:
-                en: Content
-                nl: Inhoud
-              fields:
-                - content
-        edit:
-          extends: create
-          title:
-            en: Edit contact moment
-            nl: Contactmoment bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Contact details
+                    nl: Contactgegevens
+                  fields:
+                    - type
+                    - detailType
+                    - channel
+                    - direction
+                    - occurredAt
+                    - subject
+                - title:
+                    en: Content
+                    nl: Inhoud
+                  fields:
+                    - content
+            - id: tasks
+              label:
+                en: Tasks
+                nl: Taken
+              relationship: tasks
+        modes:
+          create:
+            title:
+              en: Create contact moment
+              nl: Contactmoment aanmaken
+            groups:
+              - title:
+                  en: Contact details
+                  nl: Contactgegevens
+                fields:
+                  - type
+                  - detailType
+                  - channel
+                  - direction
+                  - occurredAt
+                  - subject
+              - title:
+                  en: Content
+                  nl: Inhoud
+                fields:
+                  - content
+          update:
+            title:
+              en: Edit contact moment
+              nl: Contactmoment bewerken
+    fields:
+      channel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: COMMUNICATIONCHANNEL
+            clearable: false
+      direction:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: COMMUNICATIONDIRECTION
+            clearable: true
+      content:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 10000
+      occurredAt:
+        render:
+          component: DateTimePicker
+          props: {}

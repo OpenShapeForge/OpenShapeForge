@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: InspectionReport
@@ -40,9 +40,6 @@ fields:
     persisted:
       column: inspected_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: summary
     valueType: string
     required: false
@@ -57,11 +54,7 @@ fields:
     persisted:
       column: summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -76,138 +69,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: inspector
-    kind: belongsTo
-    target: Relation
-    foreignKey: inspector_relation_id
+  - key: inspectorId
     label:
       en: Inspector
       nl: Inspecteur
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_reference
+    persisted:
+      column: inspector_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: assetId
     label:
       en: Asset
       nl: Object
-ui:
-  routes:
-    list:
-      en: /inspection-reports
-      nl: /inspectierapporten
-    detail:
-      en: /inspection-reports/:id
-      nl: /inspectierapporten/:id
-    create:
-      en: /inspection-reports/create
-      nl: /inspectierapporten/aanmaken
-    edit:
-      en: /inspection-reports/:id/edit
-      nl: /inspectierapporten/:id/bewerken
-    delete:
-      en: /inspection-reports/:id/delete
-      nl: /inspectierapporten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Inspection reports
-        nl: Inspectierapporten
-      columns:
-        - key: code
-          sortable: true
-        - key: inspectedAt
-          sortable: true
-      defaultSort:
-        key: inspectedAt
-        direction: desc
-      rowLink:
-        en: /inspection-reports/:id
-        nl: /inspectierapporten/:id
-    detail:
-      header:
-        title: "{{code}}"
-        subtitle: "{{inspectedAt}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Report details
-                nl: Rapportgegevens
-              fields:
-                - code
-                - inspectedAt
-            - title:
-                en: Summary
-                nl: Samenvatting
-              fields:
-                - summary
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create inspection report
-            nl: Inspectierapport aanmaken
-          groups:
-            - title:
-                en: Report details
-                nl: Rapportgegevens
-              fields:
-                - code
-                - inspectedAt
-            - title:
-                en: Summary
-                nl: Samenvatting
-              fields:
-                - summary
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit inspection report
-            nl: Inspectierapport bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: asset_reference
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -222,3 +103,188 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Inspection Report
+    description: List InspectionReport records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Inspection Report
+    description: Get InspectionReport records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Inspection Report
+    description: Create InspectionReport records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update InspectionReport records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /inspection-reports
+          nl: /inspectierapporten
+        columns:
+          - key: code
+            sortable: true
+          - key: inspectedAt
+            sortable: true
+        title:
+          en: Inspection reports
+          nl: Inspectierapporten
+        defaultSort:
+          key: inspectedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /inspection-reports/:id
+            nl: /inspectierapporten/:id
+          create:
+            en: /inspection-reports/create
+            nl: /inspectierapporten/aanmaken
+        title: "{{code}}"
+        subtitle: "{{inspectedAt}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Report details
+                    nl: Rapportgegevens
+                  fields:
+                    - code
+                    - inspectedAt
+                - title:
+                    en: Summary
+                    nl: Samenvatting
+                  fields:
+                    - summary
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create inspection report
+              nl: Inspectierapport aanmaken
+            groups:
+              - title:
+                  en: Report details
+                  nl: Rapportgegevens
+                fields:
+                  - code
+                  - inspectedAt
+              - title:
+                  en: Summary
+                  nl: Samenvatting
+                fields:
+                  - summary
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit inspection report
+              nl: Inspectierapport bewerken
+    fields:
+      inspectedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      summary:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

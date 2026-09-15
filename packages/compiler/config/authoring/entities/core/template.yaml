@@ -8,7 +8,7 @@ labels: { en: Template, nl: Template }
 domains: [documents]
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
@@ -21,6 +21,7 @@ fields:
     label: { en: Key, nl: Sleutel }
     valueType: string
     required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
     persisted: { column: key, storageClass: core }
   - key: name
@@ -85,7 +86,7 @@ interfaces:
       collection:
         route: /templates
         title: { en: Templates, nl: Templates }
-        columns: [{ key: name, sortable: true }, { key: key }, { key: description }]
+        columns: [{ key: name, sortable: true }, { key: description }]
       record:
         routes: { read: "/templates/:id", create: /templates/new }
         title: "{{name}}"
@@ -93,14 +94,14 @@ interfaces:
           tabs:
             - id: details
               label: { en: Details, nl: Details }
-              groups: [{ title: { en: Template, nl: Template }, fields: [key, name, description] }]
+              groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
             - id: versions
               label: { en: Versions, nl: Versies }
               relationship: versions
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Template, nl: Template }, fields: [key, name, description] }]
+            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
           update:
             title: { en: Edit, nl: Bewerken }
             groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]

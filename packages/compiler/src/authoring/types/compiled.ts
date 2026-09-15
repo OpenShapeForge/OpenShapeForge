@@ -25,6 +25,7 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
+import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
 import type {
   ListColumn,
   ListFilter,
@@ -91,7 +92,7 @@ export interface CompiledField {
   };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
@@ -108,6 +109,8 @@ export interface CompiledField {
    * column, the way `immutable` and `classification` do.
    */
   writtenBy?: string[];
+  /** Persisted server-owned create-time derivation retained for every interface projection. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;
@@ -136,6 +139,7 @@ export interface CompiledField {
 }
 
 export interface CompiledRelationship {
+  through?: { field: string; column: string; target: string };
   key: string;
   fieldKey?: string;
   inverse?: string;
@@ -163,6 +167,7 @@ export interface GraphQLField {
 }
 
 export interface GraphQLRelationship {
+  through?: { field: string; column: string; target: string };
   name: string;
   target: string;
   type: string;
@@ -717,6 +722,7 @@ export interface CompiledEntityContract {
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: {
+      fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       recordContext?: { fields: string[]; relationships?: string[] };

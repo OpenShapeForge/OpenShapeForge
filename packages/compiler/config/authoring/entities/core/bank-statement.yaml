@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: BankStatement
@@ -51,9 +51,6 @@ fields:
     persisted:
       column: statement_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: openingBalance
     valueType: number
     required: true
@@ -110,135 +107,6 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-ui:
-  routes:
-    list:
-      en: /bank-statements
-      nl: /bankafschriften
-    detail:
-      en: /bank-statements/:id
-      nl: /bankafschriften/:id
-    create:
-      en: /bank-statements/create
-      nl: /bankafschriften/aanmaken
-    edit:
-      en: /bank-statements/:id/edit
-      nl: /bankafschriften/:id/bewerken
-    delete:
-      en: /bank-statements/:id/delete
-      nl: /bankafschriften/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Bank statements
-        nl: Bankafschriften
-      columns:
-        - key: accountIban
-          sortable: true
-        - key: statementNumber
-          sortable: true
-        - key: statementDate
-          sortable: true
-        - key: openingBalance
-          sortable: true
-        - key: closingBalance
-          sortable: true
-      defaultSort:
-        key: statementDate
-        direction: desc
-      rowLink:
-        en: /bank-statements/:id
-        nl: /bankafschriften/:id
-    detail:
-      header:
-        title: "{{accountIban}} #{{statementNumber}}"
-        subtitle: "{{statementDate}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Statement details
-                nl: Afschriftgegevens
-              fields:
-                - accountIban
-                - statementNumber
-                - statementDate
-                - currencyCode
-            - title:
-                en: Balances
-                nl: Saldi
-              fields:
-                - openingBalance
-                - closingBalance
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create bank statement
-            nl: Bankafschrift aanmaken
-          groups:
-            - title:
-                en: Statement details
-                nl: Afschriftgegevens
-              fields:
-                - accountIban
-                - statementNumber
-                - statementDate
-                - currencyCode
-            - title:
-                en: Balances
-                nl: Saldi
-              fields:
-                - openingBalance
-                - closingBalance
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit bank statement
-            nl: Bankafschrift bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
 authorization:
   roles:
     read:
@@ -253,3 +121,194 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Bank Statement
+    description: List BankStatement records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Bank Statement
+    description: Get BankStatement records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Bank Statement
+    description: Create BankStatement records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update BankStatement records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /bank-statements
+          nl: /bankafschriften
+        columns:
+          - key: accountIban
+            sortable: true
+          - key: statementNumber
+            sortable: true
+          - key: statementDate
+            sortable: true
+          - key: openingBalance
+            sortable: true
+          - key: closingBalance
+            sortable: true
+        title:
+          en: Bank statements
+          nl: Bankafschriften
+        defaultSort:
+          key: statementDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /bank-statements/:id
+            nl: /bankafschriften/:id
+          create:
+            en: /bank-statements/create
+            nl: /bankafschriften/aanmaken
+        title: "{{accountIban}} #{{statementNumber}}"
+        subtitle: "{{statementDate}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Statement details
+                    nl: Afschriftgegevens
+                  fields:
+                    - accountIban
+                    - statementNumber
+                    - statementDate
+                    - currencyCode
+                - title:
+                    en: Balances
+                    nl: Saldi
+                  fields:
+                    - openingBalance
+                    - closingBalance
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create bank statement
+              nl: Bankafschrift aanmaken
+            groups:
+              - title:
+                  en: Statement details
+                  nl: Afschriftgegevens
+                fields:
+                  - accountIban
+                  - statementNumber
+                  - statementDate
+                  - currencyCode
+              - title:
+                  en: Balances
+                  nl: Saldi
+                fields:
+                  - openingBalance
+                  - closingBalance
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit bank statement
+              nl: Bankafschrift bewerken
+    fields:
+      statementDate:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

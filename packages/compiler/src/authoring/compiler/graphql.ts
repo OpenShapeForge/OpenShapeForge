@@ -69,6 +69,7 @@ export function buildGraphQL(
     resolve: r.kind,
     foreignKey: r.foreignKey,
     via: r.via,
+    ...(r.through ? { through: r.through } : {}),
   }));
 
   const profileTypes: Record<string, GraphQLProfileType> = {};

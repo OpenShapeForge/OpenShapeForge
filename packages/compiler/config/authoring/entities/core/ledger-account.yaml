@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: LedgerAccount
@@ -55,11 +55,10 @@ fields:
     persisted:
       column: account_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: LEDGERACCOUNTTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: LEDGERACCOUNTTYPE
+    semanticType: referenceDataCode
   - key: isPostable
     valueType: boolean
     label:
@@ -67,7 +66,8 @@ fields:
       nl: Boekbaar
     description:
       en: Whether journal entries can post directly to this account (true) or only to its children (false).
-      nl: Of journaalposten direct op deze rekening kunnen worden geboekt (waar) of alleen op onderliggende rekeningen (onwaar).
+      nl: Of journaalposten direct op deze rekening kunnen worden geboekt (waar) of alleen op onderliggende rekeningen
+        (onwaar).
     defaultValue: true
     persisted:
       column: is_postable
@@ -102,11 +102,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -121,152 +117,25 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentLedgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: parent_ledger_account_id
+  - key: parentLedgerAccountId
     label:
       en: Parent ledger account
       nl: Bovenliggende grootboekrekening
+    persisted:
+      column: parent_ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
   - key: childLedgerAccounts
-    kind: hasMany
-    target: LedgerAccount
-    foreignKey: parent_ledger_account_id
     label:
       en: Child ledger accounts
       nl: Onderliggende grootboekrekeningen
-ui:
-  routes:
-    list:
-      en: /ledger-accounts
-      nl: /grootboekrekeningen
-    detail:
-      en: /ledger-accounts/:id
-      nl: /grootboekrekeningen/:id
-    create:
-      en: /ledger-accounts/create
-      nl: /grootboekrekeningen/aanmaken
-    edit:
-      en: /ledger-accounts/:id/edit
-      nl: /grootboekrekeningen/:id/bewerken
-    delete:
-      en: /ledger-accounts/:id/delete
-      nl: /grootboekrekeningen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Ledger accounts
-        nl: Grootboekrekeningen
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: accountType
-          sortable: true
-        - key: isPostable
-          sortable: true
-        - key: currencyCode
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /ledger-accounts/:id
-        nl: /grootboekrekeningen/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{accountType}}"
-        badges:
-          - accountType
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Account details
-                nl: Rekeninggegevens
-              fields:
-                - code
-                - name
-                - accountType
-                - isPostable
-                - currencyCode
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create ledger account
-            nl: Grootboekrekening aanmaken
-          groups:
-            - title:
-                en: Account details
-                nl: Rekeninggegevens
-              fields:
-                - code
-                - name
-                - accountType
-                - isPostable
-                - currencyCode
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit ledger account
-            nl: Grootboekrekening bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: LedgerAccount
+    cardinality: collection
+    relationship:
+      inverse: parentLedgerAccountId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -281,3 +150,204 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Ledger Account
+    description: List LedgerAccount records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Ledger Account
+    description: Get LedgerAccount records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Ledger Account
+    description: Create LedgerAccount records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update LedgerAccount records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /ledger-accounts
+          nl: /grootboekrekeningen
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: accountType
+            sortable: true
+          - key: isPostable
+            sortable: true
+          - key: currencyCode
+            sortable: true
+        title:
+          en: Ledger accounts
+          nl: Grootboekrekeningen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /ledger-accounts/:id
+            nl: /grootboekrekeningen/:id
+          create:
+            en: /ledger-accounts/create
+            nl: /grootboekrekeningen/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{accountType}}"
+        badges:
+          - accountType
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Account details
+                    nl: Rekeninggegevens
+                  fields:
+                    - code
+                    - name
+                    - accountType
+                    - isPostable
+                    - currencyCode
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create ledger account
+              nl: Grootboekrekening aanmaken
+            groups:
+              - title:
+                  en: Account details
+                  nl: Rekeninggegevens
+                fields:
+                  - code
+                  - name
+                  - accountType
+                  - isPostable
+                  - currencyCode
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit ledger account
+              nl: Grootboekrekening bewerken
+    fields:
+      accountType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: LEDGERACCOUNTTYPE
+            clearable: false
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

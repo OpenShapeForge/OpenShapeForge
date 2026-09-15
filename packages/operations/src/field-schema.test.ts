@@ -2,6 +2,14 @@
 import { expect, test } from "bun:test";
 import { operationFieldObjectSchema } from "./field-schema.js";
 
+test("entity semantic types retain their inferred target in parameter schemas", () => {
+  const schema = operationFieldObjectSchema([{ key: "record", semanticType: "ExampleRecord", required: true }], {
+    semanticTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" },
+      shape: [{ key: "parent", semanticType: "ExampleRecord" }] } },
+  });
+  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } } } });
+});
+
 test("cardinality bounds with max one preserve a scalar value", () => {
   for (const cardinality of [{ min: 0, max: 1 }, { min: 1, max: 1 }, {}]) {
     const schema = operationFieldObjectSchema([{

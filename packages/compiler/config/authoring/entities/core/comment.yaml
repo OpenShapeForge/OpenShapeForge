@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Comment
 title: Comment
-description: A textual comment attached to another entity (currently support issues), written by a human author or a workflow/AI node.
+description: A textual comment attached to another entity (currently support issues), written by a human author or a
+  workflow/AI node.
 language: en
 displayTemplate: "{{body}}"
 filterField: body
@@ -42,11 +43,7 @@ fields:
     persisted:
       column: body
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 5
-        maxLength: 5000
+    semanticType: multilineText
   - key: source
     valueType: string
     required: true
@@ -63,121 +60,195 @@ fields:
     persisted:
       column: source
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMENTBRON
-        clearable: false
-relationships:
-  - key: supportIssue
-    kind: belongsTo
-    target: SupportIssue
-    foreignKey: support_issue_id
+    options:
+      type: referentiedata
+      referentieGroep: COMMENTBRON
+    semanticType: referenceDataCode
+  - key: supportIssueId
     label:
       en: Support issue
       nl: Supportverzoek
-  - key: author
-    kind: belongsTo
-    target: Relation
-    foreignKey: author_relation_id
+    persisted:
+      column: support_issue_id
+      storageClass: core
+    semanticType: SupportIssue
+    relationship:
+      ownership: reference
+  - key: authorId
     label:
       en: Author
       nl: Auteur
-ui:
-  routes:
-    list:
-      en: /comments
-      nl: /comments
-    detail:
-      en: /comments/:id
-      nl: /comments/:id
-    create:
-      en: /comments/create
-      nl: /comments/aanmaken
-    edit:
-      en: /comments/:id/edit
-      nl: /comments/:id/bewerken
-    delete:
-      en: /comments/:id/delete
-      nl: /comments/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Comments
-        nl: Opmerkingen
-      columns:
-        - key: author
-          sortable: false
-          label:
-            en: Author
-            nl: Auteur
-        - key: body
-          sortable: false
-        - key: source
-          sortable: true
-        - key: createdAt
-          sortable: true
-      defaultSort:
-        key: createdAt
-        direction: desc
-      rowLink:
-        en: /comments/:id
-        nl: /comments/:id
-    detail:
-      header:
+    persisted:
+      column: author_relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Comment
+    description: List Comment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Comment
+    description: Get Comment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Comment
+    description: Create Comment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Comment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /comments
+          nl: /comments
+        columns:
+          - key: author
+            sortable: false
+            label:
+              en: Author
+              nl: Auteur
+          - key: body
+            sortable: false
+          - key: source
+            sortable: true
+          - key: createdAt
+            sortable: true
+        title:
+          en: Comments
+          nl: Opmerkingen
+        defaultSort:
+          key: createdAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /comments/:id
+            nl: /comments/:id
+          create:
+            en: /comments/create
+            nl: /comments/aanmaken
         title: "{{body}}"
         subtitle: "{{source}}"
         badges:
           - source
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Comment
-                nl: Opmerking
-              fields:
-                - body
-                - source
-    form:
-      variants:
-        create:
-          title:
-            en: New comment
-            nl: Nieuwe opmerking
-          groups:
-            - title:
-                en: Comment
-                nl: Opmerking
-              fields:
-                - body
-                - source
-        edit:
-          extends: create
-          title:
-            en: Edit comment
-            nl: Opmerking bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Comment
+                    nl: Opmerking
+                  fields:
+                    - body
+                    - source
+        modes:
+          create:
+            title:
+              en: New comment
+              nl: Nieuwe opmerking
+            groups:
+              - title:
+                  en: Comment
+                  nl: Opmerking
+                fields:
+                  - body
+                  - source
+          update:
+            title:
+              en: Edit comment
+              nl: Opmerking bewerken
+    fields:
+      body:
+        render:
+          component: Textarea
+          props:
+            rows: 5
+            maxLength: 5000
+      source:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: COMMENTBRON
+            clearable: false

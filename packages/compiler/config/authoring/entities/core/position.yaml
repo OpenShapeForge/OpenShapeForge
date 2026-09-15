@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Position
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 5000
+    semanticType: multilineText
   - key: salaryRangeMin
     valueType: number
     required: false
@@ -116,156 +112,25 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: orgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: org_unit_id
+  - key: orgUnitId
     label:
       en: Org unit
       nl: Organisatorische eenheid
+    persisted:
+      column: org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
   - key: employeeRoles
-    kind: hasMany
-    target: EmployeeRole
-    foreignKey: position_id
     label:
       en: Employee roles
       nl: Medewerkerrollen
-ui:
-  routes:
-    list:
-      en: /positions
-      nl: /functies
-    detail:
-      en: /positions/:id
-      nl: /functies/:id
-    create:
-      en: /positions/create
-      nl: /functies/aanmaken
-    edit:
-      en: /positions/:id/edit
-      nl: /functies/:id/bewerken
-    delete:
-      en: /positions/:id/delete
-      nl: /functies/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Positions
-        nl: Functies
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: salaryRangeMin
-          sortable: true
-        - key: salaryRangeMax
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /positions/:id
-        nl: /functies/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{description}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Position details
-                nl: Functiegegevens
-              fields:
-                - code
-                - name
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Compensation
-                nl: Beloning
-              fields:
-                - salaryRangeMin
-                - salaryRangeMax
-                - currencyCode
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create position
-            nl: Functie aanmaken
-          groups:
-            - title:
-                en: Position details
-                nl: Functiegegevens
-              fields:
-                - code
-                - name
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Compensation
-                nl: Beloning
-              fields:
-                - salaryRangeMin
-                - salaryRangeMax
-                - currencyCode
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit position
-            nl: Functie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: EmployeeRole
+    cardinality: collection
+    relationship:
+      inverse: positionId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -280,3 +145,202 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Position
+    description: List Position records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Position
+    description: Get Position records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Position
+    description: Create Position records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Position records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /positions
+          nl: /functies
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: salaryRangeMin
+            sortable: true
+          - key: salaryRangeMax
+            sortable: true
+        title:
+          en: Positions
+          nl: Functies
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /positions/:id
+            nl: /functies/:id
+          create:
+            en: /positions/create
+            nl: /functies/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{description}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Position details
+                    nl: Functiegegevens
+                  fields:
+                    - code
+                    - name
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Compensation
+                    nl: Beloning
+                  fields:
+                    - salaryRangeMin
+                    - salaryRangeMax
+                    - currencyCode
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create position
+              nl: Functie aanmaken
+            groups:
+              - title:
+                  en: Position details
+                  nl: Functiegegevens
+                fields:
+                  - code
+                  - name
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Compensation
+                  nl: Beloning
+                fields:
+                  - salaryRangeMin
+                  - salaryRangeMax
+                  - currencyCode
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit position
+              nl: Functie bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 5000

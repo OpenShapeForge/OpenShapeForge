@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ElicitedOutput
@@ -11,12 +11,6 @@ labels:
   en: Elicited Output
 domains:
   - relations
-mcp:
-  elicitOnCreate:
-    sourceField: name
-    sourceEntity: ElicitedOutput
-    definitionsField: configuration
-    into: configuration
 authorization:
   roles:
     read:
@@ -44,3 +38,83 @@ fields:
     persisted:
       column: configuration
       storageClass: core
+operations:
+  list:
+    name: List Elicited Output
+    description: List ElicitedOutput records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Elicited Output
+    description: Get ElicitedOutput records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Elicited Output
+    description: Create ElicitedOutput records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+    interaction:
+      type: secureInput
+      sourceField: name
+      sourceEntity: ElicitedOutput
+      definitionsField: configuration
+      into: configuration
+  update:
+    name: Update Elicited Output
+    description: Update ElicitedOutput records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Elicited Output
+    description: Delete ElicitedOutput records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  mcp: {}

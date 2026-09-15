@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: OrganizationPermission
@@ -102,126 +102,195 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: targetTenant
-    kind: belongsTo
-    target: Tenant
-    foreignKey: target_tenant_id
+  - key: targetTenantId
     label:
       en: Target tenant
       nl: Doeltenant
-  - key: targetOrgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: target_org_unit_id
+    persisted:
+      column: target_tenant_id
+      storageClass: core
+    semanticType: Tenant
+    relationship:
+      ownership: reference
+  - key: targetOrgUnitId
     label:
       en: Target org unit
       nl: Doeleenheid
-ui:
-  routes:
-    list:
-      en: /organization-permissions
-      nl: /organisatierechten
-    detail:
-      en: /organization-permissions/:id
-      nl: /organisatierechten/:id
-    create:
-      en: /organization-permissions/create
-      nl: /organisatierechten/aanmaken
-    edit:
-      en: /organization-permissions/:id/edit
-      nl: /organisatierechten/:id/bewerken
-    delete:
-      en: /organization-permissions/:id/delete
-      nl: /organisatierechten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Organization permissions
-        nl: Organisatierechten
-      columns:
-        - key: clientId
-          sortable: true
-        - key: permissionName
-          sortable: true
-        - key: targetScopeKind
-          sortable: true
-      defaultSort:
-        key: permissionName
-        direction: asc
-      rowLink:
-        en: /organization-permissions/:id
-        nl: /organisatierechten/:id
-    detail:
-      header:
+    persisted:
+      column: target_org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Organization Permission
+    description: List OrganizationPermission records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Organization Permission
+    description: Get OrganizationPermission records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Organization Permission
+    description: Create OrganizationPermission records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Organization Permission
+    description: Update OrganizationPermission records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Organization Permission
+    description: Delete OrganizationPermission records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /organization-permissions
+          nl: /organisatierechten
+        columns:
+          - key: clientId
+            sortable: true
+          - key: permissionName
+            sortable: true
+          - key: targetScopeKind
+            sortable: true
+        title:
+          en: Organization permissions
+          nl: Organisatierechten
+        defaultSort:
+          key: permissionName
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /organization-permissions/:id
+            nl: /organisatierechten/:id
+          create:
+            en: /organization-permissions/create
+            nl: /organisatierechten/aanmaken
         title: "{{permissionName}}"
         subtitle: "{{clientId}}"
         badges:
           - effect
           - targetScopeKind
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-    form:
-      variants:
-        create:
-          title:
-            en: Create organization permission
-            nl: Organisatierecht aanmaken
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-        edit:
-          title:
-            en: Edit organization permission
-            nl: Organisatierecht bewerken
-          groups:
-            - title:
-                en: Permission
-                nl: Recht
-              fields:
-                - targetScopeKind
-                - clientId
-                - permissionName
-                - effect
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
+        actions: []
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Permission
+                    nl: Recht
+                  fields:
+                    - targetScopeKind
+                    - clientId
+                    - permissionName
+                    - effect
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+        modes:
+          create:
+            title:
+              en: Create organization permission
+              nl: Organisatierecht aanmaken
+            groups:
+              - title:
+                  en: Permission
+                  nl: Recht
+                fields:
+                  - targetScopeKind
+                  - clientId
+                  - permissionName
+                  - effect
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+          update:
+            title:
+              en: Edit organization permission
+              nl: Organisatierecht bewerken
+            groups:
+              - title:
+                  en: Permission
+                  nl: Recht
+                fields:
+                  - targetScopeKind
+                  - clientId
+                  - permissionName
+                  - effect
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization

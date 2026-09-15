@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RelationGroupMembership
@@ -38,10 +38,9 @@ authorization:
     empty: public
 fields:
   - key: relationId
-    valueType: string
     required: true
     immutable: true
-    semanticType: relationId
+    semanticType: Relation
     label:
       en: Relation
       nl: Relatie
@@ -53,11 +52,15 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: relationGroupId
-    valueType: string
     required: true
     immutable: true
-    semanticType: relationGroupId
+    semanticType: RelationGroup
     label:
       en: Relation group
       nl: Relatiegroep
@@ -69,6 +72,11 @@ fields:
     persisted:
       column: relation_group_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: status
     valueType: string
     required: true
@@ -85,21 +93,6 @@ fields:
     options:
       type: referentiedata
       referentieGroep: RELATIONGROUPSTATUS
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
-    label:
-      en: Relation
-      nl: Relatie
-  - key: relationGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: relation_group_id
-    label:
-      en: Relation group
-      nl: Relatiegroep
 operations:
   list:
     name: { en: List relation group memberships, nl: Relatiegroepslidmaatschappen tonen }
@@ -162,7 +155,7 @@ operations:
         kind: type-current-field
         field: relationGroupId
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -177,7 +170,8 @@ interfaces:
           nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
       delete:
         instructions:
-          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current relation-group id.
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current relation-group
+            id.
           nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact het actuele relatiegroep-id.
     resource:
       uri: app://relation-group-memberships
@@ -199,25 +193,25 @@ interfaces:
           read: { en: /relation-group-memberships/:id, nl: /relatiegroepslidmaatschappen/:id }
           create: { en: /relation-group-memberships/new, nl: /relatiegroepslidmaatschappen/nieuw }
         title: Group membership
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [status]
-            relationships: [relation, relationGroup]
+            fields: [ status ]
+            relationships: [ relationId, relationGroupId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Membership, nl: Lidmaatschap }
-                  fields: [relationId, relationGroupId, status]
+                  fields: [ relationId, relationGroupId, status ]
         modes:
           create:
             title: { en: Add relation to group, nl: Relatie aan groep toevoegen }
             groups:
               - title: { en: Membership, nl: Lidmaatschap }
-                fields: [relationId, relationGroupId, status]
+                fields: [ relationId, relationGroupId, status ]
           update:
             title: { en: Update membership, nl: Lidmaatschap wijzigen }
             groups:
               - title: { en: Status, nl: Status }
-                fields: [status]
+                fields: [ status ]

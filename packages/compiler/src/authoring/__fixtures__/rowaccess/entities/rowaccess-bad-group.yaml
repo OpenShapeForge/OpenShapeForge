@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RowAccessBadGroup
 title: Row Access Bad Group
-description: Test fixture — group.column matches no field or belongsTo foreignKey (authoring fail-closed). Not part of the shipped slice.
+description: Test fixture — group.column matches no field or belongsTo foreignKey (authoring fail-closed). Not part of
+  the shipped slice.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -37,3 +38,76 @@ fields:
     persisted:
       column: title
       storageClass: core
+operations:
+  list:
+    name: List Row Access Bad Group
+    description: List RowAccessBadGroup records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Row Access Bad Group
+    description: Get RowAccessBadGroup records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Row Access Bad Group
+    description: Create RowAccessBadGroup records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Row Access Bad Group
+    description: Update RowAccessBadGroup records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Row Access Bad Group
+    description: Delete RowAccessBadGroup records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}

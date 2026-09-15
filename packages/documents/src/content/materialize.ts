@@ -214,7 +214,8 @@ export async function materializeTemplateContent(
       variantId: variant.id,
       parameters,
     });
-    for (const block of variant.blocks) {
+    for (const sourceBlock of variant.blocks) {
+      let block = sourceBlock;
       if (++visitedBlocks > CONTENT_LIMITS.blocks)
         contentError("CONTENT_LIMIT_EXCEEDED", "Expanded template contains too many blocks.");
       const definition = Object.hasOwn(registry, block.definitionKey)
@@ -238,6 +239,19 @@ export async function materializeTemplateContent(
       if (!renderer && (!definition.composition || Object.keys(definition.renderers).length > 0))
         contentError("UNSUPPORTED_CHANNEL", "Block has no renderer for the requested channel.");
       definitions[block.definitionKey] = definition;
+      const boundReferences = Object.fromEntries(Object.entries(block.references).map(([key, reference]) => {
+        if (reference && !Array.isArray(reference) && "parameter" in reference) {
+          const name = reference.parameter;
+          if (Object.keys(reference).length !== 1 || !/^[a-z][A-Za-z0-9]{0,127}$/.test(name)) contentError("INVALID_VALUE", "Invalid local parameter binding.");
+          const parameter = Object.hasOwn(version.parameters, name) ? version.parameters[name] : undefined;
+          const target = definition.fields[key]?.relationship?.target;
+          if (!target || parameter?.relationship?.target !== target || parameter.cardinality && parameter.cardinality !== "single") contentError("DEPENDENCY_INVALID", `Parameter ${name} does not match relationship ${key}.`);
+          if (!Object.hasOwn(parameters, name) || typeof parameters[name] !== "string") contentError("MISSING_VARIABLE", `Entity parameter ${name} is missing.`);
+          return [key, { entity: target, id: parameters[name] as string }];
+        }
+        return [key, reference];
+      }));
+      block = { ...block, references: boundReferences };
       validateContentBlockReferences(block, definition);
       const valueFields = Object.fromEntries(
         Object.entries(definition.fields).filter(([, field]) => !field.relationship),

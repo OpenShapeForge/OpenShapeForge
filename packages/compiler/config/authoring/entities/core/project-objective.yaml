@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: ProjectObjective
@@ -43,11 +43,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: targetValue
     valueType: string
     required: false
@@ -88,9 +84,6 @@ fields:
     persisted:
       column: target_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: achievedAt
     valueType: date
     required: false
@@ -103,126 +96,16 @@ fields:
     persisted:
       column: achieved_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
-relationships:
-  - key: project
-    kind: belongsTo
-    target: Project
-    foreignKey: project_id
+  - key: projectId
     label:
       en: Project
       nl: Project
-ui:
-  routes:
-    list:
-      en: /project-objectives
-      nl: /projectdoelstellingen
-    detail:
-      en: /project-objectives/:id
-      nl: /projectdoelstellingen/:id
-    create:
-      en: /project-objectives/create
-      nl: /projectdoelstellingen/aanmaken
-    edit:
-      en: /project-objectives/:id/edit
-      nl: /projectdoelstellingen/:id/bewerken
-    delete:
-      en: /project-objectives/:id/delete
-      nl: /projectdoelstellingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Project objectives
-        nl: Projectdoelstellingen
-      columns:
-        - key: code
-          sortable: true
-        - key: description
-          sortable: true
-        - key: targetDate
-          sortable: true
-        - key: achievedAt
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /project-objectives/:id
-        nl: /projectdoelstellingen/:id
-    detail:
-      header:
-        title: "{{code}} {{description}}"
-        subtitle: "{{targetValue}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Objective details
-                nl: Doelgegevens
-              fields:
-                - code
-                - description
-            - title:
-                en: Target and result
-                nl: Streefwaarde en resultaat
-              fields:
-                - targetValue
-                - actualValue
-                - targetDate
-                - achievedAt
-    form:
-      variants:
-        create:
-          title:
-            en: Create project objective
-            nl: Projectdoelstelling aanmaken
-          groups:
-            - title:
-                en: Objective details
-                nl: Doelgegevens
-              fields:
-                - code
-                - description
-            - title:
-                en: Target and result
-                nl: Streefwaarde en resultaat
-              fields:
-                - targetValue
-                - actualValue
-                - targetDate
-                - achievedAt
-        edit:
-          extends: create
-          title:
-            en: Edit project objective
-            nl: Projectdoelstelling bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: project_id
+      storageClass: core
+    semanticType: Project
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -237,3 +120,184 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Project Objective
+    description: List ProjectObjective records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Project Objective
+    description: Get ProjectObjective records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Project Objective
+    description: Create ProjectObjective records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update ProjectObjective records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /project-objectives
+          nl: /projectdoelstellingen
+        columns:
+          - key: code
+            sortable: true
+          - key: description
+            sortable: true
+          - key: targetDate
+            sortable: true
+          - key: achievedAt
+            sortable: true
+        title:
+          en: Project objectives
+          nl: Projectdoelstellingen
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /project-objectives/:id
+            nl: /projectdoelstellingen/:id
+          create:
+            en: /project-objectives/create
+            nl: /projectdoelstellingen/aanmaken
+        title: "{{code}} {{description}}"
+        subtitle: "{{targetValue}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Objective details
+                    nl: Doelgegevens
+                  fields:
+                    - code
+                    - description
+                - title:
+                    en: Target and result
+                    nl: Streefwaarde en resultaat
+                  fields:
+                    - targetValue
+                    - actualValue
+                    - targetDate
+                    - achievedAt
+        modes:
+          create:
+            title:
+              en: Create project objective
+              nl: Projectdoelstelling aanmaken
+            groups:
+              - title:
+                  en: Objective details
+                  nl: Doelgegevens
+                fields:
+                  - code
+                  - description
+              - title:
+                  en: Target and result
+                  nl: Streefwaarde en resultaat
+                fields:
+                  - targetValue
+                  - actualValue
+                  - targetDate
+                  - achievedAt
+          update:
+            title:
+              en: Edit project objective
+              nl: Projectdoelstelling bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000
+      targetDate:
+        render:
+          component: DatePicker
+          props: {}
+      achievedAt:
+        render:
+          component: DatePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

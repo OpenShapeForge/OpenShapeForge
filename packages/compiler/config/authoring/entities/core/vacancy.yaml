@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Vacancy
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 5000
+    semanticType: multilineText
   - key: status
     valueType: string
     required: true
@@ -74,11 +70,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: VACANCYSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: VACANCYSTATUS
+    semanticType: referenceDataCode
   - key: openedAt
     valueType: date
     required: true
@@ -91,9 +86,6 @@ fields:
     persisted:
       column: opened_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: closedAt
     valueType: date
     required: false
@@ -106,9 +98,6 @@ fields:
     persisted:
       column: closed_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -123,152 +112,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: position
-    kind: belongsTo
-    target: Position
-    foreignKey: position_id
+  - key: positionId
     label:
       en: Position
       nl: Functie
-  - key: orgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: org_unit_id
+    persisted:
+      column: position_id
+      storageClass: core
+    semanticType: Position
+    relationship:
+      ownership: reference
+  - key: orgUnitId
     label:
       en: Org unit
       nl: Organisatorische eenheid
-ui:
-  routes:
-    list:
-      en: /vacancies
-      nl: /vacatures
-    detail:
-      en: /vacancies/:id
-      nl: /vacatures/:id
-    create:
-      en: /vacancies/create
-      nl: /vacatures/aanmaken
-    edit:
-      en: /vacancies/:id/edit
-      nl: /vacatures/:id/bewerken
-    delete:
-      en: /vacancies/:id/delete
-      nl: /vacatures/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Vacancies
-        nl: Vacatures
-      columns:
-        - key: code
-          sortable: true
-        - key: title
-          sortable: true
-        - key: status
-          sortable: true
-        - key: openedAt
-          sortable: true
-        - key: closedAt
-          sortable: true
-      defaultSort:
-        key: openedAt
-        direction: desc
-      rowLink:
-        en: /vacancies/:id
-        nl: /vacatures/:id
-    detail:
-      header:
-        title: "{{code}} {{title}}"
-        subtitle: "{{status}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Vacancy details
-                nl: Vacaturegegevens
-              fields:
-                - code
-                - title
-                - status
-                - openedAt
-                - closedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create vacancy
-            nl: Vacature aanmaken
-          groups:
-            - title:
-                en: Vacancy details
-                nl: Vacaturegegevens
-              fields:
-                - code
-                - title
-                - status
-                - openedAt
-                - closedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit vacancy
-            nl: Vacature bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -283,3 +146,212 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Vacancy
+    description: List Vacancy records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Vacancy
+    description: Get Vacancy records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Vacancy
+    description: Create Vacancy records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Vacancy records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /vacancies
+          nl: /vacatures
+        columns:
+          - key: code
+            sortable: true
+          - key: title
+            sortable: true
+          - key: status
+            sortable: true
+          - key: openedAt
+            sortable: true
+          - key: closedAt
+            sortable: true
+        title:
+          en: Vacancies
+          nl: Vacatures
+        defaultSort:
+          key: openedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /vacancies/:id
+            nl: /vacatures/:id
+          create:
+            en: /vacancies/create
+            nl: /vacatures/aanmaken
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Vacancy details
+                    nl: Vacaturegegevens
+                  fields:
+                    - code
+                    - title
+                    - status
+                    - openedAt
+                    - closedAt
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create vacancy
+              nl: Vacature aanmaken
+            groups:
+              - title:
+                  en: Vacancy details
+                  nl: Vacaturegegevens
+                fields:
+                  - code
+                  - title
+                  - status
+                  - openedAt
+                  - closedAt
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit vacancy
+              nl: Vacature bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 6
+            maxLength: 5000
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: VACANCYSTATUS
+            clearable: false
+      openedAt:
+        render:
+          component: DatePicker
+          props: {}
+      closedAt:
+        render:
+          component: DatePicker
+          props: {}

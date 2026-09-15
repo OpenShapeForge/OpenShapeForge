@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Employee
@@ -40,11 +40,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: EMPLOYMENTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: EMPLOYMENTSTATUS
+    semanticType: referenceDataCode
   - key: hireDate
     valueType: date
     required: false
@@ -57,9 +56,6 @@ fields:
     persisted:
       column: hire_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: terminationDate
     valueType: date
     required: false
@@ -72,9 +68,6 @@ fields:
     persisted:
       column: termination_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: name
     valueType: string
     required: false
@@ -103,11 +96,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -122,159 +111,34 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
   - key: roles
-    kind: hasMany
-    target: EmployeeRole
-    foreignKey: employee_id
     label:
       en: Roles
       nl: Rollen
+    semanticType: EmployeeRole
+    cardinality: collection
+    relationship:
+      inverse: employeeId
+      ownership: reference
   - key: organizationPermissions
-    kind: hasMany
-    target: UserOrganizationPermission
-    foreignKey: employee_id
     label:
       en: Organization permissions
       nl: Organisatierechten
-ui:
-  routes:
-    list:
-      en: /employees
-      nl: /medewerkers
-    detail:
-      en: /employees/:id
-      nl: /medewerkers/:id
-    create:
-      en: /employees/create
-      nl: /medewerkers/aanmaken
-    edit:
-      en: /employees/:id/edit
-      nl: /medewerkers/:id/bewerken
-    delete:
-      en: /employees/:id/delete
-      nl: /medewerkers/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Employees
-        nl: Medewerkers
-      columns:
-        - key: employeeNumber
-          sortable: true
-        - key: name
-          sortable: true
-        - key: status
-          sortable: true
-        - key: hireDate
-          sortable: true
-        - key: terminationDate
-          sortable: true
-      defaultSort:
-        key: employeeNumber
-        direction: asc
-      rowLink:
-        en: /employees/:id
-        nl: /medewerkers/:id
-    detail:
-      header:
-        title: "{{employeeNumber}}"
-        subtitle: "{{name}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Employee details
-                nl: Medewerkergegevens
-              fields:
-                - employeeNumber
-                - status
-                - hireDate
-                - terminationDate
-                - name
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create employee
-            nl: Medewerker aanmaken
-          groups:
-            - title:
-                en: Employee details
-                nl: Medewerkergegevens
-              fields:
-                - employeeNumber
-                - status
-                - hireDate
-                - terminationDate
-                - name
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit employee
-            nl: Medewerker bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: UserOrganizationPermission
+    cardinality: collection
+    relationship:
+      inverse: employeeId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -289,3 +153,212 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Employee
+    description: List Employee records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Employee
+    description: Get Employee records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Employee
+    description: Create Employee records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Employee records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /employees
+          nl: /medewerkers
+        columns:
+          - key: employeeNumber
+            sortable: true
+          - key: name
+            sortable: true
+          - key: status
+            sortable: true
+          - key: hireDate
+            sortable: true
+          - key: terminationDate
+            sortable: true
+        title:
+          en: Employees
+          nl: Medewerkers
+        defaultSort:
+          key: employeeNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /employees/:id
+            nl: /medewerkers/:id
+          create:
+            en: /employees/create
+            nl: /medewerkers/aanmaken
+        title: "{{employeeNumber}}"
+        subtitle: "{{name}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Employee details
+                    nl: Medewerkergegevens
+                  fields:
+                    - employeeNumber
+                    - status
+                    - hireDate
+                    - terminationDate
+                    - name
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create employee
+              nl: Medewerker aanmaken
+            groups:
+              - title:
+                  en: Employee details
+                  nl: Medewerkergegevens
+                fields:
+                  - employeeNumber
+                  - status
+                  - hireDate
+                  - terminationDate
+                  - name
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit employee
+              nl: Medewerker bewerken
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: EMPLOYMENTSTATUS
+            clearable: false
+      hireDate:
+        render:
+          component: DatePicker
+          props: {}
+      terminationDate:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

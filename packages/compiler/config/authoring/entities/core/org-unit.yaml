@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: OrgUnit
@@ -57,11 +57,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
+    semanticType: multilineText
   - key: establishedAt
     valueType: date
     required: false
@@ -74,9 +70,6 @@ fields:
     persisted:
       column: established_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -91,163 +84,52 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentOrgUnit
-    kind: belongsTo
-    target: OrgUnit
-    foreignKey: parent_org_unit_id
+  - key: parentOrgUnitId
     label:
       en: Parent org unit
       nl: Bovenliggende eenheid
+    persisted:
+      column: parent_org_unit_id
+      storageClass: core
+    semanticType: OrgUnit
+    relationship:
+      ownership: reference
   - key: relationGroups
-    kind: hasMany
-    target: RelationGroup
-    foreignKey: org_unit_id
     label:
       en: Relation groups
       nl: Relatiegroepen
+    semanticType: RelationGroup
+    cardinality: collection
+    relationship:
+      inverse: orgUnitId
+      ownership: reference
   - key: employeeRoles
-    kind: hasMany
-    target: EmployeeRole
-    foreignKey: org_unit_id
     label:
       en: Employee roles
       nl: Medewerkerrollen
+    semanticType: EmployeeRole
+    cardinality: collection
+    relationship:
+      inverse: orgUnitId
+      ownership: reference
   - key: organizationPermissions
-    kind: hasMany
-    target: OrganizationPermission
-    foreignKey: target_org_unit_id
     label:
       en: Organization permissions
       nl: Organisatierechten
+    semanticType: OrganizationPermission
+    cardinality: collection
+    relationship:
+      inverse: targetOrgUnitId
+      ownership: reference
   - key: userOrganizationPermissions
-    kind: hasMany
-    target: UserOrganizationPermission
-    foreignKey: target_org_unit_id
     label:
       en: User organization permissions
       nl: Gebruikersrechten per organisatie
-ui:
-  routes:
-    list:
-      en: /org-units
-      nl: /organisatorische-eenheden
-    detail:
-      en: /org-units/:id
-      nl: /organisatorische-eenheden/:id
-    create:
-      en: /org-units/create
-      nl: /organisatorische-eenheden/aanmaken
-    edit:
-      en: /org-units/:id/edit
-      nl: /organisatorische-eenheden/:id/bewerken
-    delete:
-      en: /org-units/:id/delete
-      nl: /organisatorische-eenheden/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Org units
-        nl: Organisatorische eenheden
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: establishedAt
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /org-units/:id
-        nl: /organisatorische-eenheden/:id
-    detail:
-      header:
-        title: "{{code}} {{name}}"
-        subtitle: "{{description}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Unit details
-                nl: Eenheidgegevens
-              fields:
-                - code
-                - name
-                - establishedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create org unit
-            nl: Organisatorische eenheid aanmaken
-          groups:
-            - title:
-                en: Unit details
-                nl: Eenheidgegevens
-              fields:
-                - code
-                - name
-                - establishedAt
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit org unit
-            nl: Organisatorische eenheid bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: UserOrganizationPermission
+    cardinality: collection
+    relationship:
+      inverse: targetOrgUnitId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -262,3 +144,192 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Organizational Unit
+    description: List OrgUnit records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Organizational Unit
+    description: Get OrgUnit records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Organizational Unit
+    description: Create OrgUnit records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update OrgUnit records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /org-units
+          nl: /organisatorische-eenheden
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: establishedAt
+            sortable: true
+        title:
+          en: Org units
+          nl: Organisatorische eenheden
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /org-units/:id
+            nl: /organisatorische-eenheden/:id
+          create:
+            en: /org-units/create
+            nl: /organisatorische-eenheden/aanmaken
+        title: "{{code}} {{name}}"
+        subtitle: "{{description}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Unit details
+                    nl: Eenheidgegevens
+                  fields:
+                    - code
+                    - name
+                    - establishedAt
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create org unit
+              nl: Organisatorische eenheid aanmaken
+            groups:
+              - title:
+                  en: Unit details
+                  nl: Eenheidgegevens
+                fields:
+                  - code
+                  - name
+                  - establishedAt
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit org unit
+              nl: Organisatorische eenheid bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 1000
+      establishedAt:
+        render:
+          component: DatePicker
+          props: {}

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Invoice
@@ -25,11 +25,10 @@ fields:
     persisted:
       column: invoice_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: INVOICEKIND
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: INVOICEKIND
+    semanticType: referenceDataCode
   - key: invoiceStatus
     valueType: string
     required: true
@@ -42,11 +41,10 @@ fields:
     persisted:
       column: invoice_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: INVOICESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: INVOICESTATUS
+    semanticType: referenceDataCode
   - key: invoiceNumber
     valueType: integer
     required: true
@@ -73,9 +71,6 @@ fields:
     persisted:
       column: issue_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: dueDate
     valueType: date
     required: false
@@ -88,9 +83,6 @@ fields:
     persisted:
       column: due_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: currencyCode
     valueType: string
     required: true
@@ -199,11 +191,10 @@ fields:
     persisted:
       column: dispatch_channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: INVOICEDISPATCHCHANNEL
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: INVOICEDISPATCHCHANNEL
+    semanticType: referenceDataCode
   - key: descriptionLine1
     valueType: string
     required: false
@@ -260,221 +251,66 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-  - key: fiscalPeriod
-    kind: belongsTo
-    target: FiscalPeriod
-    foreignKey: fiscal_period_id
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
+  - key: fiscalPeriodId
     label:
       en: Fiscal period
       nl: Boekjaarperiode
-  - key: controlLedgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: control_ledger_account_id
+    persisted:
+      column: fiscal_period_id
+      storageClass: core
+    semanticType: FiscalPeriod
+    relationship:
+      ownership: reference
+  - key: controlLedgerAccountId
     label:
       en: Control ledger account
       nl: Tussenrekening
-  - key: paymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: payment_method_id
+    persisted:
+      column: control_ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: paymentMethodId
     label:
       en: Payment method
       nl: Betaalwijze
-  - key: mandate
-    kind: belongsTo
-    target: DirectDebitMandate
-    foreignKey: mandate_id
+    persisted:
+      column: payment_method_id
+      storageClass: core
+    semanticType: PaymentMethod
+    relationship:
+      ownership: reference
+  - key: mandateId
     label:
       en: Mandate
       nl: Machtiging
-ui:
-  routes:
-    list:
-      en: /invoices
-      nl: /facturen
-    detail:
-      en: /invoices/:id
-      nl: /facturen/:id
-    create:
-      en: /invoices/create
-      nl: /facturen/aanmaken
-    edit:
-      en: /invoices/:id/edit
-      nl: /facturen/:id/bewerken
-    delete:
-      en: /invoices/:id/delete
-      nl: /facturen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Invoices
-        nl: Facturen
-      columns:
-        - key: invoiceKind
-          sortable: true
-        - key: invoiceNumber
-          sortable: true
-        - key: invoiceStatus
-          sortable: true
-        - key: issueDate
-          sortable: true
-        - key: dueDate
-          sortable: true
-        - key: amountTotal
-          sortable: true
-        - key: balance
-          sortable: true
-      defaultSort:
-        key: issueDate
-        direction: desc
-      rowLink:
-        en: /invoices/:id
-        nl: /facturen/:id
-    detail:
-      header:
-        title: "{{invoiceKind}} {{invoiceNumber}}"
-        subtitle: "{{amountTotal}}"
-        badges:
-          - invoiceKind
-          - invoiceStatus
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Invoice details
-                nl: Factuurgegevens
-              fields:
-                - invoiceKind
-                - invoiceStatus
-                - invoiceNumber
-                - issueDate
-                - dueDate
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-                - balance
-            - title:
-                en: Dispatch
-                nl: Verzending
-              fields:
-                - iban
-                - email
-                - dispatchChannel
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - descriptionLine1
-                - descriptionLine2
-                - descriptionLine3
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create invoice
-            nl: Factuur aanmaken
-          groups:
-            - title:
-                en: Invoice details
-                nl: Factuurgegevens
-              fields:
-                - invoiceKind
-                - invoiceStatus
-                - invoiceNumber
-                - issueDate
-                - dueDate
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-                - balance
-            - title:
-                en: Dispatch
-                nl: Verzending
-              fields:
-                - iban
-                - email
-                - dispatchChannel
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - descriptionLine1
-                - descriptionLine2
-                - descriptionLine3
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit invoice
-            nl: Factuur bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: mandate_id
+      storageClass: core
+    semanticType: DirectDebitMandate
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -489,3 +325,259 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Invoice
+    description: List Invoice records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Invoice
+    description: Get Invoice records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Invoice
+    description: Create Invoice records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Invoice records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /invoices
+          nl: /facturen
+        columns:
+          - key: invoiceKind
+            sortable: true
+          - key: invoiceNumber
+            sortable: true
+          - key: invoiceStatus
+            sortable: true
+          - key: issueDate
+            sortable: true
+          - key: dueDate
+            sortable: true
+          - key: amountTotal
+            sortable: true
+          - key: balance
+            sortable: true
+        title:
+          en: Invoices
+          nl: Facturen
+        defaultSort:
+          key: issueDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /invoices/:id
+            nl: /facturen/:id
+          create:
+            en: /invoices/create
+            nl: /facturen/aanmaken
+        title: "{{invoiceKind}} {{invoiceNumber}}"
+        subtitle: "{{amountTotal}}"
+        badges:
+          - invoiceKind
+          - invoiceStatus
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Invoice details
+                    nl: Factuurgegevens
+                  fields:
+                    - invoiceKind
+                    - invoiceStatus
+                    - invoiceNumber
+                    - issueDate
+                    - dueDate
+                    - currencyCode
+                - title:
+                    en: Amounts
+                    nl: Bedragen
+                  fields:
+                    - amountBase
+                    - amountVat
+                    - amountTotal
+                    - balance
+                - title:
+                    en: Dispatch
+                    nl: Verzending
+                  fields:
+                    - iban
+                    - email
+                    - dispatchChannel
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - descriptionLine1
+                    - descriptionLine2
+                    - descriptionLine3
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create invoice
+              nl: Factuur aanmaken
+            groups:
+              - title:
+                  en: Invoice details
+                  nl: Factuurgegevens
+                fields:
+                  - invoiceKind
+                  - invoiceStatus
+                  - invoiceNumber
+                  - issueDate
+                  - dueDate
+                  - currencyCode
+              - title:
+                  en: Amounts
+                  nl: Bedragen
+                fields:
+                  - amountBase
+                  - amountVat
+                  - amountTotal
+                  - balance
+              - title:
+                  en: Dispatch
+                  nl: Verzending
+                fields:
+                  - iban
+                  - email
+                  - dispatchChannel
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - descriptionLine1
+                  - descriptionLine2
+                  - descriptionLine3
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit invoice
+              nl: Factuur bewerken
+    fields:
+      invoiceKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: INVOICEKIND
+            clearable: false
+      invoiceStatus:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: INVOICESTATUS
+            clearable: false
+      issueDate:
+        render:
+          component: DatePicker
+          props: {}
+      dueDate:
+        render:
+          component: DatePicker
+          props: {}
+      dispatchChannel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: INVOICEDISPATCHCHANNEL
+            clearable: true

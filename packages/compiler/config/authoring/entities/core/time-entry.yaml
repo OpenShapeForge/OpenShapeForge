@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: TimeEntry
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: worked_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: hours
     valueType: number
     required: true
@@ -57,11 +54,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 500
+    semanticType: multilineText
   - key: billable
     valueType: boolean
     required: false
@@ -88,144 +81,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: employee
-    kind: belongsTo
-    target: Employee
-    foreignKey: employee_id
+  - key: employeeId
     label:
       en: Employee
       nl: Medewerker
-  - key: agreement
-    kind: belongsTo
-    target: Agreement
-    foreignKey: agreement_id
+    persisted:
+      column: employee_id
+      storageClass: core
+    semanticType: Employee
+    relationship:
+      ownership: reference
+  - key: agreementId
     label:
       en: Agreement
       nl: Overeenkomst
-ui:
-  routes:
-    list:
-      en: /time-entries
-      nl: /tijdsbestedingen
-    detail:
-      en: /time-entries/:id
-      nl: /tijdsbestedingen/:id
-    create:
-      en: /time-entries/create
-      nl: /tijdsbestedingen/aanmaken
-    edit:
-      en: /time-entries/:id/edit
-      nl: /tijdsbestedingen/:id/bewerken
-    delete:
-      en: /time-entries/:id/delete
-      nl: /tijdsbestedingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Time entries
-        nl: Tijdsbestedingen
-      columns:
-        - key: workedAt
-          sortable: true
-        - key: hours
-          sortable: true
-        - key: billable
-          sortable: true
-        - key: description
-          sortable: false
-      defaultSort:
-        key: workedAt
-        direction: desc
-      rowLink:
-        en: /time-entries/:id
-        nl: /tijdsbestedingen/:id
-    detail:
-      header:
-        title: "{{workedAt}}: {{hours}}h"
-        subtitle: "{{description}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Time details
-                nl: Tijdgegevens
-              fields:
-                - workedAt
-                - hours
-                - billable
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create time entry
-            nl: Tijdsbesteding aanmaken
-          groups:
-            - title:
-                en: Time details
-                nl: Tijdgegevens
-              fields:
-                - workedAt
-                - hours
-                - billable
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit time entry
-            nl: Tijdsbesteding bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: agreement_id
+      storageClass: core
+    semanticType: Agreement
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -240,3 +115,194 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Time Entry
+    description: List TimeEntry records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Time Entry
+    description: Get TimeEntry records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Time Entry
+    description: Create TimeEntry records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update TimeEntry records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /time-entries
+          nl: /tijdsbestedingen
+        columns:
+          - key: workedAt
+            sortable: true
+          - key: hours
+            sortable: true
+          - key: billable
+            sortable: true
+          - key: description
+            sortable: false
+        title:
+          en: Time entries
+          nl: Tijdsbestedingen
+        defaultSort:
+          key: workedAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /time-entries/:id
+            nl: /tijdsbestedingen/:id
+          create:
+            en: /time-entries/create
+            nl: /tijdsbestedingen/aanmaken
+        title: "{{workedAt}}: {{hours}}h"
+        subtitle: "{{description}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Time details
+                    nl: Tijdgegevens
+                  fields:
+                    - workedAt
+                    - hours
+                    - billable
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create time entry
+              nl: Tijdsbesteding aanmaken
+            groups:
+              - title:
+                  en: Time details
+                  nl: Tijdgegevens
+                fields:
+                  - workedAt
+                  - hours
+                  - billable
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit time entry
+              nl: Tijdsbesteding bewerken
+    fields:
+      workedAt:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 500
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

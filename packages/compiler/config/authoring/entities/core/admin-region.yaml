@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: AdminRegion
@@ -55,11 +55,10 @@ fields:
     persisted:
       column: region_level
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ADMINREGIONLEVEL
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ADMINREGIONLEVEL
+    semanticType: referenceDataCode
   - key: validFrom
     valueType: date
     required: false
@@ -72,9 +71,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validTo
     valueType: date
     required: false
@@ -87,9 +83,6 @@ fields:
     persisted:
       column: valid_to
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -104,138 +97,25 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: parentAdminRegion
-    kind: belongsTo
-    target: AdminRegion
-    foreignKey: parent_admin_region_id
+  - key: parentAdminRegionId
     label:
       en: Parent admin region
       nl: Bovenliggend gebied
+    persisted:
+      column: parent_admin_region_id
+      storageClass: core
+    semanticType: AdminRegion
+    relationship:
+      ownership: reference
   - key: childAdminRegions
-    kind: hasMany
-    target: AdminRegion
-    foreignKey: parent_admin_region_id
     label:
       en: Child admin regions
       nl: Onderliggende gebieden
-ui:
-  routes:
-    list:
-      en: /admin-regions
-      nl: /bestuurlijke-gebieden
-    detail:
-      en: /admin-regions/:id
-      nl: /bestuurlijke-gebieden/:id
-    create:
-      en: /admin-regions/create
-      nl: /bestuurlijke-gebieden/aanmaken
-    edit:
-      en: /admin-regions/:id/edit
-      nl: /bestuurlijke-gebieden/:id/bewerken
-    delete:
-      en: /admin-regions/:id/delete
-      nl: /bestuurlijke-gebieden/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Admin regions
-        nl: Bestuurlijke gebieden
-      columns:
-        - key: code
-          sortable: true
-        - key: name
-          sortable: true
-        - key: regionLevel
-          sortable: true
-      defaultSort:
-        key: code
-        direction: asc
-      rowLink:
-        en: /admin-regions/:id
-        nl: /bestuurlijke-gebieden/:id
-    detail:
-      header:
-        title: "{{regionLevel}}: {{code}}"
-        subtitle: "{{name}}"
-        badges:
-          - regionLevel
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Region details
-                nl: Gebiedsgegevens
-              fields:
-                - code
-                - name
-                - regionLevel
-                - validFrom
-                - validTo
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create admin region
-            nl: Bestuurlijk gebied aanmaken
-          groups:
-            - title:
-                en: Region details
-                nl: Gebiedsgegevens
-              fields:
-                - code
-                - name
-                - regionLevel
-                - validFrom
-                - validTo
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit admin region
-            nl: Bestuurlijk gebied bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: AdminRegion
+    cardinality: collection
+    relationship:
+      inverse: parentAdminRegionId
+      ownership: reference
 authorization:
   roles:
     read:
@@ -250,3 +130,192 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Administrative Region
+    description: List AdminRegion records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Administrative Region
+    description: Get AdminRegion records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Administrative Region
+    description: Create AdminRegion records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update AdminRegion records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /admin-regions
+          nl: /bestuurlijke-gebieden
+        columns:
+          - key: code
+            sortable: true
+          - key: name
+            sortable: true
+          - key: regionLevel
+            sortable: true
+        title:
+          en: Admin regions
+          nl: Bestuurlijke gebieden
+        defaultSort:
+          key: code
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /admin-regions/:id
+            nl: /bestuurlijke-gebieden/:id
+          create:
+            en: /admin-regions/create
+            nl: /bestuurlijke-gebieden/aanmaken
+        title: "{{regionLevel}}: {{code}}"
+        subtitle: "{{name}}"
+        badges:
+          - regionLevel
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Region details
+                    nl: Gebiedsgegevens
+                  fields:
+                    - code
+                    - name
+                    - regionLevel
+                    - validFrom
+                    - validTo
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create admin region
+              nl: Bestuurlijk gebied aanmaken
+            groups:
+              - title:
+                  en: Region details
+                  nl: Gebiedsgegevens
+                fields:
+                  - code
+                  - name
+                  - regionLevel
+                  - validFrom
+                  - validTo
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit admin region
+              nl: Bestuurlijk gebied bewerken
+    fields:
+      regionLevel:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ADMINREGIONLEVEL
+            clearable: false
+      validFrom:
+        render:
+          component: DatePicker
+          props: {}
+      validTo:
+        render:
+          component: DatePicker
+          props: {}

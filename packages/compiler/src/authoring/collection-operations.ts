@@ -26,7 +26,7 @@ export function materializeCollectionOperations(
       if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
-      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
+      if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
       if (action === "move" && !relation.sortable) fail("move requires a sortable collection.");
       const child = contracts.find((contract) => contract.entity.name === relation.target);
       if (!child || child.entity.valueDefinition) fail("collection child storage is absent.");
@@ -82,6 +82,15 @@ export function materializeCollectionOperations(
             const bundled = splitBundledDefinitions(compiledObjectSchema(valueDefinition.model.fields, referentiedata, { requireRequired: true, includeDefault: true }));
             definitions = { ...(definitions as Record<string, unknown> | undefined), ...bundled.definitions };
             const valueSchema = bundled.schema;
+            if (valueField.entityValue?.parameterBindings) {
+              const properties = valueSchema.properties as Record<string, unknown>;
+              for (const reference of valueDefinition.model.fields.filter(field => field.relationship?.target)) {
+                properties[reference.key] = { anyOf: [properties[reference.key], {
+                  type: "object", additionalProperties: false, required: ["parameter"],
+                  properties: { parameter: { type: "string", pattern: "^[a-z][A-Za-z0-9]{0,127}$" } },
+                }] };
+              }
+            }
             branches.push({ if: { properties: { [discriminator]: { const: name } }, required: [discriminator] }, then: { properties: { [valueField.key]: valueSchema } } });
           }
         }

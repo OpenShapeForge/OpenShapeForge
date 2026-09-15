@@ -560,7 +560,6 @@
     },
     "operations": {
       "type": "object",
-      "minProperties": 1,
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
       "additionalProperties": { "$ref": "#/$defs/entityOperationV2" }
     },
@@ -595,6 +594,10 @@
     }
   },
   "allOf": [
+    {
+      "if": { "properties": { "schemaVersion": { "const": 2 } }, "required": ["schemaVersion"] },
+      "then": { "properties": { "operations": { "minProperties": 1 }, "interfaces": { "minProperties": 1 } } }
+    },
     {
       "if": { "properties": { "schemaVersion": { "const": 3 } }, "required": ["schemaVersion"] },
       "then": {
@@ -1180,12 +1183,15 @@
     "entityInterfacesV2": {
       "type": "object",
       "additionalProperties": false,
-      "minProperties": 1,
       "properties": {
+        "workflow": { "$ref": "#/properties/workflow" },
         "rest": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "operations": { "$ref": "#/$defs/restInterfaceOperationsV2" } }
+          "properties": {
+            "basePath": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "operations": { "$ref": "#/$defs/restInterfaceOperationsV2" }
+          }
         },
         "graphql": {
           "type": "object",
@@ -1208,8 +1214,15 @@
         "web": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["views"],
+          "anyOf": [{ "required": ["views"] }, { "required": ["fields"] }],
           "properties": {
+            "fields": {
+              "type": "object", "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$" },
+              "additionalProperties": {
+                "type": "object", "additionalProperties": false, "required": ["render"],
+                "properties": { "render": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" } }
+              }
+            },
             "operations": { "$ref": "#/$defs/webInterfaceOperationsV2" },
             "views": { "$ref": "#/$defs/webViewsV2" }
           }
@@ -1257,6 +1270,7 @@
                 "required": ["key"],
                 "properties": {
                   "key": { "$ref": "#/$defs/fieldKey" },
+                  "label": { "$ref": "#/$defs/localizedText" },
                   "sortable": { "type": "boolean" }
                 }
               }
@@ -1288,6 +1302,7 @@
             },
             "title": { "type": "string", "minLength": 1 },
             "subtitle": { "type": "string", "minLength": 1 },
+            "badges": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/fieldKey" } },
             "variableSources": {
               "type": "array",
               "items": {
@@ -1295,7 +1310,7 @@
                 "additionalProperties": false,
                 "required": ["key", "resolver"],
                 "properties": {
-                  "key": { "type": "string", "minLength": 1 },
+                  "key": { "$ref": "#/$defs/fieldKey" },
                   "resolver": { "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"] },
                   "params": { "type": "object" }
                 }

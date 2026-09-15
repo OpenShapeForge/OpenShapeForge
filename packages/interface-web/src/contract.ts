@@ -98,6 +98,8 @@ export type WebFieldOptionSource =
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
+  /** Explicit Web-only exception; defaults still come from the semantic registry. */
+  presentation?: { component: string; props?: Record<string, unknown> };
   id: string;
   key: string;
   label: LocalizedText;
@@ -105,7 +107,7 @@ export type WebFieldProjection = {
   valueType: string;
   semanticType?: string;
   /** Logical dynamic form metadata; physical storage stays server-side. */
-  entityValue?: { definitionField: string };
+  entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   relationship?: { targetEntityId: string };
   variables?: "none" | "whole" | "template" | "both";
@@ -165,6 +167,7 @@ export type WebRelationshipProjection = {
   sortable?: boolean;
   positionColumn?: string;
   via?: string;
+  through?: { field: string; column: string; target: string };
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   operations: {
@@ -206,6 +209,7 @@ export type WebRecordView = {
   /** Authored form layout retained even when standalone create is unavailable. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
+  badges?: string[];
   layout: {
     tabs: WebRecordTab[];
     context: { groups: WebFieldGroup[]; relationships: string[] };

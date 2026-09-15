@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Appointment
@@ -54,11 +54,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 5000
+    semanticType: multilineText
   - key: startDateTime
     valueType: datetime
     required: true
@@ -71,9 +67,6 @@ fields:
     persisted:
       column: start_date_time
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: endDateTime
     valueType: datetime
     required: false
@@ -86,9 +79,6 @@ fields:
     persisted:
       column: end_date_time
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: status
     valueType: string
     required: true
@@ -104,11 +94,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: APPOINTMENTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: APPOINTMENTSTATUS
+    semanticType: referenceDataCode
   - key: location
     valueType: string
     required: false
@@ -123,141 +112,226 @@ fields:
     persisted:
       column: location
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
   - key: tasks
-    kind: hasMany
-    target: Task
-    foreignKey: appointment_id
     label:
       en: Tasks
       nl: Taken
-ui:
-  routes:
-    list:
-      en: /appointments
-      nl: /afspraken
-    detail:
-      en: /appointments/:id
-      nl: /afspraken/:id
-    create:
-      en: /appointments/create
-      nl: /afspraken/aanmaken
-    edit:
-      en: /appointments/:id/edit
-      nl: /afspraken/:id/bewerken
-    delete:
-      en: /appointments/:id/delete
-      nl: /afspraken/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Appointments
-        nl: Afspraken
-      columns:
-        - key: subject
-          sortable: true
-        - key: startDateTime
-          sortable: true
-        - key: status
-          sortable: true
-        - key: location
-          sortable: false
-      defaultSort:
-        key: startDateTime
-        direction: desc
-      rowLink:
-        en: /appointments/:id
-        nl: /afspraken/:id
-    detail:
-      header:
+    semanticType: Task
+    cardinality: collection
+    relationship:
+      inverse: appointmentId
+      ownership: reference
+operations:
+  list:
+    name: List Appointment
+    description: List Appointment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Appointment
+    description: Get Appointment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Appointment
+    description: Create Appointment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Appointment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /appointments
+          nl: /afspraken
+        columns:
+          - key: subject
+            sortable: true
+          - key: startDateTime
+            sortable: true
+          - key: status
+            sortable: true
+          - key: location
+            sortable: false
+        title:
+          en: Appointments
+          nl: Afspraken
+        defaultSort:
+          key: startDateTime
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /appointments/:id
+            nl: /afspraken/:id
+          create:
+            en: /appointments/create
+            nl: /afspraken/aanmaken
         title: "{{subject}}"
         subtitle: "{{startDateTime}}"
         badges:
           - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Appointment details
-                nl: Afspraakgegevens
-              fields:
-                - subject
-                - description
-                - status
-                - location
-            - title:
-                en: Schedule
-                nl: Planning
-              fields:
-                - startDateTime
-                - endDateTime
-        - id: tasks
-          label:
-            en: Tasks
-            nl: Taken
-          relationship: tasks
-    form:
-      variants:
-        create:
-          title:
-            en: Create appointment
-            nl: Afspraak aanmaken
-          groups:
-            - title:
-                en: Appointment details
-                nl: Afspraakgegevens
-              fields:
-                - subject
-                - description
-                - status
-                - location
-            - title:
-                en: Schedule
-                nl: Planning
-              fields:
-                - startDateTime
-                - endDateTime
-        edit:
-          extends: create
-          title:
-            en: Edit appointment
-            nl: Afspraak bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Appointment details
+                    nl: Afspraakgegevens
+                  fields:
+                    - subject
+                    - description
+                    - status
+                    - location
+                - title:
+                    en: Schedule
+                    nl: Planning
+                  fields:
+                    - startDateTime
+                    - endDateTime
+            - id: tasks
+              label:
+                en: Tasks
+                nl: Taken
+              relationship: tasks
+        modes:
+          create:
+            title:
+              en: Create appointment
+              nl: Afspraak aanmaken
+            groups:
+              - title:
+                  en: Appointment details
+                  nl: Afspraakgegevens
+                fields:
+                  - subject
+                  - description
+                  - status
+                  - location
+              - title:
+                  en: Schedule
+                  nl: Planning
+                fields:
+                  - startDateTime
+                  - endDateTime
+          update:
+            title:
+              en: Edit appointment
+              nl: Afspraak bewerken
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 5000
+      startDateTime:
+        render:
+          component: DateTimePicker
+          props: {}
+      endDateTime:
+        render:
+          component: DateTimePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: APPOINTMENTSTATUS
+            clearable: false

@@ -58,6 +58,20 @@ that shape using compiler metadata; clients never choose physical column names.
 Reference authorization belongs in the same transaction as the write. Metadata
 itself grants no access to the referenced records.
 
+An entity-value carrier may explicitly enable `parameterBindings: true` beside
+`definitionField`. A single relationship then accepts either a fixed UUID or
+`{ parameter: "record" }`. These are alternatives, not two simultaneous targets.
+The compiler retains the UUID foreign key and adds a separate parameter-name
+column plus an exclusive-storage check. A symbolic name is not a database record
+identity and is never stored in the UUID column or own-values JSON.
+
+At materialization, `record` must be a declared local parameter whose inferred
+entity semantic type matches the relationship target. The supplied UUID is
+validated by the parameter schema and resolved through the normal authorized
+entity read. Template snapshots preserve the symbolic binding; materialized
+references preserve the resolved record and its version. Parameters remain
+FieldDefinitions on the template version, not separately stored parameter entities.
+
 The generated `entityValues` registry contains resolved definition fields,
 JSON schemas, exact reference mappings, definition fingerprints, and owning
 collection allowlists. Web receives logical field projections, not physical

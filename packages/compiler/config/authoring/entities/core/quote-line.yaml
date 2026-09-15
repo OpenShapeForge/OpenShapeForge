@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: QuoteLine
@@ -121,67 +121,94 @@ fields:
     persisted:
       column: amount_total
       storageClass: core
-relationships:
-  - key: quote
-    kind: belongsTo
-    target: Quote
-    foreignKey: quote_id
+  - key: quoteId
     label:
       en: Quote
       nl: Offerte
-  - key: agreementComponent
-    kind: belongsTo
-    target: AgreementComponent
-    foreignKey: agreement_component_id
+    persisted:
+      column: quote_id
+      storageClass: core
+    semanticType: Quote
+    relationship:
+      ownership: reference
+  - key: agreementComponentId
     label:
       en: Agreement component
       nl: Overeenkomstcomponent
-  - key: vatRate
-    kind: belongsTo
-    target: VatRate
-    foreignKey: vat_rate_id
+    persisted:
+      column: agreement_component_id
+      storageClass: core
+    semanticType: AgreementComponent
+    relationship:
+      ownership: reference
+  - key: vatRateId
     label:
       en: VAT rate
       nl: BTW-tarief
-  - key: ledgerAccount
-    kind: belongsTo
-    target: LedgerAccount
-    foreignKey: ledger_account_id
+    persisted:
+      column: vat_rate_id
+      storageClass: core
+    semanticType: VatRate
+    relationship:
+      ownership: reference
+  - key: ledgerAccountId
     label:
       en: Ledger account
       nl: Grootboekrekening
-  - key: componentDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: component_dimension_id
+    persisted:
+      column: ledger_account_id
+      storageClass: core
+    semanticType: LedgerAccount
+    relationship:
+      ownership: reference
+  - key: componentDimensionId
     label:
       en: Component dimension
       nl: Componentdimensie
-  - key: dimension1
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_1_id
+    persisted:
+      column: component_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: dimension1Id
     label:
       en: Cost dimension 1
       nl: Kostendimensie 1
-  - key: dimension2
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: dimension_2_id
+    persisted:
+      column: dimension_1_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: dimension2Id
     label:
       en: Cost dimension 2
       nl: Kostendimensie 2
-  - key: vatDimension
-    kind: belongsTo
-    target: CostDimension
-    foreignKey: vat_dimension_id
+    persisted:
+      column: dimension_2_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
+  - key: vatDimensionId
     label:
       en: VAT dimension
       nl: BTW-dimensie
+    persisted:
+      column: vat_dimension_id
+      storageClass: core
+    semanticType: CostDimension
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List quote lines, nl: Offerteregels tonen }
-    description: { en: Returns a filtered and sorted page of quote lines., nl: Geeft een gefilterde en gesorteerde pagina met offerteregels terug. }
+    description:
+      {
+        en: Returns a filtered and sorted page of quote lines.,
+        nl: Geeft een gefilterde en gesorteerde pagina met offerteregels terug.
+      }
     implementation: { type: entity, action: list }
     effects: { data: read, external: none }
     reliability:
@@ -197,7 +224,11 @@ operations:
     confirmation: { mode: none }
   create:
     name: { en: Create quote line, nl: Offerteregel aanmaken }
-    description: { en: Creates one quote line after validating its canonical fields., nl: Maakt één offerteregel aan na validatie van de canonieke velden. }
+    description:
+      {
+        en: Creates one quote line after validating its canonical fields.,
+        nl: Maakt één offerteregel aan na validatie van de canonieke velden.
+      }
     implementation: { type: entity, action: create }
     effects: { data: write, external: none }
     reliability:
@@ -205,7 +236,11 @@ operations:
     confirmation: { mode: none }
   update:
     name: { en: Update quote line, nl: Offerteregel wijzigen }
-    description: { en: Updates one quote line while holding its server-issued edit lease and current version., nl: Wijzigt één offerteregel met de server-uitgegeven bewerkingslease en actuele versie. }
+    description:
+      {
+        en: Updates one quote line while holding its server-issued edit lease and current version.,
+        nl: Wijzigt één offerteregel met de server-uitgegeven bewerkingslease en actuele versie.
+      }
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability:
@@ -216,7 +251,11 @@ operations:
     confirmation: { mode: none }
   delete:
     name: { en: Delete quote line, nl: Offerteregel verwijderen }
-    description: { en: Permanently deletes one quote line after a server-issued version-bound confirmation challenge., nl: Verwijdert één offerteregel definitief na een server-uitgegeven versiegebonden bevestigingsvraag. }
+    description:
+      {
+        en: Permanently deletes one quote line after a server-issued version-bound confirmation challenge.,
+        nl: Verwijdert één offerteregel definitief na een server-uitgegeven versiegebonden bevestigingsvraag.
+      }
     implementation: { type: entity, action: delete }
     effects: { data: delete, external: none }
     reliability:
@@ -230,7 +269,7 @@ operations:
         kind: type-current-field
         field: description
         issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
+        bindTo: [ subject, tenant, operation, target.id, target.version ]
         expiresAfter: PT5M
         singleUse: true
 
@@ -262,34 +301,34 @@ interfaces:
           create: { en: /quote-lines/new, nl: /offerteregels/nieuw }
         title: "{{description}}"
         subtitle: "{{amountTotal}}"
-        actions: [update, delete]
+        actions: [ update, delete ]
         layout:
           context:
-            fields: [lineNumber, quantity, unitPrice, amountTotal]
-            relationships: [quote, agreementComponent, vatRate]
+            fields: [ lineNumber, quantity, unitPrice, amountTotal ]
+            relationships: [ quoteId, agreementComponentId, vatRateId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Line details, nl: Regelgegevens }
-                  fields: [lineNumber, description, quantity, unitId, unitPrice]
+                  fields: [ lineNumber, description, quantity, unitId, unitPrice ]
                 - title: { en: Amounts, nl: Bedragen }
-                  fields: [amountBase, amountVat, amountTotal]
+                  fields: [ amountBase, amountVat, amountTotal ]
         modes:
           create:
             title: { en: Create quote line, nl: Offerteregel aanmaken }
             groups:
               - title: { en: Line details, nl: Regelgegevens }
-                fields: [lineNumber, description, quantity, unitId, unitPrice]
+                fields: [ lineNumber, description, quantity, unitId, unitPrice ]
               - title: { en: Amounts, nl: Bedragen }
-                fields: [amountBase, amountVat, amountTotal]
+                fields: [ amountBase, amountVat, amountTotal ]
           update:
             title: { en: Update quote line, nl: Offerteregel wijzigen }
             groups:
               - title: { en: Line details, nl: Regelgegevens }
-                fields: [lineNumber, description, quantity, unitId, unitPrice]
+                fields: [ lineNumber, description, quantity, unitId, unitPrice ]
               - title: { en: Amounts, nl: Bedragen }
-                fields: [amountBase, amountVat, amountTotal]
+                fields: [ amountBase, amountVat, amountTotal ]
 # Finance.QuoteLines.Read / Finance.QuoteLines.ReadWrite are the per-entity roles the realm already
 # emits; listing them here is what makes them mean something. A caller that
 # writes quote lines without being all of Finance — a host-authored role or a

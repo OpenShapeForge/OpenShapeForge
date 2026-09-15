@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Point
@@ -69,116 +69,26 @@ fields:
     persisted:
       column: description
       storageClass: core
-relationships:
-  - key: asset
-    kind: belongsTo
-    target: Asset
-    foreignKey: asset_id
+  - key: assetId
     label:
       en: Asset
       nl: Object
-  - key: building
-    kind: belongsTo
-    target: Building
-    foreignKey: building_id
+    persisted:
+      column: asset_id
+      storageClass: core
+    semanticType: Asset
+    relationship:
+      ownership: reference
+  - key: buildingId
     label:
       en: Building
       nl: Pand
-ui:
-  routes:
-    list:
-      en: /points
-      nl: /punten
-    detail:
-      en: /points/:id
-      nl: /punten/:id
-    create:
-      en: /points/create
-      nl: /punten/aanmaken
-    edit:
-      en: /points/:id/edit
-      nl: /punten/:id/bewerken
-    delete:
-      en: /points/:id/delete
-      nl: /punten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Points
-        nl: Punten
-      columns:
-        - key: latitude
-          sortable: true
-        - key: longitude
-          sortable: true
-        - key: description
-          sortable: true
-      defaultSort:
-        key: latitude
-        direction: asc
-      rowLink:
-        en: /points/:id
-        nl: /punten/:id
-    detail:
-      header:
-        title: "{{latitude}}, {{longitude}}"
-        subtitle: "{{description}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Point details
-                nl: Puntgegevens
-              fields:
-                - latitude
-                - longitude
-                - srid
-                - description
-    form:
-      variants:
-        create:
-          title:
-            en: Create point
-            nl: Punt aanmaken
-          groups:
-            - title:
-                en: Point details
-                nl: Puntgegevens
-              fields:
-                - latitude
-                - longitude
-                - srid
-                - description
-        edit:
-          extends: create
-          title:
-            en: Edit point
-            nl: Punt bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: building_id
+      storageClass: core
+    semanticType: Building
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -193,3 +103,155 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Point
+    description: List Point records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Point
+    description: Get Point records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Point
+    description: Create Point records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update Point records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /points
+          nl: /punten
+        columns:
+          - key: latitude
+            sortable: true
+          - key: longitude
+            sortable: true
+          - key: description
+            sortable: true
+        title:
+          en: Points
+          nl: Punten
+        defaultSort:
+          key: latitude
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /points/:id
+            nl: /punten/:id
+          create:
+            en: /points/create
+            nl: /punten/aanmaken
+        title: "{{latitude}}, {{longitude}}"
+        subtitle: "{{description}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Point details
+                    nl: Puntgegevens
+                  fields:
+                    - latitude
+                    - longitude
+                    - srid
+                    - description
+        modes:
+          create:
+            title:
+              en: Create point
+              nl: Punt aanmaken
+            groups:
+              - title:
+                  en: Point details
+                  nl: Puntgegevens
+                fields:
+                  - latitude
+                  - longitude
+                  - srid
+                  - description
+          update:
+            title:
+              en: Edit point
+              nl: Punt bewerken
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

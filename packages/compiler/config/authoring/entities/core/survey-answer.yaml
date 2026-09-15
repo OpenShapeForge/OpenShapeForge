@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SurveyAnswer
@@ -62,11 +62,7 @@ fields:
     persisted:
       column: answer
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 4000
+    semanticType: multilineText
   - key: explanation
     valueType: string
     required: false
@@ -81,11 +77,7 @@ fields:
     persisted:
       column: explanation
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 4000
+    semanticType: multilineText
   - key: answeredAt
     valueType: datetime
     required: false
@@ -98,9 +90,6 @@ fields:
     persisted:
       column: answered_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: externalCode
     valueType: string
     required: false
@@ -115,33 +104,132 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: question
-    kind: belongsTo
-    target: SurveyQuestion
-    foreignKey: survey_question_id
+  - key: questionId
     label:
       en: Question
       nl: Vraag
-  - key: respondent
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+    persisted:
+      column: survey_question_id
+      storageClass: core
+    semanticType: SurveyQuestion
+    relationship:
+      ownership: reference
+  - key: respondentId
     label:
       en: Respondent
       nl: Respondent
-  - key: researchResult
-    kind: belongsTo
-    target: ResearchResult
-    foreignKey: research_result_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: researchResultId
     label:
       en: Research result
       nl: Onderzoeksresultaat
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: research_result_id
+      storageClass: core
+    semanticType: ResearchResult
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Survey Answer
+    description: List SurveyAnswer records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Survey Answer
+    description: Get SurveyAnswer records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Survey Answer
+    description: Create SurveyAnswer records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Survey Answer
+    description: Update SurveyAnswer records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Survey Answer
+    description: Delete SurveyAnswer records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      answer:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000
+      explanation:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000
+      answeredAt:
+        render:
+          component: DateTimePicker
+          props: {}

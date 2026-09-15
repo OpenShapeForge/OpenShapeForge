@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Process
@@ -64,11 +64,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: processType
     valueType: string
     required: true
@@ -78,11 +74,10 @@ fields:
     persisted:
       column: process_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSTYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -92,11 +87,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PROCESSSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PROCESSSTATUS
+    semanticType: referenceDataCode
   - key: phase
     valueType: string
     required: false
@@ -161,11 +155,10 @@ fields:
     persisted:
       column: priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEPRIORITY
+    semanticType: referenceDataCode
   - key: startedAt
     valueType: datetime
     required: false
@@ -175,9 +168,6 @@ fields:
     persisted:
       column: started_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: dueAt
     valueType: datetime
     required: false
@@ -187,9 +177,6 @@ fields:
     persisted:
       column: due_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedAt
     valueType: datetime
     required: false
@@ -199,13 +186,10 @@ fields:
     persisted:
       column: completed_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: completedByAccountId
     valueType: string
     required: false
-    semanticType: accountId
+    semanticType: Account
     label:
       en: Completed by
       nl: Afgerond door
@@ -217,6 +201,9 @@ fields:
     persisted:
       column: completed_by_account_id
       storageClass: core
+    classification:
+      sensitivity: internal
+      category: workflow
   - key: completionApprovalComment
     valueType: string
     required: false
@@ -228,11 +215,7 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
+    semanticType: multilineText
   - key: cancelledAt
     valueType: datetime
     required: false
@@ -242,9 +225,6 @@ fields:
     persisted:
       column: cancelled_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: note
     valueType: string
     required: false
@@ -256,67 +236,208 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
-relationships:
-  - key: template
-    kind: belongsTo
-    target: CaseTemplate
-    foreignKey: case_template_id
+    semanticType: multilineText
+  - key: templateId
     label:
       en: Template
       nl: Sjabloon
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    persisted:
+      column: case_template_id
+      storageClass: core
+    semanticType: CaseTemplate
+    relationship:
+      ownership: reference
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: caseFile
-    kind: belongsTo
-    target: CaseFile
-    foreignKey: case_file_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: caseFileId
     label:
       en: Case file
       nl: Dossier
-  - key: owner
-    kind: belongsTo
-    target: Account
-    foreignKey: owner_account_id
+    persisted:
+      column: case_file_id
+      storageClass: core
+    semanticType: CaseFile
+    relationship:
+      ownership: reference
+  - key: ownerId
     label:
       en: Owner
       nl: Proceseigenaar
-  - key: parentProcess
-    kind: belongsTo
-    target: Process
-    foreignKey: parent_process_id
+    persisted:
+      column: owner_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: parentProcessId
     label:
       en: Parent process
       nl: Hoofdproces
+    persisted:
+      column: parent_process_id
+      storageClass: core
+    semanticType: Process
+    relationship:
+      ownership: reference
   - key: childProcesses
-    kind: hasMany
-    target: Process
-    foreignKey: parent_process_id
     label:
       en: Child processes
       nl: Deelprocessen
+    semanticType: Process
+    cardinality: collection
+    relationship:
+      inverse: parentProcessId
+      ownership: reference
   - key: steps
-    kind: hasMany
-    target: ProcessStep
-    foreignKey: process_id
     label:
       en: Process steps
       nl: Processtappen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: ProcessStep
+    cardinality: collection
+    relationship:
+      inverse: processId
+      ownership: reference
+operations:
+  list:
+    name: List Case Step Container
+    description: List Process records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Step Container
+    description: Get Process records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Step Container
+    description: Create Process records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Step Container
+    description: Update Process records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Step Container
+    description: Delete Process records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      processType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSTYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSSTATUS
+            clearable: false
+      priority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+            clearable: true
+      startedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      dueAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      completionApprovalComment:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000
+      cancelledAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000

@@ -11,7 +11,7 @@ baseEntity: false
 displayTemplate: "{{text}}"
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
   - key: text
     semanticType: multilineText
@@ -43,7 +43,7 @@ operations:
           value:
             x-osf-entityInput: { entity: TextBlock, fields: [text] }
     errors: []
-    auth: { mode: session, roles: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
+    auth: { mode: session, roles: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }

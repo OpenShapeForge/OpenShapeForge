@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: MonitorMeasurement
@@ -25,9 +25,6 @@ fields:
     persisted:
       column: measured_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: value
     valueType: number
     required: true
@@ -54,114 +51,26 @@ fields:
     persisted:
       column: unit_id
       storageClass: core
-relationships:
-  - key: monitorInterval
-    kind: belongsTo
-    target: MonitorInterval
-    foreignKey: monitor_interval_id
+  - key: monitorIntervalId
     label:
       en: Monitor interval
       nl: Monitorinterval
-  - key: monitorLog
-    kind: belongsTo
-    target: MonitorLog
-    foreignKey: monitor_log_id
+    persisted:
+      column: monitor_interval_id
+      storageClass: core
+    semanticType: MonitorInterval
+    relationship:
+      ownership: reference
+  - key: monitorLogId
     label:
       en: Monitor log
       nl: Monitorlog
-ui:
-  routes:
-    list:
-      en: /monitor-measurements
-      nl: /monitormetingen
-    detail:
-      en: /monitor-measurements/:id
-      nl: /monitormetingen/:id
-    create:
-      en: /monitor-measurements/create
-      nl: /monitormetingen/aanmaken
-    edit:
-      en: /monitor-measurements/:id/edit
-      nl: /monitormetingen/:id/bewerken
-    delete:
-      en: /monitor-measurements/:id/delete
-      nl: /monitormetingen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Monitor measurements
-        nl: Monitormetingen
-      columns:
-        - key: measuredAt
-          sortable: true
-        - key: value
-          sortable: true
-        - key: unitId
-          sortable: true
-      defaultSort:
-        key: measuredAt
-        direction: desc
-      rowLink:
-        en: /monitor-measurements/:id
-        nl: /monitormetingen/:id
-    detail:
-      header:
-        title: "{{measuredAt}}"
-        subtitle: "{{value}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Measurement details
-                nl: Metinggegevens
-              fields:
-                - measuredAt
-                - value
-                - unitId
-    form:
-      variants:
-        create:
-          title:
-            en: Create monitor measurement
-            nl: Monitormeting aanmaken
-          groups:
-            - title:
-                en: Measurement details
-                nl: Metinggegevens
-              fields:
-                - measuredAt
-                - value
-                - unitId
-        edit:
-          extends: create
-          title:
-            en: Edit monitor measurement
-            nl: Monitormeting bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: monitor_log_id
+      storageClass: core
+    semanticType: MonitorLog
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -176,3 +85,158 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Monitor Measurement
+    description: List MonitorMeasurement records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Monitor Measurement
+    description: Get MonitorMeasurement records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Monitor Measurement
+    description: Create MonitorMeasurement records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update MonitorMeasurement records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  web:
+    views:
+      collection:
+        route:
+          en: /monitor-measurements
+          nl: /monitormetingen
+        columns:
+          - key: measuredAt
+            sortable: true
+          - key: value
+            sortable: true
+          - key: unitId
+            sortable: true
+        title:
+          en: Monitor measurements
+          nl: Monitormetingen
+        defaultSort:
+          key: measuredAt
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /monitor-measurements/:id
+            nl: /monitormetingen/:id
+          create:
+            en: /monitor-measurements/create
+            nl: /monitormetingen/aanmaken
+        title: "{{measuredAt}}"
+        subtitle: "{{value}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Measurement details
+                    nl: Metinggegevens
+                  fields:
+                    - measuredAt
+                    - value
+                    - unitId
+        modes:
+          create:
+            title:
+              en: Create monitor measurement
+              nl: Monitormeting aanmaken
+            groups:
+              - title:
+                  en: Measurement details
+                  nl: Metinggegevens
+                fields:
+                  - measuredAt
+                  - value
+                  - unitId
+          update:
+            title:
+              en: Edit monitor measurement
+              nl: Monitormeting bewerken
+    fields:
+      measuredAt:
+        render:
+          component: DateTimePicker
+          props: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true

@@ -93,8 +93,12 @@ fields:
       en: Variable key
       nl: Variabele-sleutel
     description:
-      en: Identifier used to surface this rule as a flat top-level variable on the entity (e.g. `isAggressive`, `arrearsTotal`). Must be a valid JS-style identifier — starts with a lowercase letter, contains only letters and digits.
-      nl: Identifier waarmee deze regel als platte top-level variabele op de entiteit beschikbaar wordt (bijv. `isAggressive`, `arrearsTotal`). Moet een geldige JS-achtige identifier zijn — begint met een kleine letter en bevat alleen letters en cijfers.
+      en: Identifier used to surface this rule as a flat top-level variable on the entity (e.g. `isAggressive`,
+        `arrearsTotal`). Must be a valid JS-style identifier — starts with a lowercase letter, contains only letters and
+        digits.
+      nl: Identifier waarmee deze regel als platte top-level variabele op de entiteit beschikbaar wordt (bijv. `isAggressive`,
+        `arrearsTotal`). Moet een geldige JS-achtige identifier zijn — begint met een kleine letter en bevat alleen
+        letters en cijfers.
     validation:
       minLength: 1
       maxLength: 120
@@ -110,8 +114,10 @@ fields:
       en: Output type
       nl: Uitvoertype
     description:
-      en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`, `numberValue`, or `stringValue`) and how the variable is typed downstream.
-      nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`, `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
+      en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`,
+        `numberValue`, or `stringValue`) and how the variable is typed downstream.
+      nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`,
+        `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
     defaultValue: boolean
     persisted:
       column: output_type
@@ -123,8 +129,10 @@ fields:
       en: Expression
       nl: Expressie
     description:
-      en: Expression evaluated against entity data to produce the label's output value. Supports conditions, arithmetic, string helpers, and aggregates over related collections.
-      nl: Expressie die wordt geëvalueerd tegen entiteitsgegevens om de uitvoerwaarde van het label te produceren. Ondersteunt condities, rekenkundige bewerkingen, tekstfuncties en aggregaties over gerelateerde collecties.
+      en: Expression evaluated against entity data to produce the label's output value. Supports conditions, arithmetic,
+        string helpers, and aggregates over related collections.
+      nl: Expressie die wordt geëvalueerd tegen entiteitsgegevens om de uitvoerwaarde van het label te produceren. Ondersteunt
+        condities, rekenkundige bewerkingen, tekstfuncties en aggregaties over gerelateerde collecties.
     semanticType: condition
     persisted:
       column: expression
@@ -191,8 +199,10 @@ fields:
       en: Validity
       nl: Geldigheid
     description:
-      en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional` honors the dates plus any context-specific conditions (e.g. tenant or process state).
-      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate; `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
+      en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional`
+        honors the dates plus any context-specific conditions (e.g. tenant or process state).
+      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate;
+        `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
     defaultValue: permanent
     persisted:
       column: validity
@@ -204,8 +214,10 @@ fields:
       en: Start date
       nl: Begindatum
     description:
-      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `temporary` or `conditional`.
-      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
+      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `temporary` or
+        `conditional`.
+      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `temporary` of
+        `conditional` staat.
     persisted:
       column: start_date
       storageClass: core
@@ -223,8 +235,10 @@ fields:
       en: End date
       nl: Einddatum
     description:
-      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `temporary` or `conditional`.
-      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
+      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `temporary` or
+        `conditional`.
+      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `temporary` of
+        `conditional` staat.
     persisted:
       column: end_date
       storageClass: core
@@ -235,6 +249,13 @@ fields:
           value:
             - temporary
             - conditional
+  - key: tenantId
+    semanticType: Tenant
+    readOnly: true
+    required: false
+    label: { en: Tenant, nl: Tenant }
+    persisted: { column: tenant_id, storageClass: core }
+    relationship: { ownership: reference }
 operations:
   list:
     name: List label rule
@@ -279,7 +300,9 @@ operations:
     confirmation:
       mode: none
   update:
-    name: Update label rule
+    name:
+      en: Edit
+      nl: Bewerken
     description: Update an accessible label rule.
     implementation:
       type: entity
@@ -297,28 +320,40 @@ operations:
         mode: required
         field: updatedAt
   delete:
-    name: Delete label rule
-    description: Delete an accessible label rule.
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure you want to delete this label rule?
+      nl: Weet je zeker dat je deze labelregel wilt verwijderen?
     implementation:
       type: entity
       action: delete
     effects:
-      data: write
+      data: delete
       external: none
     reliability:
       idempotency:
         mode: natural
     confirmation:
-      mode: none
+      mode: acknowledgement
     concurrency:
       version:
         mode: required
         field: updatedAt
 interfaces:
-  rest: {}
   graphql: {}
   mcp:
     tools: generic
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  rest: {}
   web:
     views:
       collection:
@@ -354,6 +389,9 @@ interfaces:
             nl: /labelregels/aanmaken
         title: "{{name}}"
         subtitle: "{{entityType}}"
+        badges:
+          - variant
+          - active
         actions:
           - update
           - delete
@@ -443,3 +481,24 @@ interfaces:
             title:
               en: Edit label rule
               nl: Labelregel bewerken
+    fields:
+      entityType:
+        render:
+          component: ListSelect
+      variant:
+        render:
+          component: ListSelect
+      outputType:
+        render:
+          component: ListSelect
+      validity:
+        render:
+          component: ListSelect
+      startDate:
+        render:
+          component: DateTimePicker
+          props: {}
+      endDate:
+        render:
+          component: DateTimePicker
+          props: {}

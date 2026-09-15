@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Survey
@@ -78,11 +78,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: surveyKind
     valueType: string
     required: false
@@ -95,11 +91,10 @@ fields:
     persisted:
       column: survey_kind
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SURVEYKIND
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: SURVEYKIND
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -112,11 +107,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SURVEYSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SURVEYSTATUS
+    semanticType: referenceDataCode
   - key: externalCode
     valueType: string
     required: false
@@ -131,20 +125,114 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
   - key: questions
-    kind: hasMany
-    target: SurveyQuestion
-    foreignKey: survey_id
     label:
       en: Questions
       nl: Vragen
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
-      wait: true
+    semanticType: SurveyQuestion
+    cardinality: collection
+    relationship:
+      inverse: surveyId
+      ownership: reference
+operations:
+  list:
+    name: List Survey
+    description: List Survey records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Survey
+    description: Get Survey records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Survey
+    description: Create Survey records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Survey
+    description: Update Survey records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Survey
+    description: Delete Survey records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+        wait: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      surveyKind:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SURVEYKIND
+            clearable: true
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SURVEYSTATUS
+            clearable: false

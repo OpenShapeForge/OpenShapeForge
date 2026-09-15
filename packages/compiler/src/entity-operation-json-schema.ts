@@ -125,6 +125,7 @@ export function writableEntityFields(
       !(field.relationship && field.cardinality === "collection") &&
       field.computed === undefined &&
       !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
+      field.deriveOnCreate === undefined &&
       !(operation === "update" && field.immutable === true),
   );
 }

@@ -28,6 +28,7 @@ import type {
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import { writableEntityFields } from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
 import {
   compiledFieldSchema,
@@ -355,19 +356,6 @@ function entityToolOutputSchema(
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
 
-/**
- * Server-managed columns. A model must never be invited to set these: the id
- * is generated, the tenant comes from the session, and the timestamps are
- * maintained by the database. Mirrors writableColumnMap in the API's CRUD
- * layer and isWritableColumn in the OpenAPI generator.
- */
-const SERVER_MANAGED_FIELDS = new Set([
-  "id",
-  "tenantId",
-  "createdAt",
-  "updatedAt",
-]);
-
 function operationControlSchema(
   operation: CompiledEntityOperation | undefined,
 ): {
@@ -448,18 +436,16 @@ function operationControlSchema(
  * check the operation runs before writing it, so create/update must not offer
  * a way around that check. Same shape as `immutable`: the advertised schema
  * and the server's refusal both come from the one authored fact.
+ *
+ * `deriveOnCreate` is absent from both writes because the entity runtime owns
+ * its initial value and keeps it stable afterwards. The shared helper below
+ * is also used by the canonical Operation schema, preventing transport drift.
  */
 function writableFields(
   fields: CompiledField[],
   operation: "create" | "update",
 ): CompiledField[] {
-  return fields.filter(
-    (field) =>
-      !SERVER_MANAGED_FIELDS.has(field.key) &&
-      field.computed === undefined &&
-      !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
-      !(operation === "update" && field.immutable === true),
-  );
+  return writableEntityFields(fields, operation);
 }
 
 /**
@@ -1092,6 +1078,7 @@ export type McpEntityCatalogEntry = {
      */
     field?: string;
     via?: string;
+    through?: { field: string; column: string; target: string };
     label?: string;
   }[];
 };
@@ -1460,6 +1447,7 @@ export function buildMcpCatalog(
             : {}),
           ...(column ? { field: column.key } : {}),
           ...(relationship.via ? { via: relationship.via } : {}),
+          ...(relationship.through ? { through: relationship.through } : {}),
           ...(label ? { label } : {}),
         };
       }),

@@ -72,6 +72,12 @@ export function entityValueCarriers(table: GeneratedCrudTable, registry = genera
         if (!physical || physical.type !== "uuid" || physical.sourceField || physical.immutable || physical.writtenBy?.length || protectedColumns.has(physical.name)) {
           throw generatedCrudError("Entity-value reference storage metadata is invalid.", "INVALID_DEFINITION");
         }
+        if (reference.parameterColumn) {
+          const parameter = table.columns.find(column => column.name === reference.parameterColumn);
+          if (!parameter || parameter.type !== "text" || parameter.sourceField || parameter.immutable || parameter.writtenBy?.length || protectedColumns.has(parameter.name)) {
+            throw generatedCrudError("Entity-value parameter storage metadata is invalid.", "INVALID_DEFINITION");
+          }
+        }
       }
     }
   }
@@ -79,7 +85,7 @@ export function entityValueCarriers(table: GeneratedCrudTable, registry = genera
 }
 
 export function entityValuePhysicalColumns(table: GeneratedCrudTable, registry = generatedEntityValues): Set<string> {
-  return new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.map((reference) => reference.column))));
+  return new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
 }
 
 /** Called before normalization, so protected inputs cannot be silently discarded. */

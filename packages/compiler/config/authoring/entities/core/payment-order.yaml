@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: PaymentOrder
@@ -37,9 +37,6 @@ fields:
     persisted:
       column: execution_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: status
     valueType: string
     required: true
@@ -52,11 +49,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PAYMENTORDERSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PAYMENTORDERSTATUS
+    semanticType: referenceDataCode
   - key: totalAmount
     valueType: number
     required: false
@@ -98,133 +94,16 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: paymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: payment_method_id
+  - key: paymentMethodId
     label:
       en: Payment method
       nl: Betaalwijze
-ui:
-  routes:
-    list:
-      en: /payment-orders
-      nl: /betaalopdrachten
-    detail:
-      en: /payment-orders/:id
-      nl: /betaalopdrachten/:id
-    create:
-      en: /payment-orders/create
-      nl: /betaalopdrachten/aanmaken
-    edit:
-      en: /payment-orders/:id/edit
-      nl: /betaalopdrachten/:id/bewerken
-    delete:
-      en: /payment-orders/:id/delete
-      nl: /betaalopdrachten/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Payment orders
-        nl: Betaalopdrachten
-      columns:
-        - key: referenceNumber
-          sortable: true
-        - key: executionDate
-          sortable: true
-        - key: status
-          sortable: true
-        - key: totalAmount
-          sortable: true
-      defaultSort:
-        key: executionDate
-        direction: desc
-      rowLink:
-        en: /payment-orders/:id
-        nl: /betaalopdrachten/:id
-    detail:
-      header:
-        title: "{{referenceNumber}}"
-        subtitle: "{{totalAmount}}"
-        badges:
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Order details
-                nl: Opdrachtgegevens
-              fields:
-                - referenceNumber
-                - executionDate
-                - status
-                - totalAmount
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create payment order
-            nl: Betaalopdracht aanmaken
-          groups:
-            - title:
-                en: Order details
-                nl: Opdrachtgegevens
-              fields:
-                - referenceNumber
-                - executionDate
-                - status
-                - totalAmount
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit payment order
-            nl: Betaalopdracht bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: payment_method_id
+      storageClass: core
+    semanticType: PaymentMethod
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -239,3 +118,190 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Payment Order
+    description: List PaymentOrder records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Payment Order
+    description: Get PaymentOrder records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Payment Order
+    description: Create PaymentOrder records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update PaymentOrder records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /payment-orders
+          nl: /betaalopdrachten
+        columns:
+          - key: referenceNumber
+            sortable: true
+          - key: executionDate
+            sortable: true
+          - key: status
+            sortable: true
+          - key: totalAmount
+            sortable: true
+        title:
+          en: Payment orders
+          nl: Betaalopdrachten
+        defaultSort:
+          key: executionDate
+          direction: desc
+      record:
+        routes:
+          read:
+            en: /payment-orders/:id
+            nl: /betaalopdrachten/:id
+          create:
+            en: /payment-orders/create
+            nl: /betaalopdrachten/aanmaken
+        title: "{{referenceNumber}}"
+        subtitle: "{{totalAmount}}"
+        badges:
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Order details
+                    nl: Opdrachtgegevens
+                  fields:
+                    - referenceNumber
+                    - executionDate
+                    - status
+                    - totalAmount
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create payment order
+              nl: Betaalopdracht aanmaken
+            groups:
+              - title:
+                  en: Order details
+                  nl: Opdrachtgegevens
+                fields:
+                  - referenceNumber
+                  - executionDate
+                  - status
+                  - totalAmount
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit payment order
+              nl: Betaalopdracht bewerken
+    fields:
+      executionDate:
+        render:
+          component: DatePicker
+          props: {}
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PAYMENTORDERSTATUS
+            clearable: false

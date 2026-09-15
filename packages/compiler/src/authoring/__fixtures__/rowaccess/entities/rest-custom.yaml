@@ -1,9 +1,10 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: RestCustom
 title: Rest Custom
-description: "Test fixture — generated REST exposure with a custom base path and a disabled operation. Not part of the shipped slice."
+description: "Test fixture — generated REST exposure with a custom base path and a disabled operation. Not part of the
+  shipped slice."
 language: en
 displayTemplate: "{{name}}"
 filterField: name
@@ -11,11 +12,6 @@ labels:
   en: Rest Custom
 domains:
   - relations
-rest:
-  enabled: true
-  basePath: custom-things
-  operations:
-    delete: false
 authorization:
   roles:
     read:
@@ -35,3 +31,80 @@ fields:
     persisted:
       column: name
       storageClass: core
+operations:
+  list:
+    name: List Rest Custom
+    description: List RestCustom records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Rest Custom
+    description: Get RestCustom records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Rest Custom
+    description: Create RestCustom records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Rest Custom
+    description: Update RestCustom records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Rest Custom
+    description: Delete RestCustom records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  rest:
+    basePath: custom-things
+    operations:
+      delete: false

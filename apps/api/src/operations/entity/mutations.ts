@@ -44,6 +44,11 @@ import {
   assertRecordPermissionInTransaction,
   assertUpdateRecordPermissions,
 } from "./record-permissions.js";
+import {
+  derivedOnCreateColumn,
+  derivedSlugCandidate,
+  maxDerivedIdentifierAttempts,
+} from "./derive-on-create.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -212,25 +217,54 @@ async function insertGeneratedRowInTransaction(
   entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
   const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "create", undefined, entityValues);
-  const columns = [...prepared.keys()];
-  const sqlValues = [...prepared.values()];
+  const derivedColumn = derivedOnCreateColumn(table);
+  const derivation = derivedColumn?.deriveOnCreate;
   const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
-  if (table.tenantScoped && tenantColumn) {
-    columns.push(tenantColumn);
-    sqlValues.push(session.tenantId);
+  const attempts = derivation ? maxDerivedIdentifierAttempts() : 1;
+  let row: GeneratedEntityRow | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const candidateValues = new Map(prepared);
+    if (derivedColumn && derivation) {
+      const sourceColumn = table.columns.find((column) => column.name === derivation.sourceColumn);
+      if (!sourceColumn || !candidateValues.has(sourceColumn)) {
+        throw generatedCrudError(
+          "Generated CRUD derivation metadata does not resolve to a submitted source field.",
+          "INTERNAL_SERVER_ERROR",
+        );
+      }
+      candidateValues.set(
+        derivedColumn,
+        derivedSlugCandidate(candidateValues.get(sourceColumn), attempt, derivation.maxLength),
+      );
+    }
+    const columns = [...candidateValues.keys()];
+    const sqlValues = [...candidateValues.values()];
+    if (table.tenantScoped && tenantColumn) {
+      columns.push(tenantColumn);
+      sqlValues.push(session.tenantId);
+    }
+    const conflict = derivation
+      ? sql`on conflict (${sql.join(derivation.conflictColumns.map((column) => sql.id(column)))}) do nothing`
+      : sql``;
+    const result = await sql<{ row: GeneratedEntityRow }>`
+      insert into ${sql.id(table.schema, table.table)}
+        (${sql.join(columns.map((column) => sql.id(column.name)))})
+      values
+        (${sql.join(sqlValues)})
+      ${conflict}
+      returning to_jsonb(${sql.id(table.table)}.*) as row
+    `.execute(trx);
+    row = result.rows[0]?.row;
+    if (row) break;
   }
 
-  const result = await sql<{ row: GeneratedEntityRow }>`
-    insert into ${sql.id(table.schema, table.table)}
-      (${sql.join(columns.map((column) => sql.id(column.name)))})
-    values
-      (${sql.join(sqlValues)})
-    returning to_jsonb(${sql.id(table.table)}.*) as row
-  `.execute(trx);
-
-  const row = result.rows[0]?.row;
   if (!row) {
-    throw generatedCrudError("Generated entity create did not return a row.", "INTERNAL_SERVER_ERROR");
+    throw generatedCrudError(
+      derivation
+        ? "Generated CRUD could not allocate a unique derived identifier."
+        : "Generated entity create did not return a row.",
+      "INTERNAL_SERVER_ERROR",
+    );
   }
   await appendGeneratedCrudEvent(trx, table, {
     aggregateId: generatedCrudAggregateId(table, row),

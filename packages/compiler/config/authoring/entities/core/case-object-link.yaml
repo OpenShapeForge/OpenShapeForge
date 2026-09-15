@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: CaseObjectLink
@@ -36,11 +36,10 @@ fields:
     persisted:
       column: object_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEOBJECTTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CASEOBJECTTYPE
+    semanticType: referenceDataCode
   - key: objectLabel
     valueType: string
     required: false
@@ -84,24 +83,109 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
-relationships:
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    semanticType: multilineText
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Case Object Link
+    description: List CaseObjectLink records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Case Object Link
+    description: Get CaseObjectLink records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Case Object Link
+    description: Create CaseObjectLink records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Case Object Link
+    description: Update CaseObjectLink records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Case Object Link
+    description: Delete CaseObjectLink records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      objectType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEOBJECTTYPE
+            clearable: false
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: SupplierRole
@@ -40,11 +40,10 @@ fields:
     persisted:
       column: role_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: SUPPLIERROLE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: SUPPLIERROLE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: false
@@ -57,11 +56,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ROLEASSIGNMENTSTATUS
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: ROLEASSIGNMENTSTATUS
+    semanticType: referenceDataCode
   - key: vatNumber
     valueType: string
     required: false
@@ -145,7 +143,7 @@ fields:
       storageClass: core
     cardinality:
       min: 0
-      max: "unbounded"
+      max: unbounded
     item:
       key: certification
       valueType: string
@@ -165,9 +163,6 @@ fields:
     persisted:
       column: start_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -180,9 +175,6 @@ fields:
     persisted:
       column: end_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: name
     valueType: string
     required: false
@@ -211,11 +203,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
+    semanticType: multilineText
   - key: externalCode
     valueType: string
     required: false
@@ -230,183 +218,26 @@ fields:
     persisted:
       column: external_code
       storageClass: core
-relationships:
-  - key: relation
-    kind: belongsTo
-    target: Relation
-    foreignKey: relation_id
+  - key: relationId
     label:
       en: Relation
       nl: Relatie
-  - key: defaultPaymentMethod
-    kind: belongsTo
-    target: PaymentMethod
-    foreignKey: default_payment_method_id
+    persisted:
+      column: relation_id
+      storageClass: core
+    semanticType: Relation
+    relationship:
+      ownership: reference
+  - key: defaultPaymentMethodId
     label:
       en: Default payment method
       nl: Standaard betaalwijze
-ui:
-  routes:
-    list:
-      en: /supplier-roles
-      nl: /leveranciers
-    detail:
-      en: /supplier-roles/:id
-      nl: /leveranciers/:id
-    create:
-      en: /supplier-roles/create
-      nl: /leveranciers/aanmaken
-    edit:
-      en: /supplier-roles/:id/edit
-      nl: /leveranciers/:id/bewerken
-    delete:
-      en: /supplier-roles/:id/delete
-      nl: /leveranciers/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Suppliers
-        nl: Leveranciers
-      columns:
-        - key: supplierNumber
-          sortable: true
-        - key: name
-          sortable: true
-        - key: roleType
-          sortable: true
-        - key: status
-          sortable: true
-        - key: ratingAverage
-          sortable: true
-      defaultSort:
-        key: supplierNumber
-        direction: asc
-      rowLink:
-        en: /supplier-roles/:id
-        nl: /leveranciers/:id
-    detail:
-      header:
-        title: "{{supplierNumber}}"
-        subtitle: "{{name}}"
-        badges:
-          - roleType
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Supplier details
-                nl: Leveranciersgegevens
-              fields:
-                - supplierNumber
-                - roleType
-                - status
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Identifiers
-                nl: Identificaties
-              fields:
-                - vatNumber
-                - chamberOfCommerceNumber
-                - kvkVerified
-                - defaultIban
-            - title:
-                en: Ratings and certifications
-                nl: Beoordelingen en certificeringen
-              fields:
-                - ratingAverage
-                - certifications
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create supplier
-            nl: Leverancier aanmaken
-          groups:
-            - title:
-                en: Supplier details
-                nl: Leveranciersgegevens
-              fields:
-                - supplierNumber
-                - roleType
-                - status
-                - name
-                - startDate
-                - endDate
-            - title:
-                en: Identifiers
-                nl: Identificaties
-              fields:
-                - vatNumber
-                - chamberOfCommerceNumber
-                - kvkVerified
-                - defaultIban
-            - title:
-                en: Ratings and certifications
-                nl: Beoordelingen en certificeringen
-              fields:
-                - ratingAverage
-                - certifications
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit supplier
-            nl: Leverancier bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: default_payment_method_id
+      storageClass: core
+    semanticType: PaymentMethod
+    relationship:
+      ownership: reference
 authorization:
   roles:
     read:
@@ -421,3 +252,249 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+operations:
+  list:
+    name: List Supplier Role
+    description: List SupplierRole records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Supplier Role
+    description: Get SupplierRole records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Supplier Role
+    description: Create SupplierRole records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name:
+      en: Edit
+      nl: Bewerken
+    description: Update SupplierRole records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name:
+      en: Delete
+      nl: Verwijderen
+    description:
+      en: Are you sure?
+      nl: Weet je het zeker?
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    views:
+      collection:
+        route:
+          en: /supplier-roles
+          nl: /leveranciers
+        columns:
+          - key: supplierNumber
+            sortable: true
+          - key: name
+            sortable: true
+          - key: roleType
+            sortable: true
+          - key: status
+            sortable: true
+          - key: ratingAverage
+            sortable: true
+        title:
+          en: Suppliers
+          nl: Leveranciers
+        defaultSort:
+          key: supplierNumber
+          direction: asc
+      record:
+        routes:
+          read:
+            en: /supplier-roles/:id
+            nl: /leveranciers/:id
+          create:
+            en: /supplier-roles/create
+            nl: /leveranciers/aanmaken
+        title: "{{supplierNumber}}"
+        subtitle: "{{name}}"
+        badges:
+          - roleType
+          - status
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - title:
+                    en: Supplier details
+                    nl: Leveranciersgegevens
+                  fields:
+                    - supplierNumber
+                    - roleType
+                    - status
+                    - name
+                    - startDate
+                    - endDate
+                - title:
+                    en: Identifiers
+                    nl: Identificaties
+                  fields:
+                    - vatNumber
+                    - chamberOfCommerceNumber
+                    - kvkVerified
+                    - defaultIban
+                - title:
+                    en: Ratings and certifications
+                    nl: Beoordelingen en certificeringen
+                  fields:
+                    - ratingAverage
+                    - certifications
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Source
+                    nl: Herkomst
+                  fields:
+                    - externalId
+                    - externalCode
+                    - sourceAuthority
+                    - sourceOrganization
+                    - sourceAdministration
+        modes:
+          create:
+            title:
+              en: Create supplier
+              nl: Leverancier aanmaken
+            groups:
+              - title:
+                  en: Supplier details
+                  nl: Leveranciersgegevens
+                fields:
+                  - supplierNumber
+                  - roleType
+                  - status
+                  - name
+                  - startDate
+                  - endDate
+              - title:
+                  en: Identifiers
+                  nl: Identificaties
+                fields:
+                  - vatNumber
+                  - chamberOfCommerceNumber
+                  - kvkVerified
+                  - defaultIban
+              - title:
+                  en: Ratings and certifications
+                  nl: Beoordelingen en certificeringen
+                fields:
+                  - ratingAverage
+                  - certifications
+              - title:
+                  en: Description
+                  nl: Omschrijving
+                fields:
+                  - description
+              - title:
+                  en: Source
+                  nl: Herkomst
+                fields:
+                  - externalId
+                  - externalCode
+                  - sourceAuthority
+                  - sourceOrganization
+                  - sourceAdministration
+          update:
+            title:
+              en: Edit supplier
+              nl: Leverancier bewerken
+    fields:
+      roleType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: SUPPLIERROLE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ROLEASSIGNMENTSTATUS
+            clearable: true
+      startDate:
+        render:
+          component: DatePicker
+          props: {}
+      endDate:
+        render:
+          component: DatePicker
+          props: {}
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 2000

@@ -26,7 +26,7 @@ const carrier: RuntimeEntityValueCarrier = {
   },
 };
 
-function fixture(blockDefault?: string, withReference = false) {
+function fixture(blockDefault?: string, withReference = false, withBinding = false) {
   const authorizations: string[] = [];
   const calls: { schema: unknown; values: unknown }[] = [];
   const executions: unknown[] = [];
@@ -38,7 +38,8 @@ function fixture(blockDefault?: string, withReference = false) {
     TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", valueType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
       ...(withReference ? [{ key: "brand", valueType: "string", required: true, relationship: { target: "Chip" } }] : [])],
-      references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true }] : [],
+      references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
+        ...(withBinding ? { parameterColumn: "text_brand_parameter" } : {}) }] : [],
     },
   } });
   const op = {
@@ -57,7 +58,8 @@ function fixture(blockDefault?: string, withReference = false) {
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
         fields: {
-          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" } } }),
+          object: () => ({ type: "object", properties: { name: { type: "string", default: "Reader" },
+            ...(withBinding ? { brand: { type: "string", format: "uuid", "x-osf-reference": { entity: "Chip" } } } : {}) } }),
           validateObject: () => ({ valid: true }),
         },
         json: { validate(schema: unknown, values: unknown) { calls.push({ schema, values }); return { valid: true }; } },
@@ -87,7 +89,7 @@ function fixture(blockDefault?: string, withReference = false) {
               TemplateVersion: { ...base, template: ids.template, versionNumber: 1, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] },
               TemplateVariant: { ...base, version: ids.version, channel: "document", locale: "en" },
               Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1,
-                values: data.redactBlock ? null : { ...(data.omitBlockText ? {} : { text: data.text }), ...(withReference ? { brand: ids.chip } : {}) } },
+                values: data.redactBlock ? null : { ...(data.omitBlockText ? {} : { text: data.text }), ...(withReference ? { brand: withBinding ? { parameter: "brand" } : ids.chip } : {}) } },
               Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
@@ -105,6 +107,17 @@ function fixture(blockDefault?: string, withReference = false) {
 }
 
 describe("template materialization runtime adapter", () => {
+  test("preserves entity parameter metadata and resolves symbolic references via canonical reads", async () => {
+    const f = fixture(undefined, true, true);
+    const response = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en", parameters: { brand: ids.chip } }, f.context);
+    expect("value" in response).toBe(true);
+    expect(f.reads).toContain("Chip");
+    expect(f.executions).toHaveLength(1);
+    expect((response as any).value.templates[0].version.variants[0].blocks[0].references.brand).toEqual({ parameter: "brand" });
+    const missing = fixture(undefined, true, true);
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, missing.context)).rejects.toBeDefined();
+    expect(missing.executions).toHaveLength(0);
+  });
   test("reads scoped records, applies local/chip values and invokes the canonical block Operation", async () => {
     const f = fixture();
     const response = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);

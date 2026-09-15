@@ -8,7 +8,7 @@ labels: { en: Block, nl: Block }
 domains: [documents]
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
@@ -33,7 +33,7 @@ fields:
     persisted: { column: definition_version, storageClass: core }
   - key: values
     semanticType: entityValue
-    entityValue: { definitionField: definitionKey }
+    entityValue: { definitionField: definitionKey, parameterBindings: true }
     required: true
     label: { en: Values, nl: Waarden }
     persisted: { column: values, storageClass: core }

@@ -33,6 +33,7 @@ import { deriveTableName } from "./helpers.js";
 import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
 import { buildEntityOperations } from "./entity-operations.js";
+import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import {
   isCoreEntityV2,
   v2PluginOperations,
@@ -106,7 +107,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
   const viewEntity = isCoreEntityV2(coreEntity)
-    ? { ...coreEntity, ui: v2WebUi(coreEntity) }
+    ? { ...coreEntity, ui: v2WebUi(coreEntity), fields: coreEntity.fields.map(field => ({
+        ...field, ...(coreEntity.interfaces?.web?.fields?.[field.key] ?? {}),
+      })) }
     : coreEntity;
   const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
@@ -128,6 +131,14 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     model: { fields: modelFields, relationships },
     graphql,
     views,
+  });
+
+  resolveDerivedOnCreateBindings({
+    entityName: coreEntity.entity,
+    fields: modelFields,
+    columns,
+    ...(coreEntity.indexes ? { indexes: coreEntity.indexes } : {}),
+    tenantScoped: coreEntity.authorization !== undefined,
   });
 
   return {
@@ -162,19 +173,20 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
             ...(coreEntity.interfaces?.web
               ? {
                   web: {
-                    operations: v2WebOperationActions(coreEntity)!,
-                    ...(coreEntity.interfaces.web.views.record?.layout.context
+                    ...(coreEntity.interfaces.web.fields ? { fields: coreEntity.interfaces.web.fields } : {}),
+                    operations: v2WebOperationActions(coreEntity) ?? {},
+                    ...(coreEntity.interfaces.web.views?.record?.layout.context
                       ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
                       : {}),
-                    ...(coreEntity.interfaces.web.views.collection.actions?.length
+                    ...(coreEntity.interfaces.web.views?.collection.actions?.length
                       ? {
                           collectionActions: [
                             ...coreEntity.interfaces.web.views.collection.actions,
                           ],
                         }
                       : {}),
-                    ...(coreEntity.interfaces.web.views.collection.renderer ||
-                      coreEntity.interfaces.web.views.record?.renderer
+                    ...(coreEntity.interfaces.web.views?.collection.renderer ||
+                      coreEntity.interfaces.web.views?.record?.renderer
                       ? {
                           renderers: {
                             ...(coreEntity.interfaces.web.views.collection.renderer

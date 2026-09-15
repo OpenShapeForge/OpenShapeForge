@@ -274,6 +274,19 @@ export type ColumnDefinition = {
    * unaffected columns keep byte-identical output.
    */
   writtenBy?: string[];
+  /**
+   * Compiler-resolved create-time derivation. Callers never write this column;
+   * the API materializes it and uses the named unique-index columns as its
+   * race-safe ON CONFLICT target.
+   */
+  deriveOnCreate?: {
+    sourceField: string;
+    sourceColumn: string;
+    transform: "slug";
+    onConflict: "suffix";
+    conflictColumns: string[];
+    maxLength?: number;
+  };
 };
 
 export type LocalizedTextManifest = {
@@ -325,6 +338,7 @@ export type TableSourceDefinition = {
       delete: boolean;
     };
     relationships: Array<{
+      through?: { field: string; column: string; target: string };
       name: string;
       target: string;
       type: string;

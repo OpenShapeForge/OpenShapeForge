@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: WorkQueue
@@ -63,11 +63,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
+    semanticType: multilineText
   - key: queueType
     valueType: string
     required: true
@@ -77,11 +73,10 @@ fields:
     persisted:
       column: queue_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: WORKQUEUETYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: WORKQUEUETYPE
+    semanticType: referenceDataCode
   - key: status
     valueType: string
     required: true
@@ -91,11 +86,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: WORKQUEUESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: WORKQUEUESTATUS
+    semanticType: referenceDataCode
   - key: assignmentStrategy
     valueType: string
     required: true
@@ -105,11 +99,10 @@ fields:
     persisted:
       column: assignment_strategy
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: WORKQUEUESTRATEGY
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: WORKQUEUESTRATEGY
+    semanticType: referenceDataCode
   - key: workingHoursProfile
     valueType: string
     required: false
@@ -130,11 +123,10 @@ fields:
     persisted:
       column: default_priority
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CASEPRIORITY
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: CASEPRIORITY
+    semanticType: referenceDataCode
   - key: autoAssignEnabled
     valueType: boolean
     required: true
@@ -146,27 +138,29 @@ fields:
       column: auto_assign_enabled
       storageClass: core
   - key: visibilityRelationGroupId
-    valueType: string
     required: false
     label:
       en: Visibility group
       nl: Zichtbaarheidsgroep
     description:
-      en: Relation group whose members can see conversations assigned to this queue. Existing queues may be empty during rollout; create and update APIs require this value.
-      nl: Relatiegroep waarvan leden gesprekken in deze queue kunnen zien. Bestaande queues mogen tijdens rollout leeg zijn; create- en update-APIs vereisen deze waarde.
-    semanticType: relationGroupId
+      en: Relation group whose members can see conversations assigned to this queue. Existing queues may be empty during
+        rollout; create and update APIs require this value.
+      nl: Relatiegroep waarvan leden gesprekken in deze queue kunnen zien. Bestaande queues mogen tijdens rollout leeg zijn;
+        create- en update-APIs vereisen deze waarde.
+    semanticType: RelationGroup
     options:
       type: remote
       remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
     persisted:
       column: visibility_relation_group_id
       storageClass: core
-    render:
-      component: OptionVariablePicker
-      props:
-        valueMode: selectId
     validation:
       format: uuid
+    classification:
+      sensitivity: internal
+      category: workflow
+    relationship:
+      ownership: reference
   - key: targetFirstResponseMinutes
     valueType: integer
     required: false
@@ -222,61 +216,177 @@ fields:
     persisted:
       column: supports_escalation
       storageClass: core
-relationships:
-  - key: escalationQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: escalation_queue_id
+  - key: escalationQueueId
     label:
       en: Escalation queue
       nl: Escalatiequeue
-  - key: overflowQueue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: overflow_queue_id
+    persisted:
+      column: escalation_queue_id
+      storageClass: core
+    semanticType: WorkQueue
+    relationship:
+      ownership: reference
+  - key: overflowQueueId
     label:
       en: Overflow queue
       nl: Overflowqueue
-  - key: visibilityGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: visibility_relation_group_id
-    label:
-      en: Visibility group
-      nl: Zichtbaarheidsgroep
+    persisted:
+      column: overflow_queue_id
+      storageClass: core
+    semanticType: WorkQueue
+    relationship:
+      ownership: reference
   - key: cases
-    kind: hasMany
-    target: Case
-    foreignKey: work_queue_id
     label:
       en: Cases
       nl: Zaken
+    semanticType: Case
+    cardinality: collection
+    relationship:
+      inverse: currentQueueId
+      ownership: reference
   - key: assignments
-    kind: hasMany
-    target: Assignment
-    foreignKey: work_queue_id
     label:
       en: Assignments
       nl: Toewijzingen
+    semanticType: Assignment
+    cardinality: collection
+    relationship:
+      inverse: queueId
+      ownership: reference
   - key: incomingEscalations
-    kind: hasMany
-    target: WorkQueue
-    foreignKey: escalation_queue_id
     label:
       en: Incoming escalations
       nl: Inkomende escalaties
+    semanticType: WorkQueue
+    cardinality: collection
+    relationship:
+      inverse: escalationQueueId
+      ownership: reference
   - key: incomingOverflows
-    kind: hasMany
-    target: WorkQueue
-    foreignKey: overflow_queue_id
     label:
       en: Inkomende overflows
       nl: Inkomende overflows
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    semanticType: WorkQueue
+    cardinality: collection
+    relationship:
+      inverse: overflowQueueId
+      ownership: reference
+operations:
+  list:
+    name: List Work Queue
+    description: List WorkQueue records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Work Queue
+    description: Get WorkQueue records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Work Queue
+    description: Create WorkQueue records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Work Queue
+    description: Update WorkQueue records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Work Queue
+    description: Delete WorkQueue records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      description:
+        render:
+          component: Textarea
+          props:
+            rows: 4
+            maxLength: 4000
+      queueType:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: WORKQUEUETYPE
+            clearable: false
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: WORKQUEUESTATUS
+            clearable: false
+      assignmentStrategy:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: WORKQUEUESTRATEGY
+            clearable: false
+      defaultPriority:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+            clearable: true
+      visibilityRelationGroupId:
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: selectId

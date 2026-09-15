@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 3
 kind: coreEntity
 module: core
 entity: Assignment
@@ -37,11 +37,10 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ASSIGNMENTSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ASSIGNMENTSTATUS
+    semanticType: referenceDataCode
   - key: assignedAt
     valueType: datetime
     required: true
@@ -51,9 +50,6 @@ fields:
     persisted:
       column: assigned_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: acceptedAt
     valueType: datetime
     required: false
@@ -63,9 +59,6 @@ fields:
     persisted:
       column: accepted_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: releasedAt
     valueType: datetime
     required: false
@@ -75,9 +68,6 @@ fields:
     persisted:
       column: released_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: reason
     valueType: string
     required: false
@@ -111,45 +101,151 @@ fields:
     persisted:
       column: note
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
-relationships:
-  - key: case
-    kind: belongsTo
-    target: Case
-    foreignKey: case_id
+    semanticType: multilineText
+  - key: caseId
     label:
       en: Case
       nl: Zaak
-  - key: queue
-    kind: belongsTo
-    target: WorkQueue
-    foreignKey: work_queue_id
+    persisted:
+      column: case_id
+      storageClass: core
+    semanticType: Case
+    relationship:
+      ownership: reference
+  - key: queueId
     label:
       en: Queue
       nl: Queue
-  - key: assignee
-    kind: belongsTo
-    target: Account
-    foreignKey: assignee_account_id
+    persisted:
+      column: work_queue_id
+      storageClass: core
+    semanticType: WorkQueue
+    relationship:
+      ownership: reference
+  - key: assigneeId
     label:
       en: Assignee
       nl: Behandelaar
-  - key: assignedBy
-    kind: belongsTo
-    target: Account
-    foreignKey: assigned_by_account_id
+    persisted:
+      column: assignee_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+  - key: assignedById
     label:
       en: Assigned by
       nl: Toegewezen door
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+    persisted:
+      column: assigned_by_account_id
+      storageClass: core
+    semanticType: Account
+    relationship:
+      ownership: reference
+operations:
+  list:
+    name: List Assignment
+    description: List Assignment records.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: Get Assignment
+    description: Get Assignment records.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: Create Assignment
+    description: Create Assignment records.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: Update Assignment
+    description: Update Assignment records.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  delete:
+    name: Delete Assignment
+    description: Delete Assignment records.
+    implementation:
+      type: entity
+      action: delete
+    effects:
+      data: delete
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  graphql: {}
+  workflow:
+    nodes:
+      actions:
+        create: true
+        getOne: true
+        list: true
+        update: true
+        delete: true
+  web:
+    fields:
+      status:
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: ASSIGNMENTSTATUS
+            clearable: false
+      assignedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      acceptedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      releasedAt:
+        render:
+          component: DateTimePicker
+          props: {}
+      note:
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 2000

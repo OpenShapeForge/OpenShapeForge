@@ -31,6 +31,7 @@ test("LabelRule's canonical create view preserves inherited choices, variable so
 
 test("LabelRule uses the platform tenant column and renders its backend SQL", () => {
   const manifest = compileAuthoringBackendManifest(authoringDir, {
+    mode: "promote",
     entityAllowlist: ["label-rule", "tenant"],
     generatedCrudAllowlist: ["label-rule", "tenant"],
   });

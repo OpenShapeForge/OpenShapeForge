@@ -18,6 +18,7 @@ bun install
 cp apps/api/.env.example apps/api/.env   # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build
 bun run generate       # compile authoring YAML into generated artifacts
+bun run db:provision-roles # once per Postgres volume
 bun run db:migrate     # create/roll-forward the schema
 bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 ```

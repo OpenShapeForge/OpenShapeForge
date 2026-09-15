@@ -318,7 +318,9 @@ that neither column above already reaches.
 
 ```sh
 docker compose -f docker-compose.local.yml up -d   # Postgres, Redis, Keycloak
-bun run generate && bun run db:migrate
+bun run generate
+bun run db:provision-roles                         # once per Postgres volume
+bun run db:migrate
 bun run dev:api                                    # or apps/api start, on :3001
 bun run build:web && bun run --cwd apps/web start  # on :3000
 bun run --cwd apps/web exec playwright install chromium   # once

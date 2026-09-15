@@ -35,7 +35,7 @@ describe("native canonical collection Operations", () => {
     expect(binding).toEqual({ entityName: "Page", field: "sections", action: "insert" });
     expect(Object.isFrozen(binding)).toBe(true);
     expect(bindOperationHandlers([], [fixture()]).has(op.key)).toBe(true);
-    expect(operationModulesConfigured([], [fixture()])).toBe(true);
+    expect(operationModulesConfigured([], [fixture()])).toBe(false);
     expect(operationModulesConfigured([], [])).toBe(false);
   });
 
@@ -63,7 +63,7 @@ describe("native canonical collection Operations", () => {
   test("retains duplicate-Operation and missing plugin-handler boot checks", () => {
     expect(() => bindOperationHandlers([], [fixture(), fixture()])).toThrow("duplicated");
     const ordinary: OperationContract = { ...fixture() }; delete ordinary.implementation;
-    expect(() => bindOperationHandlers([], [ordinary])).toThrow("no loaded runtime module");
+    expect(() => bindOperationHandlers([], [ordinary], { pluginOperations: "required" })).toThrow("no loaded runtime module");
   });
 
   test("cannot run a native write outside a verified runtime session", async () => {

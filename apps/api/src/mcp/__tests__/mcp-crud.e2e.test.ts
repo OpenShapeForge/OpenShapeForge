@@ -531,12 +531,21 @@ describe("generated MCP server", () => {
     expect(listed.status).toBe(200);
     const tools = listed.body.result.tools as { name: string; inputSchema: unknown }[];
     expect(tools).toContainEqual(expect.objectContaining({
-      name: "workflow_start_webhook",
+      name: "osf_search_operations",
       inputSchema: expect.objectContaining({ type: "object" }),
     }));
 
-    const called = await callTool(workflowOperator, "workflow_start_webhook", {
-      definitionId: randomUUID(),
+    const searched = await callTool(workflowOperator, "osf_search_operations", {
+      query: "webhook",
+      limit: 20,
+    });
+    expect(toolEnvelope(searched.body)).toMatchObject({
+      operations: [{ operation: { id: "workflow.instance.webhook-start" } }],
+    });
+
+    const called = await callTool(workflowOperator, "osf_execute_operation", {
+      operationId: "workflow.instance.webhook-start",
+      input: { definitionId: randomUUID() },
       idempotencyKey: randomUUID(),
     });
     // The Operation is keyed and declares an external write, so the runtime

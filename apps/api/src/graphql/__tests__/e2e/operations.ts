@@ -2,7 +2,7 @@
 /**
  * Canonical-Operations awareness for the e2e suites.
  *
- * A v2 (`authoringVersion: 2`) entity is driven through its authored
+ * A current (`authoringVersion >= 2`) entity is driven through its authored
  * Operation contracts: an update or delete may demand a record version and an
  * edit lease, a delete may demand a typed confirmation challenge, and a create
  * may be plugin-backed with an input contract of its own. The suites derive
@@ -37,9 +37,9 @@ export type MutationControls = {
   confirmationAnswer?: string;
 };
 
-/** Authored as canonical Operations (v2); the only generation once conversion completes. */
+/** Authored as canonical Operations (v2 and later). */
 export function isCanonical(table: GeneratedTable): boolean {
-  return table.source?.authoringVersion === 2;
+  return (table.source?.authoringVersion ?? 1) >= 2;
 }
 
 /**

@@ -2,45 +2,68 @@
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import { APP_ROLE } from "./app-role.js";
+import { ensureCheckConstraint, ensureForeignKey } from "./sql-invariants.js";
 
-/** Published snapshots are the only cross-tenant surface. The definer has no
- * BYPASSRLS and can read only these two bookkeeping tables, never source data. */
+/**
+ * The invariants of the blueprint tables that the manifest cannot express.
+ * platform.blueprint_libraries, blueprint_versions and blueprint_copies are
+ * declared in packages/compiler/config/platform-schema.yaml; this runs after
+ * the generated step and adds, idempotently on every migrate, the check
+ * constraints, the compound provenance reference, the policies, the reader
+ * grants and the one cross-tenant read function.
+ *
+ * Published snapshots are the only cross-tenant surface. The definer has no
+ * BYPASSRLS and can read only these two bookkeeping tables, never source data.
+ */
 export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_libraries",
+    name: "blueprint_libraries_check",
+    expression: "tenant_id <> blueprint_tenant_id",
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_versions",
+    name: "blueprint_versions_blueprint_id_check",
+    expression: "length(blueprint_id) > 0",
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_versions",
+    name: "blueprint_versions_version_check",
+    expression: "version > 0",
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_versions",
+    name: "blueprint_versions_reader_roles_check",
+    expression: "cardinality(reader_roles) > 0",
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_versions",
+    name: "blueprint_versions_values_json_check",
+    expression: "jsonb_typeof(values_json) = 'object'",
+  });
+  // A copy records the exact published version it was taken from; the
+  // manifest expresses single-column references only.
+  await ensureForeignKey(db, {
+    table: "platform.blueprint_copies",
+    name: "blueprint_copies_source_version_fkey",
+    columns: ["blueprint_tenant_id", "entity_name", "blueprint_id", "source_version"],
+    references: {
+      table: "platform.blueprint_versions",
+      columns: ["tenant_id", "entity_name", "blueprint_id", "version"],
+    },
+  });
+  await ensureCheckConstraint(db, {
+    table: "platform.blueprint_copies",
+    name: "blueprint_copies_check",
+    expression: "tenant_id <> blueprint_tenant_id",
+  });
+
   await sql`
     -- The definer role is declared in the database role contract; the host
     -- provisions it and the chain verified the migrate role's membership.
     grant usage on schema app, platform to openshapeforge_blueprint_reader;
     grant execute on function app.current_tenant(), app.current_user_id() to openshapeforge_blueprint_reader;
 
-    create table if not exists platform.blueprint_libraries (
-      tenant_id uuid primary key references platform.tenants(id) on delete cascade,
-      blueprint_tenant_id uuid not null references platform.tenants(id),
-      check (tenant_id <> blueprint_tenant_id)
-    );
-    create table if not exists platform.blueprint_versions (
-      tenant_id uuid not null references platform.tenants(id),
-      entity_name text not null,
-      blueprint_id text not null check (length(blueprint_id) > 0),
-      version integer not null check (version > 0),
-      source_record_id uuid not null,
-      label text not null,
-      reader_roles text[] not null check (cardinality(reader_roles) > 0),
-      values_json jsonb not null check (jsonb_typeof(values_json) = 'object'),
-      created_at timestamptz not null default now(),
-      primary key (tenant_id, entity_name, blueprint_id, version)
-    );
-    create table if not exists platform.blueprint_copies (
-      tenant_id uuid not null references platform.tenants(id) on delete cascade,
-      entity_name text not null,
-      record_id uuid not null,
-      blueprint_tenant_id uuid not null,
-      blueprint_id text not null,
-      source_version integer not null,
-      primary key (tenant_id, entity_name, record_id),
-      foreign key (blueprint_tenant_id, entity_name, blueprint_id, source_version)
-        references platform.blueprint_versions(tenant_id, entity_name, blueprint_id, version),
-      check (tenant_id <> blueprint_tenant_id)
-    );
     alter table platform.blueprint_libraries enable row level security;
     alter table platform.blueprint_libraries force row level security;
     alter table platform.blueprint_versions enable row level security;

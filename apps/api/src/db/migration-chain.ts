@@ -19,31 +19,28 @@
  *      and same reason as the app role; its grants are enumerated rather than
  *      swept, and also land in step 5.
  *   1. app helpers            — RLS helper functions every policy references.
- *   2. system bypass audit    — break-glass audit table (not manifest-managed).
  *   3. versioned bespoke      — hand-written transformations; run BEFORE the
  *      generated step so a bespoke migration can eliminate non-additive drift
  *      before the roll-forward evaluates it.
  *   3b. plugin cutovers       — immutable compiler-plugin migrations that
  *      must transform legacy ownership before generated drift is evaluated.
- *   4. generated roll-forward — manifest-driven schema apply/diff.
- *   4b. identity link         — runtime-owned platform.identities /
- *      platform.identity_relations (idempotent DDL, like step 2); after the
- *      generated step because they reference platform.tenants and
- *      erp.relations, and before the plugin invariants because plugin DDL
- *      may reference them (a fresh database has neither until here).
+ *   4. generated roll-forward — manifest-driven schema apply/diff. Every
+ *      table, the runtime-owned platform bookkeeping included, is created
+ *      here from the ONE declaration in platform-schema.yaml.
+ *   4b. identity link         — what the manifest cannot express for
+ *      platform.identities / platform.identity_relations: checks, an
+ *      expression index, app.identity_subject() and the bespoke policies
+ *      (idempotent DDL on every run). Before the plugin invariants because
+ *      plugin DDL may reference the function.
  *   4c. plugin invariants     — immutable compiler-plugin constraints,
  *      functions, triggers, and other DDL, after contributed tables exist.
- *   4d. employee invitations  — runtime-owned platform.employee_invitations
- *      (idempotent DDL, same reasoning); references platform.tenants only, so
- *      it could run before 4c, but sits next to it because both are the
- *      "login ↔ party" story (db/migrations/employee-invitations.ts).
- *   4e. organization relation link — platform.tenants.relation_id (idempotent
- *      DDL, same reasoning); references erp.relations, so it must run after
- *      the generated step like 4c/4d
- *      (db/migrations/organization-relation-link.ts).
- *   4f. Operation execution receipts — runtime-owned, actor-scoped durable
- *      idempotency ledger. It references platform.tenants, so it also runs
- *      after generated schema and before the app grant sweep.
+ *   4d–4g. the other runtime invariants the manifest cannot express, one
+ *      file per table family and each idempotent on every run: employee
+ *      invitations (checks, the one-pending-per-address partial expression
+ *      index, policy), the tenant's organization-Relation write policy,
+ *      update notices (policies), execution receipts (checks, policy),
+ *      blueprints (checks, compound provenance reference, policies, the
+ *      SECURITY DEFINER read function and its ownership transfer).
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -70,11 +67,9 @@ import { verifyDatabaseRoles } from "./database-roles.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
-import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
-import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
@@ -137,7 +132,6 @@ export async function runMigrationChain(
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
-  await applySystemBypassAuditMigration(db);
   const versioned = await applyVersionedMigrations(
     db,
     options.versioned ?? versionedMigrations,
@@ -156,10 +150,9 @@ export async function runMigrationChain(
     options.appliedBy,
   );
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
-  // The identity link tables are runtime-owned (not in the manifest) but a
-  // plugin's invariant DDL may reference them, so they must exist before the
-  // after-generated plugin migrations run. They need platform.tenants and
-  // erp.relations, which the generated step has just created.
+  // The identity-link invariants (app.identity_subject() above all) may be
+  // referenced by a plugin's invariant DDL, so they land before the
+  // after-generated plugin migrations run.
   await applyIdentityLinkMigration(db);
   const afterGenerated = await applyGeneratedPluginMigrations(
     db,
@@ -168,7 +161,6 @@ export async function runMigrationChain(
   );
   await applyEmployeeInvitationsMigration(db);
   await applyOrganizationRelationLinkMigration(db);
-  await applyOnboardingMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
   await applyBlueprintsMigration(db);

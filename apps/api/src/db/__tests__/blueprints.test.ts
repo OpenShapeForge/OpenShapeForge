@@ -7,6 +7,7 @@ import { createDatabaseRuntime } from "../connection.js";
 import { applyAppRoleMigration, applyAppRoleGrants, APP_ROLE } from "../migrations/app-role.js";
 import { applyAppHelpersMigration } from "../migrations/app-helpers.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "../migrations/blueprints.js";
+import { applyGeneratedTables } from "./__fixtures__/generated-tables.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -37,6 +38,14 @@ test("published blueprint lookup is scoped, authorized and read-only across tena
     await sql`insert into platform.tenants values (${bp}), (${customer}), (${stranger})`.execute(runtime.db);
     await sql`insert into erp.tenants values (${bp}, 'blueprint'), (${customer}, 'customer'), (${stranger}, 'customer');
     `.execute(runtime.db);
+    // The three tables come from the manifest; the migration file owns only
+    // their checks, policies and the definer function. Applied twice below to
+    // prove that file idempotent.
+    await applyGeneratedTables(runtime.db, [
+      "platform.blueprint_libraries",
+      "platform.blueprint_versions",
+      "platform.blueprint_copies",
+    ]);
     await applyBlueprintsMigration(runtime.db);
     await applyAppRoleGrants(runtime.db);
     await applyBlueprintsGrants(runtime.db);

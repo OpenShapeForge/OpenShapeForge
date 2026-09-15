@@ -31,7 +31,6 @@ import { readFile } from "node:fs/promises";
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
-import { ensureSchemaMigrationsTable } from "./schema-migrations-table.js";
 
 export const generatedSchemaMigrationVersion = "0001_generated_platform_schema";
 
@@ -70,40 +69,6 @@ export type ManifestTable = {
 const manifestTables = manifest.tables as unknown as ManifestTable[];
 
 /**
- * Tables inside manifest-covered schemas that are managed by dedicated
- * migrations rather than the generated manifest. They are never treated as
- * "disappeared from the manifest" drift. platform.schema_migrations is
- * currently in the manifest too; keeping it here is defensive.
- *
- * Exported because ../schema-drift.ts must apply the identical exemption: it
- * answers "does this database carry schema the branch does not declare?", and
- * a divergent allowlist there would report these two tables as foreign on
- * every database.
- */
-export const nonManifestManagedTables = new Set<string>([
-  "platform.schema_migrations",
-  "platform.blueprint_libraries",
-  "platform.blueprint_versions",
-  "platform.blueprint_copies",
-  "platform.system_bypass_audit",
-  // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
-  "platform.operation_execution_receipts",
-  // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
-  // after the generated step (its FKs point at generated tables).
-  "platform.identities",
-  "platform.identity_relations",
-  // Pending employee invitations: created by migrations/employee-invitations.ts
-  // after the generated step.
-  "platform.employee_invitations",
-  // Update notices and who has been told: created by migrations/update-notices.ts
-  // after the generated step, for the same reason as the two above — they are
-  // runtime bookkeeping, not authored entities, so no manifest describes them
-  // and drift detection would read them as foreign schema.
-  "platform.update_notices",
-  "platform.user_update_notices",
-]);
-
-/**
  * Columns on generated (manifest-declared) tables that a plugin schema
  * migration owns. A `CompilerPlugin.schemaMigrations` entry is free to
  * `ALTER TABLE ... ADD COLUMN` a generated entity table — the manifest cannot
@@ -115,9 +80,14 @@ export const nonManifestManagedTables = new Set<string>([
  * which is the non-additive class, and migrate refuses to run on a database
  * the plugin migration has already touched.
  *
- * Keyed `schema.table.column`. Exported for the same reason as
- * `nonManifestManagedTables`: ../schema-drift.ts must apply the identical
- * exemption or readiness would flag these columns as foreign schema.
+ * Keyed `schema.table.column`. Exported because ../schema-drift.ts must apply
+ * the identical exemption: it answers "does this database carry schema the
+ * branch does not declare?", and a divergent allowlist there would report
+ * these columns as foreign on every database.
+ *
+ * Every TABLE, by contrast, is manifest-declared — the runtime-owned platform
+ * bookkeeping included — so there is no table-level exemption: a table in a
+ * manifest-covered schema that the manifest does not name is drift, full stop.
  *
  * This is an explicit list because the plugin migration contract
  * (`PluginSchemaMigration` = `{ version, sql }`, projected verbatim into
@@ -151,15 +121,6 @@ const pluginMigrationOwnedColumns: {
       "override_fields",
       "update_available_version",
     ],
-  },
-  {
-    // The tenant's own organization Relation, linked by a core migration
-    // after the generated step (it points at a generated table, so it cannot
-    // be part of the manifest that creates that table).
-    plugin: "core",
-    migration: "organization-relation-link",
-    tables: ["platform.tenants"],
-    columns: ["relation_id"],
   },
 ];
 
@@ -198,6 +159,9 @@ const informationSchemaDataType: Record<string, string> = {
   numeric: "numeric",
   boolean: "boolean",
   date: "date",
+  // information_schema reports every array column as ARRAY; the element type
+  // is not compared, which is exact for the one array type the manifest has.
+  "text[]": "ARRAY",
 };
 
 async function readGeneratedSchemaSql() {
@@ -523,8 +487,7 @@ export type ManifestSchemaDiff = {
  * - DB column absent from the manifest (unless a plugin schema migration
  *   owns it — see nonManifestManagedColumns);
  * - column type, nullability, identity, or (manifest-declared) default mismatch;
- * - DB table (in a covered schema, not in nonManifestManagedTables) absent
- *   from the manifest;
+ * - DB table in a covered schema absent from the manifest;
  * - manifest column type with no known information_schema mapping.
  *
  * Row-count probes honor RLS: the migration role is expected to be the
@@ -704,10 +667,7 @@ export async function diffManifestAgainstDatabase(
 
   const manifestTableNames = new Set(tables.map((table) => table.name));
   for (const tableName of liveTableNames) {
-    if (
-      !manifestTableNames.has(tableName) &&
-      !nonManifestManagedTables.has(tableName)
-    ) {
+    if (!manifestTableNames.has(tableName)) {
       nonAdditive.push(
         `${tableName}: table exists in the database but is not in the generated manifest`,
       );
@@ -733,17 +693,31 @@ function nonAdditiveDriftError(
   );
 }
 
-export async function applyGeneratedSchemaMigration(
+/**
+ * The generated-schema ledger row, or undefined on a database that has never
+ * been migrated. platform.schema_migrations is itself a manifest table, so on
+ * an empty database it does not exist until schema.sql runs below — probed
+ * rather than pre-created, so the manifest stays its only declaration.
+ */
+async function readRecordedChecksum(
   db: OpenShapeForgeDatabase,
-  appliedBy = "apps/api",
-): Promise<GeneratedSchemaMigrationResult> {
-  await ensureSchemaMigrationsTable(db);
-
-  const existing = await db
+): Promise<{ checksum: string } | undefined> {
+  const ledger = await sql<{ present: boolean }>`
+    select to_regclass('platform.schema_migrations') is not null as present
+  `.execute(db);
+  if (!ledger.rows[0]?.present) return undefined;
+  return db
     .selectFrom("platform.schema_migrations")
     .select(["checksum"])
     .where("version", "=", generatedSchemaMigrationVersion)
     .executeTakeFirst();
+}
+
+export async function applyGeneratedSchemaMigration(
+  db: OpenShapeForgeDatabase,
+  appliedBy = "apps/api",
+): Promise<GeneratedSchemaMigrationResult> {
+  const existing = await readRecordedChecksum(db);
 
   if (existing === undefined) {
     // Fresh install: apply the full generated schema and record the checksum.

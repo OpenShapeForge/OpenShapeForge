@@ -27,6 +27,7 @@ import {
   type ManifestColumn,
   type ManifestTable,
 } from "../migrations/generated-schema.js";
+import { findUndeclaredDatabaseSchema } from "../schema-drift.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -210,6 +211,115 @@ describe("generated schema migration", () => {
         expect(second.checksum).toBe(manifest.checksum);
         // On rerun the applied versioned migration is skipped, not reapplied.
         expect(second.versionedApplied).toEqual([]);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a fresh install creates every table from the manifest and nothing beside it",
+    async () => {
+      // The reset-model invariant: one declared source of truth per table.
+      // After the chain, every schema object in a manifest-covered schema is
+      // one the manifest declares (the runtime bookkeeping tables included),
+      // and every declared column matches the live one in type, nullability
+      // and default — so a reset builds exactly what the manifest says and
+      // drift detection has nothing to exempt.
+      await withScratchDb(async (url) => {
+        await runChain(url);
+
+        await withDb(url, async (db) => {
+          expect(await findUndeclaredDatabaseSchema(db)).toEqual({ tables: [], columns: [] });
+          const diff = await diffManifestAgainstDatabase(db);
+          expect(diff.nonAdditive).toEqual([]);
+          expect(diff.missingTables).toEqual([]);
+          expect(diff.missingColumns).toEqual([]);
+
+          // The runtime-owned platform tables that used to be created by
+          // their own migration files now come from platform-schema.yaml,
+          // composite keys and text arrays included.
+          for (const table of [
+            "system_bypass_audit",
+            "identities",
+            "identity_relations",
+            "employee_invitations",
+            "update_notices",
+            "user_update_notices",
+            "operation_execution_receipts",
+            "blueprint_libraries",
+            "blueprint_versions",
+            "blueprint_copies",
+          ]) {
+            expect(await tableExists(db, "platform", table)).toBe(true);
+          }
+          const keys = await sql<{ table: string; columns: string[] }>`
+            select c.conrelid::regclass::text as "table",
+              array_agg(a.attname order by k.ordinality) as columns
+            from pg_constraint c
+            cross join lateral unnest(c.conkey) with ordinality as k(attnum, ordinality)
+            join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum
+            where c.contype = 'p'
+              and c.conrelid in (
+                'platform.identity_relations'::regclass,
+                'platform.blueprint_versions'::regclass,
+                'platform.operation_execution_receipts'::regclass
+              )
+            group by c.conrelid
+            order by 1
+          `.execute(db);
+          expect(keys.rows).toEqual([
+            { table: "platform.blueprint_versions", columns: ["tenant_id", "entity_name", "blueprint_id", "version"] },
+            { table: "platform.identity_relations", columns: ["identity_id", "tenant_id"] },
+            {
+              table: "platform.operation_execution_receipts",
+              columns: ["tenant_id", "actor_id", "operation_id", "operation_intent", "key_hash"],
+            },
+          ]);
+          expect(await columnExists(db, "platform", "identity_relations", "onboarding_guides_read")).toBe(true);
+          expect(await columnExists(db, "platform", "tenants", "relation_id")).toBe(true);
+
+          // What the migration files still own: the invariants the manifest
+          // cannot express, present after the chain and idempotent on rerun.
+          const invariants = await sql<{ name: string }>`
+            select conname as name from pg_constraint
+            where conname in (
+              'identity_relations_status_shape',
+              'employee_invitations_status_shape',
+              'operation_execution_receipts_state_shape',
+              'blueprint_copies_source_version_fkey',
+              'tenants_relation_id_fkey',
+              'identity_relations_relation_id_fkey'
+            )
+            order by 1
+          `.execute(db);
+          expect(invariants.rows.map((row) => row.name)).toEqual([
+            "blueprint_copies_source_version_fkey",
+            "employee_invitations_status_shape",
+            "identity_relations_relation_id_fkey",
+            "identity_relations_status_shape",
+            "operation_execution_receipts_state_shape",
+            "tenants_relation_id_fkey",
+          ]);
+          const policies = await sql<{ policyname: string }>`
+            select policyname from pg_policies
+            where schemaname = 'platform'
+              and policyname in (
+                'identities_visibility',
+                'identity_relations_tenant_isolation',
+                'employee_invitations_tenant_isolation',
+                'update_notices_readable',
+                'user_update_notices_tenant_isolation',
+                'operation_execution_receipts_actor_scope',
+                'blueprint_versions_publish',
+                'tenants_relation_link_write'
+              )
+          `.execute(db);
+          expect(policies.rows).toHaveLength(8);
+        });
+
+        // Rerunning the chain re-applies every invariant without complaint.
+        const again = await runChain(url);
+        expect(again.applied).toBe(false);
       });
     },
     TEST_TIMEOUT,

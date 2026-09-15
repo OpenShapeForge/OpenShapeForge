@@ -21,10 +21,7 @@
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "./connection.js";
-import {
-  isNonManifestManagedColumn,
-  nonManifestManagedTables,
-} from "./migrations/generated-schema.js";
+import { isNonManifestManagedColumn } from "./migrations/generated-schema.js";
 
 /** Version key of the generated-schema row in platform.schema_migrations. */
 export const GENERATED_SCHEMA_MIGRATION_VERSION = "0001_generated_platform_schema";
@@ -132,10 +129,10 @@ export type UndeclaredSchemaManifestTable = {
  * correctly, and rerunning it will keep refusing.
  *
  * Only schemas the manifest covers are examined, so unrelated schemas on the
- * same database are never mistaken for drift. `nonManifestManagedTables` and
- * `nonManifestManagedColumns` are exempt for the same reason the migrator
- * exempts them: those tables and columns come from dedicated (core or plugin)
- * migrations, not from the manifest.
+ * same database are never mistaken for drift. `nonManifestManagedColumns` are
+ * exempt for the same reason the migrator exempts them: those columns come
+ * from a plugin's own schema migration, not from the manifest. Every TABLE is
+ * manifest-declared, so a table has no such exemption.
  *
  * Two catalog queries, no row probes; safe to run as the restricted runtime
  * role. A missing schema is not an error here — information_schema simply
@@ -185,7 +182,7 @@ export async function findUndeclaredDatabaseSchema(
   const tables: string[] = [];
   for (const row of liveTables) {
     const name = `${row.table_schema}.${row.table_name}`;
-    if (!declaredColumnsByTable.has(name) && !nonManifestManagedTables.has(name)) {
+    if (!declaredColumnsByTable.has(name)) {
       tables.push(name);
     }
   }
@@ -195,7 +192,7 @@ export async function findUndeclaredDatabaseSchema(
     const name = `${row.table_schema}.${row.table_name}`;
     // Columns of an undeclared table are already covered by the table entry.
     const declared = declaredColumnsByTable.get(name);
-    if (declared === undefined || nonManifestManagedTables.has(name)) {
+    if (declared === undefined) {
       continue;
     }
     if (

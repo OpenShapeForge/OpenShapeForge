@@ -7,13 +7,15 @@ import {
   assertOperationRuntimeModules,
   buildStaticOperationCatalog,
   collectAuthoredEntityPluginOperations,
+  collectAuthoredModulePluginOperations,
   collectPluginOperations,
   collectEntityOperations,
+  CORE_OPERATION_MODULES,
   operationOpenApiPaths,
   renderOperationCatalog,
 } from "./generate-operations.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
-import type { CompiledEntityOperation } from "./authoring/types.js";
+import type { CompiledEntityOperation, OperationCatalogDefinition } from "./authoring/types.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const operation: PluginOperationContract = {
@@ -1164,5 +1166,224 @@ describe("first-class plugin operations", () => {
     manifest.tables[0]!.source!.graphql!.createMutationName = "createQuote";
     if (collected[0]!.transports.mcp.enabled) collected[0]!.transports.mcp.name = "demo_publish_create";
     expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).toThrow(/MCP tool/);
+  });
+});
+
+/**
+ * A slice of the platform's own administration catalog: one read that lands
+ * on its page, one read with a path parameter, one acknowledged write.
+ */
+const controlCatalog: OperationCatalogDefinition = {
+  schemaVersion: 1,
+  kind: "operationCatalog",
+  plugin: "osf-control",
+  operations: {
+    listTenants: {
+      id: "control.list-tenants",
+      name: { en: "Tenants", nl: "Tenants" },
+      description: { en: "Every tenant of the deployment.", nl: "Alle tenants van deze omgeving." },
+      implementation: { type: "plugin", plugin: "osf-control", handler: "listTenants" },
+      input: { schema: { type: "object", additionalProperties: false } },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "read", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "none" },
+    },
+    getTenant: {
+      id: "control.get-tenant",
+      name: { en: "Get tenant", nl: "Tenant opvragen" },
+      description: { en: "One tenant by slug.", nl: "Eén tenant op slug." },
+      implementation: { type: "plugin", plugin: "osf-control", handler: "getTenant" },
+      input: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug"],
+          properties: { slug: { type: "string", pattern: "^[a-z][a-z0-9-]*$" } },
+        },
+      },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [{ status: 404, code: "NOT_FOUND", description: "The tenant does not exist." }],
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "read", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "none" },
+    },
+    updateTenant: {
+      id: "control.update-tenant",
+      name: { en: "Update tenant", nl: "Tenant wijzigen" },
+      description: { en: "Renames one tenant.", nl: "Hernoemt één tenant." },
+      implementation: { type: "plugin", plugin: "osf-control", handler: "updateTenant" },
+      input: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["slug"],
+          properties: {
+            slug: { type: "string", pattern: "^[a-z][a-z0-9-]*$" },
+            name: { type: "string", minLength: 1 },
+          },
+        },
+      },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "control", roles: ["platform-operator"] },
+      tenancy: { mode: "none" },
+      effects: { data: "write", external: "write" },
+      reliability: { idempotency: { mode: "natural" } },
+      confirmation: { mode: "acknowledgement" },
+    },
+  },
+  interfaces: {
+    rest: {
+      operations: {
+        listTenants: { method: "GET", path: "/api/control/v1/tenants", response: { status: 200, kind: "json" } },
+        getTenant: { method: "GET", path: "/api/control/v1/tenants/:slug", response: { status: 200, kind: "json" } },
+        updateTenant: { method: "PATCH", path: "/api/control/v1/tenants/:slug", response: { status: 200, kind: "json" } },
+      },
+    },
+    mcp: {
+      operations: {
+        listTenants: { name: "list_tenants" },
+        getTenant: { name: "get_tenant" },
+        updateTenant: { name: "update_tenant" },
+      },
+    },
+    web: {
+      pages: { tenants: { title: { en: "Tenants", nl: "Tenants" }, icon: "buildings", order: 1 } },
+      operations: {
+        listTenants: { page: "tenants", order: 0, landing: true },
+        getTenant: { page: "tenants", order: 1 },
+        updateTenant: { page: "tenants", order: 2 },
+      },
+    },
+  },
+};
+
+describe("control-realm operation catalogs", () => {
+  const lowered = () => collectAuthoredModulePluginOperations([controlCatalog], context);
+  const listTenantsOnly = (
+    overrides: Partial<OperationCatalogDefinition["operations"][string]> = {},
+    interfaces: Partial<OperationCatalogDefinition["interfaces"]> = {},
+  ): OperationCatalogDefinition => ({
+    ...controlCatalog,
+    operations: { listTenants: { ...controlCatalog.operations.listTenants!, ...overrides } },
+    interfaces: {
+      rest: { operations: { listTenants: controlCatalog.interfaces.rest!.operations!.listTenants! } },
+      ...interfaces,
+    },
+  });
+
+  test("lowers the catalog to core-module contracts the runtime binds without a plugin", () => {
+    const operations = lowered();
+    expect(operations.map((operation) => operation.key)).toEqual([
+      "control.get-tenant",
+      "control.list-tenants",
+      "control.update-tenant",
+    ]);
+    const list = operations.find((operation) => operation.key === "control.list-tenants")!;
+    expect(list).toMatchObject({
+      id: "control.list-tenants",
+      plugin: "osf-control",
+      handler: "listTenants",
+      intent: "invoke",
+      auth: { mode: "control", roles: ["platform_admin", "platform-operator"] },
+      tenancy: { mode: "none" },
+      idempotency: { mode: "intrinsic" },
+      transports: {
+        rest: { method: "GET", path: "/api/control/v1/tenants", response: { status: 200, kind: "json" } },
+        mcp: { enabled: true, name: "list_tenants" },
+        graphql: { enabled: false },
+        typescript: { enabled: true, functionName: "controlListTenants" },
+      },
+    });
+    expect((list.transports.graphql as { reason?: string }).reason)
+      .toMatch(/does not project this Operation to GraphQL/);
+    // The acknowledgement control is derived once, here, for every transport.
+    const update = operations.find((operation) => operation.key === "control.update-tenant")!;
+    expect(Object.keys(update.inputSchema.properties as object)).toEqual(["slug", "name", "confirmed"]);
+    expect(() => assertOperationRuntimeModules(operations, CORE_OPERATION_MODULES)).not.toThrow();
+    expect(() => assertOperationRuntimeModules(operations, ["osf-blueprints"]))
+      .toThrow(/not registered: osf-control/);
+  });
+
+  test("reserves the control namespace for the core control module alone", () => {
+    const squatter: OperationCatalogDefinition = {
+      ...listTenantsOnly({ implementation: { type: "plugin", plugin: "acme", handler: "listTenants" } }),
+      plugin: "acme",
+    };
+    expect(() => collectAuthoredModulePluginOperations([squatter], context))
+      .toThrow(/reserved API namespace "control"/);
+  });
+
+  test("refuses control auth with a tenant context or a GraphQL projection", () => {
+    expect(() => collectAuthoredModulePluginOperations(
+      [listTenantsOnly({ tenancy: { mode: "required" } })],
+      context,
+    )).toThrow(/control auth requires tenancy mode none/);
+    expect(() => collectAuthoredModulePluginOperations(
+      [listTenantsOnly({}, { graphql: { operations: { listTenants: { kind: "query", field: "controlListTenants" } } } })],
+      context,
+    )).toThrow(/control auth can only project to REST and the control MCP server/);
+  });
+
+  test("keeps control MCP tools off the tenant server's budget and name space", () => {
+    const operations = lowered();
+    const emptyManifest: PlatformSchemaManifest = { version: 1, tables: [] };
+    const tenantTwin: CompiledPluginOperation = {
+      ...operation,
+      plugin: "demo",
+      id: operation.key,
+      intent: "invoke",
+      transports: { ...operation.transports, mcp: { enabled: true, name: "list_tenants" } },
+    };
+    // Three control tools and one tenant tool against a budget of one: the
+    // tenant projection stays dedicated because only the tenant tool counts,
+    // and the shared spelling "list_tenants" is no collision across servers.
+    expect(auditOperationSurfaceCollisions([...operations, tenantTwin], emptyManifest, [], 1))
+      .toBe("dedicated");
+    const control = operations.find((candidate) => candidate.key === "control.list-tenants")!;
+    const duplicate: CompiledPluginOperation = {
+      ...control,
+      key: "control.other",
+      id: "control.other",
+      transports: {
+        ...control.transports,
+        rest: { method: "GET", path: "/api/control/v1/other", response: { status: 200, kind: "json" } },
+      },
+    };
+    expect(() => auditOperationSurfaceCollisions([...operations, duplicate], emptyManifest, [], 60))
+      .toThrow(/control MCP tool "list_tenants" is claimed by both/);
+  });
+
+  test("projects control Operations to OpenAPI under their own bearer with the canonical id", () => {
+    const paths = operationOpenApiPaths(lowered()) as Record<string, Record<string, Record<string, unknown>>>;
+    const body = (method: Record<string, unknown>) =>
+      (method.requestBody as { content: Record<string, { schema: { properties: object; required?: string[] } }> })
+        .content["application/json"]!.schema;
+    expect(paths["/api/control/v1/tenants/{slug}"]!.get).toMatchObject({
+      operationId: "control.get-tenant",
+      "x-osf-operation-id": "control.get-tenant",
+      security: [{ controlBearerAuth: [] }],
+      parameters: [{ name: "slug", in: "path", required: true }],
+    });
+    // The path parameter leaves the body; the acknowledgement control stays.
+    const patch = paths["/api/control/v1/tenants/{slug}"]!.patch!;
+    expect(Object.keys(body(patch).properties)).toEqual(["name", "confirmed"]);
+    expect(body(patch).required).toBeUndefined();
+    // Every plugin Operation carries the id the web REST map keys on, not
+    // only control ones.
+    const demo = operationOpenApiPaths(
+      collectPluginOperations([{ name: "demo", operations: [operation] }], context),
+    ) as Record<string, Record<string, Record<string, unknown>>>;
+    expect(demo["/api/demo/quotes/{quoteId}/publish"]!.post)
+      .toHaveProperty("x-osf-operation-id", "demo.quote.publish");
+    const spec = JSON.parse(renderOpenApiSpec({ version: 1, tables: [] }, "fixture", { operations: lowered() }));
+    expect(spec.components.securitySchemes.controlBearerAuth).toMatchObject({ type: "http", scheme: "bearer" });
+    expect(spec.paths["/api/control/v1/tenants"].get.security).toEqual([{ controlBearerAuth: [] }]);
   });
 });

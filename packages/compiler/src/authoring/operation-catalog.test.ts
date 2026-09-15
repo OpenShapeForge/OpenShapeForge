@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadOperationCatalogs } from "./operation-catalog.js";
+import { loadOperationCatalogs, moduleOperationId } from "./operation-catalog.js";
 
 const roots: string[] = [];
 
@@ -94,5 +94,134 @@ describe("module Operation catalog authoring", () => {
         "implementation: { type: plugin, plugin: example, handler: guide, action: create }",
       ),
     ))).toThrow(/must NOT be valid|cannot claim entity CRUD action/);
+  });
+});
+
+const controlCatalog = `
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-control
+operations:
+  listTenants:
+    id: control.list-tenants
+    name: { en: Tenants, nl: Tenants }
+    description: { en: Every tenant of the deployment., nl: Alle tenants van deze omgeving. }
+    implementation: { type: plugin, plugin: osf-control, handler: listTenants }
+    input: { schema: { type: object, additionalProperties: false } }
+    output: { schema: { type: object, additionalProperties: true } }
+    errors: []
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  whoami:
+    id: control.whoami
+    name: { en: Who am I, nl: Wie ben ik }
+    description: { en: The signed-in operator., nl: De aangemelde beheerder. }
+    implementation: { type: plugin, plugin: osf-control, handler: whoami }
+    input: { schema: { type: object, additionalProperties: false } }
+    output: { schema: { type: object, additionalProperties: true } }
+    errors: []
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  createTenant:
+    id: control.create-tenant
+    name: { en: Create tenant, nl: Tenant aanmaken }
+    description: { en: Creates one tenant., nl: Maakt één tenant aan. }
+    implementation: { type: plugin, plugin: osf-control, handler: createTenant }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [slug]
+        properties:
+          slug: { type: string }
+    output: { schema: { type: object, additionalProperties: true } }
+    errors: []
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+interfaces:
+  rest:
+    operations:
+      listTenants: { method: GET, path: /api/control/v1/tenants, response: { status: 200, kind: json } }
+      whoami: { method: GET, path: /api/control/v1/whoami, response: { status: 200, kind: json } }
+      createTenant: { method: POST, path: /api/control/v1/tenants, response: { status: 201, kind: json } }
+  mcp:
+    operations:
+      listTenants: { name: list_tenants }
+      whoami: { name: whoami }
+      createTenant: { name: create_tenant }
+  web:
+    pages:
+      tenants: { title: { en: Tenants, nl: Tenants }, icon: buildings, order: 1 }
+    operations:
+      listTenants: { page: tenants, order: 0, landing: true }
+      createTenant: { page: tenants, order: 1 }
+      whoami: { page: tenants, order: 2 }
+`;
+
+describe("control-realm operation catalogs with web pages", () => {
+  test("loads control auth, tenancy none and the page placement", () => {
+    const [loaded] = loadOperationCatalogs(authoringRoot(controlCatalog));
+    const document = loaded!.document;
+    expect(document.operations.listTenants).toMatchObject({
+      auth: { mode: "control", roles: ["platform-operator"] },
+      tenancy: { mode: "none" },
+    });
+    expect(document.interfaces.web).toEqual({
+      pages: { tenants: { title: { en: "Tenants", nl: "Tenants" }, icon: "buildings", order: 1 } },
+      operations: {
+        listTenants: { page: "tenants", order: 0, landing: true },
+        createTenant: { page: "tenants", order: 1 },
+        whoami: { page: "tenants", order: 2 },
+      },
+    });
+    expect(moduleOperationId(document, "listTenants", document.operations.listTenants!))
+      .toBe("control.list-tenants");
+    expect(moduleOperationId({ plugin: "osf-control" }, "listTenants", {}))
+      .toBe("osf-control.listTenants");
+  });
+
+  test("refuses control auth that still asks for a tenant", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "auth: { mode: control, roles: [platform-operator] }\n    tenancy: { mode: none }",
+      "auth: { mode: control, roles: [platform-operator] }\n    tenancy: { mode: required }",
+    )))).toThrow(/control auth and so must declare tenancy mode none/);
+  });
+
+  test("refuses a placement that names no operation or no page", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "createTenant: { page: tenants, order: 1 }",
+      "deleteTenant: { page: tenants, order: 1 }",
+    )))).toThrow(/places unknown operation "deleteTenant"/);
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "createTenant: { page: tenants, order: 1 }",
+      "createTenant: { page: billing, order: 1 }",
+    )))).toThrow(/on unknown page "billing"/);
+  });
+
+  test("lets only one read-without-input operation land on a page", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "createTenant: { page: tenants, order: 1 }",
+      "createTenant: { page: tenants, order: 1, landing: true }",
+    )))).toThrow(/landing operation "createTenant" must be a read operation without required input/);
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "whoami: { page: tenants, order: 2 }",
+      "whoami: { page: tenants, order: 2, landing: true }",
+    )))).toThrow(/two landing operations \("listTenants" and "whoami"\)/);
+  });
+
+  test("refuses a page nobody places an operation on", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(controlCatalog.replace(
+      "tenants: { title: { en: Tenants, nl: Tenants }, icon: buildings, order: 1 }",
+      "tenants: { title: { en: Tenants, nl: Tenants }, icon: buildings, order: 1 }\n      billing: { title: { en: Billing, nl: Facturatie } }",
+    )))).toThrow(/page "billing" has no operations/);
   });
 });

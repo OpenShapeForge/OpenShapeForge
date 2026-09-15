@@ -1197,6 +1197,24 @@ export const SEARCHABLE_OPERATION_TOOL_NAMES = {
 
 export type McpOperationToolProjection = "dedicated" | "searchable";
 
+export type McpOperationServer = "tenant" | "control";
+
+/**
+ * Which MCP server advertises an Operation. A control-realm Operation
+ * (`auth.mode: control`) is served by the control server behind the control
+ * realm's own bearer and never by the tenant server, so it neither counts
+ * against the tenant server's dedicated-tool budget nor shares its tool-name
+ * space: a control tool may spell the same name as a tenant tool because no
+ * client is ever shown both lists. `operationTools` still carries both kinds,
+ * each tagged by its `auth.mode`, so one generated catalog feeds both servers
+ * and each filters to its own.
+ */
+export function operationMcpServer(
+  operation: Pick<CompiledPluginOperation, "auth">,
+): McpOperationServer {
+  return operation.auth.mode === "control" ? "control" : "tenant";
+}
+
 /**
  * Keep the fixed dedicated budget while retaining every canonical Operation.
  * Entity/connector tools cannot be collapsed here; static Operations can use
@@ -2001,9 +2019,12 @@ export function buildMcpCatalog(
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));
+  // The projection decides how the TENANT server lists its Operations; the
+  // control server lists its own dedicated tools regardless, so control
+  // Operations are excluded from the count (see operationMcpServer).
   const locallyRequiredProjection = selectOperationToolProjection(
     dedicatedCount,
-    operationTools.length,
+    operationTools.filter((tool) => operationMcpServer(tool) === "tenant").length,
   );
   const operationToolProjection =
     locallyRequiredProjection === "searchable" ||

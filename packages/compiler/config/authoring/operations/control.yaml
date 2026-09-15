@@ -533,6 +533,141 @@ operations:
     confirmation:
       mode: acknowledgement
     errors: *id002
+  listTenantInvitations:
+    id: control.list-tenant-invitations
+    name:
+      en: List tenant invitations
+      nl: Tenantuitnodigingen bekijken
+    description:
+      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry and any pending local role assignments missing at the provider. Never returns invitation links.
+      nl: Toont de openstaande Keycloak-uitnodigingen voor één tenant met hun opgeslagen rollen, verzenddata, vervaldatum en lokale roltoekenningen die bij de provider ontbreken. Geeft nooit uitnodigingslinks terug.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listTenantInvitations
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+        required:
+        - slug
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: read
+      external: read
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  revokeTenantInvitation:
+    id: control.revoke-tenant-invitation
+    name:
+      en: Revoke tenant invitation
+      nl: Tenantuitnodiging intrekken
+    description:
+      en: Revokes one currently outstanding invitation selected from List tenant invitations. Invalidates the delivered link and cancels its pending role assignment without removing an accepted member.
+      nl: Trekt één actuele uitnodiging uit Tenantuitnodigingen bekijken in. Maakt de verzonden link ongeldig en annuleert de openstaande roltoekenning zonder een geaccepteerd lid te verwijderen.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: revokeTenantInvitation
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId:
+            type: string
+            pattern: ^[a-zA-Z0-9_-]{1,128}$
+            description: Opaque invitationId returned by List tenant invitations.
+            x-osf-i18n:
+              title:
+                en: Invitation ID
+                nl: Uitnodigings-ID
+        required:
+        - slug
+        - invitationId
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: write
+      external: write
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  resendTenantInvitation:
+    id: control.resend-tenant-invitation
+    name:
+      en: Resend tenant invitation
+      nl: Tenantuitnodiging opnieuw versturen
+    description:
+      en: Explicitly resends one currently outstanding invitation selected from List tenant invitations, preserving its recipient and pending role. Never retries automatically after an uncertain mail response.
+      nl: Verstuurt één actuele uitnodiging uit Tenantuitnodigingen bekijken expliciet opnieuw met behoud van ontvanger en openstaande rol. Probeert na een onzekere mailrespons nooit automatisch opnieuw.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: resendTenantInvitation
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId:
+            type: string
+            pattern: ^[a-zA-Z0-9_-]{1,128}$
+            description: Opaque invitationId returned by List tenant invitations.
+            x-osf-i18n:
+              title:
+                en: Invitation ID
+                nl: Uitnodigings-ID
+        required:
+        - slug
+        - invitationId
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: write
+      external: write
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
   getTenantOrganizationTree:
     id: control.get-tenant-organization-tree
     name:
@@ -1358,6 +1493,24 @@ interfaces:
         response:
           status: 200
           kind: json
+      listTenantInvitations:
+        method: GET
+        path: /api/control/v1/tenants/:slug/invitations
+        response:
+          status: 200
+          kind: json
+      revokeTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId/revoke
+        response:
+          status: 200
+          kind: json
+      resendTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId/resend
+        response:
+          status: 200
+          kind: json
       getTenantOrganizationTree:
         method: GET
         path: /api/control/v1/tenants/:slug/organizations
@@ -1462,6 +1615,12 @@ interfaces:
         name: assign_blueprint_library
       inviteFirstTenantAdmin:
         name: invite_first_tenant_admin
+      listTenantInvitations:
+        name: list_tenant_invitations
+      revokeTenantInvitation:
+        name: revoke_tenant_invitation
+      resendTenantInvitation:
+        name: resend_tenant_invitation
       getTenantOrganizationTree:
         name: get_tenant_organization_tree
       createTenantOrganization:
@@ -1548,6 +1707,15 @@ interfaces:
       inviteFirstTenantAdmin:
         page: tenants
         order: 6
+      listTenantInvitations:
+        page: tenants
+        order: 7
+      revokeTenantInvitation:
+        page: tenants
+        order: 8
+      resendTenantInvitation:
+        page: tenants
+        order: 9
       getTenantOrganizationTree:
         page: organizations
         order: 0

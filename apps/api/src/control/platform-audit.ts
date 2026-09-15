@@ -71,6 +71,9 @@ function decodeCursor(value: string): AuditCursor {
 const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = Object.fromEntries(
   ([
     ["control.invite-first-tenant-admin", "invite_first_tenant_admin", /^[a-z][a-z0-9-]*$/],
+    ["control.list-tenant-invitations", "list_tenant_invitations", /^[a-z][a-z0-9-]*$/],
+    ["control.revoke-tenant-invitation", "revoke_tenant_invitation", /^[a-z][a-z0-9-]*$/],
+    ["control.resend-tenant-invitation", "resend_tenant_invitation", /^[a-z][a-z0-9-]*$/],
     ["control.list-tenants", "list_tenants", null],
     ["control.get-tenant", "get_tenant", /^slug="[a-z][a-z0-9-]*"$/],
     [

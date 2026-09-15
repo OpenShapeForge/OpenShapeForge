@@ -40,7 +40,9 @@ export const PLATFORM_SERVER_INSTRUCTIONS =
   "calling it. Inspect tenant and organization state before mutating it, and inspect " +
   "get_reconciliation_report before reapplying drift. When offered, use invite_first_tenant_admin " +
   "to invite the first organization " +
-  "administrator for one existing tenant by email; this never makes you a tenant member.";
+  "administrator for one existing tenant by email; this never makes you a tenant member. " +
+  "Use list_tenant_invitations to inspect outstanding invitations, " +
+  "revoke_tenant_invitation to withdraw one, and resend_tenant_invitation only for an explicit resend.";
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 
@@ -60,7 +62,7 @@ export const PLATFORM_GUIDE = [
   "When update_tenant is offered, use it for display-name or lifecycle changes. Suspending or deactivating a tenant disables its root Organization and can interrupt access; confirm that consequence first. Use get_tenant_organization_tree before creating or moving a sub-organization, and pass only its opaque org-unit ids — never invent or accept a Keycloak Organization id.",
   "Use get_reconciliation_report to compare the authoritative registry with Keycloak. When reapply_reconciliation is offered, it pushes repairable registry state into Keycloak for one tenant or every affected tenant; it never deletes an unclaimed Organization. Confirm an all-tenant run first.",
   "",
-  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
+  "When invite_first_tenant_admin is offered, use it for an existing tenant without an organization administrator after confirming the exact slug and recipient email. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Use list_tenant_invitations to inspect current provider state. Revoke only an invitation id from that list; this invalidates the delivered link but never removes an accepted member. Resend only after explicit confirmation and never retry automatically after an uncertain response. Once an administrator exists, use that tenant administrator's invite_employee workflow. The control-realm user stays outside the tenant.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",

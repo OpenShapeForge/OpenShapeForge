@@ -82,6 +82,11 @@ describe("the control MCP tool list", () => {
       expect(retireCatalogEntry.inputSchema.properties).toHaveProperty("confirmed");
       expect((retireCatalogEntry.inputSchema as { required?: string[] }).required).toEqual(["kind", "key"]);
       expect(listed.tools.map((tool) => tool.name)).not.toContain("update_tenant");
+      expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "list_tenant_invitations",
+        "revoke_tenant_invitation",
+        "resend_tenant_invitation",
+      ]));
       expect(listed.tools.find((tool) => tool.name === "list_tenants")!.inputSchema.properties).not.toHaveProperty("confirmed");
       expect(listed.tools.find((tool) => tool.name === "retire_catalog_entry")!.annotations).toMatchObject({
         readOnlyHint: false, idempotentHint: false,
@@ -116,6 +121,24 @@ describe("the control MCP tool list", () => {
 });
 
 describe("calling a control tool", () => {
+  test("lists and dispatches invitation administration from the same session registry", async () => {
+    const { client, close } = await connect(controlSessionFor(administrator, ["platform_admin"]));
+    try {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).toContain("list_tenant_invitations");
+      const result = await client.callTool({
+        name: "list_tenant_invitations",
+        arguments: { slug: "acme" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: { code: "CONTROL_PLANE_NOT_CONFIGURED", detail: "INVITATIONS_NOT_CONFIGURED" },
+      });
+    } finally {
+      await close();
+    }
+  });
+
   test("goes through the canonical runtime: guide, whoami with the session's own counts, and the platform-session resource", async () => {
     const { client, close } = await connect(controlSessionFor(administrator, ["platform-operator"]));
     try {

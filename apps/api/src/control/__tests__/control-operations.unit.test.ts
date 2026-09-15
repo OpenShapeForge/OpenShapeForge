@@ -85,11 +85,11 @@ async function refusal(
 describe("binding the control catalog", () => {
   it("has exactly one handler per authored handler name, and no extras", () => {
     const authored = controlOperationContracts().map((operation) => operation.handler).sort();
-    expect(authored).toHaveLength(23);
+    expect(authored).toHaveLength(26);
     expect(controlOperationHandlerNames()).toEqual(authored);
   });
 
-  it("binds all 23 in a process without any operation module, as core", () => {
+  it("binds all 26 in a process without any operation module, as core", () => {
     const bound = bindOperationHandlers([], controlOperationContracts());
     expect([...bound.keys()].sort()).toEqual(controlOperationContracts().map((operation) => operation.key).sort());
     expect([...bound.values()].every(({ operation }) => operation.plugin === CONTROL_PLUGIN)).toBe(true);
@@ -160,6 +160,12 @@ describe("what a handler answers without a database", () => {
       status: 503, code: "CONTROL_PLANE_NOT_CONFIGURED", detail: "INVITATIONS_NOT_CONFIGURED",
     });
     expect(await refusal("inviteFirstTenantAdmin", { slug: "acme", email: "invalid" })).toMatchObject({
+      status: 400, code: "VALIDATION", detail: "INVALID_INPUT",
+    });
+    expect(await refusal("listTenantInvitations", { slug: "acme" })).toMatchObject({
+      status: 503, code: "CONTROL_PLANE_NOT_CONFIGURED", detail: "INVITATIONS_NOT_CONFIGURED",
+    });
+    expect(await refusal("revokeTenantInvitation", { slug: "acme", invitationId: "../foreign" })).toMatchObject({
       status: 400, code: "VALIDATION", detail: "INVALID_INPUT",
     });
   });

@@ -55,7 +55,7 @@ function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => 
     for (const [file, value] of Object.entries({ "catalogs/components.yaml": { defaults: {}, components: {}, viewDefaults: {} }, "catalogs/transforms.yaml": { transforms: {} }, "catalogs/semantic-types.yaml": { types: { entityValue: { kind: "object", valueType: "object" } } }, "entities/owner.yaml": owner, "entities/child.yaml": child, ...Object.fromEntries(extra.map((entity) => [`entities/${entity.entity.toLowerCase()}.yaml`, entity])) })) {
       writeFileSync(join(dir, file), JSON.stringify(value));
     }
-    compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], generatedCrudAllowlist: ["owner", "child"], onCandidate: (candidate) => entries.push(candidate as CompiledEntityInfo) });
+    compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], generatedCrudAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], onCandidate: (candidate) => entries.push(candidate as CompiledEntityInfo) });
     return entries;
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
@@ -114,6 +114,36 @@ test("binds Web relationship insert/move by field and advertises atomic only for
   const hidden = fixture();
   for (const entry of hidden) for (const operation of entry.contract.pluginOperations ?? []) operation.interfaces.web = false;
   expect(buildWebManifest(hidden).entities.Owner!.relationships.children).toMatchObject({ mutationSupport: "unsupported" });
+});
+
+test("materializes one atomic create Operation for a reference with a hasMany constraint", () => {
+  const membership = entity("Membership", [
+    { key: "child", semanticType: "Child", required: true },
+    { key: "groupId", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
+  ]);
+  const groupId = "10000000-0000-4000-8000-000000000099";
+  const entries = fixture((owner, child) => {
+    owner.fields.push({
+      key: "primaryChild", semanticType: "Child", required: true,
+      relationship: { constraints: { kind: { eq: "primary" }, memberships: { any: { groupId: { eq: groupId } } } } },
+    });
+    child.fields.push(
+      { key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } },
+      { key: "memberships", semanticType: "Membership", cardinality: "collection", relationship: { inverse: "child" } },
+    );
+  }, [membership]);
+  const operation = compile(entries).find(item => item.id === "core.Owner.primaryChild.create-constrained-reference")!;
+  expect(operation).toMatchObject({
+    plugin: "core", handler: "constrainedReferenceCreate", intent: "invoke",
+    implementation: {
+      type: "constrained-reference-create", targetEntityName: "Child", collectionEntityName: "Membership",
+      parentField: "child", targetValues: { kind: "primary" }, childValues: { groupId },
+    },
+  });
+  expect(buildWebManifest(entries).entities.Owner!.fields.primaryChild!.relationship).toMatchObject({
+    targetEntityId: "Child",
+    createOperation: { id: operation.id, intent: "invoke" },
+  });
 });
 
 test("refuses spoofed native metadata and a cloned native Operation without compiler provenance", () => {

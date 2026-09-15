@@ -44,6 +44,12 @@ import {
   assertRecordPermissionInTransaction,
   assertUpdateRecordPermissions,
 } from "./record-permissions.js";
+import {
+  derivedOnCreateColumn,
+  derivedSlugCandidate,
+  maxDerivedIdentifierAttempts,
+} from "./derive-on-create.js";
+import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -212,8 +218,9 @@ async function insertGeneratedRowInTransaction(
   entityValues: EntityValueIOContext = {},
 ): Promise<GeneratedEntityRow> {
   const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "create", undefined, entityValues);
-  const columns = [...prepared.keys()];
-  const sqlValues = [...prepared.values()];
+  await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
+  const derivedColumn = derivedOnCreateColumn(table);
+  const derivation = derivedColumn?.deriveOnCreate;
   const tenantColumn = table.columns.find((column) => column.name === "tenant_id");
   if (table.tenantScoped && tenantColumn) {
     columns.push(tenantColumn);
@@ -342,6 +349,7 @@ async function applyGeneratedRowUpdate(
       : sql``;
 
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
+    await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
     if (updatedAt) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
 

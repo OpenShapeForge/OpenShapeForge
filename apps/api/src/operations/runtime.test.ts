@@ -312,6 +312,7 @@ describe("canonical operation runtime", () => {
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
+        operation.implementation?.type === "constrained-reference-create" ||
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control"
       ),

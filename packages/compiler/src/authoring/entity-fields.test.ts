@@ -99,8 +99,9 @@ describe("one relational field contract", () => {
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", semanticType: "referenceItems" }]), types)).toThrow("not IDs inside JSON");
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", semanticType: "recursiveItems" }]), types)).toThrow("cyclic inline");
   });
-  test("does not accept new relation declarations under an old version's weaker guarantees", () => {
-    for (const schemaVersion of [1, 2]) expect(() => normalizeEntityFields({ ...block, schemaVersion }, catalog())).toThrow("require schemaVersion 3");
+  test("accepts canonical relation fields from operation-backed version 2 onward", () => {
+    expect(() => normalizeEntityFields({ ...block, schemaVersion: 1 }, catalog())).toThrow("require schemaVersion 2 or 3");
+    expect(normalizeEntityFields({ ...block, schemaVersion: 2 }, catalog()).fields[0]?.relationship?.target).toBe("Page");
   });
   test("refuses ownership and one-to-one shapes without a canonical physical owner", () => {
     expect(() => normalizeEntityFields(entity("Block", [{ key: "page", semanticType: "Page", relationship: { ownership: "owned" } }]), catalog())).toThrow("single owned");

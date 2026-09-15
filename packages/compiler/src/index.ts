@@ -66,6 +66,7 @@ import {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+import { validateRelationshipConstraints } from "./relationship-constraints.js";
 
 export type {
   FieldDefinition,
@@ -314,6 +315,7 @@ export async function collectAllArtifacts(
   const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
+  validateRelationshipConstraints(entities);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A

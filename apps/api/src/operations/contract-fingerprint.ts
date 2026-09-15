@@ -26,7 +26,9 @@ export function operationContractFingerprint(
     version: 1,
     id: definition.id,
     intent: definition.intent,
-    implementation: definition.implementation?.type === "collection" ? definition.implementation : undefined,
+    implementation: definition.implementation && definition.implementation.type !== "plugin"
+      ? definition.implementation
+      : undefined,
     target: definition.target,
     input: definition.input,
     output: definition.output,

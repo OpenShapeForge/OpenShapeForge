@@ -107,6 +107,12 @@ export type WebFieldOption = {
   label: LocalizedText;
 };
 
+export type WebEqualityConstraint = { eq: string | number | boolean };
+export type WebRelationshipConstraints = Record<
+  string,
+  WebEqualityConstraint | { any: Record<string, WebEqualityConstraint> }
+>;
+
 export type WebFieldOptionSource =
   | { type: "referentiedata"; group: string }
   | { type: "entity"; source: string; valueField: string }
@@ -127,7 +133,12 @@ export type WebFieldProjection = {
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string };
   allowedDefinitions?: string[];
-  relationship?: { targetEntityId: string };
+  relationship?: {
+    targetEntityId: string;
+    constraints?: WebRelationshipConstraints;
+    /** Canonical compound create used when satisfying constraints needs related writes. */
+    createOperation?: OperationReference<"invoke">;
+  };
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
   visibility?: {
@@ -187,6 +198,7 @@ export type WebRelationshipProjection = {
   via?: string;
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
+  constraints?: WebRelationshipConstraints;
   operations: {
     list?: WebOperationRef;
     get?: WebOperationRef;

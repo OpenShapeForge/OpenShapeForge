@@ -406,7 +406,11 @@ function projectField(
       ? { optionSource: { type: field.options.type, source: field.options.remoteUrl ?? field.options.source! } } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
     ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
-    supports: { read: supports.read, create: supports.create && !field.readOnly, update: supports.update && !field.readOnly && !field.immutable },
+    supports: {
+      read: supports.read,
+      create: supports.create && !field.readOnly && !field.deriveOnCreate,
+      update: supports.update && !field.readOnly && !field.immutable && !field.deriveOnCreate,
+    },
   };
 }
 
@@ -440,6 +444,9 @@ function projectEntity(
       ? [contract.entityOperations.create.interaction.secureInput.into]
       : [],
   );
+  for (const field of contract.model.fields) {
+    if (field.deriveOnCreate) serverOwnedFields.add(field.key);
+  }
   for (const relationship of contract.model.relationships) {
     if (relationship.fieldKey && relationship.kind !== "belongsTo") serverOwnedFields.add(relationship.fieldKey);
   }
@@ -459,8 +466,8 @@ function projectEntity(
   const explicitFields = contract.model.fields.map((field) => {
     const projected = projectField(field, entityName, {
         read: true,
-        create: !field.readOnly && createFields.has(field.key),
-        update: !field.readOnly && !field.immutable && updateFields.has(field.key),
+        create: !field.readOnly && !field.deriveOnCreate && createFields.has(field.key),
+        update: !field.readOnly && !field.immutable && !field.deriveOnCreate && updateFields.has(field.key),
     }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
   });

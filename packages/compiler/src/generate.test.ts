@@ -2069,3 +2069,45 @@ describe("writtenBy columns", () => {
     ).toThrow(/no.*compiled operation has that key/i);
   });
 });
+
+describe("deriveOnCreate columns", () => {
+  it("publishes the compiler-resolved source and race-safe conflict target", () => {
+    const source: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "templates",
+        tenantScoped: true,
+        columns: [
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "name", type: "text", required: true, sourceField: "name" },
+          {
+            name: "key",
+            type: "text",
+            required: true,
+            sourceField: "key",
+            deriveOnCreate: {
+              sourceField: "name",
+              sourceColumn: "name",
+              transform: "slug",
+              onConflict: "suffix",
+              conflictColumns: ["tenant_id", "key"],
+              maxLength: 100,
+            },
+          },
+        ],
+      }],
+    };
+    const generated = JSON.parse(
+      generateArtifacts(source).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    expect(generated.tables[0].columns[2].deriveOnCreate).toEqual({
+      sourceField: "name",
+      sourceColumn: "name",
+      transform: "slug",
+      onConflict: "suffix",
+      conflictColumns: ["tenant_id", "key"],
+      maxLength: 100,
+    });
+  });
+});

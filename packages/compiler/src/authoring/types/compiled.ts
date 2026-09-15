@@ -25,6 +25,7 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
+import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
 import type {
   ListColumn,
   ListFilter,
@@ -108,6 +109,8 @@ export interface CompiledField {
    * column, the way `immutable` and `classification` do.
    */
   writtenBy?: string[];
+  /** Persisted server-owned create-time derivation retained for every interface projection. */
+  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;

@@ -34,6 +34,7 @@ import { resolveModelFields } from "./compiler/model.js";
 import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
+import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -1268,6 +1269,25 @@ export function compileAuthoringBackendManifest(
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 
     const compiledIndexes = compileEntityIndexes(candidate, tenantScoped, columnsByField);
+    for (const binding of resolveDerivedOnCreateBindings({
+      entityName: candidate.contract.entity.name,
+      fields: candidate.contract.model.fields,
+      columns: candidate.contract.storage.columns,
+      ...(candidate.contract.entity.indexes
+        ? { indexes: candidate.contract.entity.indexes }
+        : {}),
+      tenantScoped,
+    })) {
+      const target = columnsByField.get(binding.targetField)!;
+      target.deriveOnCreate = {
+        sourceField: binding.sourceField,
+        sourceColumn: binding.sourceColumn,
+        transform: binding.transform,
+        onConflict: binding.onConflict,
+        conflictColumns: binding.conflictColumns,
+        ...(binding.maxLength === undefined ? {} : { maxLength: binding.maxLength }),
+      };
+    }
 
     // Row-level access → rowScope translation (§B.3) + fail-closed guards (§C).
     const rowAccess = candidate.contract.authorization?.rowAccess;

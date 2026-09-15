@@ -178,6 +178,17 @@ Notes on what the compiler does with this:
   a provenance link — `PaymentDetail.relationId` is authored with it, so a
   payment detail cannot be re-pointed at a different relation after the fact
   (#177). The two are independent: a field may be either, both, or neither.
+- **Internal identifiers are derived, not entered.** A persisted required
+  string field can declare
+  `deriveOnCreate: { from: name, transform: slug, onConflict: suffix }`. The
+  field is then absent from create and update inputs in Web, REST, GraphQL and
+  MCP. The API stores the slug once, keeps it stable when the source is later
+  edited, and allocates `name-2`, `name-3`, and so on under the database unique
+  index. Tenant-scoped entities must declare that index as
+  `fields: [tenantId, <derivedField>]`; global entities use only the derived
+  field. The compiler rejects missing sources, non-persisted/non-string fields,
+  and derivations without this race-safe index. Put only fields a person should
+  actually enter in form groups; identifiers and IDs are implementation data.
 - **`tenant_id` is injected automatically** when the entity has an
   `authorization` block (that is what makes it tenant-scoped and gives it an
   RLS policy). `created_at`/`updated_at` are appended automatically when not

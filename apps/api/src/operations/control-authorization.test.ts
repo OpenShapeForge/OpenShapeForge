@@ -88,7 +88,7 @@ describe("requireOperationAuthorization with the control credential", () => {
       },
     });
     const registrations = runtimeStaticOperationRegistrations([], { db }, controlOperationContracts());
-    expect(registrations).toHaveLength(23);
+    expect(registrations).toHaveLength(26);
     const availableTo = (session: TrustedSessionContext) =>
       registrations.filter((registration) => registration.available(session)).map((registration) => registration.definition.id);
     expect(availableTo(admin)).toEqual(

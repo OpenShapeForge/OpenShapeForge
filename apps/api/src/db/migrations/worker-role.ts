@@ -56,8 +56,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * PASSWORD OWNERSHIP
  * ------------------
  * Identical contract to the app role's: operator-owned, read from
- * OPENSHAPEFORGE_WORKER_PASSWORD, applied only at role creation, rotated only
- * when OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE=1 is set for a single migrate run.
+ * OPENSHAPEFORGE_WORKER_PASSWORD, applied only at role creation, and rotated
+ * only by `db:provision-roles` with OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE=1.
  * It must stay consistent with the password in
  * OPENSHAPEFORGE_WORKER_DATABASE_URL.
  */
@@ -107,8 +107,8 @@ export function readWorkerRolePassword(env: NodeJS.ProcessEnv = process.env): st
 }
 
 /**
- * Whether this migrate run should ROTATE the existing worker role's password.
- * Off by default, for the reason the app role's flag is off by default: the
+ * Whether this provisioning run should ROTATE the existing worker role's
+ * password. Off by default, for the reason the app role's flag is off: the
  * password is set only at role creation, so an operator-chosen credential is
  * never clobbered by a routine `helm upgrade`.
  */
@@ -212,17 +212,10 @@ const MANIFEST_SCHEMAS: readonly string[] = [
  * steps instead, and only the role itself and the CONNECT grant land here.
  */
 export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
-  // 1. The role is declared in the database role contract and provisioned by
+  // The role is declared in the database role contract and provisioned by
   //    the host; the chain verified LOGIN, NOSUPERUSER and NOBYPASSRLS before
   //    this step. No cluster-wide write happens on a routine migrate.
-  if (shouldRotateWorkerRolePassword()) {
-    const workerRolePassword = readWorkerRolePassword();
-    await sql`alter role ${sql.ref(WORKER_ROLE)} login password ${sql.lit(workerRolePassword)}`.execute(
-      db,
-    );
-  }
-
-  // 2. CONNECT on the database itself. Stock PostgreSQL grants it to PUBLIC;
+  // 1. CONNECT on the database itself. Stock PostgreSQL grants it to PUBLIC;
   //    managed providers revoke it, leaving a role able to authenticate but not
   //    connect. Same reasoning, and same statement, as the app role's.
   await sql`

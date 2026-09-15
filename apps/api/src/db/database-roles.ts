@@ -149,19 +149,13 @@ export async function provisionDatabaseRoles(
           throw new Error(`A password is required to create login role ${role.name} (${role.key}).`);
         }
         await sql`
-          do $$ begin
-            if not exists (select 1 from pg_roles where rolname = ${sql.lit(name)}) then
-              execute format('create role %I login password %L nosuperuser nobypassrls', ${sql.lit(name)}, ${sql.lit(password)});
-            end if;
-          end $$;
+          create role ${sql.ref(name)} login password ${sql.lit(password)}
+          nosuperuser nobypassrls
         `.execute(admin);
       } else {
         await sql`
-          do $$ begin
-            if not exists (select 1 from pg_roles where rolname = ${sql.lit(name)}) then
-              execute format('create role %I nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls', ${sql.lit(name)});
-            end if;
-          end $$;
+          create role ${sql.ref(name)} nologin nosuperuser nocreatedb
+          nocreaterole noinherit nobypassrls
         `.execute(admin);
       }
       result.created.push(role.name);

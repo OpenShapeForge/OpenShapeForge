@@ -493,8 +493,8 @@ The two conditions answer different questions, and only one of them is a
 question the database can answer.
 
 - `current_user` is the **connected login role**. A worker process connects as
-  `openshapeforge_worker`, provisioned by the same migrate chain that
-  provisions `openshapeforge_app` and equally `NOSUPERUSER NOBYPASSRLS`. A
+  `openshapeforge_worker`, provisioned with `openshapeforge_app` by
+  `db:provision-roles` and equally `NOSUPERUSER NOBYPASSRLS`. A
   session cannot assume it: no membership is granted, so `SET ROLE
   openshapeforge_worker` from the app role is refused by PostgreSQL.
 - `app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
@@ -840,8 +840,8 @@ needs a fresh volume rather than an in-place upgrade. A machine that ran an
 earlier revision of the compose file still has the unsuffixed
 `openshapeforge_platform-db-data` / `openshapeforge_keycloak-db-data` volumes:
 those are stale, and `docker volume rm` them once you have confirmed you do not
-want what is in them. The platform DB starts empty on its new volume — rerun
-`bun run db:migrate`.
+want what is in them. The platform DB starts empty on its new volume — run
+`bun run db:provision-roles` once, then `bun run db:migrate`.
 
 Keycloak imports **two generated** realms — regenerate both with `bun run
 generate` before first compose up. `--import-realm` imports every file in the

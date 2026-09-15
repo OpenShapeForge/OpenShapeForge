@@ -89,8 +89,9 @@ bun run db:provision-roles -- --print # render the statements for an operator
 ```
 
 Login roles are created with `OPENSHAPEFORGE_APP_PASSWORD` and
-`OPENSHAPEFORGE_WORKER_PASSWORD`; existing roles are never altered (rotate a
-password explicitly with the `*_PASSWORD_ROTATE=1` flags on `db:migrate`).
+`OPENSHAPEFORGE_WORKER_PASSWORD`; existing roles are never altered unless an
+operator explicitly rotates them with `*_PASSWORD_ROTATE=1 bun run
+db:provision-roles` through the administrator connection.
 Locally and in CI the migrate role owns the instance, so the migrate URL
 doubles as the administrator connection when no admin URL is set.
 

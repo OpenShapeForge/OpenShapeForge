@@ -5,9 +5,9 @@ networks:
     driver: bridge
 
 services:
-  # The superuser below is the PRIVILEGED migrate role. `bun run db:migrate`
-  # connects as it and provisions the two restricted runtime roles inside this
-  # database — `openshapeforge_app` for the API and `openshapeforge_worker` for
+  # The superuser below is the local administrator and migrate role.
+  # `bun run db:provision-roles` creates the two restricted runtime roles —
+  # `openshapeforge_app` for the API and `openshapeforge_worker` for
   # a worker process, each NOSUPERUSER NOBYPASSRLS, each with its own password
   # and its own grants. Nothing here creates them; the defaults that connect as
   # them are DATABASE_URL and OPENSHAPEFORGE_WORKER_DATABASE_URL in

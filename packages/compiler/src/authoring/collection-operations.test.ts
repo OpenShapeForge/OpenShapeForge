@@ -61,7 +61,7 @@ function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => 
 }
 const compile = (entries = fixture()) => collectAuthoredEntityPluginOperations(entries, context);
 
-test("real authored template collection Operations compile with recursive fieldDefinition parameters under strict AJV", () => {
+test("real authored template collection Operations compile the direct-edit variant flow under strict AJV", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
   const entries = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block"].map((slug) => {
     const contract = compileEntity(loadEntity(authoringDir, slug));
@@ -75,14 +75,14 @@ test("real authored template collection Operations compile with recursive fieldD
     expect(missingSchemaUiTranslations(operation.inputSchema, `${operation.id}.input`)).toEqual([]);
     expect(missingSchemaUiTranslations(operation.outputSchema, `${operation.id}.output`)).toEqual([]);
   }
-  expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVersion", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVersion.insertVariant"]);
-  const schema = operations.find((operation) => operation.id === "Template.insertVersion")!.inputSchema;
+  expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock"]);
+  const schema = operations.find((operation) => operation.id === "Template.insertVariant")!.inputSchema;
   const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control"]) ajv.addKeyword({ keyword, valid: true });
   const validate = ajv.compile(schema);
-  const base = { id: "10000000-0000-4000-8000-000000000001", expectedVersion: "2026-09-14T10:00:00Z", values: { versionNumber: 1, status: "draft", parameters: [] as unknown[] } };
-  for (const parameter of [{ key: "name", valueType: "string" }, { key: "reference", semanticType: "Template" }, { key: "nested", valueType: "object", children: [{ key: "amount", valueType: "number" }] }]) expect(validate({ ...base, values: { ...base.values, parameters: [parameter] } })).toBe(true);
-  for (const parameter of [{ key: "name" }, { key: "name", valueType: "invalid" }, { key: "name", valueType: "string", unknown: true }, { key: "nested", valueType: "object", children: [{ key: "amount" }] }, { key: "definition", semanticType: "fieldDefinition", children: [] }]) expect(validate({ ...base, values: { ...base.values, parameters: [parameter] } })).toBe(false);
+  const base = { id: "10000000-0000-4000-8000-000000000001", expectedVersion: "2026-09-14T10:00:00Z" };
+  for (const values of [{ channel: "document", locale: "nl" }, { channel: "email", locale: "en" }, { channel: "whatsapp", locale: "nl-NL" }]) expect(validate({ ...base, values })).toBe(true);
+  for (const values of [{ locale: "nl" }, { channel: "sms", locale: "nl" }, { channel: "email", locale: "dutch" }, { channel: "email", locale: "nl", unknown: true }]) expect(validate({ ...base, values })).toBe(false);
 });
 
 test("lowers native collection declarations to the canonical invoke catalog and validates concrete input", () => {

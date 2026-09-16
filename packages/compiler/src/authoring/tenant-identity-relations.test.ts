@@ -2,11 +2,12 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { loadActivePlatformCompile } from "../active-manifest.js";
-import { generateArtifacts } from "../generate.js";
+import { collectAllArtifacts } from "../index.js";
 
 test("platform tenancy and authored tenant references keep distinct storage contracts", async () => {
   const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
-  const sql = generateArtifacts(active.manifest).find(artifact => artifact.path.endsWith("schema.sql"))!.contents;
+  const sql = (await collectAllArtifacts(join(import.meta.dir, "../../../.."))).groups.db
+    .find(artifact => artifact.path.endsWith("schema.sql"))!.contents;
   const labelRules = active.manifest.tables.find(table => table.schema === "erp" && table.name === "label_rules")!;
   const labelTenant = labelRules.columns.find(column => column.name === "tenant_id")!;
   expect(labelTenant).toMatchObject({ type: "uuid", required: true });

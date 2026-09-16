@@ -26,12 +26,22 @@ async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
     join(root, "documents-plugin", "runtime.ts"),
     'export default { name: "documents", operationHandlers: {} };\n',
   );
+  await mkdir(join(root, "versioning-plugin"), { recursive: true });
+  await writeFile(
+    join(root, "versioning-plugin", "index.ts"),
+    'export default { name: "core-versioning" };\n',
+  );
+  await writeFile(
+    join(root, "versioning-plugin", "runtime.ts"),
+    'export default { name: "core-versioning", operationHandlers: {} };\n',
+  );
   await writeFile(
     join(root, "authoring.config.yaml"),
     [
       "layers:",
       "  - packages/compiler/config/authoring",
       "plugins:",
+      "  - ./versioning-plugin/index.ts",
       "  - ./documents-plugin/index.ts",
       ...(options.plugin ? [`  - ./${options.plugin}`] : []),
       "",
@@ -102,6 +112,7 @@ describe("compiler host artifact assembly", () => {
         "  - packages/compiler/config/authoring",
         "  - authoring-overlay",
         "plugins:",
+        "  - ./versioning-plugin/index.ts",
         "  - ./documents-plugin/index.ts",
         "",
       ].join("\n"),
@@ -164,6 +175,7 @@ describe("compiler host artifact assembly", () => {
         "layers:",
         "  - packages/compiler/config/authoring",
         "plugins:",
+        "  - ./versioning-plugin/index.ts",
         "  - ./documents-plugin/index.ts",
         "restApi:",
         "  title: Example Product API",

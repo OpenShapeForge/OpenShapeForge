@@ -85,7 +85,7 @@ test("canonical entity input sources reach every generated operation interface",
   try {
     await writeFile(
       join(root, "authoring.config.yaml"),
-      `layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ${JSON.stringify(new URL("../../documents/src/index.ts", import.meta.url).pathname)}\n`,
+      `layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ${JSON.stringify(new URL("../../versioning/src/index.ts", import.meta.url).pathname)}\n  - ${JSON.stringify(new URL("../../documents/src/index.ts", import.meta.url).pathname)}\n`,
     );
     await mkdir(join(root, "apps/product-web"), { recursive: true });
 

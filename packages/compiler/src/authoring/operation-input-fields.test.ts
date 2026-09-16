@@ -9,7 +9,16 @@ import { compile } from "./compiler/index.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { loadActivePlatformCompile } from "../active-manifest.js";
 
-const source = () => loadEntity(join(import.meta.dir, "../../config/authoring"), "template-version");
+const source = () => {
+  const authoringDir = join(import.meta.dir, "../../config/authoring");
+  const artifacts = loadEntity(authoringDir, "template-version");
+  const template = loadEntity(authoringDir, "template").coreEntity;
+  const parameterField = template.fields.find(field => field.key === "parameters")!;
+  artifacts.coreEntity.fields.push(structuredClone(parameterField));
+  const materializeParameters = artifacts.coreEntity.operations!.materialize!.input!.schema.properties!.parameters as Record<string, unknown>;
+  materializeParameters["x-osf-inputFields"] = "parameters";
+  return artifacts;
+};
 
 test("input-field annotation uses the target record's fieldDefinition collection", async () => {
   const artifacts = source();
@@ -20,6 +29,7 @@ test("input-field annotation uses the target record's fieldDefinition collection
   const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
   const web = buildWebManifest(active.entities, { requireTranslations: true });
   expect(web.entities.TemplateVersion!.operations.materialize).toBeDefined();
+  expect(web.entities.TemplateVersion!.operations.materialize!.input).toMatchObject({ kind: "json-schema" });
   expect(web.entities.LabelRule!.views.record!.badges).toEqual(["variant", "active"]);
   expect(web.entities.LabelRule!.views.record!.variableSources).toEqual([
     { key: "entityFields", resolver: "entityFields", params: { sourceField: "entityType" } },

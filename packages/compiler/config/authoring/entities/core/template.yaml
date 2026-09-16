@@ -125,4 +125,6 @@ interfaces:
             groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+            groups:
+              - { title: { en: Template, nl: Template }, fields: [name, description] }
+              - { title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }

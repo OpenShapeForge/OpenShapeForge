@@ -70,9 +70,9 @@ import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organiz
 // would put the admission rule and the table it reads in different files.
 import {
   acceptInvitation,
+  employeeInvitationRoleGrants,
   findPendingInvitation,
   invitedRoleWithinGrace,
-  EMPLOYEE_INVITATION_ROLE_GRANTS,
   INVITED_ROLE_GRACE_MS,
   type GrantInvitedRole,
 } from "./employee-invitations.js";
@@ -479,7 +479,7 @@ async function gracePeriodRoles(
   const role = await withDbSession(db, session, (trx) =>
     invitedRoleWithinGrace(trx, session.tenantId, claims.email!),
   );
-  return role ? EMPLOYEE_INVITATION_ROLE_GRANTS[role] : [];
+  return role ? employeeInvitationRoleGrants(role) : [];
 }
 
 async function createPersonRelation(

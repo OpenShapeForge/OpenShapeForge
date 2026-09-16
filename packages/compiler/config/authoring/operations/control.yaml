@@ -1629,8 +1629,11 @@ operations:
             type: array
             minItems: 1
             uniqueItems: true
-            items: { type: string, enum: [org_admin, org_employee] }
-            x-osf-i18n: { title: { en: Roles, nl: Rollen }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+            items:
+              type: string
+              enum: [org_admin, org_employee]
+              x-osf-i18n: { enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
         required: [slug, memberId, roles]
     output: { schema: *id004 }
     auth: { mode: control, roles: [platform-operator] }

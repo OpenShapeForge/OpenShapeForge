@@ -106,7 +106,7 @@ export type MemberRoleAdminClient = {
    * roles than named would leave `set_member_role` reporting success for a
    * grant that did not fully happen.
    */
-  grantClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<void>;
+  grantClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<readonly string[]>;
   revokeClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<void>;
 
   /**
@@ -202,16 +202,36 @@ export function createMemberRoleAdminClient(
     if (!clientUuid) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", `Client "${clientId}" does not exist in this realm.`);
     const { body: available } = await request(`/clients/${encodeURIComponent(clientUuid)}/roles`, { method: "GET" });
     const byName = new Map((Array.isArray(available) ? available : []).map((row) => row as Record<string, unknown>)
-      .filter((row): row is { id: string; name: string } => typeof row.id === "string" && typeof row.name === "string")
+      .filter((row): row is { id: string; name: string; composite?: boolean } => typeof row.id === "string" && typeof row.name === "string")
       .map((row) => [row.name, row]));
     const missing = roleNames.filter((name) => !byName.has(name));
     if (missing.length) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", `Roles do not exist on client "${clientId}": ${missing.sort().join(", ")}.`);
     return { clientUuid, roles: roleNames.map((name) => byName.get(name)!) };
   }
 
+  async function effectiveClientRoleNames(
+    clientUuid: string,
+    roots: readonly { id: string; name: string; composite?: boolean }[],
+  ): Promise<readonly string[]> {
+    const effective = new Map(roots.map((role) => [role.id, role]));
+    const queue = roots.filter((role) => role.composite === true);
+    while (queue.length) {
+      const parent = queue.shift()!;
+      const { body } = await request(`/roles-by-id/${encodeURIComponent(parent.id)}/composites`, { method: "GET" });
+      for (const candidate of Array.isArray(body) ? body : []) {
+        const role = candidate as { id?: unknown; name?: unknown; containerId?: unknown; composite?: unknown };
+        if (typeof role.id !== "string" || typeof role.name !== "string" || role.containerId !== clientUuid || effective.has(role.id)) continue;
+        const resolved = { id: role.id, name: role.name, composite: role.composite === true };
+        effective.set(role.id, resolved);
+        if (resolved.composite) queue.push(resolved);
+      }
+    }
+    return [...effective.values()].map((role) => role.name);
+  }
+
   return {
     async grantClientRoles(userId, clientId, roleNames) {
-      if (roleNames.length === 0) return;
+      if (roleNames.length === 0) return [];
       const resolved = await roleRepresentations(clientId, roleNames);
 
       await request(
@@ -221,6 +241,7 @@ export function createMemberRoleAdminClient(
           body: JSON.stringify(resolved.roles),
         },
       );
+      return effectiveClientRoleNames(resolved.clientUuid, resolved.roles);
     },
 
     async revokeClientRoles(userId, clientId, roleNames) {

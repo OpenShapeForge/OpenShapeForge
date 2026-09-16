@@ -201,12 +201,13 @@ async function invitationRows(adminDb: Kysely<DB>, tenantId: string) {
 }
 
 /** Records what the admission path asked Keycloak to grant, granting nothing. */
-function recordingGrant() {
+function recordingGrant(effectiveRoles?: readonly string[]) {
   const grants: Array<{ subject: string; clientId: string; roles: readonly string[] }> = [];
   return {
     grants,
     grantInvitedRole: async (subject: string, clientId: string, roles: readonly string[]) => {
       grants.push({ subject, clientId, roles });
+      return effectiveRoles;
     },
   };
 }
@@ -366,7 +367,11 @@ describe("identity ↔ Relation link", () => {
         await seedTenants(adminDb);
         const dave = person("dave");
         await invite(adminDb, tenantA, "Dave@Example.com", "org_admin");
-        const keycloak = recordingGrant();
+        const keycloak = recordingGrant([
+          "Organization.All.ReadWrite",
+          "org_admin",
+          "Relations.All.ReadWrite",
+        ]);
 
         const { state } = await signIn(appDb, dave, tenantA, {
           grantInvitedRole: keycloak.grantInvitedRole,
@@ -386,7 +391,11 @@ describe("identity ↔ Relation link", () => {
         // and the role rides on this very session because the token that
         // admitted them predates the grant.
         expect(state!.needsRoleAssignment).toBe(false);
-        expect(state!.invitedRoles).toEqual(["Organization.All.ReadWrite"]);
+        expect(state!.invitedRoles).toEqual([
+          "Organization.All.ReadWrite",
+          "org_admin",
+          "Relations.All.ReadWrite",
+        ]);
         expect(
           await listPendingRoleAssignments(
             appDb,

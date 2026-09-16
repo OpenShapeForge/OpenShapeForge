@@ -433,7 +433,7 @@ export type GrantInvitedRole = (
   keycloakSubject: string,
   clientId: string,
   roles: readonly string[],
-) => Promise<void>;
+) => Promise<readonly string[] | void>;
 
 /** The real one: `control/member-role-admin.ts` against the tenant realm. */
 const grantThroughKeycloak: GrantInvitedRole = async (keycloakSubject, clientId, roles) => {
@@ -446,7 +446,7 @@ const grantThroughKeycloak: GrantInvitedRole = async (keycloakSubject, clientId,
     );
   }
   const admin = createMemberRoleAdminClient(controlPlane.config.keycloak);
-  await admin.grantClientRoles(keycloakSubject, clientId, roles);
+  return admin.grantClientRoles(keycloakSubject, clientId, roles);
 };
 
 export type AcceptInvitationResult = {
@@ -488,9 +488,11 @@ export async function acceptInvitation(
   grantInvitedRole: GrantInvitedRole = grantThroughKeycloak,
 ): Promise<AcceptInvitationResult> {
   const clientRoles = employeeInvitationRoleGrants(invitation.role);
+  let effectiveClientRoles = clientRoles;
 
   try {
-    await grantInvitedRole(keycloakSubject, memberRoleClientId(), clientRoles);
+    const effective = await grantInvitedRole(keycloakSubject, memberRoleClientId(), clientRoles);
+    if (effective?.length) effectiveClientRoles = [...new Set(effective)];
   } catch (error) {
     // Never fatal: the invitation already decided the person may be here.
     // Refusing the session over a Keycloak hiccup would turn "you are invited"
@@ -523,7 +525,7 @@ export async function acceptInvitation(
     `[auth] ${session.userId} accepted invitation ${invitation.id} in tenant ` +
       `${session.tenantId}; granted ${invitation.role} (${clientRoles.join(", ")}).`,
   );
-  return { role: invitation.role, clientRoles, granted: true };
+  return { role: invitation.role, clientRoles: effectiveClientRoles, granted: true };
 }
 
 export type RevokeInvitationInput = { email: string };

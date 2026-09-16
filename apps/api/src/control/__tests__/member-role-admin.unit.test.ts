@@ -77,6 +77,29 @@ describe("granting a client role onto a person's user", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("returns same-client composite capabilities for the current-session grace period", async () => {
+    const { fetch } = stubFetch([
+      () => Response.json([{ id: "client-uuid", clientId: "hubble-api" }]),
+      () => Response.json([
+        { id: "admin", name: "org_admin", composite: true },
+        { id: "relations", name: "Relations.All.ReadWrite", composite: false },
+      ]),
+      () => new Response(null, { status: 204 }),
+      () => Response.json([
+        { id: "relations", name: "Relations.All.ReadWrite", containerId: "client-uuid", composite: false },
+        { id: "foreign", name: "realm-role", containerId: "realm-uuid", composite: false },
+      ]),
+    ]);
+
+    const effective = await createMemberRoleAdminClient(config, { fetch }).grantClientRoles(
+      "user-sub-123",
+      "hubble-api",
+      ["org_admin"],
+    );
+
+    expect(effective).toEqual(["org_admin", "Relations.All.ReadWrite"]);
+  });
+
   it("refuses a role name that does not exist on the client, rather than silently granting fewer", async () => {
     const { fetch } = stubFetch([
       () => Response.json([{ id: "client-uuid", clientId: "hubble-api" }]),

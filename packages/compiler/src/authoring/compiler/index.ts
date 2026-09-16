@@ -60,7 +60,7 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     description: { en: "Freeze the current editable content as a new immutable version.", nl: "Leg de huidige bewerkbare inhoud vast als een nieuwe onveranderlijke versie." },
     implementation: { type: "plugin" as const, plugin: "core-versioning", handler: `publish${entity.entity}To${versioning.versionEntity}` },
     target: { scope: "record" as const, inputField: "id" },
-    input: { schema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", format: "uuid" } } } },
+    input: { schema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", format: "uuid", "x-osf-i18n": { title: { en: entity.title, nl: entity.labels?.nl ?? entity.title } } } } } },
     output: { schema: { type: "object" } },
     errors: [
       { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },

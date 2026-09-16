@@ -1180,6 +1180,7 @@ operations:
         properties:
           entries:
             type: array
+            x-osf-i18n: { title: { en: Services, nl: Services } }
             items:
               type: object
               additionalProperties: true
@@ -1187,7 +1188,12 @@ operations:
                 kind:
                   type: string
                   enum: [service, adapter, capability]
-                  x-osf-i18n: { title: { en: Kind, nl: Soort } }
+                  x-osf-i18n:
+                    title: { en: Kind, nl: Soort }
+                    enum:
+                      service: { en: Service, nl: Service }
+                      adapter: { en: Adapter, nl: Adapter }
+                      capability: { en: Capability, nl: Capability }
                 key:
                   type: string
                   x-osf-i18n: { title: { en: Key, nl: Sleutel } }
@@ -1200,7 +1206,12 @@ operations:
                 authority:
                   type: string
                   enum: [platform_release, host, tenant_shared]
-                  x-osf-i18n: { title: { en: Authority, nl: Autoriteit } }
+                  x-osf-i18n:
+                    title: { en: Authority, nl: Autoriteit }
+                    enum:
+                      platform_release: { en: Platform release, nl: Platformrelease }
+                      host: { en: Host, nl: Host }
+                      tenant_shared: { en: Shared by tenant, nl: Gedeeld door tenant }
                 source:
                   type: string
                   x-osf-i18n: { title: { en: Source, nl: Bron } }

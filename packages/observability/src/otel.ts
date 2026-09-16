@@ -5,6 +5,7 @@ import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-base";
+import type { ClientRequest, IncomingMessage } from "node:http";
 
 export type OpenTelemetryBootstrapOptions = {
   /** Omit to keep tracing disabled rather than exporting to an implicit host. */
@@ -48,9 +49,7 @@ const REDACTED_QUERY_PARAMS = [
 /** Overwrite transport attributes that may carry IDs, addresses, or secrets. */
 export function applyBoundedHttpSpanAttributes(
   span: { setAttribute(name: string, value: string | number): unknown },
-  // Transport objects are deliberately not inspected; accept both Node/Bun
-  // instrumentation types without coupling consumers to one @types/node copy.
-  _request: unknown,
+  _request: ClientRequest | IncomingMessage,
 ): void {
   for (const attribute of [
     "http.target",
@@ -128,7 +127,7 @@ export function bootstrapOpenTelemetry(
         redactedQueryParams: REDACTED_QUERY_PARAMS,
         requestHook: applyBoundedHttpSpanAttributes,
         responseHook: (span, response) =>
-          applyBoundedHttpSpanAttributes(span, response),
+          applyBoundedHttpSpanAttributes(span, response as IncomingMessage),
       }),
       new FastifyInstrumentation(),
     ],

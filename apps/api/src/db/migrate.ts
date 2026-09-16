@@ -1,22 +1,30 @@
 // SPDX-License-Identifier: BUSL-1.1
-/**
- * `bun run db:migrate` — build or roll forward the connected database from
- * the compiled manifest. On an empty database this is the bootstrap the API
- * performs on first start (db/bootstrap.ts); on a built one it re-applies the
- * invariants, rolls an additive manifest change forward, and re-runs the
- * seeds. Non-additive drift is refused: the reset model settles that with
- * `bun run db:reset`, not with a hand-written migration.
- */
+import { sql } from "kysely";
 import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
 import { loadRuntimeModules } from "../modules/registry.js";
-import { runMigrationChainLocked } from "./bootstrap.js";
-import { renderMigrationReport } from "./migration-report.js";
+import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
+import { runMigrationChain } from "./migration-chain.js";
 
-// Migrations run as the PRIVILEGED role (DDL, GRANT) via
-// OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL
-// role. The host must provision the declared roles first (the Helm hook runs
-// provision-roles.ts immediately before this entry point); this chain verifies
-// their presence and then refreshes their grants and policies.
+/**
+ * One reporting line per catalog seed, omitted entirely when the compiler did
+ * not emit that seed — a repo without `apps/web`, or without the workflow
+ * plugin, should not read as though a catalog failed to load.
+ */
+function seedReport(name: string, result: CatalogSeedResult): Record<string, string> {
+  if (!result.present) return {};
+  return {
+    [name]: result.skipped ? `unchanged (${result.rows} rows)` : `seeded ${result.rows} rows`,
+  };
+}
+
+// Migrations run as the PRIVILEGED role (CREATE ROLE, DDL, GRANT) via
+// OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL role.
+// It provisions BOTH restricted roles — openshapeforge_app (password:
+// OPENSHAPEFORGE_APP_PASSWORD) and openshapeforge_worker
+// (OPENSHAPEFORGE_WORKER_PASSWORD) — on every run, whether or not this
+// deployment starts a worker: the emitted queue policies name the worker role
+// either way, and a role the policies name but nothing creates fails silently
+// as an empty queue.
 // Modules are resolved before the connection opens: a plugin whose runtime half
 // will not load must not leave a migration half-run. Load failures are reported
 // with the result rather than thrown — a broken plugin costs its own seed, not
@@ -25,9 +33,60 @@ const modules = await loadRuntimeModules();
 const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
 
 const runtime = createDatabaseRuntime({ databaseUrl: readMigrateDatabaseUrl() });
+const migrationLockKey = "openshapeforge-service-db-migrate";
+
 try {
-  const result = await runMigrationChainLocked(runtime.db, { moduleSeeds });
-  console.log(JSON.stringify(renderMigrationReport(result, modules.failures), null, 2));
+  await runtime.db.connection().execute(async (db) => {
+    // Acquire the cross-replica serialization lock with no lock_timeout: the
+    // second replica must wait for the first to finish the whole chain, so
+    // this wait is intentional and must not fail fast.
+    await sql`select pg_advisory_lock(hashtextextended(${migrationLockKey}, 0))`.execute(db);
+    // Bounded lock_timeout for the migration DDL itself, so DDL that waits on
+    // a lock held by app traffic fails fast and the caller retries instead of
+    // hanging forever.
+    await sql`set lock_timeout = '5s'`.execute(db);
+    try {
+      const result = await runMigrationChain(db, { moduleSeeds });
+      console.log(
+        JSON.stringify(
+          {
+            migration: result.version,
+            checksum: result.checksum,
+            applied: result.applied,
+            ...(result.rollForward === undefined
+              ? {}
+              : { rollForward: result.rollForward }),
+            ...(result.versionedApplied.length === 0
+              ? {}
+              : { versionedApplied: result.versionedApplied }),
+            // Loud on purpose: reconciling a checksum is a rare, reviewed event
+            // and an operator should see it in the migrate output, not infer it.
+            ...(result.versionedReconciled.length === 0
+              ? {}
+              : { versionedReconciled: result.versionedReconciled }),
+            ...(result.pluginMigrationsApplied.length === 0
+              ? {}
+              : { pluginMigrationsApplied: result.pluginMigrationsApplied }),
+            ...(modules.failures.length === 0
+              ? {}
+              : {
+                  moduleLoadFailures: modules.failures.map(
+                    (failure) => `${failure.name}: ${failure.reason} — ${failure.message}`,
+                  ),
+                }),
+            ...seedReport("pageConfigs", result.pageConfigs),
+            ...Object.entries(result.moduleSeeds).flatMap(([name, seed]) =>
+              Object.entries(seedReport(name, seed)),
+            ).reduce((all, [key, value]) => ({ ...all, [key]: value }), {}),
+          },
+          null,
+          2,
+        ),
+      );
+    } finally {
+      await sql`select pg_advisory_unlock(hashtextextended(${migrationLockKey}, 0))`.execute(db);
+    }
+  });
 } finally {
   await runtime.close();
 }

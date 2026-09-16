@@ -8,10 +8,7 @@
  * needed.
  */
 import { describe, expect, test } from "bun:test";
-import {
-  OperationFailure,
-  type OperationError,
-} from "@openshapeforge/operations";
+import { GraphQLError } from "graphql";
 import {
   __requireEntityOperationForTests as requireEntityOperation,
   getGeneratedCrudTables,
@@ -27,12 +24,12 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 const table = getGeneratedCrudTables().find((t) => t.name === "erp.relations")!;
 const noRoleSession = { tenantId: "tenant", userId: "user", roles: [] as string[] };
 
-function captureThrow(fn: () => unknown): OperationError {
+function captureThrow(fn: () => unknown): GraphQLError {
   try {
     fn();
   } catch (error) {
-    expect(error).toBeInstanceOf(OperationFailure);
-    return (error as OperationFailure).operationError;
+    expect(error).toBeInstanceOf(GraphQLError);
+    return error as GraphQLError;
   }
   throw new Error("expected the guard to throw");
 }
@@ -43,8 +40,8 @@ describe("requireEntityOperation", () => {
       const error = captureThrow(() =>
         requireEntityOperation(table, operation, noRoleSession),
       );
-      expect(error.code).toBe("FORBIDDEN");
-      expect(error.retryable).toBe(false);
+      expect(error.extensions.code).toBe("FORBIDDEN");
+      expect(error.extensions.status).toBe(403);
       expect(error.message).toContain(operation);
       // No role enumeration: the allowed role list must never leak.
       expect(error.message).not.toContain("Relations.All");
@@ -59,19 +56,14 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.Read"],
       }),
     ).not.toThrow();
-    // A role on the delete allow-list satisfies delete. Read from the manifest
-    // rather than spelled out: the entity authors its delete list separately
-    // from its write list (Relations.All.Delete today), and the guard's job is
-    // to honour whatever the list says. (The authored-vs-normalized vocabulary
-    // union is covered by the compiler's backend-manifest tests; since #403
-    // the shipped catalog is authored in English, so the manifest carries a
-    // single spelling per role.)
-    const deleteRole = table.source?.authorization?.roles?.delete?.[0];
-    expect(deleteRole).toBeTruthy();
+    // The write role also satisfies delete. (The authored-vs-normalized
+    // vocabulary union is covered by the compiler's backend-manifest tests;
+    // since #403 the shipped catalog is authored in English, so the manifest
+    // carries a single spelling per role.)
     expect(() =>
       requireEntityOperation(table, "delete", {
         ...noRoleSession,
-        roles: [deleteRole!],
+        roles: ["Relations.All.ReadWrite"],
       }),
     ).not.toThrow();
   });
@@ -83,7 +75,7 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.Read"],
       }),
     );
-    expect(error.code).toBe("FORBIDDEN");
+    expect(error.extensions.code).toBe("FORBIDDEN");
   });
 
   test("fails closed on a table without role metadata (stale manifest)", () => {
@@ -98,7 +90,7 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.ReadWrite"],
       }),
     );
-    expect(error.code).toBe("FORBIDDEN");
+    expect(error.extensions.code).toBe("FORBIDDEN");
     expect(error.message).toContain("no role metadata");
   });
 
@@ -118,33 +110,33 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.ReadWrite"],
       }),
     );
-    expect(error).toMatchObject({
+    expect(error.extensions).toMatchObject({
       code: "GENERATED_CRUD_OPERATION_NOT_ENABLED",
-      retryable: false,
+      status: 404,
     });
   });
 
   test("relationship traversal gates the TARGET entity's read roles before any DB use", async () => {
-    // Resolve a real compiler-owned traversal first; the role guard then runs
-    // before any transaction, so a null db proves the denial is DB-free.
-    const relationship = table.source?.graphql?.relationships?.[0];
-    const targetTable = getGeneratedCrudTables().find(
-      (candidate) => candidate.source?.graphql?.typeName === relationship?.target,
-    );
-    expect(relationship).toBeDefined();
-    expect(targetTable).toBeDefined();
+    // The guard is the first statement of listGeneratedEntityRelation, so a
+    // null db proves the deny path rejects before any transaction could open.
     const attempt = listGeneratedEntityRelation(
       null as unknown as OpenShapeForgeDatabase,
       noRoleSession,
       {
         parent: {},
         parentTable: table,
-        relationship: relationship!,
-        targetTable: targetTable!,
+        relationship: {
+          name: "anything",
+          target: "Anything",
+          type: "T",
+          resolve: "hasMany",
+          foreignKey: "relation_id",
+        },
+        targetTable: table,
       },
     );
     await expect(attempt).rejects.toMatchObject({
-      operationError: { code: "FORBIDDEN", retryable: false },
+      extensions: { code: "FORBIDDEN", status: 403 },
     });
   });
 });

@@ -17,23 +17,12 @@ afterEach(async () => {
 async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), "osf-compiler-host-"));
   roots.push(root);
-  await mkdir(join(root, "documents-plugin"), { recursive: true });
-  await writeFile(
-    join(root, "documents-plugin", "index.ts"),
-    'export default { name: "documents" };\n',
-  );
-  await writeFile(
-    join(root, "documents-plugin", "runtime.ts"),
-    'export default { name: "documents", operationHandlers: {} };\n',
-  );
   await writeFile(
     join(root, "authoring.config.yaml"),
     [
       "layers:",
       "  - packages/compiler/config/authoring",
-      "plugins:",
-      "  - ./documents-plugin/index.ts",
-      ...(options.plugin ? [`  - ./${options.plugin}`] : []),
+      ...(options.plugin ? ["plugins:", `  - ./${options.plugin}`] : []),
       "",
     ].join("\n"),
   );
@@ -57,83 +46,7 @@ describe("compiler host artifact assembly", () => {
     expect(second.all).toEqual(first.all);
   }, 60_000);
 
-  test("headless hosts receive the merged raw field-authoring registries", async () => {
-    const root = await hostRoot();
-    const overlay = join(root, "authoring-overlay", "catalogs");
-    await mkdir(overlay, { recursive: true });
-    await writeFile(
-      join(overlay, "field-authoring-profiles.yaml"),
-      [
-        "profiles:",
-        "  hostProfile:",
-        "    label: { nl: Hostprofiel, en: Host profile }",
-        "    futureProfileProperty: keep-me",
-        "",
-      ].join("\n"),
-    );
-    await writeFile(
-      join(overlay, "semantic-types.yaml"),
-      [
-        "types:",
-        "  hostType:",
-        "    label: { nl: Hosttype, en: Host type }",
-        "    valueType: string",
-        "    futureSemanticProperty: keep-me",
-        "",
-      ].join("\n"),
-    );
-    await writeFile(
-      join(overlay, "core-referentiedata.yaml"),
-      [
-        "groepen:",
-        "  HOST_GROUP:",
-        "    description: Keep raw group metadata",
-        "    futureGroupProperty: keep-me",
-        "    items:",
-        "      - value: host-value",
-        "        label: { nl: Hostwaarde, en: Host value }",
-        "",
-      ].join("\n"),
-    );
-    await writeFile(
-      join(root, "authoring.config.yaml"),
-      [
-        "layers:",
-        "  - packages/compiler/config/authoring",
-        "  - authoring-overlay",
-        "plugins:",
-        "  - ./documents-plugin/index.ts",
-        "",
-      ].join("\n"),
-    );
-
-    const { groups } = await collectAllArtifacts(root);
-    const artifact = groups.operations.find(
-      (entry) =>
-        entry.path === "apps/api/src/generated/compiler/field-authoring-registry.json",
-    );
-    expect(artifact).toBeDefined();
-    expect(JSON.parse(artifact!.contents)).toMatchObject({
-      version: 1,
-      fieldAuthoringProfiles: {
-        workflowInputField: { typePickerUsage: "requestInput" },
-        hostProfile: { futureProfileProperty: "keep-me" },
-      },
-      semanticTypes: {
-        email: { valueType: "string" },
-        hostType: { futureSemanticProperty: "keep-me" },
-      },
-      referentiedata: {
-        RELATIONTYPE: { description: expect.any(String) },
-        HOST_GROUP: {
-          description: "Keep raw group metadata",
-          futureGroupProperty: "keep-me",
-        },
-      },
-    });
-  }, 60_000);
-
-  test("web hosts retain persisted operations and receive a web interface manifest", async () => {
+  test("web hosts retain the populated API and web manifest pair", async () => {
     const root = await hostRoot({ web: true });
     const { all } = await collectAllArtifacts(root);
     const paths = [
@@ -145,15 +58,6 @@ describe("compiler host artifact assembly", () => {
     expect(persisted.map((artifact) => artifact.path).sort()).toEqual(paths);
     expect(persisted[0]!.contents).toBe(persisted[1]!.contents);
     expect(JSON.parse(persisted[0]!.contents).operationNames.length).toBeGreaterThan(0);
-    const webManifestArtifact = all.find(
-      (artifact) => artifact.path === "apps/web/src/generated/web-manifest.json",
-    );
-    expect(webManifestArtifact).toBeDefined();
-    expect(JSON.parse(webManifestArtifact!.contents)).toMatchObject({
-      contract: "openshapeforge.web-manifest",
-      version: 1,
-      entities: { Relation: { operations: { list: { id: "Relation.list" } } } },
-    });
   }, 60_000);
 
   test("committed REST onboarding reaches the generated OpenAPI artifact", async () => {
@@ -163,8 +67,6 @@ describe("compiler host artifact assembly", () => {
       [
         "layers:",
         "  - packages/compiler/config/authoring",
-        "plugins:",
-        "  - ./documents-plugin/index.ts",
         "restApi:",
         "  title: Example Product API",
         "  description: Authenticate first, then follow the integration workflow.",

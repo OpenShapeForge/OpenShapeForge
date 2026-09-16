@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import type { CompilerPlugin } from "./plugins.js";
 import {
   collectPluginMigrationRegistry,
@@ -74,33 +73,6 @@ describe("plugin schema migrations", () => {
     );
     expect(result.migrations.every((migration) => /^[0-9a-f]{64}$/.test(migration.checksum))).toBe(true);
     expect(JSON.parse(renderPluginMigrationRegistry(result))).toEqual(result);
-  });
-
-  test("reconciles content-addressed compiler CHECK constraints", () => {
-    const result = registry([
-      table("values", {
-        constraints: [{
-          compilerOwned: true,
-          replaceExisting: true,
-          version: "0001_entity-value-values-kind-acde1234",
-          name: "values_kind_check",
-          kind: "check",
-          expression: `"kind" IN ('Copy', 'Link')`,
-        }],
-      }),
-    ], []);
-
-    expect(result.migrations[0]!.sql).toBe(
-      'ALTER TABLE "cpq"."values" DROP CONSTRAINT IF EXISTS "values_kind_check";\n' +
-      'ALTER TABLE "cpq"."values"\n  ADD CONSTRAINT "values_kind_check" CHECK ("kind" IN (\'Copy\', \'Link\'));\n',
-    );
-    expect(() => registry([table("values", { constraints: [{
-      replaceExisting: true,
-      version: "0001_unsafe-replacement",
-      name: "values_id_key",
-      kind: "unique",
-      columns: ["id"],
-    }] })])).toThrow("only replace an existing compiler-owned CHECK");
   });
 
   test("validates foreign-key targets before emitting SQL", () => {
@@ -320,66 +292,5 @@ describe("plugin schema migrations", () => {
       ["cpq", "0001_install-trigger"],
       ["cpq-extra", "0001_install-trigger"],
     ]);
-  });
-});
-
-describe("composite column-level keys", () => {
-  const versionTable = table("versions", {
-    columns: [
-      { name: "tenant_id", type: "uuid", primaryKey: true },
-      { name: "blueprint_id", type: "text", primaryKey: true },
-      { name: "version", type: "integer", primaryKey: true },
-    ],
-  });
-
-  test("a composite column key is one key, and unique only as a whole", () => {
-    // Three primaryKey flags form one key: no "multiple primary keys".
-    expect(() => registry([versionTable])).not.toThrow();
-
-    expect(() =>
-      registry([
-        versionTable,
-        table("copies", {
-          columns: [
-            idColumn,
-            { name: "blueprint_tenant_id", type: "uuid", required: true },
-            { name: "blueprint_id", type: "text", required: true },
-            { name: "source_version", type: "integer", required: true },
-          ],
-          constraints: [
-            {
-              version: "0001_copies-source-fk",
-              name: "copies_source_fk",
-              kind: "foreignKey",
-              columns: ["blueprint_tenant_id", "blueprint_id", "source_version"],
-              references: {
-                schema: "cpq",
-                table: "versions",
-                columns: ["tenant_id", "blueprint_id", "version"],
-              },
-            },
-          ],
-        }),
-      ]),
-    ).not.toThrow();
-
-    // One member of the composite key does not identify a row.
-    expect(() =>
-      registry([
-        versionTable,
-        table("copies", {
-          columns: [idColumn, { name: "blueprint_id", type: "text", required: true }],
-          constraints: [
-            {
-              version: "0001_copies-source-fk",
-              name: "copies_source_fk",
-              kind: "foreignKey",
-              columns: ["blueprint_id"],
-              references: { schema: "cpq", table: "versions", columns: ["blueprint_id"] },
-            },
-          ],
-        }),
-      ]),
-    ).toThrow(/no matching primary key or unique constraint/);
   });
 });

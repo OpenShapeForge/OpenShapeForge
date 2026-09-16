@@ -25,7 +25,6 @@ const EMPTY = {
   userId: null,
   roles: [] as string[],
   groups: [] as string[],
-  relationGroupIds: [] as string[],
   scope: "self" as const,
   credential: "none" as const,
 };
@@ -206,27 +205,27 @@ describe("resolveSessionContext bearer fail-closed", () => {
 
 describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("merges realm roles with every resource_access client's roles, deduplicated and sorted", () => {
-    // Mirrors a dev-realm token: an audience client composite is expanded by
-    // Keycloak into entity client roles under resource_access.
+    // Mirrors a dev-realm token: `directie` is the realm composite; Keycloak
+    // expands it into entity client roles under resource_access.
     expect(
       mergeIdentityRoles({
-        roles: ["default-roles-openshapeforge"],
+        roles: ["directie", "default-roles-openshapeforge"],
         clientRoles: {
-          "erp-provider": ["Test.Admin", "Relations.All.ReadWrite", "Relations.All.Read"],
+          "erp-provider": ["Relations.All.ReadWrite", "Relations.All.Read"],
           account: ["manage-account", "Relations.All.Read"],
         },
       }),
     ).toEqual([
       "Relations.All.Read",
       "Relations.All.ReadWrite",
-      "Test.Admin",
       "default-roles-openshapeforge",
+      "directie",
       "manage-account",
     ]);
   });
 
   test("returns realm roles unchanged when the token carries no client roles", () => {
-    expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
+    expect(mergeIdentityRoles({ roles: ["directie"] })).toEqual(["directie"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
   });
 });

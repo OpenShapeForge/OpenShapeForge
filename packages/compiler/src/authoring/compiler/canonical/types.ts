@@ -81,7 +81,6 @@ export interface CanonicalField {
       value: string;
     }>;
     referentieGroep?: string;
-    source?: string;
     remoteUrl?: string;
     valueField?: string;
     labelField?: string;

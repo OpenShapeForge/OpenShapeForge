@@ -10,8 +10,8 @@
 #     The workflow queue policies compare current_user against that role, so a
 #     worker process must not be given the API's credentials — and never falls
 #     back to them (apps/api/src/roles/worker.ts refuses);
-#   - a pre-upgrade Job provisions roles through database.adminUrl (or the
-#     privileged database.migrateUrl fallback), then runs migrations;
+#   - migrations run as a PRIVILEGED role via database.migrateUrl in a
+#     pre-upgrade Job (it also provisions both restricted roles);
 #   - NODE_ENV=production is always set, so the API refuses to start unless a
 #     bearer audience and a strong internal context secret are configured
 #     (assertProductionEnv).
@@ -43,15 +43,10 @@ database:
   existingSecret: ""
   # Used only when existingSecret is empty (chart-managed Secret):
   url: "" # postgres://openshapeforge_app:<pw>@<host>:5432/openshapeforge  (restricted role)
-  # Optional administrator connection used only to create/grant roles and for
-  # explicit app/worker password rotation. When empty, the role provisioner
-  # uses migrateUrl, which must then hold the required role privileges (the
-  # existing chart contract and the default deployment shape).
-  adminUrl: ""
   migrateUrl: "" # postgres://openshapeforge:<pw>@<host>:5432/openshapeforge  (privileged role)
   # Password for the restricted openshapeforge_app role. The pre-upgrade migrate
-  # Job provisions the role with this value on first creation and only rotates
-  # an existing password when appPasswordRotate is true, so it MUST equal <pw> in
+  # Job provisions the role with this value ON FIRST CREATION ONLY (it never
+  # force-resets an existing role's password), so it MUST equal <pw> in
   # database.url above. Required in production (NODE_ENV=production is always
   # set): a strong, randomized secret — the migrate Job refuses to run if unset
   # or left at the dev default. To rotate an already-provisioned role, set the

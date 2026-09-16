@@ -17,22 +17,8 @@ afterEach(async () => {
 describe("module-only MCP transport registration", () => {
   it("treats an MCP module as a sufficient surface with no core tools", () => {
     const module: RuntimeModule = { name: "module", mcp: {} };
-    const providerModule: RuntimeModule = {
-      name: "provider",
-      operationProviders: [{
-        id: "provider.operations",
-        list: async () => [],
-        get: async () => undefined,
-        execute: async () => ({ data: {}, operations: [] }),
-      }],
-    };
     expect(hasMcpSurface([], { tools: 0, operationTools: 0, connectors: 0 })).toBe(false);
     expect(hasMcpSurface([module], { tools: 0, operationTools: 0, connectors: 0 })).toBe(true);
-    expect(hasMcpSurface([providerModule], {
-      tools: 0,
-      operationTools: 0,
-      connectors: 0,
-    })).toBe(true);
     expect(hasDynamicModuleToolProjection([{
       name: "decorator",
       mcp: { decorateTool: (tool) => tool },

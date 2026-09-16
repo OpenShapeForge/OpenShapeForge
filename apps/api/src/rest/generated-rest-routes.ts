@@ -9,7 +9,8 @@
  *   - resolveSessionContext() for bearer/trusted-context authentication,
  *   - the generated CRUD service layer (get/list/create/update/delete),
  *     which applies tenant scoping and RLS via withDbSession(),
- *   - canonical Operation failures, translated to HTTP by toHttpError().
+ *   - the CRUD layer's GraphQLError vocabulary, translated to HTTP statuses
+ *     by toHttpError().
  *
  * Rows come back from the CRUD layer as to_jsonb() objects keyed by
  * snake_case column names; responses are serialized through the same
@@ -17,29 +18,23 @@
  * APIs present identical field names.
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { OperationFailure } from "@openshapeforge/operations";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
-import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
-import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import {
-  entityOperationRef,
-  entityOperationContract,
-  executeEntityOperation,
-  fieldNameForColumn,
+  createGeneratedEntity,
+  deleteGeneratedEntity,
+  getGeneratedEntity,
   getGeneratedCrudTables,
-  isGeneratedCrudOperationEnabled,
-  invalidMutationControlTypeFailure,
   isCallerWritableColumn,
   isOperationWrittenColumn,
   operationWrittenRefusal,
-} from "../operations/entity/index.js";
+  listGeneratedEntities,
+  updateGeneratedEntity,
+} from "../graphql/generated-crud.js";
 import { headersFromFastify } from "../http/headers.js";
-import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { HttpError, toHttpError } from "./http-error.js";
-import { serializeGeneratedRestRow } from "./serialize-generated-row.js";
 
 import { registerRestDocs } from "./rest-docs.js";
 // Re-exported so existing import sites keep working.
@@ -50,24 +45,6 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
-function usesCanonicalResultEnvelope(table: GeneratedTable): boolean {
-  return (table.source?.authoringVersion ?? 1) >= 2;
-}
-
-function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
-  const error = body.error as Record<string, unknown> | undefined;
-  if (!error) return body;
-  const data = error.data as Record<string, unknown> | undefined;
-  return {
-    error: {
-      code: error.code,
-      message: error.message,
-      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
-      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
-    },
-  };
-}
-
 const RESERVED_LIST_PARAMS = new Set([
   "first",
   "after",
@@ -75,64 +52,14 @@ const RESERVED_LIST_PARAMS = new Set([
   "sortDirection",
 ]);
 
-const MUTATION_CONTROL_FIELDS = new Set([
-  "blueprintId",
-  "expectedVersion",
-  "leaseToken",
-  "confirmed",
-  "confirmationToken",
-  "confirmationAnswer",
-]);
-
-type MutationControlField =
-  | "blueprintId"
-  | "expectedVersion"
-  | "leaseToken"
-  | "confirmed"
-  | "confirmationToken"
-  | "confirmationAnswer";
-
-function expectedMutationControlType(
-  field: MutationControlField,
-): "string" | "boolean" {
-  return field === "confirmed" ? "boolean" : "string";
+function fieldNameForColumn(column: GeneratedColumn) {
+  return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
-function splitMutationBody(
-  body: unknown,
-  allowControls: boolean,
-): {
-  valuesBody: unknown;
-  controls: Record<string, string | boolean>;
-} {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    return { valuesBody: body, controls: {} };
-  }
-  const entries = Object.entries(body as Record<string, unknown>);
-  if (allowControls) {
-    for (const [key, value] of entries) {
-      if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
-      const field = key as MutationControlField;
-      const expectedType = expectedMutationControlType(field);
-      if (typeof value !== expectedType) {
-        if (field === "blueprintId") throw new HttpError(400, "BAD_USER_INPUT", "blueprintId must be a string.");
-        throw invalidMutationControlTypeFailure(field, expectedType);
-      }
-    }
-  }
-  const controls = Object.fromEntries(
-    entries.filter(
-      ([key, value]) =>
-        allowControls &&
-        MUTATION_CONTROL_FIELDS.has(key) &&
-        (typeof value === "string" ||
-          (key === "confirmed" && typeof value === "boolean")),
-    ),
-  ) as Record<string, string | boolean>;
-  const valuesBody = Object.fromEntries(
-    entries.filter(([key]) => !allowControls || !MUTATION_CONTROL_FIELDS.has(key)),
+function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
+  return Object.fromEntries(
+    table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
   );
-  return { valuesBody, controls };
 }
 
 /**
@@ -152,8 +79,6 @@ function assertWritableBody(
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Request body must be a JSON object.");
   }
-  const unsupported = collectionMutationError(table, operation, getGeneratedCrudTables(), body as Record<string, unknown>);
-  if (unsupported) throw new HttpError(400, unsupported.code, unsupported.message);
   const writable = new Set(
     table.columns
       .filter((column) => isCallerWritableColumn(table, column, operation))
@@ -337,13 +262,6 @@ type RestRequestContext = {
   session: DbSessionInput;
 };
 
-/** Keep all verified session metadata available to canonical entity controls. */
-export function generatedRestSession(
-  resolved: TrustedSessionContext,
-): DbSessionInput {
-  return { ...resolved };
-}
-
 export function registerGeneratedRestRoutes(
   app: FastifyInstance,
   options: { db?: OpenShapeForgeDatabase | undefined } = {},
@@ -355,26 +273,9 @@ export function registerGeneratedRestRoutes(
 
   // The generated spec is a build artifact of the same manifest that drives
   // these routes; serve it unauthenticated like the health endpoints.
-  const projectedSpec = structuredClone(openApiSpec);
-  const schemas = projectedSpec.components.schemas as Record<string, Record<string, unknown>>;
-  for (const table of getGeneratedCrudTables()) {
-    const typeName = table.source?.graphql?.typeName;
-    if (!typeName) continue;
-    const managed = collectionManagedFields(table, getGeneratedCrudTables());
-    for (const name of [`${typeName}Input`, `${typeName}UpdateInput`]) {
-      if (schemas[name]) schemas[name] = withoutCollectionInputs(schemas[name], managed);
-    }
-    if (table.source?.rest && isGeneratedCrudOperationEnabled(table, "create") &&
-      collectionMutationError(table, "create", getGeneratedCrudTables()) &&
-      entityOperationContract(entityOperationRef(table, "create").id).implementation?.type !== "plugin") {
-      const paths = projectedSpec.paths as Record<string, Record<string, unknown>>;
-      const path = paths[`${REST_MOUNT_PATH}/${table.source.rest.basePath}`];
-      if (path) delete path.post;
-    }
-  }
-  app.get(REST_OPENAPI_PATH, async () => projectedSpec);
+  app.get(REST_OPENAPI_PATH, async () => openApiSpec);
 
-  registerRestDocs(app, projectedSpec);
+  registerRestDocs(app, openApiSpec);
 
   if (restTables.length === 0) {
     return;
@@ -399,7 +300,13 @@ export function registerGeneratedRestRoutes(
     }
     return {
       db: options.db,
-      session: generatedRestSession(resolved),
+      session: {
+        tenantId: resolved.tenantId,
+        userId: resolved.userId,
+        roles: [...resolved.roles],
+        groups: [...resolved.groups],
+        scope: resolved.scope,
+      },
     };
   }
 
@@ -425,16 +332,8 @@ export function registerGeneratedRestRoutes(
       },
     );
 
-    instance.setErrorHandler((error, request, reply) => {
-      const { status, body: canonicalBody } = toHttpError(error);
-      const pathname = request.url.split("?", 1)[0] ?? request.url;
-      const table = restTables.find((candidate) => {
-        const base = `${REST_MOUNT_PATH}/${candidate.source.rest.basePath}`;
-        return pathname === base || pathname.startsWith(`${base}/`);
-      });
-      const body = table && !usesCanonicalResultEnvelope(table)
-        ? legacyFailureBody(canonicalBody as unknown as Record<string, unknown>)
-        : canonicalBody;
+    instance.setErrorHandler((error, _request, reply) => {
+      const { status, body } = toHttpError(error);
       if (status >= 500) {
         instance.log.error({ err: error }, "Generated REST route failed.");
       }
@@ -444,13 +343,6 @@ export function registerGeneratedRestRoutes(
     for (const table of restTables) {
       const rest = table.source.rest;
       const base = `${REST_MOUNT_PATH}/${rest.basePath}`;
-      const canonical = usesCanonicalResultEnvelope(table);
-      const offerIntents = (Object.entries(rest.operations) as Array<[
-        "list" | "get" | "create" | "update" | "delete",
-        boolean,
-      ]>)
-        .filter(([, enabled]) => enabled)
-        .map(([intent]) => intent);
 
       if (rest.operations.list) {
         instance.get(base, async (request, reply) => {
@@ -459,36 +351,15 @@ export function registerGeneratedRestRoutes(
           // The REST list body always carries totalCount, so REST always pays
           // for the count pass — unlike GraphQL, where the client selects it
           // (#17). A REST opt-out would be a query-parameter contract change.
-          const operationResult = await executeEntityOperation(context.db, context.session, {
-            operation: entityOperationRef(table, "list"),
-            offerIntents,
-            input: {
-              ...buildListInput(table, query),
-              includeTotalCount: true,
-            },
+          const result = await listGeneratedEntities(context.db, context.session, {
+            table: table.name,
+            ...buildListInput(table, query),
+            includeTotalCount: true,
           });
-          if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
-          if ("error" in operationResult) throw new OperationFailure(operationResult.error);
-          const result = operationResult.data;
-          if (!canonical) {
-            return reply.send({
-              items: result.items.map((item) =>
-                serializeGeneratedRestRow(table, item.data),
-              ),
-              totalCount: result.totalCount,
-              nextCursor: result.nextCursor,
-            });
-          }
           return reply.send({
-            data: {
-              items: result.items.map((item) => ({
-                data: serializeGeneratedRestRow(table, item.data),
-                operations: item.operations,
-              })),
-              totalCount: result.totalCount,
-              nextCursor: result.nextCursor,
-            },
-            operations: operationResult.operations,
+            items: result.rows.map((row) => serializeRow(table, row)),
+            totalCount: result.totalCount,
+            nextCursor: result.nextCursor,
           });
         });
       }
@@ -497,130 +368,58 @@ export function registerGeneratedRestRoutes(
         instance.get(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const result = await executeEntityOperation(context.db, context.session, {
-            operation: entityOperationRef(table, "get"),
-            offerIntents,
-            input: { id },
+          const row = await getGeneratedEntity(context.db, context.session, {
+            table: table.name,
+            id,
           });
-          if (result.intent !== "get") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          const row = result.data;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
-          return reply.send({
-            data: serializeGeneratedRestRow(table, row),
-            operations: result.operations,
-          });
+          return reply.send(serializeRow(table, row));
         });
       }
 
       if (rest.operations.create) {
-        const operation = entityOperationContract(entityOperationRef(table, "create").id);
-        const projection = operation.implementation?.type === "plugin" ? operation.interfaces?.rest : undefined;
-        const path = projection && projection.path ? projection.path : base;
-        instance.post(path, async (request, reply) => {
+        instance.post(base, async (request, reply) => {
           const context = await requireRestContext(request);
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
-          const input = operation.implementation?.type === "plugin"
-            ? pluginEntityTransportInput(operation, request.body ?? {}, undefined,
-                typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
-            : { values: assertWritableBody(table, valuesBody, "create"), ...controls };
-          const result = await executeEntityOperation(context.db, context.session, {
-            operation: entityOperationRef(table, "create"),
-            offerIntents,
-            input,
+          const values = assertWritableBody(table, request.body ?? {}, "create");
+          const row = await createGeneratedEntity(context.db, context.session, {
+            table: table.name,
+            values,
           });
-          if (result.intent !== "create") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          const row = result.data;
-          if (!row) throw new Error("Create operation returned no record.");
-          if (!canonical) {
-            return reply.status(201).send(serializeGeneratedRestRow(table, row));
-          }
-          return reply.status(projection && projection.response?.status ? projection.response.status : 201).send({
-            data: serializeGeneratedRestRow(table, row),
-            operations: result.operations,
-          });
+          return reply.status(201).send(serializeRow(table, row));
         });
       }
 
       if (rest.operations.update) {
-        const operation = entityOperationContract(entityOperationRef(table, "update").id);
-        const projection = operation.implementation?.type === "plugin" ? operation.interfaces?.rest : undefined;
-        const path = projection && projection.path ? projection.path : `${base}/:id`;
-        const method = projection && projection.method === "PUT" ? "PUT" : "PATCH";
-        instance.route({ method, url: path, handler: async (request, reply) => {
+        instance.patch(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
-          const targetField = operation.target?.scope === "record" ? operation.target.inputField : "id";
-          const params = request.params as Record<string, string>;
-          const id = params[targetField] ?? params.id;
-          if (!id) throw new HttpError(400, "BAD_USER_INPUT", "The record identifier is missing.");
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
-          const input = operation.implementation?.type === "plugin"
-            ? pluginEntityTransportInput(operation, request.body ?? {}, id,
-                typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
-            : { id, values: assertWritableBody(table, valuesBody, "update"), ...controls };
-          if (Object.hasOwn(controls, "blueprintId")) throw new HttpError(400, "BAD_USER_INPUT", "blueprintId is only supported when creating a record.");
-          const result = await executeEntityOperation(context.db, context.session, {
-            operation: entityOperationRef(table, "update"),
-            offerIntents,
-            input,
+          const { id } = request.params as { id: string };
+          const values = assertWritableBody(table, request.body ?? {}, "update");
+          const row = await updateGeneratedEntity(context.db, context.session, {
+            table: table.name,
+            id,
+            values,
           });
-          if (result.intent !== "update") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          const row = result.data;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
-          return reply.status(projection && projection.response?.status ? projection.response.status : 200).send({
-            data: serializeGeneratedRestRow(table, row),
-            operations: result.operations,
-          });
-        } });
+          return reply.send(serializeRow(table, row));
+        });
       }
 
       if (rest.operations.delete) {
         instance.delete(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const { valuesBody, controls } = splitMutationBody(
-            request.body ?? {},
-            canonical,
-          );
-          if (
-            canonical &&
-            valuesBody &&
-            typeof valuesBody === "object" &&
-            Object.keys(valuesBody as Record<string, unknown>).length > 0
-          ) {
-            throw new HttpError(
-              400,
-              "BAD_USER_INPUT",
-              "Delete body contains an unknown control field.",
-            );
-          }
-          const result = await executeEntityOperation(context.db, context.session, {
-            operation: entityOperationRef(table, "delete"),
-            offerIntents,
-            input: { id, ...controls },
+          const deleted = await deleteGeneratedEntity(context.db, context.session, {
+            table: table.name,
+            id,
           });
-          if (result.intent !== "delete") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          const deleted = result.data.deleted;
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          if (!canonical) return reply.status(204).send();
-          return reply.send({ data: result.data, operations: result.operations });
+          return reply.status(204).send();
         });
       }
     }

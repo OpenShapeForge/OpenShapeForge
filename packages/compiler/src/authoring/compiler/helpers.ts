@@ -23,24 +23,6 @@ export const FIELD_VALUE_TYPE_TO_GQL: Record<string, string> = {
   object: "JSON",
 };
 
-const POSTGRES_INTEGER_MIN = -2_147_483_648;
-const POSTGRES_INTEGER_MAX = 2_147_483_647;
-
-function numericValidationRule(rule: unknown): number | undefined {
-  const value = rule && typeof rule === "object" ? (rule as { value?: unknown }).value : rule;
-  return typeof value === "number" ? value : undefined;
-}
-
-function needsWideInteger(field: Pick<Field, "valueType" | "validation">): boolean {
-  if (field.valueType !== "integer") return false;
-  const minimum = numericValidationRule(field.validation?.min);
-  const maximum = numericValidationRule(field.validation?.max);
-  return (
-    (minimum !== undefined && minimum < POSTGRES_INTEGER_MIN) ||
-    (maximum !== undefined && maximum > POSTGRES_INTEGER_MAX)
-  );
-}
-
 export function fieldCardinality(field: Pick<Field, "cardinality">): "single" | "collection" {
   if (field.cardinality === "collection") return "collection";
   if (field.cardinality && typeof field.cardinality === "object") {
@@ -60,31 +42,22 @@ export function isUuidField(field: Pick<Field, "valueType" | "validation">): boo
   return field.valueType === "string" && field.validation?.format === "uuid";
 }
 
-export function fieldSqlType(
-  field: Pick<Field, "valueType" | "cardinality" | "validation">,
-): string {
+export function fieldSqlType(field: Pick<Field, "valueType" | "cardinality" | "validation">): string {
   if (isCollectionField(field)) return "jsonb";
   if (isUuidField(field)) return "uuid";
-  if (needsWideInteger(field)) return "bigint";
   return FIELD_VALUE_TYPE_TO_SQL[field.valueType] ?? "text";
 }
 
-export function fieldGraphqlBaseType(
-  field: Pick<Field, "valueType" | "cardinality" | "validation">,
-): string {
+export function fieldGraphqlBaseType(field: Pick<Field, "valueType" | "cardinality" | "validation">): string {
   if (isCollectionField(field)) {
-    const itemType =
-      field.valueType === "object"
-        ? "JSON"
-        : isUuidField(field)
-          ? "ID"
-          : needsWideInteger(field)
-            ? "Float"
-            : (FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String");
+    const itemType = field.valueType === "object"
+      ? "JSON"
+      : isUuidField(field)
+        ? "ID"
+        : FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String";
     return `[${itemType}]`;
   }
   if (isUuidField(field)) return "ID";
-  if (needsWideInteger(field)) return "Float";
   return FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String";
 }
 

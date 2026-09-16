@@ -8,25 +8,13 @@ export type ScalarType =
   | "numeric"
   | "date"
   | "timestamptz"
-  | "jsonb"
-  /**
-   * A text array, spelled the way Postgres spells it because the manifest
-   * type doubles as the SQL type token (the roll-forward migrator renders
-   * `ADD COLUMN` from it verbatim). Platform bookkeeping only: no authoring
-   * field maps onto it, so no generated CRUD, GraphQL or MCP surface has to
-   * render one — the runtime tables that hold a role list or a read-guides
-   * list are the reason it exists.
-   */
-  | "text[]";
+  | "jsonb";
 
 export type ReferenceDefinition = {
   schema: string;
   table: string;
   column: string;
   onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
-  /** Composite FK columns, including tenant identity; both arrays have equal length. */
-  localColumns?: string[];
-  targetColumns?: string[];
 };
 
 export type IndexDefinition = {
@@ -57,14 +45,6 @@ export type IndexDefinition = {
  * schema migration instead.
  */
 export type TableConstraintDefinition = {
-  /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
-  compilerOwned?: boolean;
-  /**
-   * Reconcile a compiler-owned CHECK whose expression is content-addressed in
-   * its version. The generated migration drops the previous same-name
-   * constraint before adding the current definition.
-   */
-  replaceExisting?: boolean;
   /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
   version: string;
   /** Explicit PostgreSQL constraint name. */
@@ -142,15 +122,6 @@ export type RowScopePolicy = {
    * at session establishment.
    */
   bypassRoles?: string[];
-  /**
-   * Persisted action ACL. The SELECT policy composes its `view` decision with
-   * the tenant/owner/group predicate; edit/delete stay Operation-semantic
-   * runtime checks because SQL UPDATE also implements actions such as archive.
-   */
-  recordPermissions?: {
-    column: string;
-    empty: "public" | "restricted";
-  };
 };
 
 export type RetentionAction = "retain" | "archive" | "redact" | "delete";
@@ -259,15 +230,6 @@ export type ColumnSensitivity = "confidential" | "pii" | "bsn";
 export type ColumnDefinition = {
   name: string;
   type: ScalarType;
-  /**
-   * Part of the table's primary key. One column gives the ordinary inline
-   * `PRIMARY KEY`; more than one gives a composite key over those columns in
-   * declaration order, rendered as a table constraint. A composite key is a
-   * platform-bookkeeping shape (a link row keyed by both ends, a version row
-   * keyed by its coordinates) — generated CRUD addresses rows by a single
-   * column, so `manifest.primaryKey` is null for such a table and it can never
-   * be CRUD-eligible.
-   */
   primaryKey?: boolean;
   required?: boolean;
   default?: string;
@@ -298,19 +260,6 @@ export type ColumnDefinition = {
    * unaffected columns keep byte-identical output.
    */
   writtenBy?: string[];
-  /**
-   * Compiler-resolved create-time derivation. Callers never write this column;
-   * the API materializes it and uses the named unique-index columns as its
-   * race-safe ON CONFLICT target.
-   */
-  deriveOnCreate?: {
-    sourceField: string;
-    sourceColumn: string;
-    transform: "slug";
-    onConflict: "suffix";
-    conflictColumns: string[];
-    maxLength?: number;
-  };
 };
 
 export type LocalizedTextManifest = {
@@ -320,12 +269,9 @@ export type LocalizedTextManifest = {
 };
 
 export type TableSourceDefinition = {
-  blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
-  /** Present for strict entity authoring; absence means legacy v1. */
-  authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",
@@ -342,11 +288,6 @@ export type TableSourceDefinition = {
    * `sourceField` map to bridge authoring fields → DB columns.
    */
   displayTemplate?: string;
-  /** Interface-neutral values computed by the operation runtime after reading a row. */
-  computedFields?: Array<{
-    field: string;
-    resolver: "labelRules";
-  }>;
   graphql?: {
     typeName: string;
     singleQueryName: string;
@@ -354,14 +295,6 @@ export type TableSourceDefinition = {
     createMutationName: string;
     updateMutationName: string;
     deleteMutationName: string;
-    /** Explicit v2 interface exposure; absent for v1 manifests. */
-    operations?: {
-      list: boolean;
-      get: boolean;
-      create: boolean;
-      update: boolean;
-      delete: boolean;
-    };
     relationships: Array<{
       name: string;
       target: string;
@@ -394,19 +327,6 @@ export type TableSourceDefinition = {
       update: boolean;
       delete: boolean;
     };
-  };
-  /**
-   * Transport-neutral secure-input policy compiled from the canonical create
-   * Operation. `into` is server-owned on every generated interface. The MCP
-   * sub-object below temporarily mirrors this metadata for its existing
-   * secure browser/client handoff runtime.
-   */
-  secureInputOnCreate?: {
-    sourceField: string;
-    sourceEntity: string;
-    definitionsField: string;
-    into: string;
-    message?: string;
   };
   /**
    * Opt-in generated REST exposure for this table. Present only when the
@@ -481,13 +401,6 @@ export type TableSourceDefinition = {
       update: string[];
       delete: string[];
     };
-    recordPermissions?: {
-      field: string;
-      column: string;
-      empty: "public" | "restricted";
-      createRequires: import("./authoring/types/common.js").RecordPermissionAction[];
-      defaultValue?: Record<string, unknown>;
-    };
   };
   relationshipStatus?: {
     emittedReferences: string[];
@@ -514,15 +427,6 @@ export type TableDefinition = {
   generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
-  /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
-  relationStorage?: {
-    sourceEntity: string;
-    fieldKey: string;
-    targetEntity: string;
-    sourceColumn: string;
-    targetColumn: string;
-    positionColumn?: string;
-  };
   /** Compound and named invariants owned by a compiler plugin. */
   constraints?: TableConstraintDefinition[];
   /** Set by the compiler when a plugin contributes versioned constraints. */
@@ -664,7 +568,6 @@ export type PlatformSchemaManifest = {
   description?: string;
   relationshipRegister?: RelationshipRegisterEntry[];
   tables: TableDefinition[];
-  entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
 };
 
 export type GeneratedArtifact = {

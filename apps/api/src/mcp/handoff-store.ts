@@ -36,7 +36,7 @@ function parseToken(
 export async function createHandoff(input: {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration";
   tenantId: string;
   userId: string;
   payload: Record<string, unknown>;
@@ -75,7 +75,7 @@ export async function createHandoff(input: {
 export async function readHandoff<T extends Record<string, unknown>>(input: {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration";
   token: unknown;
   consume: boolean;
 }): Promise<T | null> {
@@ -145,7 +145,7 @@ export async function readLatestHandoffForSession<
 >(input: {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration";
   session: DbSessionInput;
 }): Promise<{ id: string; payload: T } | null> {
   const row = await withDbSession(input.db, input.session, async (trx) => {
@@ -185,7 +185,7 @@ export async function readLatestHandoffForSession<
 /** Consume an authenticated person's handoff by its non-secret database id. */
 export async function consumeHandoffForSession(input: {
   db: OpenShapeForgeDatabase;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration";
   id: unknown;
   session: DbSessionInput;
 }): Promise<boolean> {
@@ -205,7 +205,7 @@ export async function consumeHandoffForSession(input: {
 
 export async function consumeHandoff(input: {
   db: OpenShapeForgeDatabase;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration";
   token: unknown;
 }): Promise<void> {
   const parsed = parseToken(input.token);

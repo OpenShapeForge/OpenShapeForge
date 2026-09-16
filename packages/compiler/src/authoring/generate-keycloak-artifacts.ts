@@ -19,7 +19,6 @@ import {
   loadEntity,
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
-import { loadOperationCatalogs } from "./operation-catalog.js";
 import {
   generateAllKeycloakRealmArtifacts,
   type KeycloakRealmArtifact,
@@ -108,17 +107,5 @@ export function generateAuthoringKeycloakArtifacts(
   // names an `entityRoleClient` consumes them; the rest see the same contracts
   // and derive nothing from them.
   const contracts = compileAllEntities(authoringDir);
-  // Module-global Operations are not attached to an entity contract, but their
-  // session roles are part of the same canonical authorization vocabulary.
-  // Pass their authored catalogs to the realm generator so a clean Keycloak
-  // import never depends on an imperative role-seeding fallback.
-  const operationCatalogs = loadOperationCatalogs(authoringDir).map(
-    ({ document }) => document,
-  );
-  return generateAllKeycloakRealmArtifacts(
-    contracts,
-    authConfigs,
-    undefined,
-    operationCatalogs,
-  );
+  return generateAllKeycloakRealmArtifacts(contracts, authConfigs);
 }

@@ -3,22 +3,23 @@
  * Relationship traversal per generated entity: belongsTo resolution and
  * hasMany lists with aggregate counts, derived from the manifest's
  * relationship metadata.
- *
- * Shape-aware through e2e/gql-shapes.ts: relationship fields live on the
- * entity type at both generations, so only the wrapper around the record
- * differs, and fetchRecord unwraps it.
  */
 import { expect } from "bun:test";
-import { describe, registerSuiteLifecycle, tenantA, test } from "./e2e/harness.js";
+import {
+  describe,
+  expectData,
+  registerSuiteLifecycle,
+  tenantA,
+  test,
+} from "./e2e/harness.js";
 import {
   createRow,
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
-  graphqlTables as tables,
+  tables,
   tablesByTypeName,
 } from "./e2e/entity-factory.js";
-import { fetchRecord } from "./e2e/gql-shapes.js";
 
 registerSuiteLifecycle();
 
@@ -57,16 +58,20 @@ for (const table of tables) {
         return column !== undefined && !isMutableColumn(column);
       };
 
-      const withAggregate = `id ${relationship.name} { id } ${relationship.name}Aggregate { count }`;
-
       if (
         relationship.resolve === "belongsTo" &&
         sessionScoped(table, relationship.foreignKey)
       ) {
         test(`belongsTo ${relationship.name} resolves the session tenant`, async () => {
           const id = await createRow(table, tenantA);
-          const row = await fetchRecord(tenantA, table, id, `id ${relationship.name} { id }`);
-          expect(row[relationship.name]?.id).toBe(tenantA.tenantId);
+          const data = await expectData(
+            tenantA,
+            `query($id: ID!) {
+               ${graphql.singleQueryName}(id: $id) { id ${relationship.name} { id } }
+             }`,
+            { id },
+          );
+          expect(data[graphql.singleQueryName][relationship.name]?.id).toBe(tenantA.tenantId);
         });
       } else if (relationship.resolve === "belongsTo") {
         test(`belongsTo ${relationship.name} -> ${relationship.target}`, async () => {
@@ -76,8 +81,14 @@ for (const table of tables) {
           );
           expect(fkColumn).toBeTruthy();
           const id = await createRow(table, tenantA, { [fieldName(fkColumn!)]: targetId });
-          const row = await fetchRecord(tenantA, table, id, `id ${relationship.name} { id }`);
-          expect(row[relationship.name]?.id).toBe(targetId);
+          const data = await expectData(
+            tenantA,
+            `query($id: ID!) {
+               ${graphql.singleQueryName}(id: $id) { id ${relationship.name} { id } }
+             }`,
+            { id },
+          );
+          expect(data[graphql.singleQueryName][relationship.name]?.id).toBe(targetId);
         });
       }
 
@@ -87,10 +98,24 @@ for (const table of tables) {
       ) {
         test(`hasMany ${relationship.name} lists the session tenant's rows`, async () => {
           const childId = await createRow(targetTable, tenantA);
-          const row = await fetchRecord(tenantA, table, tenantA.tenantId, withAggregate);
-          const childIds = row[relationship.name].map((child: { id: string }) => child.id);
+          const data = await expectData(
+            tenantA,
+            `query($id: ID!) {
+               ${graphql.singleQueryName}(id: $id) {
+                 id
+                 ${relationship.name} { id }
+                 ${relationship.name}Aggregate { count }
+               }
+             }`,
+            { id: tenantA.tenantId },
+          );
+          const childIds = data[graphql.singleQueryName][relationship.name].map(
+            (row: { id: string }) => row.id,
+          );
           expect(childIds).toContain(childId);
-          expect(row[`${relationship.name}Aggregate`].count).toBeGreaterThanOrEqual(1);
+          expect(
+            data[graphql.singleQueryName][`${relationship.name}Aggregate`].count,
+          ).toBeGreaterThanOrEqual(1);
         });
       } else if (relationship.resolve === "hasMany") {
         test(`hasMany ${relationship.name} -> ${relationship.target}`, async () => {
@@ -102,10 +127,24 @@ for (const table of tables) {
           const childId = await createRow(targetTable, tenantA, {
             [fieldName(childFkColumn!)]: parentId,
           });
-          const row = await fetchRecord(tenantA, table, parentId, withAggregate);
-          const childIds = row[relationship.name].map((child: { id: string }) => child.id);
+          const data = await expectData(
+            tenantA,
+            `query($id: ID!) {
+               ${graphql.singleQueryName}(id: $id) {
+                 id
+                 ${relationship.name} { id }
+                 ${relationship.name}Aggregate { count }
+               }
+             }`,
+            { id: parentId },
+          );
+          const childIds = data[graphql.singleQueryName][relationship.name].map(
+            (row: { id: string }) => row.id,
+          );
           expect(childIds).toContain(childId);
-          expect(row[`${relationship.name}Aggregate`].count).toBeGreaterThanOrEqual(1);
+          expect(
+            data[graphql.singleQueryName][`${relationship.name}Aggregate`].count,
+          ).toBeGreaterThanOrEqual(1);
         });
       }
     }

@@ -113,23 +113,6 @@ describe("checkGeneratedSchemaDrift", () => {
 });
 
 describe("findUndeclaredDatabaseSchema", () => {
-  // Dedicated runtime migrations are declarations too; readiness exempts
-  // precisely those known tables while still reporting an unknown table.
-  test("exempts migration-owned platform tables but reports unknown tables", async () => {
-    await sql`create table platform.operation_execution_receipts (id uuid primary key)`.execute(runtime.db);
-    await sql`create table platform.preference_definitions (namespace text, key text, definition jsonb, primary key (namespace, key))`.execute(runtime.db);
-    await sql`create table platform.unknown_receipts (id uuid primary key)`.execute(runtime.db);
-    const result = await findUndeclaredDatabaseSchema(runtime.db, [{
-      name: "platform.schema_migrations",
-      schema: "platform",
-      columns: [{ name: "version" }, { name: "checksum" }, { name: "applied_at" }, { name: "applied_by" }],
-    }]);
-    expect(result.tables).toEqual(["platform.unknown_receipts"]);
-    expect(result.columns).toEqual([]);
-    await sql`drop table platform.unknown_receipts`.execute(runtime.db);
-    await sql`drop table platform.operation_execution_receipts`.execute(runtime.db);
-    await sql`drop table platform.preference_definitions`.execute(runtime.db);
-  });
   // Mirrors the roll-forward diff's exemption (migrations.test.ts,
   // "plugin-migration-owned columns"): readiness must not report a column a
   // plugin schema migration added to a generated table as foreign schema,

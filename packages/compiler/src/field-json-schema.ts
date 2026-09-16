@@ -14,28 +14,15 @@
  * reference-data snapshot.
  */
 
-import type {
-  CompiledField,
-  ComponentCatalog,
-  Field,
-  FieldDefinition,
-  SemanticTypeDefinition,
-} from "./authoring/types.js";
+import type { CompiledField } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
-import { resolveModelFields } from "./authoring/compiler/model.js";
 import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
 import workflowInspectorSchema from "../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
 };
-import {
-  operationFieldObjectSchema,
-  operationFieldSchema,
-  type OperationFieldDefinition,
-  type OperationFieldSchemaRegistry,
-} from "@openshapeforge/operations";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -60,31 +47,6 @@ const fieldDefinitionDefinitions = {
   workflowInspector,
 };
 
-/** Registries emitted for the host-bound runtime FieldDefinition compiler. */
-export function runtimeFieldSchemaRegistry(input: {
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
-  referentiedata?: CoreReferentiedataSnapshot;
-}): OperationFieldSchemaRegistry & {
-  fieldDefinitionSchema: JsonObject;
-} {
-  return {
-    semanticTypes: (input.semanticTypes ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["semanticTypes"]>,
-    referentiedata: (input.referentiedata ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["referentiedata"]>,
-    fieldDefinitionDefinitions: structuredClone(fieldDefinitionDefinitions),
-    fieldDefinitionSchema: {
-      $ref: FIELD_DEFINITION_SCHEMA_REF,
-      $defs: structuredClone(fieldDefinitionDefinitions),
-    },
-  };
-}
-
-export function renderRuntimeFieldSchemaRegistry(input: {
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
-  referentiedata?: CoreReferentiedataSnapshot;
-}): string {
-  return `${JSON.stringify({ version: 1, ...runtimeFieldSchemaRegistry(input) }, null, 2)}\n`;
-}
-
 /**
  * The structural minimum this mapping reads. Both `CompiledField` (compiled
  * entity model) and `FieldDefinition` (authored connector operation fields)
@@ -94,10 +56,6 @@ export type SchemaSourceField = {
   key: string;
   valueType?: string;
   cardinality?: unknown;
-  cardinalityBounds?: {
-    min?: number;
-    max?: number | "unbounded";
-  };
   required?: boolean;
   defaultValue?: unknown;
   semanticType?: string;
@@ -262,23 +220,6 @@ export function isCollection(field: SchemaSourceField): boolean {
   return field.cardinality === "collection";
 }
 
-function applyCollectionBounds(
-  array: JsonObject,
-  field: SchemaSourceField,
-): JsonObject {
-  const minItems = numericRule(field.validation?.minItems);
-  const cardinalityMin = field.cardinalityBounds?.min;
-  const effectiveMin = minItems === undefined
-    ? cardinalityMin
-    : cardinalityMin === undefined
-      ? minItems
-      : Math.max(minItems, cardinalityMin);
-  if (effectiveMin !== undefined) array.minItems = effectiveMin;
-  const cardinalityMax = field.cardinalityBounds?.max;
-  if (typeof cardinalityMax === "number") array.maxItems = cardinalityMax;
-  return array;
-}
-
 /**
  * Wrap a finished scalar schema as an array. The scalar shape becomes the item
  * shape; a description on the array itself is more useful than one buried in
@@ -291,7 +232,9 @@ export function applyCollectionShape(
   const { description, ...items } = scalar;
   const array: JsonObject = { type: "array", items };
   if (description !== undefined) array.description = description;
-  return applyCollectionBounds(array, field);
+  const minItems = numericRule(field.validation?.minItems);
+  if (minItems !== undefined) array.minItems = minItems;
+  return array;
 }
 
 /**
@@ -392,7 +335,6 @@ export type CompiledFieldSchemaOptions = {
 export type CompiledFieldEnumeration = {
   values: string[];
   labels: Map<string, string>;
-  uiLabels?: Record<string, LocalizedText>;
 };
 
 /**
@@ -410,7 +352,6 @@ export function resolveCompiledFieldEnumeration(
   if (options?.type === "static" && options.items && options.items.length > 0) {
     return {
       values: options.items.map((item) => item.value),
-      uiLabels: Object.fromEntries(options.items.filter(item => item.label && typeof item.label === "object").map(item => [item.value, item.label as LocalizedText])),
       labels: new Map(
         options.items.flatMap((item) => {
           const label = localizedText(item.label);
@@ -432,7 +373,6 @@ export function resolveCompiledFieldEnumeration(
   if (items.length === 0) return undefined;
   return {
     values: items.map((item) => item.value),
-    uiLabels: Object.fromEntries(items.map(item => [item.value, item.label])),
     labels: new Map(
       items.flatMap((item) => {
         const label = localizedText(item.label);
@@ -471,34 +411,11 @@ function addCompiledFieldMetadata(
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
   const title = localizedText(field.label);
-  // Preserve authored UI copy separately from transport documentation and validation.
-  const copy: JsonObject = {};
-  if (field.label && typeof field.label === "object") copy.title = field.label;
-  if (enumeration?.uiLabels) copy.enum = enumeration.uiLabels;
-  const help = field.help ?? field.description;
-  if (help && typeof help === "object") copy.description = help;
-  if (Object.keys(copy).length) schema["x-osf-i18n"] = copy;
   if (title) {
     schema.title = title;
   }
   if (enumeration) {
     schema.enum = enumeration.values;
-  }
-  if (field.options?.type === "entity") {
-    if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
-    schema["x-osf-reference"] = {
-      entity: field.options.source,
-      valueField: field.options.valueField ?? "id",
-    };
-  }
-  if (field.relationship?.target) {
-    schema["x-osf-reference"] = {
-      entity: field.relationship.target,
-      valueField: "id",
-      ...(field.relationship.constraints
-        ? { constraints: structuredClone(field.relationship.constraints) }
-        : {}),
-    };
   }
 
   const descriptionParts: string[] = [];
@@ -546,7 +463,6 @@ export function compiledFieldSchemaWithoutDefinitions(
   const {
     title,
     description,
-    "x-osf-i18n": uiCopy,
     default: defaultValue,
     ...outerItemSchema
   } = valueSchema;
@@ -559,7 +475,6 @@ export function compiledFieldSchemaWithoutDefinitions(
       }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
-  if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;
   if (defaultValue !== undefined) {
@@ -570,7 +485,9 @@ export function compiledFieldSchemaWithoutDefinitions(
       array.items = items;
     }
   }
-  return applyCollectionBounds(array, field);
+  const minItems = numericRule(field.validation?.minItems);
+  if (minItems !== undefined) array.minItems = minItems;
+  return array;
 }
 
 /** Project one resolved entity field and bundle reusable definitions at the schema root. */
@@ -606,51 +523,4 @@ export function compiledObjectSchema(
   return bundleFieldDefinitionSchema(
     compiledObjectSchemaWithoutDefinitions(fields, referentiedata, options),
   );
-}
-
-export type FieldSchemaCompiler = {
-  /** Resolve semantic defaults and nested fields exactly like entity compilation. */
-  compile(fields: readonly FieldDefinition[]): CompiledField[];
-  /** Compile and project one authored field to its complete value schema. */
-  field(field: FieldDefinition, options?: CompiledFieldSchemaOptions): JsonObject;
-  /** Compile and project an authored field list to a strict object schema. */
-  object(
-    fields: readonly FieldDefinition[],
-    options?: CompiledFieldSchemaOptions & { requireRequired?: boolean },
-  ): JsonObject;
-};
-
-/**
- * Bind the canonical field compiler to the resolved authoring catalogs once.
- * Compiler plugins use this build-time capability instead of implementing a
- * second FieldDefinition-to-JSON-Schema normalizer.
- */
-export function createFieldSchemaCompiler(input: {
-  componentCatalog: ComponentCatalog;
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
-  referentiedata?: CoreReferentiedataSnapshot;
-}): FieldSchemaCompiler {
-  const registry = runtimeFieldSchemaRegistry(input);
-  const compile = (fields: readonly FieldDefinition[]) =>
-    resolveModelFields(
-      fields.map((field) => field as Field),
-      input.componentCatalog,
-      input.semanticTypes,
-    );
-  return {
-    compile,
-    field: (field, options) =>
-      operationFieldSchema(
-        field as unknown as OperationFieldDefinition,
-        registry,
-        options,
-      ),
-    object: (fields, options = {}) => {
-      return operationFieldObjectSchema(
-        fields as unknown as readonly OperationFieldDefinition[],
-        registry,
-        options,
-      );
-    },
-  };
 }

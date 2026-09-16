@@ -8,7 +8,7 @@
  * Postgres; here we lock the fail-closed semantics of the primitives.
  */
 import { describe, expect, it } from "bun:test";
-import { operationErrorOf } from "@openshapeforge/operations";
+import { GraphQLError } from "graphql";
 import {
   assertOperationAllowed,
   assertClassifiedQueryFieldsAllowed,
@@ -34,8 +34,9 @@ function forbiddenCode(fn: () => void): string | undefined {
   try {
     fn();
   } catch (error) {
-    const operationError = operationErrorOf(error);
-    if (operationError) return operationError.code;
+    if (error instanceof GraphQLError) {
+      return error.extensions?.code as string | undefined;
+    }
     throw error;
   }
   return undefined;

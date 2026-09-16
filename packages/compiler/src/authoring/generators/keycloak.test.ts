@@ -10,10 +10,7 @@ import {
   normalizeKeycloakRoleName,
   resolveClientSecret,
 } from "./keycloak.js";
-import type {
-  AuthorizationConfigFile,
-  OperationCatalogDefinition,
-} from "../types/authoring.js";
+import type { AuthorizationConfigFile } from "../types/authoring.js";
 import type { CompiledEntityContract } from "../types/compiled.js";
 
 function devConfig(
@@ -280,111 +277,6 @@ describe("generateKeycloakRealmArtifacts role-name collisions", () => {
   });
 });
 
-describe("audience-scoped client role composites", () => {
-  function compositeConfig(): AuthorizationConfigFile {
-    return {
-      schemaVersion: 2,
-      kind: "authorizationConfig",
-      realm: { name: "client-composite-test" },
-      keycloak: {
-        entityRoleClient: "resource-api",
-        clients: [
-          { id: "application-api", kind: "bearerOnly" },
-          { id: "resource-api", kind: "bearerOnly" },
-        ],
-      },
-      clientRoles: {
-        "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
-      },
-      clientRoleComposites: {
-        "application-api": {
-          "Application.Editor": {
-            description: "May edit application data",
-            composites: {
-              "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
-            },
-          },
-        },
-      },
-    };
-  }
-
-  test("projects a host-authored persona onto its audience client", () => {
-    const [artifact] = generateKeycloakRealmArtifacts([], compositeConfig());
-    const realm = JSON.parse(artifact!.contents) as {
-      roles: { client: Record<string, Array<Record<string, unknown>>> };
-    };
-    expect(realm.roles.client["application-api"]).toEqual([
-      {
-        name: "Application.Editor",
-        description: "May edit application data",
-        composite: true,
-        composites: {
-          client: {
-            "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
-          },
-        },
-      },
-    ]);
-  });
-
-  test("refuses a role declared as both plain and composite", () => {
-    const config = compositeConfig();
-    config.clientRoles!["application-api"] = ["Application.Editor"];
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(
-      /declared both as a plain client role and as a composite client role/,
-    );
-  });
-});
-
-describe("canonical Operation roles", () => {
-  test("emits session roles authored by a module Operation catalog", () => {
-    const config = compositeConfigForOperationRole();
-    const catalog = {
-      schemaVersion: 1,
-      kind: "operationCatalog",
-      plugin: "example",
-      operations: {
-        manage: {
-          id: "example.manage",
-          name: { en: "Manage", nl: "Beheren" },
-          description: { en: "Manage examples", nl: "Beheer voorbeelden" },
-          implementation: { type: "plugin", plugin: "example", handler: "manage" },
-          input: { schema: { type: "object" } },
-          output: { schema: { type: "object" } },
-          errors: [],
-          auth: { mode: "session", roles: ["Example.All.Manage"] },
-          tenancy: { mode: "required" },
-          effects: { data: "write", external: "none" },
-          reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
-          confirmation: { mode: "none" },
-        },
-      },
-      interfaces: { rest: {}, graphql: {}, mcp: {} },
-    } satisfies OperationCatalogDefinition;
-
-    const realm = JSON.parse(
-      generateKeycloakRealmArtifacts([], config, "development", [catalog])[0]!.contents,
-    ) as { roles: { client: Record<string, Array<{ name: string }>> } };
-
-    expect(realm.roles.client["application-api"]!.map(({ name }) => name)).toContain(
-      "Example.All.Manage",
-    );
-  });
-});
-
-function compositeConfigForOperationRole(): AuthorizationConfigFile {
-  return {
-    schemaVersion: 2,
-    kind: "authorizationConfig",
-    realm: { name: "operation-role-test-dev" },
-    keycloak: {
-      entityRoleClient: "application-api",
-      clients: [{ id: "application-api", kind: "bearerOnly" }],
-    },
-  };
-}
-
 // A dev realm (name suffixed "-dev"), so authoring a literal client secret in
 // these fixtures is permitted by the generator's non-dev-realm secret guard.
 // The intent here is to verify synthetic service-account emission, not secret
@@ -412,86 +304,6 @@ function realmFrom(config: AuthorizationConfigFile) {
 }
 
 describe("service-account client role grants", () => {
-  test("projects one tenant-bound automatic identity with explicit roles, not employee claims", () => {
-    const config = baseConfig();
-    config.keycloak.clients = [{ id: "automatic-org", kind: "serviceAccount", secret: "local-test",
-      serviceAccountTenantId: "11111111-1111-4111-8111-111111111111", organizationAutomation: true,
-      serviceAccountClientRoles: { "erp-provider": ["Workflow.All.ReadWrite"] } }];
-    const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
-    const client = realm.clients.find((entry: any) => entry.clientId === "automatic-org");
-    expect(client.attributes).toEqual({
-      "oauth2.device.authorization.grant.enabled": "false",
-      "oidc.ciba.grant.enabled": "false",
-      "osf.serviceAccountTenantId": "11111111-1111-4111-8111-111111111111",
-      "osf.organizationAutomation": "true",
-    });
-    expect(client.standardFlowEnabled).toBe(false);
-    expect(client.implicitFlowEnabled).toBe(false);
-    expect(client.directAccessGrantsEnabled).toBe(false);
-    expect(client.redirectUris).toEqual([]);
-    expect(client.webOrigins).toEqual([]);
-    expect(client.protocolMappers.some((entry: any) => entry.name === "tid-mapper")).toBe(true);
-    expect(client.protocolMappers).toContainEqual({
-      name: "service-account-preferred-username",
-      protocol: "openid-connect",
-      protocolMapper: "oidc-usermodel-property-mapper",
-      consentRequired: false,
-      config: {
-        "user.attribute": "username",
-        "claim.name": "preferred_username",
-        "jsonType.label": "String",
-        "id.token.claim": "false",
-        "access.token.claim": "true",
-        "userinfo.token.claim": "false",
-      },
-    });
-    expect(client.defaultClientScopes).toEqual(["basic", "roles"]);
-    expect(client.protocolMappers.some((entry: any) => entry.config["claim.name"] === "act")).toBe(false);
-    expect(realm.users.find((entry: any) => entry.serviceAccountClientId === "automatic-org").attributes.tid)
-      .toEqual(["11111111-1111-4111-8111-111111111111"]);
-  });
-
-  test("normalizes service-account tenant UUIDs before output and uniqueness checks", () => {
-    const config = baseConfig();
-    const client = {
-      id: "automatic-org",
-      kind: "serviceAccount" as const,
-      secret: "local-test",
-      serviceAccountTenantId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
-      organizationAutomation: true,
-      serviceAccountClientRoles: { "erp-provider": ["Workflow.All.Read"] },
-    };
-    config.keycloak.clients = [client];
-    const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
-    expect(realm.clients.find((entry: any) => entry.clientId === client.id)
-      .attributes["osf.serviceAccountTenantId"])
-      .toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    expect(realm.users.find((entry: any) => entry.serviceAccountClientId === client.id)
-      .attributes.tid)
-      .toEqual(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
-
-    config.keycloak.clients = [client, {
-      ...client,
-      id: "automatic-other",
-      serviceAccountTenantId: client.serviceAccountTenantId.toLowerCase(),
-    }];
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(
-      "only one automatic service identity",
-    );
-  });
-
-  test("rejects automatic identities without tenant/explicit grants and ambiguous tenant bindings", () => {
-    const config = baseConfig();
-    const client = { id: "automatic-org", kind: "serviceAccount" as const, secret: "local-test", organizationAutomation: true };
-    config.keycloak.clients = [client];
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("explicit tenant");
-    const valid = { ...client, serviceAccountTenantId: "11111111-1111-4111-8111-111111111111", serviceAccountClientRoles: { "erp-provider": ["Workflow.All.Read"] } };
-    config.keycloak.clients = [valid, { ...valid, id: "other" }];
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("only one");
-    config.keycloak.clients = [{ ...valid, kind: "gateway" }];
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("require kind serviceAccount");
-  });
-
   test("emits a synthetic service-account user carrying the realm-management role", () => {
     const config = baseConfig();
     config.keycloak.clients = [
@@ -513,9 +325,6 @@ describe("service-account client role grants", () => {
     expect(svc!.clientRoles).toEqual({ "realm-management": ["manage-realm"] });
     // Service accounts are not login users — they must carry no credentials.
     expect(svc!.credentials).toBeUndefined();
-    const client = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents)
-      .clients.find((entry: any) => entry.clientId === "openshapeforge-auth-api");
-    expect(client.protocolMappers).toBeUndefined();
   });
 
   test("does not emit a service-account user when no roles are granted", () => {
@@ -1443,7 +1252,7 @@ describe("identity providers — the documented examples in authorization.yaml",
     const yamlPath = join(import.meta.dir, "../../../config/authoring/authorization.yaml");
     const lines = readFileSync(yamlPath, "utf8").split("\n");
     const start = lines.findIndex((l) => l === "  # identityProviders:");
-    const end = lines.findIndex((l, i) => i > start && /^clientRoles:/.test(l));
+    const end = lines.findIndex((l, i) => i > start && /^realmRoles:/.test(l));
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
     const example = lines

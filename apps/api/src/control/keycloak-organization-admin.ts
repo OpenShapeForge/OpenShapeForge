@@ -129,13 +129,7 @@ export type KeycloakAdminOperation =
   | "list_member_roles"
   | "list_invitations"
   | "invite_member"
-  | "resend_invitation"
-  | "delete_invitation"
-  | "get_member"
-  | "list_member_credentials"
-  | "delete_member_credential"
-  | "remove_organization_member"
-  | "send_passkey_recovery";
+  | "delete_invitation";
 
 export class KeycloakAdminError extends Error {
   readonly code: KeycloakAdminErrorCode;

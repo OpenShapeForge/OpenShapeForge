@@ -47,7 +47,7 @@ Out of scope:
 - the **local development stack** (`docker-compose.local.yml`) and its
   intentional dev-only credentials — `admin/admin`, `dev-secret`,
   `openshapeforge-local-dev-context-secret`, the `openshapeforge/openshapeforge` Postgres
-  user, the synthetic `tenant-*-*` test users, `POSTGRES_HOST_AUTH_METHOD=trust`,
+  user, the `acme-*` demo users, `POSTGRES_HOST_AUTH_METHOD=trust`,
   `sslRequired: none`. These are documented dev values (see `AGENTS.md`) and
   must never be used in production. A report that they are "insecure" in the
   dev stack is not a vulnerability; a report that a **production deployment

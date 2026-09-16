@@ -1,25 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Immutable DDL emitted by compiler plugins: constraints, functions, triggers
- * and grants on contributed tables — the runtime-owned invariants the
- * manifest cannot express yet. Applied after the generated step, ledgered in
- * platform.schema_migrations per plugin and version. The optional generated
- * registry is read at runtime because repositories without plugin schema
- * contributions intentionally have no file to import. Mutation functions
- * require a connection-bound Kysely instance because they manage explicit
- * transactions.
+ * Immutable DDL emitted by compiler plugins. The optional generated registry
+ * is read at runtime because repositories without plugin schema contributions
+ * intentionally have no file to import. Mutation functions require a
+ * connection-bound Kysely instance because they manage explicit transactions.
  */
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { sql, type Kysely } from "kysely";
+import { ensureSchemaMigrationsTable } from "./schema-migrations-table.js";
 
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
   checksum: string;
   sql: string;
-  repeatable?: true;
 };
 
 type GeneratedPluginMigrationRegistry = {
@@ -45,10 +41,6 @@ const registryPath = resolve(
 const pluginNamePattern = /^[a-z][a-z0-9-]*$/;
 const migrationVersionPattern = /^\d{4}_[a-z0-9][a-z0-9-]*$/;
 
-function migrationChecksum(migration: GeneratedPluginMigration): string {
-  return createHash("sha256").update(migration.sql).digest("hex");
-}
-
 export function pluginMigrationLedgerVersion(
   migration: Pick<GeneratedPluginMigration, "plugin" | "version">,
 ): string {
@@ -69,8 +61,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       !migrationVersionPattern.test(migration.version) ||
       typeof migration.sql !== "string" ||
       migration.sql.trim().length === 0 ||
-      typeof migration.checksum !== "string" ||
-      (migration.repeatable !== undefined && migration.repeatable !== true)
+      typeof migration.checksum !== "string"
     ) {
       throw new Error("Generated plugin migration registry contains an invalid entry.");
     }
@@ -86,7 +77,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
         `Generated plugin migration registry is not strictly ordered at ${identity}.`,
       );
     }
-    const actual = migrationChecksum(migration);
+    const actual = createHash("sha256").update(migration.sql).digest("hex");
     if (migration.checksum !== actual) {
       throw new Error(
         `Generated plugin migration ${identity} has checksum ${migration.checksum}, but its SQL hashes to ${actual}. Regenerate artifacts.`,
@@ -157,13 +148,20 @@ export async function verifyPluginMigrationLedger(
   };
 }
 
+export function createPluginMigrationLedgerVerifier(
+  loadMigrations: () => Promise<readonly GeneratedPluginMigration[]> =
+    loadGeneratedPluginMigrations,
+) {
+  return async (db: Kysely<any>) =>
+    verifyPluginMigrationLedger(db, await loadMigrations());
+}
+
 export async function applyGeneratedPluginMigrations(
   db: Kysely<any>,
   migrations: readonly GeneratedPluginMigration[],
   appliedBy = "apps/api plugin migrations",
 ): Promise<PluginMigrationsResult> {
-  // The ledger table is a manifest table; the generated step has created it
-  // by the time this runs.
+  await ensureSchemaMigrationsTable(db);
   const status = await verifyPluginMigrationLedger(db, migrations);
   if (status.mismatched.length > 0) {
     throw new Error(
@@ -175,7 +173,7 @@ export async function applyGeneratedPluginMigrations(
   const applied: string[] = [];
   for (const migration of migrations) {
     const identity = pluginMigrationLedgerVersion(migration);
-    if (!missing.has(identity) && !migration.repeatable) {
+    if (!missing.has(identity)) {
       continue;
     }
     await sql`begin`.execute(db);
@@ -184,10 +182,6 @@ export async function applyGeneratedPluginMigrations(
       await sql`
         insert into platform.schema_migrations (version, checksum, applied_by)
         values (${identity}, ${migration.checksum}, ${appliedBy})
-        on conflict (version) do update
-        set checksum = excluded.checksum,
-            applied_by = excluded.applied_by,
-            applied_at = now()
       `.execute(db);
       await sql`commit`.execute(db);
     } catch (error) {

@@ -12,7 +12,7 @@
  *   - resolveSessionContext() for bearer/trusted-context authentication,
  *   - the generated CRUD service layer, which applies tenant scoping and RLS
  *     via withDbSession() and gates every operation on entity roles,
- *   - the shared operation result/error contract, projected to MCP results.
+ *   - the CRUD layer's GraphQLError vocabulary, translated by toHttpError().
  *
  * Two things this transport does that the others do not, both because its
  * consumer is a language model reading schemas to decide what to do:
@@ -32,19 +32,6 @@
  * through, so this transport inherits them by construction.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
-import {
-  OperationFailure,
-  operationErrorOf,
-  type OperationError,
-} from "@openshapeforge/operations";
-import type {
-  RuntimeDeclarativeServiceRequest,
-  RuntimeHostOperationRequest,
-  RuntimeOperationDefinition,
-  RuntimeOperationExecutionResult,
-  RuntimeOperationExecutionOptions,
-} from "@openshapeforge/plugin-runtime";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -64,7 +51,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import { OrganizationBindingError } from "../auth/organization-binding.js";
-import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import {
   buildAuthenticateChallenge,
   canonicalResourceUri,
@@ -88,15 +74,12 @@ import type { DbSessionInput } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
+  createGeneratedEntity,
   isOperationWrittenColumn,
   operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
-  entityOperationRef,
-  entityOperationContract,
-  executeEntityOperation,
-  getEntityOperationContracts,
-  currentRecordOffers,
+  deleteGeneratedEntity,
   getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
@@ -104,12 +87,9 @@ import {
   listGeneratedEntitiesForTable,
   listGeneratedEntityStorageRowsForTable,
   mergeGeneratedEntityObjectForTable,
-  invalidExpectedVersionFailure,
-  invalidMutationControlTypeFailure,
-  assertRecordPermission,
-  requireCreateOperationConfirmation,
+  updateGeneratedEntity,
   updateGeneratedEntityForTable,
-} from "../operations/entity/index.js";
+} from "../graphql/generated-crud.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -121,7 +101,6 @@ import {
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
 import { collectElicitedValues, type ElicitOnCreateEntry } from "./elicitation.js";
-import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -140,27 +119,12 @@ import {
   findExistingConfiguration,
   mergeConfigurationValues,
 } from "./configuration-handoff.js";
-import {
-  ARTIFACT_UPLOAD_APP_URI,
-  ARTIFACT_UPLOAD_PATH,
-  ARTIFACT_UPLOAD_TOOL_NAME,
-  claimArtifactUpload,
-  mintArtifactUpload,
-  renderArtifactUploadApp,
-  renderArtifactUploadPage,
-} from "./artifact-upload.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
-import {
-  callEditLeaseTool,
-  editLeaseOperationIdsForSession,
-  EDIT_LEASE_TOOL_NAMES,
-  editLeaseToolsForOperationIds,
-} from "./edit-lease-tools.js";
 import {
   bindingSelected,
   composeBindingRequest,
   definitionFieldKeys,
-  executeBindingStep,
+  executeBinding,
   fetchWithAllowedRedirects,
   mergeOutputs,
   orderedBindings,
@@ -341,11 +305,6 @@ import {
   sameInvocationSourceReference,
 } from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import {
-  createStatefulMcpSessionContext,
-  sameStatefulMcpAuthorization,
-  withFreshRelationGroupMemberships,
-} from "./stateful-session-authorization.js";
 // --- session-info (whoami / osf://session) — see ./session-info.ts ---
 import {
   SESSION_INFO_TOOL,
@@ -379,23 +338,15 @@ import {
 // --- end the server's instructions ---
 // --- the person's language (mcp/locale.ts) ---
 import { localizedText, type ResolvedLocale } from "./locale.js";
-import {
-  canonicalRuntimeOperationSchema,
-  parseOperationExecuteArguments,
-  runtimeOperationEnvelopeSchema,
-  searchableOperationTools,
-  searchOperationDefinitions,
-  type SearchableOperationToolNames,
-} from "./operation-search.js";
 // --- end the person's language ---
 import {
   bindOperationHandlers,
+  operationModulesConfigured,
   DeclaredOperationError,
   invokeOperation,
   isMcpProjection,
   requireOperationAuthorization,
 } from "../operations/runtime.js";
-import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
 export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
@@ -403,40 +354,14 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
 export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
-function entityMutationControls(args: Record<string, unknown>) {
-  return {
-    ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
-    ...(typeof args.expectedVersion === "string"
-      ? { expectedVersion: args.expectedVersion }
-      : {}),
-    ...(typeof args.leaseToken === "string"
-      ? { leaseToken: args.leaseToken }
-      : {}),
-    ...(typeof args.confirmed === "boolean"
-      ? { confirmed: args.confirmed }
-      : {}),
-    ...(typeof args.confirmationToken === "string"
-      ? { confirmationToken: args.confirmationToken }
-      : {}),
-    ...(typeof args.confirmationAnswer === "string"
-      ? { confirmationAnswer: args.confirmationAnswer }
-      : {}),
-  };
-}
-
-export const __entityMutationControlsForTests = entityMutationControls;
-
 type CatalogTool = {
   name: string;
-  /** Strict v2 catalogues publish the canonical id; v1 resolves it internally. */
-  operationId?: string;
   operation: McpOperation;
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -474,48 +399,6 @@ type CatalogEntity = {
   relationships: CatalogRelationship[];
   elicitOnCreate?: ElicitOnCreateEntry;
 };
-
-type ProjectedRuntimeOperationTool = {
-  definition: RuntimeOperationDefinition;
-  tool: Tool;
-};
-
-function projectRuntimeOperationTool(
-  definition: RuntimeOperationDefinition,
-  locale: ResolvedLocale,
-): ProjectedRuntimeOperationTool {
-  const name = deriveToolName(definition.key);
-  if (!name) {
-    throw new Error(
-      `Runtime Operation ${JSON.stringify(definition.id)} has no usable MCP key.`,
-    );
-  }
-  const title = localizedText(definition.name, locale) ?? definition.id;
-  const description = localizedText(definition.description, locale) ?? title;
-  return {
-    definition,
-    tool: {
-      name,
-      title,
-      description,
-      inputSchema: canonicalRuntimeOperationSchema(
-        definition.input,
-        definition.id,
-        "input",
-      ) as Tool["inputSchema"],
-      outputSchema: runtimeOperationEnvelopeSchema(definition) as Tool["outputSchema"],
-      annotations: {
-        title,
-        readOnlyHint:
-          definition.effects.data === "read" &&
-          definition.effects.external !== "write",
-        destructiveHint: definition.effects.data === "delete",
-        idempotentHint:
-          definition.reliability.idempotency.mode !== "none",
-      },
-    },
-  };
-}
 
 type CatalogField = {
   key: string;
@@ -601,7 +484,6 @@ type CatalogDiscoveryTool = {
   description: string;
   entity: string;
   table: string;
-  compatibility?: { plugin: string; operation: string };
 };
 
 type CatalogTestTool = {
@@ -609,7 +491,6 @@ type CatalogTestTool = {
   description: string;
   entity: string;
   table: string;
-  compatibility?: { plugin: string; operation: string };
 };
 
 type Catalog = {
@@ -626,42 +507,21 @@ type Catalog = {
     outputSchema: Record<string, unknown>;
     auth:
       | { mode: "public" }
-      | { mode: "control"; roles: string[] }
-      | { mode: "session"; roles?: string[]; roleGroups?: string[][]; scopes?: string[] };
+      | { mode: "session"; roles: string[]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
       destructiveHint: boolean;
       idempotentHint: boolean;
     };
   }[];
-  operationToolProjection?: {
-    mode: "dedicated" | "searchable";
-    search: string;
-    execute: string;
-  };
   entities: CatalogEntity[];
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
   discoveryTools?: CatalogDiscoveryTool[];
   testTools?: CatalogTestTool[];
   guideTools?: CatalogGuideTool[];
-  executionCompatibility?: Array<{
-    plugin: string;
-    operation: string;
-    toolName: string;
-    auth:
-      | { mode: "public" }
-      | { mode: "session"; roles: string[]; scopes?: string[] };
-  }>;
 };
 const catalog = rawCatalog as unknown as Catalog;
-export type OperationToolProjection = NonNullable<Catalog["operationToolProjection"]>;
-const generatedOperationToolProjection: OperationToolProjection =
-  catalog.operationToolProjection ?? {
-    mode: "dedicated" as const,
-    search: "osf_search_operations",
-    execute: "osf_execute_operation",
-  };
 
 /** Which entity role an operation requires — mirrors the CRUD layer's gate. */
 const OPERATION_ROLE = {
@@ -868,61 +728,6 @@ function withholdClassified(
   return root;
 }
 
-/**
- * Remove classified record properties from the advertised output without
- * changing the shared catalog. The record itself stays open to additional
- * properties because the database redaction layer currently returns withheld
- * columns as null and the schema must not reveal their names.
- */
-function withholdClassifiedOutput(
-  schema: Record<string, unknown> | undefined,
-  operation: McpOperation,
-  classifiedFields: readonly string[],
-): Record<string, unknown> | undefined {
-  if (!schema) return undefined;
-  if (classifiedFields.length === 0 || operation === "delete") return schema;
-  const copy = structuredClone(schema);
-  const success = Array.isArray(copy.oneOf)
-    ? (copy.oneOf[0] as Record<string, unknown> | undefined)
-    : undefined;
-  const successProperties = success?.properties as
-    | Record<string, Record<string, unknown>>
-    | undefined;
-  let record = successProperties?.data;
-  if (operation === "list") {
-    const listProperties = record?.properties as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    const items = listProperties?.items;
-    const item = items?.items as Record<string, unknown> | undefined;
-    const itemProperties = item?.properties as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    record = itemProperties?.data;
-  }
-  if (!record) return copy;
-
-  const withheld = new Set(classifiedFields);
-  const properties = record.properties;
-  if (
-    properties &&
-    typeof properties === "object" &&
-    !Array.isArray(properties)
-  ) {
-    record.properties = Object.fromEntries(
-      Object.entries(properties as Record<string, unknown>).filter(
-        ([name]) => !withheld.has(name),
-      ),
-    );
-  }
-  if (Array.isArray(record.required)) {
-    record.required = record.required.filter(
-      (name) => !withheld.has(name as string),
-    );
-  }
-  return copy;
-}
-
 function toolsForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
@@ -934,12 +739,6 @@ function toolsForSession(
     .filter((tool) =>
       sessionMayInvoke(tables.get(tool.table), tool.operation, session),
     )
-    .filter((tool) => {
-      if (tool.operation !== "create") return true;
-      const table = tables.get(tool.table)!;
-      const operation = getEntityOperationContracts().find((entry) => entry.entityName === tool.entity && entry.intent === "create");
-      return operation?.implementation?.type === "plugin" || !collectionMutationError(table, "create", [...tables.values()]);
-    })
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 
@@ -962,26 +761,12 @@ function resourcesForSession(
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] =
   catalog.derivedTools ?? [];
-const projectedDerivedTools = catalogDerivedTools.filter(
-  (entry) => !entry.compatibility,
-);
 const catalogDiscoveryTools: CatalogDiscoveryTool[] =
   catalog.discoveryTools ?? [];
 const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
-const compatibilityOperations = catalog.executionCompatibility ?? [];
-const compatibilityOperationByKey = new Map(
-  compatibilityOperations.map((entry) => [entry.operation, entry]),
-);
-const compatibilityToolNames = new Set(
-  compatibilityOperations.map((entry) => entry.toolName),
-);
-
-function coreOwnsStaticToolName(
-  name: string,
-  projection: OperationToolProjection = generatedOperationToolProjection,
-): boolean {
+function coreOwnsStaticToolName(name: string): boolean {
   return [
     ...catalog.tools.map((tool) => tool.name),
     ...catalog.operationTools.map((tool) => tool.name),
@@ -997,10 +782,6 @@ function coreOwnsStaticToolName(
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
-    ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
-    ...(projection.mode === "searchable"
-      ? [projection.search, projection.execute]
-      : []),
   ].includes(name);
 }
 
@@ -1017,7 +798,6 @@ function discoveryToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogDiscoveryTool[] {
   return catalogDiscoveryTools.filter((tool) =>
-    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -1028,7 +808,6 @@ function testToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogTestTool[] {
   return catalogTestTools.filter((tool) =>
-    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -1069,7 +848,6 @@ async function derivedToolsForSession(
   const reserved = new Set(catalog.tools.map((tool) => tool.name));
   const tools: DerivedTool[] = [];
   for (const entry of catalogDerivedTools) {
-    if (entry.compatibility) continue;
     if (!sessionInAudience(entry, session.roles)) continue;
     const table = tables.get(entry.table);
     if (!table) continue;
@@ -1216,12 +994,6 @@ export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
 export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";
 const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
-
-function schemaUsesArtifactUpload(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false;
-  if ((value as Record<string, unknown>)["x-osf-control"] === "artifact-upload") return true;
-  return Object.values(value as Record<string, unknown>).some(schemaUsesArtifactUpload);
-}
 
 /**
  * Whether a failed elicitation should fall back to the browser handoff.
@@ -1689,41 +1461,10 @@ function assertSchemaValid(
   schema: Record<string, unknown>,
   value: unknown,
   what: string,
-  expectedVersionField?: string,
 ): void {
   const checker: ValidateFunction = ajv.compile(schema);
   try {
     if (!checker(value)) {
-      const invalidMutationControlType = (checker.errors ?? []).find(
-        (error) =>
-          error.keyword === "type" &&
-          [
-            "/expectedVersion",
-            "/leaseToken",
-            "/confirmed",
-            "/confirmationToken",
-            "/confirmationAnswer",
-          ].includes(error.instancePath),
-      );
-      if (invalidMutationControlType) {
-        const field = invalidMutationControlType.instancePath.slice(1) as
-          | "expectedVersion"
-          | "leaseToken"
-          | "confirmed"
-          | "confirmationToken"
-          | "confirmationAnswer";
-        const expectedType = field === "confirmed" ? "boolean" : "string";
-        throw invalidMutationControlTypeFailure(field, expectedType);
-      }
-      const invalidExpectedVersion = (checker.errors ?? []).some(
-        (error) =>
-          error.instancePath === "/expectedVersion" &&
-          error.keyword === "format" &&
-          error.params?.format === "date-time",
-      );
-      if (invalidExpectedVersion && expectedVersionField) {
-        throw invalidExpectedVersionFailure(expectedVersionField);
-      }
       const details = (checker.errors ?? [])
         .slice(0, 5)
         .map((error) => {
@@ -1771,20 +1512,9 @@ function describeTool(
     title: tool.title,
     description,
     inputSchema: withholdClassified(
-      table && (tool.operation === "create" || tool.operation === "update")
-        ? withoutCollectionInputs(tool.inputSchema as Record<string, unknown>, collectionManagedFields(table, getGeneratedCrudTables()))
-        : tool.inputSchema as Record<string, unknown>,
+      tool.inputSchema as Record<string, unknown>,
       classified,
     ),
-    ...(tool.outputSchema
-      ? {
-          outputSchema: withholdClassifiedOutput(
-            tool.outputSchema,
-            tool.operation,
-            classified,
-          ) as Tool["outputSchema"],
-        }
-      : {}),
     annotations: {
       title: tool.title,
       ...tool.annotations,
@@ -1894,12 +1624,6 @@ function describeGenericTool(
       required: ["entity"],
       anyOf: branches,
     } as Tool["inputSchema"],
-    // A shared generic tool may still contain legacy v1 entities. Do not add a
-    // response contract to that legacy surface; only an all-v2 group can
-    // advertise the common field-agnostic canonical envelope.
-    ...(entries.every(({ tool }) => tool.outputSchema !== undefined)
-      ? { outputSchema: first.outputSchema as Tool["outputSchema"] }
-      : {}),
     annotations: {
       title: GENERIC_OPERATION_TITLE[operation],
       ...first.annotations,
@@ -2010,9 +1734,9 @@ function withoutEntitySelector(
 }
 
 /**
- * The generated entity tool a native Service binding means, resolved first by
- * its exact canonical Operation id and then by its legacy MCP tool name. An
- * unknown key falls through to the deployment's plugin operations by key.
+ * The generated entity tool a native Service binding means, or undefined when
+ * the key names no entity tool at all (the caller then resolves it against the
+ * deployment's plugin operations by key).
  *
  * A dedicated name identifies one entry. A generic `osf_*` name is emitted per
  * entity, so the binding has to carry an `entity` input the same way an
@@ -2026,17 +1750,6 @@ function resolveNativeCrudTool(
   operationKey: string,
   inputs: Record<string, unknown>,
 ): CatalogTool | undefined {
-  const canonical = catalog.tools.filter(
-    (tool) => tool.operationId === operationKey,
-  );
-  if (canonical.length > 1) {
-    throw new HttpError(
-      400,
-      "OPERATION_MISCONFIGURED",
-      `Canonical native operation "${operationKey}" resolves to more than one generated operation.`,
-    );
-  }
-  if (canonical.length === 1) return canonical[0];
   const candidates = crudToolsNamed(operationKey);
   if (candidates.length <= 1) return candidates[0];
   const wanted = inputs.entity;
@@ -2103,7 +1816,6 @@ function describeEntityResource(
     ]),
   );
   const fields = visibleFields(entity, tables.get(entity.table), session);
-  const storageRelationships = tables.get(entity.table)?.source?.graphql?.relationships ?? [];
   const relationships = entity.relationships.filter((relationship) =>
     resourceByEntity.has(relationship.target),
   );
@@ -2136,16 +1848,13 @@ function describeEntityResource(
     // generated-entity-schema.ts.
     fields: fields.map((field) => {
       const { relationship, ...rest } = field;
-      const canonical = storageRelationships.find((entry) => entry.fieldKey === field.key);
-      const target = canonical?.target ?? entity.relationships.find((entry) => entry.key === field.key)?.target ?? relationship?.entity;
       return {
         ...rest,
-        ...(relationship && target && resourceByEntity.has(target)
+        ...(relationship && resourceByEntity.has(relationship.entity)
           ? {
               relationship: {
                 ...relationship,
-                entity: target,
-                resourceUri: resourceByEntity.get(target),
+                resourceUri: resourceByEntity.get(relationship.entity),
               },
             }
           : {}),
@@ -2153,7 +1862,6 @@ function describeEntityResource(
     }),
     relationships: relationships.map((relationship) => ({
       ...relationship,
-      ...storageRelationships.find((entry) => entry.fieldKey && entry.name === relationship.key),
       resourceUri: resourceByEntity.get(relationship.target),
     })),
     operations: tools.map((tool) => ({
@@ -2216,25 +1924,6 @@ type ToolResult = {
   _meta?: Record<string, unknown>;
 };
 
-type RuntimeDeclarativeServiceExecutor = (
-  request: RuntimeDeclarativeServiceRequest,
-  requestId: string | number,
-  assertInvocationActive?: () => void,
-  signal?: AbortSignal,
-) => Promise<RuntimeOperationExecutionResult>;
-
-type RuntimeHostOperationExecutor = (
-  request: RuntimeHostOperationRequest,
-  requestId: string | number,
-  assertInvocationActive?: () => void,
-  signal?: AbortSignal,
-) => Promise<RuntimeOperationExecutionResult>;
-
-const runtimeDeclarativeServiceExecutors =
-  new WeakMap<Server, RuntimeDeclarativeServiceExecutor>();
-const runtimeHostOperationExecutors =
-  new WeakMap<Server, RuntimeHostOperationExecutor>();
-
 /**
  * A success carries its payload as `structuredContent` too when it is a
  * plain object: a Service that aggregates several query bindings reads the
@@ -2273,7 +1962,6 @@ function operationToolResult(
 }
 
 export const __operationToolResultForTests = operationToolResult;
-export const __operationMayInvokeForTests = operationMayInvoke;
 
 /**
  * A plugin operation run as a native binding: its canonical value, plus —
@@ -2345,34 +2033,17 @@ function nativeToolOutput(result: ToolResult): Record<string, unknown> {
     // Service's caller learns the reason the way a direct tool call would.
     const failure = (result.structuredContent as { error?: unknown } | undefined)?.error;
     if (failure && typeof failure === "object") {
-      const { code, message, detail, hint, retryable, retryAt, violations, data } = failure as {
+      const { code, message, detail, hint } = failure as {
         code?: unknown;
         message?: unknown;
         detail?: unknown;
         hint?: unknown;
-        retryable?: unknown;
-        retryAt?: unknown;
-        violations?: unknown;
-        data?: unknown;
       };
-      if (
-        typeof code === "string" &&
-        typeof message === "string" &&
-        typeof retryable === "boolean"
-      ) {
-        throw new OperationFailure({
-          code,
-          message,
-          retryable,
+      if (typeof code === "string" && typeof message === "string") {
+        throw new HttpError(httpStatusForCode(code) ?? 502, code, message, {
           ...(typeof detail === "string" ? { detail } : {}),
-          ...(typeof retryAt === "string" ? { retryAt } : {}),
-          ...(Array.isArray(violations) ? { violations } : {}),
-          ...(data && typeof data === "object" && !Array.isArray(data)
-            ? { data: data as Record<string, unknown> }
-            : typeof hint === "string"
-              ? { data: { hint } }
-              : {}),
-        } as OperationError);
+          ...(typeof hint === "string" ? { hint } : {}),
+        });
       }
     }
     const text = result.content.find((item) => item.type === "text");
@@ -2385,35 +2056,9 @@ function nativeToolOutput(result: ToolResult): Record<string, unknown> {
   const text = result.content.find((item) => item.type === "text");
   const parsed: unknown =
     text && "text" in text ? JSON.parse(String(text.text)) : null;
-  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-    const record = parsed as Record<string, unknown>;
-    // Operation offers are interface metadata, not values a composed Service
-    // maps between steps. Native composition consumes the canonical result's
-    // data while direct MCP callers retain the complete envelope.
-    if (Object.prototype.hasOwnProperty.call(record, "data") && Array.isArray(record.operations)) {
-      const data = record.data;
-      if (data && typeof data === "object" && !Array.isArray(data)) {
-        const projected = data as Record<string, unknown>;
-        if (Array.isArray(projected.items)) {
-          return {
-            ...projected,
-            items: projected.items.map((item) => {
-              if (!item || typeof item !== "object" || Array.isArray(item)) return item;
-              const envelope = item as Record<string, unknown>;
-              return Object.prototype.hasOwnProperty.call(envelope, "data") &&
-                Array.isArray(envelope.operations)
-                ? envelope.data
-                : item;
-            }),
-          };
-        }
-        return projected;
-      }
-      return { value: data };
-    }
-    return record;
-  }
-  return { value: parsed };
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : { value: parsed };
 }
 
 export const __nativeToolOutputForTests = nativeToolOutput;
@@ -2496,21 +2141,7 @@ export const __configurationHandoffResultForTests = configurationHandoffResult;
  * model sees the code and the retry meaning before anything else. The
  * summary is derived from the same fields, so it cannot contradict them.
  */
-function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
-  const error = body.error as Record<string, unknown> | undefined;
-  if (!error) return body;
-  const data = error.data as Record<string, unknown> | undefined;
-  return {
-    error: {
-      code: error.code,
-      message: error.message,
-      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
-      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
-    },
-  };
-}
-
-function failed(error: unknown, canonical = true): ToolResult {
+function failed(error: unknown): ToolResult {
   if (error instanceof DeclaredOperationError) {
     const body = error.body;
     const bodyMessage = body && typeof body === "object" && !Array.isArray(body)
@@ -2530,103 +2161,15 @@ function failed(error: unknown, canonical = true): ToolResult {
       isError: true,
     };
   }
-  const mapped = toHttpError(error).body;
-  const body = canonical
-    ? mapped
-    : legacyFailureBody(mapped as unknown as Record<string, unknown>);
-  const failure = body.error as Parameters<typeof failureSummary>[0];
+  const { body } = toHttpError(error);
   return {
     content: [
-      { type: "text", text: failureSummary(failure) },
+      { type: "text", text: failureSummary(body.error) },
       { type: "text", text: JSON.stringify(body, null, 2) },
     ],
     structuredContent: body,
     isError: true,
   };
-}
-
-function runtimeOperationResult(
-  result: {
-    content: CallToolResult["content"];
-    structuredContent?: Record<string, unknown> | undefined;
-    isError?: boolean | undefined;
-  },
-): RuntimeOperationExecutionResult {
-  const structured = result.structuredContent;
-  if (result.isError) {
-    const candidate = structured?.error as Record<string, unknown> | undefined;
-    return {
-      error: {
-        code: typeof candidate?.code === "string" ? candidate.code : "OPERATION_FAILED",
-        message: typeof candidate?.message === "string"
-          ? candidate.message
-          : "The declarative Service failed.",
-        ...(typeof candidate?.detail === "string"
-          ? { detail: candidate.detail }
-          : {}),
-        retryable: candidate?.retryable === true,
-        ...(typeof candidate?.retryAt === "string"
-          ? { retryAt: candidate.retryAt }
-          : {}),
-      },
-    };
-  }
-  if (
-    structured &&
-    Object.hasOwn(structured, "data") &&
-    Array.isArray(structured.operations)
-  ) {
-    const resources = result.content.flatMap((block) =>
-      block.type === "resource_link"
-        ? [{
-            uri: block.uri,
-            name: block.name,
-            ...(block.title ? { title: block.title } : {}),
-            ...(block.description ? { description: block.description } : {}),
-            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
-          }]
-        : []
-    );
-    return {
-      ...(structured as RuntimeOperationExecutionResult),
-      ...(resources.length > 0 ? { resources } : {}),
-    };
-  }
-  const resources = result.content.flatMap((block) =>
-    block.type === "resource_link"
-      ? [{
-          uri: block.uri,
-          name: block.name,
-          ...(block.title ? { title: block.title } : {}),
-          ...(block.description ? { description: block.description } : {}),
-          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
-        }]
-      : []
-  );
-  return {
-    data: structured ?? { content: result.content },
-    operations: [],
-    ...(resources.length > 0 ? { resources } : {}),
-  };
-}
-
-/** Project the canonical Operation envelope through an MCP tool contract. */
-function runtimeOperationToolResult(
-  result: RuntimeOperationExecutionResult,
-): ToolResult {
-  if ("error" in result) return failed(new OperationFailure(result.error));
-  const projected = ok(result);
-  const resources = (result.resources ?? []).map((resource) => ({
-    type: "resource_link" as const,
-    uri: resource.uri,
-    name: resource.name,
-    ...(resource.title ? { title: resource.title } : {}),
-    ...(resource.description ? { description: resource.description } : {}),
-    ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
-  }));
-  return resources.length > 0
-    ? { ...projected, content: [...projected.content, ...resources] }
-    : projected;
 }
 
 export const __failedForTests = failed;
@@ -2964,17 +2507,6 @@ async function invokeTool(
   elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
-  const canonical = tool.outputSchema !== undefined;
-  const operationRef = (intent: McpOperation) =>
-    tool.operationId
-      ? { id: tool.operationId, intent }
-      : entityOperationRef(table, intent);
-  const offerIntents = (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
-    McpOperation,
-    boolean,
-  ]>)
-    .filter(([, enabled]) => enabled)
-    .map(([intent]) => intent);
 
   switch (tool.operation) {
     case "list": {
@@ -2996,88 +2528,34 @@ async function invokeTool(
           : undefined;
       // Like REST, the MCP list result always publishes totalCount, so the
       // count pass is always requested (#17).
-      const operationResult = await executeEntityOperation(db, session, {
-        operation: operationRef("list"),
-        offerIntents,
-        input: {
-          ...(typeof args.first === "number" ? { limit: args.first } : {}),
-          ...(typeof args.after === "string" ? { cursor: args.after } : {}),
-          ...(filter ? { filter } : {}),
-          ...(sort ? { sort } : {}),
-          includeTotalCount: true,
-        },
+      const result = await listGeneratedEntities(db, session, {
+        table: table.name,
+        ...(typeof args.first === "number" ? { limit: args.first } : {}),
+        ...(typeof args.after === "string" ? { cursor: args.after } : {}),
+        ...(filter ? { filter } : {}),
+        ...(sort ? { sort } : {}),
+        includeTotalCount: true,
       });
-      if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
-      if ("error" in operationResult) throw new OperationFailure(operationResult.error);
-      const result = operationResult.data;
-      if (!canonical) {
-        return ok({
-          items: result.items.map((item) =>
-            serializeRowForEntity(entity, table, item.data),
-          ),
-          totalCount: result.totalCount,
-          nextCursor: result.nextCursor,
-        });
-      }
       return ok({
-        data: {
-          items: result.items.map((item) => ({
-            data: serializeRowForEntity(entity, table, item.data),
-            operations: item.operations,
-          })),
-          totalCount: result.totalCount,
-          nextCursor: result.nextCursor,
-        },
-        operations: operationResult.operations,
+        items: result.rows.map((row) =>
+          serializeRowForEntity(entity, table, row),
+        ),
+        totalCount: result.totalCount,
+        nextCursor: result.nextCursor,
       });
     }
 
     case "get": {
-      const result = await executeEntityOperation(db, session, {
-        operation: operationRef("get"),
-        offerIntents,
-        input: { id: requireId(args) },
+      const row = await getGeneratedEntity(db, session, {
+        table: table.name,
+        id: requireId(args),
       });
-      if (result.intent !== "get") throw new Error("Unexpected entity result.");
-      if ("error" in result) throw new OperationFailure(result.error);
-      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
-      return ok({
-        data: serializeRowForEntity(entity, table, row),
-        operations: result.operations,
-      });
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "create": {
-      const operation = entityOperationContract(operationRef("create").id);
-      if (canonical && operation.implementation?.type === "plugin") {
-        const result = await executeEntityOperation(db, session, {
-          operation: operationRef("create"), offerIntents,
-          input: pluginEntityTransportInput(operation, args),
-        });
-        if (result.intent !== "create") throw new Error("Unexpected entity result.");
-        if ("error" in result) throw new OperationFailure(result.error);
-        if (!result.data) throw new Error("Create operation returned no record.");
-        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
-      }
-      const values = canonical
-        ? Object.fromEntries(
-            Object.entries(requireArguments(args)).filter(
-              ([key]) => key !== "confirmed" && key !== "blueprintId",
-            ),
-          )
-        : requireArguments(args);
-      if (canonical) {
-        requireCreateOperationConfirmation(
-          entityOperationContract(operationRef("create").id),
-          {
-            ...(typeof args.confirmed === "boolean"
-              ? { confirmed: args.confirmed }
-              : {}),
-          },
-        );
-      }
+      const values = requireArguments(args);
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -3091,69 +2569,21 @@ async function invokeTool(
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values);
-      if (elicitationCompleted && elicitField) {
-        const row = await createGeneratedEntityAfterElicitation(db, session, {
+      const row =
+        elicitationCompleted && elicitField
+          ? await createGeneratedEntityAfterElicitation(db, session, {
               table: table.name,
               values,
               into: elicitField,
+            })
+          : await createGeneratedEntity(db, session, {
+              table: table.name,
+              values,
             });
-        const data = serializeRowForEntity(entity, table, row);
-        if (!canonical) return ok(data);
-        return ok({
-          data,
-          operations: await currentRecordOffers(
-            db,
-            session,
-            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
-            table,
-            {
-              id: String(data.id ?? ""),
-              row,
-              ...(typeof data.updatedAt === "string"
-                ? { version: data.updatedAt }
-                : {}),
-            },
-            ["get", "update", "delete"].filter((intent) =>
-              offerIntents.includes(intent as McpOperation),
-            ) as McpOperation[],
-          ),
-        });
-      }
-      const result = await executeEntityOperation(db, session, {
-        operation: operationRef("create"),
-        offerIntents,
-        input: {
-          values,
-          ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
-          ...(typeof args.confirmed === "boolean"
-            ? { confirmed: args.confirmed }
-            : {}),
-        },
-      });
-      if (result.intent !== "create") throw new Error("Unexpected entity result.");
-      if ("error" in result) throw new OperationFailure(result.error);
-      if (!result.data) throw new Error("Create operation returned no record.");
-      if (!canonical) {
-        return ok(serializeRowForEntity(entity, table, result.data));
-      }
-      return ok({
-        data: serializeRowForEntity(entity, table, result.data),
-        operations: result.operations,
-      });
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "update": {
-      const operation = entityOperationContract(operationRef("update").id);
-      if (canonical && operation.implementation?.type === "plugin") {
-        const result = await executeEntityOperation(db, session, {
-          operation: operationRef("update"), offerIntents,
-          input: pluginEntityTransportInput(operation, args),
-        });
-        if (result.intent !== "update") throw new Error("Unexpected entity result.");
-        if ("error" in result) throw new OperationFailure(result.error);
-        if (!result.data) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
-      }
       const id = requireId(args);
       assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);
@@ -3169,42 +2599,23 @@ async function invokeTool(
       assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
-      const result = await executeEntityOperation(db, session, {
-        operation: operationRef("update"),
-        offerIntents,
-        input: {
-          id,
-          values,
-          ...entityMutationControls(args),
-        },
+      const row = await updateGeneratedEntity(db, session, {
+        table: table.name,
+        id,
+        values,
       });
-      if (result.intent !== "update") throw new Error("Unexpected entity result.");
-      if ("error" in result) throw new OperationFailure(result.error);
-      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
-      return ok({
-        data: serializeRowForEntity(entity, table, row),
-        operations: result.operations,
-      });
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "delete": {
-      const result = await executeEntityOperation(db, session, {
-        operation: operationRef("delete"),
-        offerIntents,
-        input: {
-          id: requireId(args),
-          ...entityMutationControls(args),
-        },
+      const deleted = await deleteGeneratedEntity(db, session, {
+        table: table.name,
+        id: requireId(args),
       });
-      if (result.intent !== "delete") throw new Error("Unexpected entity result.");
-      if ("error" in result) throw new OperationFailure(result.error);
-      const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok({ deleted: true });
-      return ok({ data: result.data, operations: result.operations });
+      return ok({ deleted: true });
     }
   }
 }
@@ -3214,31 +2625,14 @@ function operationMayInvoke(
   session: TrustedSessionContext,
 ): boolean {
   if (tool.auth.mode === "public") return true;
-  // The platform's own administration is served by `/admin/mcp` on a
-  // control-realm session; a tenant session never sees it, whatever its
-  // roles are called, so the tenant surface cannot even name it.
-  if (tool.auth.mode === "control" || session.credential === "control-bearer") return false;
   if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
     return false;
+  const roles = new Set(session.roles);
   const scopes = new Set(session.oauthScopes ?? []);
   return (
-    sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
-    sessionOperationRoleGroupsAllow(tool.auth.roleGroups, session.roles) &&
+    tool.auth.roles.some((role) => roles.has(role)) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );
-}
-
-function projectCatalogOperationTool(
-  tool: Catalog["operationTools"][number],
-): Tool {
-  return {
-    name: tool.name,
-    title: tool.title,
-    description: tool.description,
-    inputSchema: tool.inputSchema as Tool["inputSchema"],
-    outputSchema: tool.outputSchema as Tool["outputSchema"],
-    annotations: { title: tool.title, ...tool.annotations },
-  };
 }
 
 // ---- employee invitations: lazy Keycloak client ----
@@ -3248,8 +2642,8 @@ function projectCatalogOperationTool(
 // environment. `undefined` when that configuration is absent (an existing
 // deployment that never set it up), in which case the tool answers
 // CONTROL_PLANE_NOT_CONFIGURED rather than throwing at server-build time —
-// consistent with how the control Operations stay bound and answer 503 by
-// name instead of refusing to start.
+// consistent with how registerControlRestRoutes stays registered and answers
+// 503 by name instead of refusing to start.
 let cachedEmployeeInvitationKeycloak: KeycloakOrganizationMembersClient | undefined | null = null;
 function employeeInvitationKeycloakClient(): KeycloakOrganizationMembersClient | undefined {
   if (cachedEmployeeInvitationKeycloak !== null) return cachedEmployeeInvitationKeycloak;
@@ -3295,26 +2689,14 @@ function buildServer(
    * session has no person to name.
    */
   opening: string | null = null,
-  /** Core-internal: reuse an already live Operation capability verbatim. */
-  moduleSessionOverride?: TrustedSessionContext,
-  /** @internal Test-only projection override. */
-  operationToolProjectionOverride?: OperationToolProjection,
 ): Server {
   const runtimeModules = modules ?? [];
   // Resolved once, here: the server's `instructions` are written at build time
   // and every authored label this session projects is read through the same
   // answer, so a second resolution could only disagree with the first.
   const locale = sessionLocale(session);
-  const moduleSession = moduleSessionOverride ?? createModuleSessionCapability(session);
-  const operationToolProjection =
-    operationToolProjectionOverride ?? generatedOperationToolProjection;
-  const searchableOperationToolNames: SearchableOperationToolNames = {
-    search: operationToolProjection.search,
-    execute: operationToolProjection.execute,
-  };
-  const hasDynamicModuleTools =
-    hasDynamicModuleToolProjection(runtimeModules) ||
-    runtimeModules.some((module) => (module.operationProviders?.length ?? 0) > 0);
+  const moduleSession = createModuleSessionCapability(session);
+  const hasDynamicModuleTools = hasDynamicModuleToolProjection(runtimeModules);
   const hasDynamicModuleResources = runtimeModules.some(
     (module) =>
       module.mcp?.resources !== undefined ||
@@ -3326,7 +2708,7 @@ function buildServer(
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.
       tools:
-        projectedDerivedTools.length > 0 || hasDynamicModuleTools
+        catalogDerivedTools.length > 0 || hasDynamicModuleTools
           ? { listChanged: true }
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},
@@ -3340,7 +2722,7 @@ function buildServer(
     // knows; without a public origin it says that, instead of failing.
     instructions: buildServerInstructions({
       opening,
-      hasConnectors: projectedDerivedTools.some((entry) => entry.connect),
+      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),
       guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
@@ -3350,31 +2732,12 @@ function buildServer(
     }),
   });
   const tables = tableOverride ?? tablesByName();
-  const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
-  const canUploadArtifacts = hasArtifactStorage && crudToolsForSession(session, tables).some(
-    (tool) => schemaUsesArtifactUpload(tool.inputSchema),
-  );
   // The same rule REST boot applies (roles/api.ts): with no operation module
-  // in the process there are the core operation tools and no plugin ones,
-  // rather than a 500 on every request because the catalog names a handler
-  // nothing loaded.
-  const operations = bindOperationHandlers(runtimeModules);
-  const searchableStaticOperationIds = new Set(
-    catalog.operationTools
-      .filter((tool) => operations.has(tool.key))
-      .map((tool) => tool.key),
-  );
-  const projectedEntityOperationIds = toolsForSession(session, tables)
-    .map(({ tool }) => tool.operationId)
-    .filter((operationId): operationId is string => Boolean(operationId));
-  const projectedPluginOperationIds = [...operations.values()]
-    .filter(({ operation }) => operation.transports.mcp.enabled)
-    .map(({ operation }) => operation.key);
-  const editLeaseOperationIds = editLeaseOperationIdsForSession(
-    session,
-    [...projectedEntityOperationIds, ...projectedPluginOperationIds],
-  );
-  const allowedEditLeaseOperationIds = new Set(editLeaseOperationIds);
+  // in the process there are no operation tools, rather than a 500 on every
+  // request because the catalog names a handler nothing loaded.
+  const operations = operationModulesConfigured(runtimeModules)
+    ? bindOperationHandlers(runtimeModules)
+    : new Map();
   const sourceVault = new InvocationSourceVault();
 
   const projectionContext = (): McpProjectionContext => {
@@ -3407,7 +2770,6 @@ function buildServer(
     exact: [
       ENTITY_CATALOG_URI,
       ENTITY_CONFIGURATION_APP_URI,
-      ARTIFACT_UPLOAD_APP_URI,
       ...ONBOARDING_RESOURCE_URIS,
       ...catalog.entities.map(entityResourceUri),
       ...catalogResources.map((resource) => resource.uri),
@@ -3492,7 +2854,7 @@ function buildServer(
   };
 
   const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
-    if (coreOwnsStaticToolName(toolName, operationToolProjection)) return true;
+    if (coreOwnsStaticToolName(toolName)) return true;
     if (!session.tenantId || catalogDerivedTools.length === 0) return false;
     return withDbSession(db, session, async (trx) => {
       for (const entry of catalogDerivedTools) {
@@ -3509,7 +2871,7 @@ function buildServer(
   ): Promise<void> => {
     assertUniqueToolNames(tools);
     for (const { tool } of tools) {
-      if (coreOwnsStaticToolName(tool.name, operationToolProjection)) {
+      if (coreOwnsStaticToolName(tool.name)) {
         throw new Error(
           `MCP tool name ${JSON.stringify(tool.name)} is contributed more than once.`,
         );
@@ -3572,43 +2934,6 @@ function buildServer(
       }
       return undefined;
     });
-  };
-
-  /**
-   * Re-read one canonical provider definition through generated internal
-   * compatibility metadata. This deliberately does not project the row as an
-   * MCP tool; the runtime Operation provider owns public listing and lookup.
-   */
-  const compatibilityDefinition = async (
-    request: RuntimeDeclarativeServiceRequest,
-  ): Promise<
-    | { entry: DerivedToolsCatalogEntry; row: Record<string, unknown> }
-    | undefined
-  > => {
-    for (const entry of catalogDerivedTools) {
-      if (
-        !entry.compatibility ||
-        entry.entity !== request.definition.entity ||
-        !sessionInAudience(entry, session.roles)
-      ) continue;
-      const row = await runtimeRowByFilter(db, session, tables, entry.table, {
-        id: request.definition.id,
-      });
-      if (!row) continue;
-      const publiclyAvailable = derivedToolsFromRows(
-        entry,
-        [row],
-        new Set(),
-        session.roles,
-        locale,
-      ).length === 1;
-      if (
-        !publiclyAvailable &&
-        !isAuthorizedInternalDerivedRow(entry, row, session.roles)
-      ) continue;
-      return { entry, row };
-    }
-    return undefined;
   };
 
   const authorizedSources = async (
@@ -3974,17 +3299,6 @@ function buildServer(
               },
             ]
           : []),
-        ...(canUploadArtifacts && supportsMcpApp(server)
-          ? [
-              {
-                uri: ARTIFACT_UPLOAD_APP_URI,
-                name: "document-upload-app",
-                title: "Document upload",
-                description: "Private file picker for document bytes that must not pass through the model.",
-                mimeType: MCP_APP_MIME_TYPE,
-              },
-            ]
-          : []),
         ...(await moduleResources(
           runtimeModules,
           projectionContext(),
@@ -4000,7 +3314,7 @@ function buildServer(
     db,
     session,
     tables,
-    derivedEntries: projectedDerivedTools,
+    derivedEntries: catalogDerivedTools,
     projectedTools: () => derivedToolsForSession(db, session, tables, locale),
     guideTools: () => guideToolsForSession(session),
     guidesCalled,
@@ -4031,7 +3345,7 @@ function buildServer(
   // the person's own stored instructions, joined with the platform's notices. ----
   const updateNotices = {
     session,
-    derivedEntries: projectedDerivedTools,
+    derivedEntries: catalogDerivedTools,
     rowsByFilter: (
       table: string,
       filter: Record<string, unknown>,
@@ -4132,23 +3446,6 @@ function buildServer(
         ],
       };
     }
-    if (request.params.uri === ARTIFACT_UPLOAD_APP_URI && canUploadArtifacts) {
-      return {
-        contents: [
-          {
-            uri: request.params.uri,
-            mimeType: MCP_APP_MIME_TYPE,
-            text: await renderArtifactUploadApp(),
-            _meta: {
-              ui: {
-                csp: { connectDomains: [callbackOrigin()] },
-                prefersBorder: true,
-              },
-            },
-          },
-        ],
-      };
-    }
     const entries = entitiesForSession(session, tables);
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
@@ -4166,34 +3463,13 @@ function buildServer(
       if (direct) {
         const table = tables.get(direct.table);
         if (!table) return fallbackOrNotFound();
-        const result = await executeEntityOperation(db, session, {
-          operation: entityOperationRef(table, "list"),
-          offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
-            McpOperation,
-            boolean,
-          ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
-          input: { limit: RESOURCE_READ_LIMIT },
+        const result = await listGeneratedEntities(db, session, {
+          table: table.name,
+          limit: RESOURCE_READ_LIMIT,
         });
-        if (result.intent !== "list") throw new Error("Unexpected entity result.");
-        if ("error" in result) throw new OperationFailure(result.error);
-        payload = (table.source?.authoringVersion ?? 1) >= 2
-          ? {
-              data: {
-                ...result.data,
-                items: result.data.items.map((item) => ({
-                  data: serializeRowForEntity(
-                    entityForTable(direct.table),
-                    table,
-                    item.data,
-                  ),
-                  operations: item.operations,
-                })),
-              },
-              operations: result.operations,
-            }
-          : result.data.items.map((item) =>
-              serializeRowForEntity(entityForTable(direct.table), table, item.data),
-            );
+        payload = result.rows.map((row) =>
+          serializeRowForEntity(entityForTable(direct.table), table, row),
+        );
       } else {
         const templated = readable.find((resource) =>
           uri.startsWith(`${resource.uri}/`),
@@ -4201,25 +3477,16 @@ function buildServer(
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
         if (templated && table && id.length > 0 && !id.includes("/")) {
-          const result = await executeEntityOperation(db, session, {
-            operation: entityOperationRef(table, "get"),
-            offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
-              McpOperation,
-              boolean,
-            ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
-            input: { id },
+          const row = await getGeneratedEntity(db, session, {
+            table: table.name,
+            id,
           });
-          if (result.intent !== "get") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          if (result.data) {
-            const data = serializeRowForEntity(
+          if (row) {
+            payload = serializeRowForEntity(
               entityForTable(templated.table),
               table,
-              result.data,
+              row,
             );
-            payload = (table.source?.authoringVersion ?? 1) >= 2
-              ? { data, operations: result.operations }
-              : data;
           }
         }
         if (payload === undefined) {
@@ -4242,41 +3509,11 @@ function buildServer(
     prompts: [],
   }));
 
-  type ListedTool = SourcedTool & {
-    runtimeOperation?: RuntimeOperationDefinition;
-  };
-  const runtimeProviderToolsForSession = async (): Promise<
-    ProjectedRuntimeOperationTool[]
-  > => modulePlatform
-    ? (await modulePlatform.listRuntimeProviderOperations(moduleSession)).map(
-        (definition) => projectRuntimeOperationTool(definition, locale),
-      )
-    : [];
-
-  const listedTools = async (): Promise<ListedTool[]> => {
-    const runtimeOperationTools = await runtimeProviderToolsForSession();
+  const listedTools = async (): Promise<SourcedTool[]> => {
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
-      ...(canUploadArtifacts
-        ? [{
-            name: ARTIFACT_UPLOAD_TOOL_NAME,
-            title: "Upload document file",
-            description:
-              "Open a private file picker so the person can upload document bytes directly to Hubble. Use the returned artifactId in the requested create operation.",
-            inputSchema: { type: "object", properties: {}, additionalProperties: false },
-            annotations: {
-              readOnlyHint: false,
-              destructiveHint: false,
-              idempotentHint: false,
-            },
-            ...(supportsMcpApp(server) && publicOriginIsHttps()
-              ? { _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } } }
-              : {}),
-          }]
-        : []),
       ...crudToolsForSession(session, tables),
-      ...editLeaseToolsForOperationIds(editLeaseOperationIds),
-      ...projectedDerivedTools
+      ...catalogDerivedTools
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
         )
@@ -4307,7 +3544,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...projectedDerivedTools
+      ...catalogDerivedTools
         .filter(
           (entry) =>
             entry.personalization && sessionInAudience(entry, session.roles),
@@ -4339,7 +3576,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...projectedDerivedTools
+      ...catalogDerivedTools
         .filter(
           (entry) =>
             entry.dryRun &&
@@ -4471,29 +3708,23 @@ function buildServer(
         inputSchema: tool.inputSchema,
         annotations: { title: tool.title, ...tool.annotations },
       })),
-      ...(operationToolProjection.mode === "dedicated"
-        ? catalog.operationTools
-            .filter(
-              (tool) =>
-                operations.has(tool.key) && operationMayInvoke(tool, session),
-            )
-            .map(projectCatalogOperationTool)
-        : modulePlatform && searchableStaticOperationIds.size > 0
-        ? searchableOperationTools(searchableOperationToolNames)
-        : []),
+      ...catalog.operationTools
+        .filter(
+          (tool) =>
+            operations.has(tool.key) && operationMayInvoke(tool, session),
+        )
+        .map((tool) => ({
+          name: tool.name,
+          title: tool.title,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          annotations: { title: tool.title, ...tool.annotations },
+        })),
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
-      if (EDIT_LEASE_TOOL_NAMES.includes(name as (typeof EDIT_LEASE_TOOL_NAMES)[number])) {
-        return "operation";
-      }
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
-        return "operation";
-      if (
-        operationToolProjection.mode === "searchable" &&
-        Object.values(searchableOperationToolNames).includes(name)
-      )
         return "operation";
       if (
         connectorToolsForSession(listConnectorContracts(), {
@@ -4509,13 +3740,8 @@ function buildServer(
       projectionContext(),
     );
     await assertModuleToolNamesAvailable(projectedModuleTools);
-    const sourced: ListedTool[] = [
+    const sourced: SourcedTool[] = [
       ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
-      ...runtimeOperationTools.map(({ definition, tool }) => ({
-        tool,
-        source: "operation" as const,
-        runtimeOperation: definition,
-      })),
       ...projectedModuleTools,
     ];
     assertUniqueToolNames(sourced);
@@ -4525,7 +3751,7 @@ function buildServer(
       projectionContext(),
     );
     assertUniqueToolNames(decorated);
-    return decorated as ListedTool[];
+    return decorated;
   };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -4540,13 +3766,6 @@ function buildServer(
     selectedOptions?: ModuleToolExecutionOptions,
     assertParentInvocationActive?: () => void,
     signal?: AbortSignal,
-    bypassInterceptors = false,
-    idempotencyKey?: string,
-    compatibilityCall = false,
-    internalDerivedDefinition?: {
-      entry: DerivedToolsCatalogEntry;
-      row: Record<string, unknown>;
-    },
   ): Promise<ModuleToolExecutionResult> => {
     signal?.throwIfAborted();
     assertParentInvocationActive?.();
@@ -4571,165 +3790,7 @@ function buildServer(
         return failed(error);
       }
     }
-    if (name === ARTIFACT_UPLOAD_TOOL_NAME && canUploadArtifacts) {
-      try {
-        const keyring = elicitedKeyring();
-        if (!keyring) {
-          throw new HttpError(
-            503,
-            "SECRET_STORAGE_NOT_CONFIGURED",
-            "Secure upload handoffs are not configured.",
-          );
-        }
-        const minted = await mintArtifactUpload({
-          db,
-          keyring,
-          session,
-          origin: callbackOrigin(),
-        });
-        if (supportsMcpApp(server) && publicOriginIsHttps()) {
-          return {
-            content: [{ type: "text", text: "A private document upload control is ready." }],
-            _meta: {
-              uploadUrl: minted.uploadUrl,
-              expiresAt: minted.expiresAt,
-            },
-          };
-        }
-        return {
-          content: [{
-            type: "text",
-            text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
-          }],
-          structuredContent: {
-            pending: true,
-            uploadUrl: minted.uploadUrl,
-            expiresAt: minted.expiresAt,
-          },
-        };
-      } catch (error) {
-        return failed(error);
-      }
-    }
     // --- end session-info ---
-    const editLeaseOutcome = await (async () => {
-      try {
-        return await callEditLeaseTool(
-          name,
-          (request.params.arguments ?? {}) as Record<string, unknown>,
-          db,
-          session,
-          allowedEditLeaseOperationIds,
-        );
-      } catch (error) {
-        return failed(error);
-      }
-    })();
-    if (editLeaseOutcome) {
-      return "content" in editLeaseOutcome
-        ? editLeaseOutcome as ToolResult
-        : ok({ data: editLeaseOutcome, operations: [] });
-    }
-    if (
-      operationToolProjection.mode === "searchable" &&
-      name === searchableOperationToolNames.search
-    ) {
-      if (!modulePlatform) {
-        return failed(
-          new HttpError(
-            503,
-            "OPERATION_UNAVAILABLE",
-            "The canonical Operation runtime is unavailable.",
-          ),
-        );
-      }
-      try {
-        assertParentInvocationActive?.();
-        assertInterceptorActive?.();
-        const definitions = await modulePlatform.services.operations.list(
-          moduleSession,
-        );
-        return ok(searchOperationDefinitions({
-          definitions,
-          allowedIds: searchableStaticOperationIds,
-          arguments: request.params.arguments ?? {},
-          locale,
-        }));
-      } catch (error) {
-        return failed(error);
-      }
-    }
-    if (
-      operationToolProjection.mode === "searchable" &&
-      name === searchableOperationToolNames.execute
-    ) {
-      if (!modulePlatform) {
-        return failed(
-          new HttpError(
-            503,
-            "OPERATION_UNAVAILABLE",
-            "The canonical Operation runtime is unavailable.",
-          ),
-        );
-      }
-      try {
-        const parsed = parseOperationExecuteArguments(
-          request.params.arguments ?? {},
-        );
-        assertParentInvocationActive?.();
-        assertInterceptorActive?.();
-        const definition = searchableStaticOperationIds.has(parsed.operationId)
-          ? await modulePlatform.services.operations.get(
-              moduleSession,
-              parsed.operationId,
-            )
-          : undefined;
-        if (!definition || !searchableStaticOperationIds.has(definition.id)) {
-          throw new HttpError(
-            404,
-            "NOT_FOUND",
-            "The requested Operation is not available.",
-          );
-        }
-        const result = await modulePlatform.services.operations.execute(
-          moduleSession,
-          {
-            operation: { id: definition.id, intent: definition.intent },
-            input: parsed.input,
-            ...(parsed.idempotencyKey
-              ? { idempotencyKey: parsed.idempotencyKey }
-              : {}),
-          },
-          signal ? { signal } : {},
-        );
-        return runtimeOperationToolResult(result);
-      } catch (error) {
-        return failed(error);
-      }
-    }
-    if (current?.runtimeOperation) {
-      if (!modulePlatform) {
-        return failed(
-          new HttpError(
-            503,
-            "OPERATION_UNAVAILABLE",
-            "The canonical Operation runtime is unavailable.",
-          ),
-        );
-      }
-      assertParentInvocationActive?.();
-      assertInterceptorActive?.();
-      const definition = current.runtimeOperation;
-      const result = await modulePlatform.services.operations.execute(
-        moduleSession,
-        {
-          operation: { id: definition.id, intent: definition.intent },
-          input: request.params.arguments ?? {},
-        },
-        signal ? { signal } : {},
-      );
-      return runtimeOperationToolResult(result);
-    }
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -5422,13 +4483,11 @@ function buildServer(
             !bindingSelected(binding, toolArguments as Record<string, unknown>)
           ) {
             const when = binding.when as Record<string, unknown>;
-            const condition =
-              when?.present === true
-                ? `${String(when.field)} has a value.`
-                : `${String(when?.field)} is ${JSON.stringify(when?.equals)} or omitted.`;
             requests.push({
               order: index + 1,
-              skipped: `Not selected by this call: it runs only when ${condition}`,
+              skipped:
+                `Not selected by this call: it runs only when ` +
+                `${String(when?.field)} is ${JSON.stringify(when?.equals)} or omitted.`,
             });
             continue;
           }
@@ -5669,10 +4728,7 @@ function buildServer(
                 : false;
             })
             .map((tool) => ({
-              nativeOperation: tool.operationId ?? tool.name,
-              ...(tool.operationId && tool.operationId !== tool.name
-                ? { legacyNativeOperation: tool.name }
-                : {}),
+              nativeOperation: tool.name,
               operation: tool.operation,
               entity: tool.entity,
               description: tool.description,
@@ -5831,27 +4887,9 @@ function buildServer(
       // not exist yet, so the honest answer is a clear failure, not a stub
       // success an agent would act on.
       if (catalogDerivedTools.length > 0) {
-        let derived = internalDerivedDefinition
-          ? {
-              name,
-              description: String(
-                internalDerivedDefinition.row[
-                  internalDerivedDefinition.entry.descriptionField
-                ] ?? name,
-              ),
-              inputSchema: inputSchemaFromStoredFields(
-                internalDerivedDefinition.row[
-                  internalDerivedDefinition.entry.inputFieldsField
-                ],
-                locale,
-              ),
-              entity: internalDerivedDefinition.entry.entity,
-              table: internalDerivedDefinition.entry.table,
-              rowId: String(internalDerivedDefinition.row.id ?? ""),
-            }
-          : (
-              await derivedToolsForSession(db, session, tables, locale)
-            ).find((tool) => tool.name === name);
+        let derived = (
+          await derivedToolsForSession(db, session, tables, locale)
+        ).find((tool) => tool.name === name);
         if (leadCapture) {
           const hidden = leadCapture;
           if (deriveToolName(hidden.serviceRow[hidden.entry.keyField]) === name) {
@@ -5872,7 +4910,6 @@ function buildServer(
         if (derived) {
           const entry =
             leadCapture?.entry ??
-            internalDerivedDefinition?.entry ??
             catalogDerivedTools.find(
               (candidate) => candidate.table === derived.table,
             );
@@ -5897,7 +4934,6 @@ function buildServer(
 
             const serviceRow =
               leadCapture?.serviceRow ??
-              internalDerivedDefinition?.row ??
               (await runtimeRowByFilter(
                 db,
                 session,
@@ -6501,16 +5537,11 @@ function buildServer(
                   });
                 }
 
-                const stepIdempotencyKey = idempotencyKey
-                  ? createHash("sha256")
-                      .update(`${idempotencyKey}\0${order}\0${operationLabel}`)
-                      .digest("hex")
-                  : undefined;
                 let outputs;
                 try {
                   assertParentInvocationActive?.();
                   assertInterceptorActive?.();
-                  outputs = await executeBindingStep({
+                  outputs = await executeBinding({
                     binding,
                     operationRow,
                     providerRow: providerForExecution,
@@ -6545,16 +5576,7 @@ function buildServer(
                           );
                         }
                         requireOperationAuthorization(bound.operation, moduleSession);
-                        const operationInputs =
-                          stepIdempotencyKey &&
-                            bound.operation.idempotency.mode === "idempotency-key"
-                            ? {
-                                ...inputs,
-                                [bound.operation.idempotency.inputField!]:
-                                  stepIdempotencyKey,
-                              }
-                            : inputs;
-                        const produced = await invokeOperation(bound, operationInputs, {
+                        const produced = await invokeOperation(bound, inputs, {
                           db,
                           session: moduleSession,
                           transport: "mcp",
@@ -6601,9 +5623,6 @@ function buildServer(
                       ...(stepEgressSource ? { source: stepEgressSource } : {}),
                     },
                     ...(signal ? { signal } : {}),
-                    ...(stepIdempotencyKey
-                      ? { idempotencyKey: stepIdempotencyKey }
-                      : {}),
                   });
                 } catch (error) {
                   if (error instanceof SecretError && oauthConnectionAudit) {
@@ -6705,7 +5724,6 @@ function buildServer(
             `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
               `this setup, and it overrides any cached local instructions or memories.`,
           ),
-          match.outputSchema !== undefined,
         );
       }
     }
@@ -6923,17 +5941,7 @@ function buildServer(
             : toValidate,
           table,
         );
-        const expectedVersionField = match.operationId
-          ? getEntityOperationContracts().find(
-              (operation) => operation.id === match.operationId,
-            )?.concurrency?.version?.field
-          : undefined;
-        assertSchemaValid(
-          match.inputSchema,
-          toValidate,
-          "arguments",
-          expectedVersionField,
-        );
+        assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
       const outcome = await invokeTool(
         match,
@@ -6960,12 +5968,12 @@ function buildServer(
       }
       return outcome;
     } catch (error) {
-      return failed(error, match.outputSchema !== undefined);
+      return failed(error);
     }
     };
 
     let preselectedReference: ResolvedInvocationSource | undefined;
-    let current: ListedTool | undefined;
+    let current: SourcedTool | undefined;
     try {
       signal?.throwIfAborted();
       const initialSelection = parseModuleToolExecutionOptions(selectedOptions);
@@ -7003,8 +6011,6 @@ function buildServer(
           catalogGuideTools.some((tool) => tool.name === name) ||
           (catalog.discoveryTools ?? []).some((tool) => tool.name === name) ||
           (catalog.testTools ?? []).some((tool) => tool.name === name) ||
-          (operationToolProjection.mode === "searchable" &&
-            Object.values(searchableOperationToolNames).includes(name)) ||
           resolveConnectorTool(listConnectorContracts(), name, {
             roles: session.roles ?? [],
           }) !== undefined;
@@ -7028,61 +6034,11 @@ function buildServer(
         }
       } else {
         signal?.throwIfAborted();
-        current = internalDerivedDefinition
-          ? {
-              source: "derived",
-              tool: {
-                name,
-                description: String(
-                  internalDerivedDefinition.row[
-                    internalDerivedDefinition.entry.descriptionField
-                  ] ?? name,
-                ),
-                inputSchema: inputSchemaFromStoredFields(
-                  internalDerivedDefinition.row[
-                    internalDerivedDefinition.entry.inputFieldsField
-                  ],
-                  locale,
-                ) as Tool["inputSchema"],
-              },
-            }
-          : compatibilityCall && compatibilityToolNames.has(name)
-          ? {
-              source: "operation",
-              tool: {
-                name,
-                description: "Internal compatibility implementation.",
-                inputSchema: { type: "object", additionalProperties: true },
-              },
-            }
-          : await (async (): Promise<ListedTool | undefined> => {
-              const listed = (await listedTools()).find(
-                (entry) => entry.tool.name === name,
-              );
-              if (listed || operationToolProjection.mode !== "searchable") {
-                return listed;
-              }
-              // Searchable projection bounds tools/list, but a previously
-              // integrated client may still call the authored direct name.
-              // Reapply the same live availability guard before selecting it.
-              const direct = catalog.operationTools.find(
-                (tool) => tool.name === name,
-              );
-              return direct &&
-                  operations.has(direct.key) &&
-                  operationMayInvoke(direct, session)
-                ? { source: "operation", tool: projectCatalogOperationTool(direct) }
-                : undefined;
-            })();
+        current = (await listedTools()).find((entry) => entry.tool.name === name);
         signal?.throwIfAborted();
       }
     } catch (error) {
-      return {
-        result: failed(
-          error,
-          current?.source !== "crud" || current.tool.outputSchema !== undefined,
-        ),
-      };
+      return { result: failed(error) };
     }
     if (!current) {
       return {
@@ -7197,31 +6153,25 @@ function buildServer(
       };
     };
     try {
-      const run = () => bypassInterceptors
-        ? invoke(selectedOptions, assertParentInvocationActive)
-        : interceptMcpToolCall(
-            runtimeModules,
-            {
-              name,
-              source: current.source,
-              arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
-              ctx,
-            },
-            (options = selectedOptions, assertActive) =>
-              invoke(options, assertActive),
-          );
+      const run = () =>
+        interceptMcpToolCall(
+          runtimeModules,
+          {
+            name,
+            source: current.source,
+            arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
+            ctx,
+          },
+          (options = selectedOptions, assertActive) =>
+            invoke(options, assertActive),
+        );
       assertParentInvocationActive?.();
       signal?.throwIfAborted();
       return modulePlatform
         ? await modulePlatform.withActiveInvocation(ctx, run, name)
         : await run();
     } catch (error) {
-      return {
-        result: failed(
-          error,
-          current.source !== "crud" || current.tool.outputSchema !== undefined,
-        ),
-      };
+      return { result: failed(error) };
     }
   };
 
@@ -7234,102 +6184,6 @@ function buildServer(
     );
     return outcome.result;
   });
-
-  const executeDeclarativeService: RuntimeDeclarativeServiceExecutor = async (
-    request,
-    requestId,
-    assertInvocationActive,
-    signal,
-  ) => {
-    signal?.throwIfAborted();
-    assertInvocationActive?.();
-    const toolName = deriveToolName(request.definition.key);
-    if (!toolName) {
-      return runtimeOperationResult(failed(
-        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
-      ));
-    }
-    const current = await compatibilityDefinition(request) ??
-      await derivedDefinition(toolName, true);
-    if (!current) {
-      return runtimeOperationResult(failed(
-        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
-      ));
-    }
-    const definition = definitionFor(current.entry, current.row);
-    if (
-      definition.kind !== request.definition.entity ||
-      definition.id !== request.definition.id ||
-      String(definition.version) !== String(request.definition.version) ||
-      String(current.row[current.entry.keyField] ?? "") !== request.definition.key
-    ) {
-      return runtimeOperationResult(failed(
-        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
-      ));
-    }
-    const selectedOptions = request.sourceReference
-      ? {
-          sourceReference: request.sourceReference,
-          expectedDefinition: definition,
-        }
-      : undefined;
-    const outcome = await dispatchTool(
-      toolName,
-      request.input ?? {},
-      requestId,
-      true,
-      selectedOptions,
-      assertInvocationActive,
-      signal,
-      true,
-      request.idempotencyKey,
-      false,
-      current,
-    );
-    return runtimeOperationResult(outcome.result);
-  };
-  runtimeDeclarativeServiceExecutors.set(server, executeDeclarativeService);
-
-  const executeHostOperation: RuntimeHostOperationExecutor = async (
-    request,
-    requestId,
-    assertInvocationActive,
-    signal,
-  ) => {
-    signal?.throwIfAborted();
-    assertInvocationActive?.();
-    const implementation = compatibilityOperationByKey.get(request.operation);
-    if (!implementation) {
-      return runtimeOperationResult(failed(
-        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
-      ));
-    }
-    const roles = new Set(session.roles);
-    const scopes = new Set(session.oauthScopes ?? []);
-    if (
-      implementation.auth.mode !== "session" ||
-      !implementation.auth.roles.some((role) => roles.has(role)) ||
-      !(implementation.auth.scopes ?? []).every((scope) => scopes.has(scope))
-    ) {
-      return runtimeOperationResult(failed(
-        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
-      ));
-    }
-    const outcome = await dispatchTool(
-      implementation.toolName,
-      request.input ?? {},
-      requestId,
-      true,
-      undefined,
-      assertInvocationActive,
-      signal,
-      true,
-      request.idempotencyKey,
-      true,
-    );
-    return runtimeOperationResult(outcome.result);
-  };
-  runtimeHostOperationExecutors.set(server, executeHostOperation);
 
   modulePlatform?.registerServer({
     server,
@@ -7375,22 +6229,6 @@ function buildServer(
               : { allowed: true, fieldAllowlist };
           }
           if (current) return { allowed: true };
-          // Searchable projection keeps tools/list bounded, while an authored
-          // direct Operation name remains callable for integrated clients.
-          // Authorization must apply the same live handler and role checks as
-          // callTool, otherwise the platform denies a tool it will execute.
-          if (operationToolProjection.mode === "searchable") {
-            const direct = catalog.operationTools.find(
-              (tool) => tool.name === subject.name,
-            );
-            if (
-              direct &&
-              operations.has(direct.key) &&
-              operationMayInvoke(direct, session)
-            ) {
-              return { allowed: true };
-            }
-          }
           const internal = await derivedDefinition(subject.name, false);
           if (!internal) return { allowed: false, code: "NOT_FOUND" };
           const fieldAllowlist = derivedToolOutputFieldAllowlist(
@@ -7423,28 +6261,7 @@ function buildServer(
             id: subject.id,
           });
           if (!row) return { allowed: false, code: "NOT_FOUND" };
-          if (operation !== "get") {
-            const permission = operation === "update" ? "edit" : "delete";
-            if (table.source?.authorization?.recordPermissions) {
-              try {
-                await assertRecordPermission(
-                  db,
-                  session,
-                  table,
-                  subject.id,
-                  permission,
-                );
-              } catch (error) {
-                if (
-                  operationErrorOf(error)?.code === "FORBIDDEN"
-                ) {
-                  return { allowed: false, code: "FORBIDDEN" };
-                }
-                throw error;
-              }
-            }
-            return { allowed: true };
-          }
+          if (operation !== "get") return { allowed: true };
           const includeClassified = canReadClassifiedColumns(
             table.source?.authorization,
             session,
@@ -7560,94 +6377,6 @@ function buildServer(
   return server;
 }
 
-/**
- * Host adapter around the one declarative engine. It creates no protocol
- * transport: the temporary server object only scopes the existing core
- * catalog/execution closure, while the caller's exact live Operation session
- * remains the authority for database, OAuth, egress and nested Operations.
- */
-export function createRuntimeDeclarativeServiceExecutor(input: {
-  db: OpenShapeForgeDatabase;
-  modules: readonly RuntimeModule[];
-  modulePlatform: ModulePlatformRuntime;
-  egressOwner?: RuntimeModule["egress"];
-  /** @internal Test-only generated-table override. */
-  tablesForTests?: Map<string, GeneratedTable>;
-}): (
-  session: TrustedSessionContext,
-  request: RuntimeDeclarativeServiceRequest,
-  options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult> {
-  return async (session, request, options) => {
-    const server = buildServer(
-      input.db,
-      session,
-      input.modules,
-      input.modulePlatform,
-      input.egressOwner,
-      undefined,
-      false,
-      input.tablesForTests,
-      null,
-      session,
-    );
-    const execute = runtimeDeclarativeServiceExecutors.get(server);
-    if (!execute) {
-      input.modulePlatform.unregisterServer(server);
-      throw new Error("The core declarative Service executor did not initialise.");
-    }
-    try {
-      return await execute(request, randomUUID(), undefined, options?.signal);
-    } finally {
-      input.modulePlatform.unregisterServer(server);
-      runtimeDeclarativeServiceExecutors.delete(server);
-    }
-  };
-}
-
-/**
- * Executes a generated internal compatibility handler by canonical Operation
- * key. The temporary Server scopes existing core state only; no MCP transport
- * or model-visible tool name is created.
- */
-export function createRuntimeHostOperationExecutor(input: {
-  db: OpenShapeForgeDatabase;
-  modules: readonly RuntimeModule[];
-  modulePlatform: ModulePlatformRuntime;
-  egressOwner?: RuntimeModule["egress"];
-}): (
-  session: TrustedSessionContext,
-  request: RuntimeHostOperationRequest,
-  options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult> {
-  return async (session, request, options) => {
-    const server = buildServer(
-      input.db,
-      session,
-      input.modules,
-      input.modulePlatform,
-      input.egressOwner,
-      undefined,
-      false,
-      undefined,
-      null,
-      session,
-    );
-    const execute = runtimeHostOperationExecutors.get(server);
-    if (!execute) {
-      input.modulePlatform.unregisterServer(server);
-      throw new Error("The core host Operation executor did not initialise.");
-    }
-    try {
-      return await execute(request, randomUUID(), undefined, options?.signal);
-    } finally {
-      input.modulePlatform.unregisterServer(server);
-      runtimeHostOperationExecutors.delete(server);
-      runtimeDeclarativeServiceExecutors.delete(server);
-    }
-  };
-}
-
 /** Direct in-memory transport seam for adversarial runtime-module tests. */
 export function __buildGeneratedMcpServerForTests(input: {
   db: OpenShapeForgeDatabase;
@@ -7657,7 +6386,6 @@ export function __buildGeneratedMcpServerForTests(input: {
   egressOwner?: RuntimeModule["egress"];
   stateful?: boolean;
   tables?: Map<string, GeneratedTable>;
-  operationToolProjection?: OperationToolProjection;
 }): Server {
   return buildServer(
     input.db,
@@ -7668,9 +6396,6 @@ export function __buildGeneratedMcpServerForTests(input: {
     undefined,
     input.stateful ?? true,
     input.tables,
-    null,
-    undefined,
-    input.operationToolProjection,
   );
 }
 
@@ -7703,9 +6428,6 @@ export function registerGeneratedMcpServer(
     resource: string;
   }> {
     const alias = (request.params as { alias?: unknown } | undefined)?.alias;
-    if (usesHostOrganizationContext() && alias !== undefined) {
-      throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
-    }
     if (alias !== undefined && !isOrganizationAlias(alias)) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
@@ -7713,25 +6435,19 @@ export function registerGeneratedMcpServer(
     const binding = alias
       ? { alias, resource: canonicalResourceUri(request, alias) }
       : null;
+    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
+    // Checked before anything reads the body or the credential, so a refused
+    // media type never becomes an authenticated request.
+    assertJsonRpcContentType(request.method, request.headers["content-type"]);
     // BOLT 1 (mcp/address.ts). The cookie header is dropped rather than
     // ignored on every MCP path — the app shares this origin, so the browser
     // sends its session cookie here whether or not the page meant to — and an
     // organization resource additionally requires a bearer token, which is the
     // one credential a page cannot obtain by merely being open.
-    // Order matters twice. The bearer check reads the ORIGINAL headers,
-    // because "you sent a cookie and no token" is the case worth naming in
-    // the answer and it is invisible once the cookie has been dropped. And it
-    // runs BEFORE the media-type check: a client with no credential yet must
-    // receive the 401 challenge (RFC 9728) whatever it sent — hosted clients
-    // open with a bare POST to discover where to authenticate — and answering
-    // that probe with 415 leaves the resource undiscoverable. Nothing is
-    // authenticated by this ordering: the credential is only verified after
-    // the media type has been accepted below.
-    if (binding || usesHostOrganizationContext()) assertBearerCredential(request.headers);
-    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
-    // Checked before anything reads the body or verifies the credential, so a
-    // refused media type never becomes an authenticated request.
-    assertJsonRpcContentType(request.method, request.headers["content-type"]);
+    // Order matters: the bearer check reads the ORIGINAL headers, because
+    // "you sent a cookie and no token" is the case worth naming in the answer
+    // and it is invisible once the cookie has been dropped.
+    if (binding) assertBearerCredential(request.headers);
     const mcpHeaders = withoutCookieIdentity(request.headers);
 
     let resolved: TrustedSessionContext;
@@ -7739,7 +6455,6 @@ export function registerGeneratedMcpServer(
       resolved = await resolveSessionContext(headersFromFastify(mcpHeaders), {
         db: options.db,
         ...(binding ? { organization: binding } : {}),
-        ...(usesHostOrganizationContext() ? { requiredAudience: hostMcpResource() } : {}),
       });
     } catch (error) {
       if (error instanceof OrganizationBindingError) {
@@ -7800,73 +6515,6 @@ export function registerGeneratedMcpServer(
       },
     );
 
-    if (options.modulePlatform && options.modules?.some((module) => module.artifactStorage !== undefined)) {
-      instance.addContentTypeParser(
-        "application/octet-stream",
-        (_request, payload, done) => done(null, payload),
-      );
-      instance.get(`${ARTIFACT_UPLOAD_PATH}/:token`, async (request, reply) => {
-        const token = (request.params as { token?: string }).token;
-        const uploadUrl = `${callbackOrigin()}${ARTIFACT_UPLOAD_PATH}/${encodeURIComponent(token ?? "")}`;
-        return reply.type("text/html").send(renderArtifactUploadPage(uploadUrl));
-      });
-      instance.post(
-        `${ARTIFACT_UPLOAD_PATH}/:token`,
-        { bodyLimit: 64 * 1024 * 1024 },
-        async (request, reply) => {
-          const keyring = elicitedKeyring();
-          if (!keyring) {
-            throw new HttpError(
-              503,
-              "SECRET_STORAGE_NOT_CONFIGURED",
-              "Secure upload handoffs are not configured.",
-            );
-          }
-          const pending = await claimArtifactUpload({
-            db: options.db!,
-            keyring,
-            token: (request.params as { token?: string }).token,
-          });
-          if (!pending) {
-            throw new HttpError(404, "NOT_FOUND", "This upload is unavailable, expired, or already used.");
-          }
-          const rawName = request.headers["x-file-name"];
-          if (typeof rawName !== "string") {
-            throw new HttpError(400, "BAD_USER_INPUT", "Header x-file-name is required.");
-          }
-          let fileName: string;
-          try {
-            fileName = decodeURIComponent(rawName);
-          } catch {
-            throw new HttpError(400, "BAD_USER_INPUT", "The file name is not valid UTF-8.");
-          }
-          if (!fileName || fileName.length > 255 || /[\r\n\0/\\]/.test(fileName)) {
-            throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
-          }
-          const source = request.body as AsyncIterable<Uint8Array> | undefined;
-          if (!source || typeof source[Symbol.asyncIterator] !== "function") {
-            throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
-          }
-          const uploadSession: TrustedSessionContext = {
-            tenantId: pending.tenantId,
-            userId: pending.userId,
-            roles: pending.roles,
-            groups: pending.groups,
-            scope: pending.scope,
-            credential: pending.credential,
-          };
-          const descriptor = await options.modulePlatform!.withActiveOperationSession(
-            uploadSession,
-            (activeSession) => options.modulePlatform!.services.artifacts.stage(
-              activeSession,
-              { purpose: "document-upload", fileName, source },
-            ),
-          );
-          return reply.status(201).send({ data: descriptor, operations: [] });
-        },
-      );
-    }
-
     instance.setErrorHandler((error, request, reply) => {
       const { status, body } = toHttpError(
         error instanceof McpTransportError
@@ -7922,12 +6570,20 @@ export function registerGeneratedMcpServer(
       roles: string[];
       oauthScopes: string[];
       groups: string[];
-      scope: TrustedSessionContext["scope"];
+      scope: DbSessionInput["scope"];
       credential: TrustedSessionContext["credential"];
-      loginSessionBinding?: string;
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
+    const sameClaims = (
+      left: readonly string[],
+      right: readonly string[],
+    ): boolean => {
+      if (left.length !== right.length) return false;
+      const sortedLeft = [...left].sort();
+      const sortedRight = [...right].sort();
+      return sortedLeft.every((value, index) => value === sortedRight[index]);
+    };
     const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
     const sweep = setInterval(() => {
       const now = Date.now();
@@ -8419,7 +7075,13 @@ export function registerGeneratedMcpServer(
             "MCP session belongs to another identity.",
           );
         }
-        if (!sameStatefulMcpAuthorization(existing, session)) {
+        if (
+          !sameClaims(existing.roles, session.roles ?? []) ||
+          !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
+          !sameClaims(existing.groups, session.groups ?? []) ||
+          existing.scope !== session.scope ||
+          existing.credential !== session.credential
+        ) {
           mcpSessions.delete(sessionId);
           options.modulePlatform?.unregisterServer(existing.server);
           void existing.transport.close();
@@ -8437,33 +7099,29 @@ export function registerGeneratedMcpServer(
         // server answers from it.
         carrySessionIdentity(existing.session, session);
         reply.hijack();
-        await withFreshRelationGroupMemberships(
-          session,
-          () => existing.transport.handleRequest(
-            request.raw,
-            reply.raw,
-            request.body,
-          ),
+        await existing.transport.handleRequest(
+          request.raw,
+          reply.raw,
+          request.body,
         );
         return;
       }
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
-        const statefulSession = createStatefulMcpSessionContext(session);
         // What the client says about itself is said once, here; the server
         // built next reads it for its instructions, and `whoami` for the
         // life of the session (mcp/session-client.ts).
-        rememberSessionClient(statefulSession, clientInfoFromInitializeBody(request.body));
+        rememberSessionClient(session, clientInfoFromInitializeBody(request.body));
         const server = buildServer(
           db,
-          statefulSession,
+          session,
           options.modules,
           options.modulePlatform,
           options.egressOwner,
           notifyDerivedDefinitionChanged,
           true,
           undefined,
-          await sessionOpeningSentence({ db, session: statefulSession }),
+          await sessionOpeningSentence({ db, session }),
         );
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -8472,7 +7130,7 @@ export function registerGeneratedMcpServer(
               transport,
               server,
               resource,
-              session: statefulSession,
+              session,
               tenantId: session.tenantId as string,
               userId: session.userId as string,
               roles: [...(session.roles ?? [])],
@@ -8480,9 +7138,6 @@ export function registerGeneratedMcpServer(
               groups: [...(session.groups ?? [])],
               scope: session.scope,
               credential: session.credential,
-              ...(session.loginSessionBinding !== undefined
-                ? { loginSessionBinding: session.loginSessionBinding }
-                : {}),
               lastSeenMs: Date.now(),
             });
           },
@@ -8498,10 +7153,7 @@ export function registerGeneratedMcpServer(
         await server.connect(
           transport as unknown as Parameters<Server["connect"]>[0],
         );
-        await withFreshRelationGroupMemberships(
-          session,
-          () => transport.handleRequest(request.raw, reply.raw, request.body),
-        );
+        await transport.handleRequest(request.raw, reply.raw, request.body);
         return;
       }
 
@@ -8572,11 +7224,7 @@ export function hasMcpSurface(
     core.tools > 0 ||
     core.operationTools > 0 ||
     core.connectors > 0 ||
-    modules.some(
-      (module) =>
-        module.mcp !== undefined ||
-        (module.operationProviders?.length ?? 0) > 0,
-    )
+    modules.some((module) => module.mcp !== undefined)
   );
 }
 

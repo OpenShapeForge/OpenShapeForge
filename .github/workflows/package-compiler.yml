@@ -1,10 +1,11 @@
 name: Package compiler
 
-# Build the installable npm tarballs for @openshapeforge/compiler and its two
-# public runtime contract packages, upload them as one run artifact, and — on
-# pushes to main — publish them to the GitHub Packages npm registry in
-# dependency order. The repo is public, but GitHub's npm registry still
-# requires consumers to authenticate with a read:packages token.
+# Build the installable npm tarball for @openshapeforge/compiler, upload it as
+# a run artifact, and — on pushes to main — publish it to the GitHub Packages
+# npm registry so a host repo (docs/consuming.md) can install it by name. The
+# repo is public, so the package is public too; note GitHub's npm registry
+# still requires consumers to authenticate with a read:packages token even for
+# public packages.
 #
 # The tarball is proven, not just produced: it is installed into a scratch
 # project outside the workspace and the packaged bin regenerates this repo's own
@@ -25,8 +26,6 @@ on:
   pull_request:
     paths:
       - "packages/compiler/**"
-      - "packages/interface-web/**"
-      - "packages/operations/**"
       - "bun.lock"
       - "docs/consuming.md"
       - ".github/workflows/package-compiler.yml"
@@ -59,17 +58,14 @@ jobs:
         run: bun install --frozen-lockfile
 
       # LICENSE and README are copied in rather than committed to the package
-      # directories. All three public tarballs carry the BUSL text; the
-      # compiler also carries the consumer guide as its package README.
-      - name: Pack the tarballs
+      # directory: npm auto-includes both from the package root, the BUSL text
+      # must travel with the tarball, and docs/consuming.md IS the package's
+      # usage documentation — duplicating either in-tree would drift.
+      - name: Pack the tarball
         run: |
-          for package in operations interface-web compiler; do
-            cp LICENSE "packages/${package}/LICENSE"
-          done
+          cp LICENSE packages/compiler/LICENSE
           cp docs/consuming.md packages/compiler/README.md
           mkdir -p /tmp/compiler-pack
-          npm pack --pack-destination /tmp/compiler-pack ./packages/operations
-          npm pack --pack-destination /tmp/compiler-pack ./packages/interface-web
           npm pack --pack-destination /tmp/compiler-pack ./packages/compiler
 
       # Install the tarball into a scratch project OUTSIDE the workspace (an
@@ -83,10 +79,7 @@ jobs:
           mkdir -p /tmp/compiler-smoke
           cd /tmp/compiler-smoke
           printf '{"name":"compiler-smoke","private":true}\n' > package.json
-          npm install \
-            /tmp/compiler-pack/openshapeforge-operations-*.tgz \
-            /tmp/compiler-pack/openshapeforge-interface-web-*.tgz \
-            /tmp/compiler-pack/openshapeforge-compiler-*.tgz
+          bun add /tmp/compiler-pack/openshapeforge-compiler-*.tgz
           ./node_modules/.bin/openshapeforge-compiler --repo-root "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" diff --exit-code
 
@@ -94,7 +87,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openshapeforge-compiler-npm-${{ github.sha }}
-          path: /tmp/compiler-pack/openshapeforge-*.tgz
+          path: /tmp/compiler-pack/openshapeforge-compiler-*.tgz
           if-no-files-found: error
           retention-days: 90
 
@@ -120,12 +113,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # Same pack-time copies as the pack job, for the same reason.
-      - name: Stage licenses and compiler README
+      # Same pack-time copies as the pack job, for the same reason: the BUSL
+      # text and the usage docs travel with the tarball without being
+      # duplicated in-tree.
+      - name: Stage LICENSE and README
         run: |
-          for package in operations interface-web compiler; do
-            cp LICENSE "packages/${package}/LICENSE"
-          done
+          cp LICENSE packages/compiler/LICENSE
           cp docs/consuming.md packages/compiler/README.md
 
       # The literal ${NODE_AUTH_TOKEN} is expanded by npm itself from the
@@ -135,40 +128,13 @@ jobs:
       - name: Configure npm for GitHub Packages
         run: printf '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > ~/.npmrc
 
-      - name: Verify immutable versions, then publish in dependency order
+      - name: Publish if this version is not published yet
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p /tmp/compiler-publish
-          : > /tmp/compiler-publish/new-tarballs
-
-          # Preflight EVERY package before publishing any of them. A version in
-          # the registry is immutable: identical content is a clean no-op, but
-          # changed content under that version is a missing version bump and
-          # must stop before a dependant can be published against stale code.
-          for package in operations interface-web compiler; do
-            name=$(node -p "require('./packages/${package}/package.json').name")
-            version=$(node -p "require('./packages/${package}/package.json').version")
-            pack_json=$(npm pack --json --pack-destination /tmp/compiler-publish "./packages/${package}")
-            tarball=$(PACK_JSON="${pack_json}" node -p 'JSON.parse(process.env.PACK_JSON)[0].filename')
-            local_integrity=$(PACK_JSON="${pack_json}" node -p 'JSON.parse(process.env.PACK_JSON)[0].integrity')
-            published_integrity=$(npm view "${name}@${version}" dist.integrity --json --registry=https://npm.pkg.github.com 2>/dev/null || true)
-
-            if [ -n "${published_integrity}" ]; then
-              published_integrity=$(PUBLISHED_INTEGRITY="${published_integrity}" node -p 'JSON.parse(process.env.PUBLISHED_INTEGRITY)')
-              if [ "${local_integrity}" != "${published_integrity}" ]; then
-                echo "::error::${name}@${version} already exists with different contents; bump its version before publishing."
-                exit 1
-              fi
-              echo "${name}@${version} is already published with identical contents; nothing to do."
-            else
-              printf '/tmp/compiler-publish/%s\n' "${tarball}" >> /tmp/compiler-publish/new-tarballs
-            fi
-          done
-
-          # The plan is already dependency ordered because the preflight loop
-          # is operations -> interface-web -> compiler. Publish the exact
-          # tarballs whose integrity was checked rather than repacking them.
-          while IFS= read -r tarball; do
-            npm publish "${tarball}"
-          done < /tmp/compiler-publish/new-tarballs
+          version=$(node -p "require('./packages/compiler/package.json').version")
+          if npm view "@openshapeforge/compiler@${version}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "@openshapeforge/compiler@${version} is already published; nothing to do."
+            exit 0
+          fi
+          npm publish ./packages/compiler

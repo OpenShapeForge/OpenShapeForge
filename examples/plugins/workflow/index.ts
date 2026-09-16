@@ -53,7 +53,7 @@ const API_WORKFLOW_ROOT = "apps/api/src/generated/workflow";
  * Routes scattered directly under `app/` could not be swept that way without a
  * gate that knew which of them were plugin-owned.
  *
- * Paired with the `appShellPatch` in `authoring/menu.yaml`, which is what
+ * Paired with the `appShellPatch` in `authoring/appShell.yaml`, which is what
  * puts the matching sidebar entry in the generated layout. Drop this plugin
  * from authoring.config.yaml and the route and the nav entry go together.
  */

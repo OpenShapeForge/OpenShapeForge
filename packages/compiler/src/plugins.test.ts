@@ -34,70 +34,15 @@ describe("compiler plugins", () => {
     ]);
     expect(docs!.artifacts[0]!.contents).toContain("## Relation (`erp.relations`)");
     expect(first.ownedPaths.files).toContain("docs/entities.generated.md");
-    const migrationRegistry = first.groups.pluginMigrations.find(
-      (artifact) =>
-        artifact.path === "apps/api/src/generated/plugin-migrations/registry.json",
-    );
-    expect(migrationRegistry).toBeDefined();
-    const migrations = JSON.parse(migrationRegistry!.contents) as {
-      version: number;
-      migrations: Array<{ plugin: string; sql: string }>;
-    };
-    expect(migrations.version).toBe(1);
-    expect(migrations.migrations.length).toBeGreaterThan(0);
-    expect(new Set(migrations.migrations.map(({ plugin }) => plugin))).toEqual(
-      new Set(["osf-compiler"]),
-    );
-    expect(migrations.migrations.every(({ sql }) => sql.includes("ALTER TABLE")))
-      .toBe(true);
+    // Existing plugins use neither invariant contract. They emit no registry
+    // and gain no owner metadata, preserving the pre-contract manifest bytes.
+    expect(first.groups.pluginMigrations).toEqual([]);
     const operationCatalog = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path.endsWith("operations/catalog.json"),
     )!.contents) as { operations: { key: string }[] };
     expect(operationCatalog.operations.map((entry) => entry.key)).toContain(
       "workflow.instance.webhook-start",
     );
-    const runtimeFieldSchemas = JSON.parse(first.groups.operations.find((artifact) =>
-      artifact.path.endsWith("operations/field-schema-registry.json"),
-    )!.contents) as {
-      version: number;
-      fieldDefinitionSchema: { $ref: string };
-      semanticTypes: Record<string, unknown>;
-      referentiedata: Record<string, unknown>;
-    };
-    expect(runtimeFieldSchemas).toMatchObject({
-      version: 1,
-      fieldDefinitionSchema: { $ref: "#/$defs/fieldDefinition" },
-    });
-    expect(runtimeFieldSchemas.semanticTypes).toHaveProperty("fieldDefinition");
-    expect(Object.keys(runtimeFieldSchemas.referentiedata).length).toBeGreaterThan(0);
-    const fieldAuthoringRegistry = JSON.parse(first.groups.operations.find((artifact) =>
-      artifact.path === "apps/api/src/generated/compiler/field-authoring-registry.json",
-    )!.contents) as {
-      version: number;
-      fieldAuthoringProfiles: Record<string, Record<string, unknown>>;
-      semanticTypes: Record<string, Record<string, unknown>>;
-      referentiedata: Record<string, {
-        description?: string;
-        items?: Array<{ label?: Record<string, string> }>;
-      }>;
-    };
-    expect(fieldAuthoringRegistry.version).toBe(1);
-    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.workflowInputField).toMatchObject({
-      keyBehavior: "hiddenGeneratedStable",
-      typePickerUsage: "requestInput",
-    });
-    expect(fieldAuthoringRegistry.semanticTypes.email).toMatchObject({
-      valueType: "string",
-      classification: { sensitivity: "pii" },
-    });
-    expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE).toMatchObject({
-      description: expect.any(String),
-    });
-    expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE?.items?.[0]?.label).toEqual({
-      nl: "Persoon",
-      en: "Person",
-      fr: "Personne",
-    });
     const openApi = JSON.parse(first.groups.db.find((artifact) =>
       artifact.path.endsWith("rest/openapi.json"),
     )!.contents) as { paths: Record<string, Record<string, { operationId?: string }>> };
@@ -118,17 +63,15 @@ describe("compiler plugins", () => {
       field: "workflowStartWebhook",
     }));
     expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/operations");
-    expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/compiler");
     const manifest = JSON.parse(
       first.groups.db.find((artifact) => artifact.path.endsWith("manifest.json"))!
         .contents,
     ) as PlatformSchemaManifest;
-    expect(manifest.tables.some((table) => table.pluginOwner !== undefined))
-      .toBe(false);
     expect(
-      manifest.tables.find((table) => table.name === "erp.blocks")?.constraints
-        ?.length,
-    ).toBeGreaterThan(0);
+      manifest.tables.some(
+        (table) => table.pluginOwner !== undefined || table.constraints !== undefined,
+      ),
+    ).toBe(false);
 
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
@@ -219,7 +162,7 @@ describe("compiler plugins", () => {
     // What belongs here is the layer resolution: an appShellPatch from a plugin
     // layer has to survive into the tree the web generator reads.
     const shell = YAML.parse(
-      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "menu.yaml"), "utf8"),
+      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "appShell.yaml"), "utf8"),
     ) as { kind: string; navigation: { sidebarItems: { key: string; route?: unknown }[] } };
 
     expect(shell.kind).toBe("appShell");

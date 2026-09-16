@@ -84,33 +84,12 @@ export interface RowAccessGroupConfig {
   expand?: "descendants" | "ancestors" | "exact";
 }
 
-export type RecordPermissionAction = "view" | "edit" | "delete";
-
-/**
- * Action-specific subjects stored on each record.
- *
- * The persisted JSON object has fixed `view`, `edit`, and `delete` members;
- * each member contains `users`, `groups`, and `roles` string arrays. Keeping
- * that shape fixed lets the database policy and every Operation adapter use
- * one parser instead of letting each entity invent an authorization dialect.
- */
-export interface RowAccessRecordPermissionsConfig {
-  /** Authored field key for the persisted single jsonb object. */
-  field: string;
-  /** A valid subject set naming nobody is public or restricted as authored. */
-  empty: "public" | "restricted";
-  /** Permissions the creator must hold in the submitted ACL. */
-  createRequires: RecordPermissionAction[];
-}
-
 export interface RowAccessConfig {
   enabled: boolean;
   empty?: "public" | "restricted";
   owner?: RowAccessOwnerConfig;
   /** Group-predicated axis. Phase 2 fills this; Phase 1 only carries the type. */
   group?: RowAccessGroupConfig;
-  /** Optional action-specific record ACL, composed with tenant/owner/group RLS. */
-  recordPermissions?: RowAccessRecordPermissionsConfig;
 }
 
 export interface AuthorizationConfig {
@@ -150,7 +129,7 @@ export interface FieldOptionStatic {
 }
 
 export interface FieldOptions {
-  type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
+  type: "static" | "referentiedata" | "remote" | "dynamic";
   items?: FieldOptionStatic[];
   source?: string;
   referentieGroep?: string;

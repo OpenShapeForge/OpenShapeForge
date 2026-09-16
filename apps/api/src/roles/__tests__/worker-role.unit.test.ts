@@ -17,7 +17,6 @@ import type {
 } from "../../modules/contract.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import { WORKER_ROLE } from "../../db/migrations/worker-role.js";
-import { runtimeSettings } from "../../modules/settings.js";
 import { indexModuleWorkers, resolveWorkerDatabaseUrl, startWorkerRole } from "../worker.js";
 
 const silentLog: ModuleWorkerLogger = {
@@ -230,68 +229,10 @@ describe("startWorkerRole", () => {
     // NO_BRIDGE — spending the retry bound on a configuration problem.
     expect(order).toEqual(["init", "start"]);
     expect(started).not.toBeNull();
-    const workerContext = started as ModuleWorkerContext | null;
-    expect(workerContext?.settings).toBe(runtimeSettings);
-    expect(Object.isFrozen(workerContext?.settings)).toBe(true);
-    expect(workerContext).not.toHaveProperty("platform");
     expect(handle).toMatchObject({ role: "probe", module: "probe-module" });
 
     await handle.stop();
     expect(order).toEqual(["init", "start", "stop", "close"]);
-  });
-
-  test("requires claim resolution and atomic contract pinning as one durable boundary", async () => {
-    for (const partial of ["resolver", "pinner"] as const) {
-      await expect(startWorkerRole("probe", {
-        databaseUrl,
-        log: silentLog,
-        modules: registry([{
-          name: "probe-module",
-          workers: {
-            probe: {
-              ...(partial === "resolver"
-                ? { resolveOperationWork: async () => undefined }
-                : { pinOperationContract: async () => {} }),
-              start: () => ({ stop: async () => {} }),
-            },
-          },
-        }]),
-      })).rejects.toThrow(/must contribute resolveOperationWork and pinOperationContract together/);
-    }
-  });
-
-  test("binds the module resolver and pinner into one host-owned durable broker", async () => {
-    let started: ModuleWorkerContext | undefined;
-    const handle = await startWorkerRole("probe", {
-      databaseUrl,
-      log: silentLog,
-      env: {
-        OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES: JSON.stringify([{
-          tenantId: "11111111-1111-4111-8111-111111111111",
-          clientId: "org-worker",
-          clientSecret: "local-test-only",
-        }]),
-        OPENSHAPEFORGE_OPERATION_API_URL: "http://127.0.0.1:3121",
-        OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL: "http://127.0.0.1:8181/token",
-      },
-      modules: registry([{
-        name: "probe-module",
-        workers: {
-          probe: {
-            resolveOperationWork: async () => undefined,
-            pinOperationContract: async () => {},
-            start: (context) => {
-              started = context;
-              return { stop: async () => {} };
-            },
-          },
-        },
-      }]),
-    });
-
-    expect(started?.durableOperations?.authorize).toBeFunction();
-    expect(started?.durableOperations?.execute).toBeFunction();
-    await handle.stop();
   });
 
   test("a module whose init throws does not contribute its role", async () => {

@@ -24,7 +24,7 @@ on:
   # Not widened: a branch with an open PR is already covered by the trigger
   # above, and widening this would run every job twice on every push.
   push:
-    branches: [main, develop]
+    branches: [main]
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -102,11 +102,6 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
-      - name: Foundation package unit tests
-        run: >-
-          bun test packages/auth packages/operations packages/interface-web
-          packages/documents packages/preferences packages/plugin-runtime
-
       - name: Observability unit tests
         run: bun run test:observability
 
@@ -153,27 +148,6 @@ jobs:
           src/graphql/__tests__/description-projection.unit.test.ts
           src/graphql/__tests__/immutable-writability.unit.test.ts
           src/graphql/__tests__/query-hardening.unit.test.ts
-          src/auth/organization-service-identity-bearer.test.ts
-          src/auth/organization-service-identities.test.ts
-          src/auth/login-session-binding.test.ts
-          src/auth/relation-group-memberships.test.ts
-          src/auth/identity-link.test.ts
-          src/auth/identity.test.ts
-          src/auth/host-organization-session.test.ts
-          src/auth/ui-locale.test.ts
-          src/auth/api-key/ceiling.test.ts
-          src/auth/api-key/resolve.test.ts
-          src/auth/api-key/role-subset.test.ts
-          src/auth/api-key/format.test.ts
-          src/auth/__tests__/organization-binding.unit.test.ts
-          src/auth/__tests__/organization-tenant-cache-key.unit.test.ts
-          src/artifacts/rest-routes.test.ts
-          src/documents/__tests__
-          src/rest/rest-docs.test.ts
-          src/rest/generated-rest-session.test.ts
-          src/rest/serialize-generated-row.test.ts
-          src/graphql/context.test.ts
-          src/graphql/operation-error.test.ts
 
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.
@@ -213,9 +187,6 @@ jobs:
       - name: Check the SPI compiles against its runtime Keycloak version
         run: bun run check:keycloak-lockstep
 
-      - name: Test the Keycloak login theme
-        run: bun test scripts/keycloak-theme.test.ts
-
       # SPI targets Java 17 (packages/keycloak-spi/pom.xml).
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
@@ -242,18 +213,12 @@ jobs:
       # These are not real secrets and are never deployed.
       - name: Helm template
         run: |
-          set -o pipefail
           helm template ./deploy/helm/openshapeforge-api \
             --set database.url="postgres://app:app@db:5432/app" \
             --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
             --set database.appPassword="ci-template-only" \
             --set database.workerPassword="ci-template-only-worker" \
-            --set auth.internalContextSecret="ci-template-only" \
-            > /tmp/openshapeforge-chart.yaml
-          grep -q 'bun apps/api/src/db/provision-roles.ts &&' /tmp/openshapeforge-chart.yaml
-          grep -q 'unset OPENSHAPEFORGE_APP_PASSWORD_ROTATE OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE &&' /tmp/openshapeforge-chart.yaml
-          grep -q 'exec bun apps/api/src/db/migrate.ts' /tmp/openshapeforge-chart.yaml
-          grep -A6 'name: OPENSHAPEFORGE_ADMIN_DATABASE_URL' /tmp/openshapeforge-chart.yaml | grep -q 'optional: true'
+            --set auth.internalContextSecret="ci-template-only"
 
       # The Keycloak subchart is disabled by default, so the render above never
       # touches it. Template it explicitly, otherwise a broken subchart would
@@ -358,15 +323,13 @@ jobs:
     name: Database migration tests
     runs-on: ubuntu-latest
     services:
-      # Exercise the documented minimum PostgreSQL version. Other end-to-end
-      # jobs remain on 17, so the release is proven on both supported majors.
-      # These tests create throwaway scratch databases and provision the
-      # openshapeforge_app
+      # Matches docker-compose.local.yml (pgvector on Postgres 17). The tests
+      # create throwaway scratch databases and provision the openshapeforge_app
       # role through the privileged connection, so the service must run as the
       # superuser openshapeforge role. These credentials are the documented
       # local-dev-only values from AGENTS.md, never used outside CI/local dev.
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: openshapeforge
           POSTGRES_PASSWORD: openshapeforge
@@ -395,22 +358,8 @@ jobs:
       # The db tests default to localhost:5434 with the openshapeforge role and
       # a /postgres admin URL — the exact service configured above — so no extra
       # env wiring is needed.
-      # Roles are cluster-wide and provisioned by the host, never by the chain
-      # (apps/api/src/db/database-roles.ts). The service's superuser stands in
-      # for the administrator here.
-      - name: Provision database roles
-        env:
-          OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/postgres
-        run: bun run db:provision-roles
-
       - name: Migration + drift tests
-        run: |
-          cd apps/api
-          bun test src/db
-          bun test src/operations
-          bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
-          find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
-          bun test src/modules/platform-artifact-transaction.test.ts
+        run: cd apps/api && bun test src/db
 
   # Software-composition analysis (issue #105). The other jobs prove the code
   # builds and behaves; nothing here proves its dependencies are free of known

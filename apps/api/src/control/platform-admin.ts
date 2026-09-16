@@ -1,22 +1,37 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The platform administrator: what a verified control-realm operator is on
- * the far side of the door (`control-session.ts`), and how one becomes a
- * system-bypass database session for one Operation.
+ * Who may use the platform administrator MCP (`/api/control/mcp`), and what
+ * they become on the far side of the door.
  *
- * The marker role here is `platform_admin` — a person who manages the
- * integration catalog for every tenant — as distinct from
- * `platform-operator` (`authorization.ts`), which is the tenant lifecycle.
- * One person may hold both; the roles do not imply each other, and each
- * control Operation names the roles that may invoke it.
+ * The same three preconditions `authorization.ts` puts in front of the REST
+ * control plane, with two deliberate differences:
  *
- * The elevation is the operator's, made in the same place: an administrator
+ *   1. the authorized party is an ALLOW-LIST rather than one client. The REST
+ *      surface is called by the admin gateway; an MCP client signs the person
+ *      in interactively through a public PKCE client of the control realm
+ *      (`codex-platform` in the reference setup), and both must be admitted.
+ *      Everything the single pin protects against still holds: `admin-cli`
+ *      is not on the list, and a name off the list is refused before a role
+ *      is looked at.
+ *   2. the marker role is `platform_admin` — a person who manages the
+ *      integration catalog for every tenant — rather than
+ *      `platform-operator`, which is the tenant lifecycle. One person may hold
+ *      both; the surfaces do not imply each other.
+ *
+ * The elevation is the same one and made in the same place: an administrator
  * becomes a `Platform.SystemBypass` database session for exactly one call,
- * with an issuer-qualified actor and a reason naming the Operation and its
- * target (`systemSessionForOperator`). No tenant, no organization: a platform
+ * with an issuer-qualified actor and a reason naming the tool and its target
+ * (`systemSessionForOperator`). No tenant, no organization: a platform
  * session names every tenant by slug and nothing in a token picks one.
  */
-import { systemSessionForOperator } from "./authorization.js";
+import {
+  ControlAuthorizationError,
+  realmRolesOf,
+  type ResolveOperatorOptions,
+  systemSessionForOperator,
+  verifyControlBearer,
+} from "./authorization.js";
+import { platformMcpAuthorizedParties, type ControlPlaneConfig } from "./config.js";
 import type { SystemSessionInput } from "../db/session.js";
 
 /** The control realm's marker role for the integration catalog. */
@@ -40,12 +55,102 @@ export type PlatformAdministrator = {
 };
 
 /**
- * The elevation for one call. `reason` names the Operation and its target so
+ * {@link ResolveOperatorOptions} plus the canonical URL of the resource being
+ * called, so a token bound to it by `aud` can be admitted on that binding.
+ * Absent means "no audience binding available", and only the `azp` allow-list
+ * applies — which is what the REST control surface wants.
+ */
+export type PlatformAdministratorOptions = ResolveOperatorOptions & {
+  resource?: string | undefined;
+};
+
+function audienceList(aud: unknown): string[] {
+  if (typeof aud === "string") return [aud];
+  if (Array.isArray(aud)) return aud.filter((v): v is string => typeof v === "string");
+  return [];
+}
+
+function stringClaim(claims: Record<string, unknown>, key: string): string | null {
+  const value = claims[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+/**
+ * Authenticate and authorize the caller as a platform administrator.
+ *
+ * A refusal is one of two codes, and each carries the same message whatever
+ * the cause within it: UNAUTHENTICATED for anything short of a verified
+ * control-realm token from an admitted party (no header, a tenant-realm
+ * token, an API key, trusted-context headers, `admin-cli`), FORBIDDEN for a
+ * verified administrator-realm identity without the role. A tenant-realm
+ * token fails signature verification against the control realm's JWKS, so
+ * it is refused without this code ever learning it was a tenant token —
+ * nothing here can enumerate tenants or realms.
+ */
+export async function resolvePlatformAdministrator(
+  headers: Headers,
+  config: ControlPlaneConfig,
+  options: PlatformAdministratorOptions = {},
+): Promise<PlatformAdministrator> {
+  const claims = await verifyControlBearer(headers, config, options);
+
+  // Admitted two ways, and the second is the stronger one.
+  //
+  // A NAME on the `azp` allow-list is how the preregistered clients get in
+  // (the admin gateway, the platform's public PKCE client). It cannot admit
+  // a client that registered itself: RFC 7591 mints the client id at
+  // registration time, so no list written in advance can hold it.
+  //
+  // A RESOURCE AUDIENCE is the alternative: `aud` names this exact endpoint,
+  // which a token only carries when it was requested with the control
+  // resource scope (mcp/control-mcp-server.ts). That is a per-resource
+  // capability rather than a client name, and it closes the same hazard the
+  // pin was written for — `admin-cli` and the console clients of the control
+  // realm do not carry that scope, so their tokens are still refused here.
+  const authorizedParty = stringClaim(claims, "azp") ?? "";
+  const admittedByParty = platformMcpAuthorizedParties(config).includes(authorizedParty);
+  const admittedByAudience =
+    options.resource !== undefined && audienceList(claims.aud).includes(options.resource);
+  if (!admittedByParty && !admittedByAudience) {
+    throw new ControlAuthorizationError(
+      "UNAUTHENTICATED",
+      "The presented token was not issued for the platform administrator MCP.",
+    );
+  }
+
+  const subject = stringClaim(claims, "sub");
+  if (!subject) {
+    throw new ControlAuthorizationError(
+      "UNAUTHENTICATED",
+      "The presented token carries no subject.",
+    );
+  }
+
+  if (!realmRolesOf(claims).includes(PLATFORM_ADMIN_ROLE)) {
+    throw new ControlAuthorizationError(
+      "FORBIDDEN",
+      `Not authorized to administer the platform; the ${PLATFORM_ADMIN_ROLE} realm role is required.`,
+    );
+  }
+
+  const exp = claims.exp;
+  const username = stringClaim(claims, "preferred_username") ?? undefined;
+  return {
+    subject,
+    issuer: config.operator.issuer,
+    username,
+    name: stringClaim(claims, "name") ?? username ?? null,
+    email: stringClaim(claims, "email"),
+    authorizedParty,
+    expiresAtMs: typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null,
+  };
+}
+
+/**
+ * The elevation for one tool call. `reason` names the tool and its target so
  * `platform.system_bypass_audit` reads as a log of what the administrator did
- * (`platform-mcp: control.publish-catalog-entry service/record-finding`),
- * with the issuer-qualified actor and the timestamps the session layer
- * records. `platform-mcp` is the audit source label of the whole
- * platform-administration surface, whichever transport carried the call.
+ * (`platform-mcp: publish_catalog_entry service/record-finding`), with the
+ * issuer-qualified actor and the timestamps the session layer records.
  */
 export function systemSessionForAdministrator(
   administrator: PlatformAdministrator,

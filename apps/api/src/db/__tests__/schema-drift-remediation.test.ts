@@ -111,14 +111,12 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
     );
 
     // Derived from the reader's own DATABASE_URL rather than interpolated, so
-    // the message cannot leak a credential into test output or a CI log. The
-    // rebuild is the reset model's own command, confirmed by database name.
-    expect(remediation.message).toContain(
-      'OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
-    );
+    // the message cannot leak a credential into test output or a CI log.
+    expect(remediation.message).toContain('DB="${DATABASE_URL##*/}"');
     expect(remediation.message).toContain(
       'ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"',
     );
+    expect(remediation.message).toContain("drop database");
     expect(remediation.message).not.toContain("postgres://");
   });
 

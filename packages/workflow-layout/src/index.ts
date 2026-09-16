@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 export { estimateWorkflowNodeSize } from "./geometry.ts";
 export { layoutWorkflowDefinition, layoutWorkflowGraph } from "./layout.ts";
-export { defaultHandleLabel, defaultOutputHandles } from "./defaults.ts";
 /**
  * Exported so a caller can ask the question without laying anything out — a
  * designer wants to flag a drifted edge while the user is looking at it, not

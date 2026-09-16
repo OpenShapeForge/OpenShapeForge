@@ -5,13 +5,12 @@ import type { ControlApiFailure } from "@/lib/clients/control-api";
  * A refusal from the control API, rendered rather than thrown.
  *
  * The message is shown VERBATIM, which is a deliberate choice and safe because
- * of what is on the other side: the control Operations
- * (`apps/api/src/control/operations.ts`) answer an explicit vocabulary and
- * redact everything they did not classify into a generic 500, so nothing
- * reaching here carries SQL text or unclassified upstream detail. The messages
- * that do reach here are written for an operator and are the most useful thing
- * on the screen — a 503 naming every missing environment variable, or a slug
- * rule with an example.
+ * of what is on the other side: `apps/api/src/control/rest-routes.ts` maps an
+ * explicit list of codes to statuses and redacts everything else into a generic
+ * 500, so nothing reaching here carries SQL text or unclassified upstream
+ * detail. The messages that do reach here are written for an operator and are
+ * the most useful thing on the screen — a 503 naming every missing environment
+ * variable, or a slug rule with an example.
  *
  * The code is shown too. It is the vocabulary the API documents and the thing
  * worth quoting in a bug report; a message alone gets paraphrased.

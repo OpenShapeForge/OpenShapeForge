@@ -25,7 +25,6 @@ const scalarTypes = new Set<ScalarType>([
   "date",
   "timestamptz",
   "jsonb",
-  "text[]",
 ]);
 
 const retentionActions = new Set<RetentionAction>([
@@ -653,11 +652,7 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         )}.`,
       );
     }
-    // The target may live in a layer promoted into this manifest later (see
-    // the column-reference check below): an unknown target TABLE is deferred
-    // to generateArtifacts, an unknown column on a table this file does
-    // declare is an authoring error here.
-    if (toColumns !== undefined && !toColumns.has(entry.to.column)) {
+    if (!toColumns?.has(entry.to.column)) {
       throw new Error(
         `relationshipRegister[${index}].to references unknown column ${columnKey(
           entry.to.schema,
@@ -688,8 +683,17 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       assertIdentifier(column.references.column, `${sourceTableKey}.${column.name}.references.column`);
 
       const targetTableKey = tableKey(column.references.schema, column.references.table);
-      const crossModule = table.schema !== column.references.schema;
-      if (crossModule) {
+      const targetColumns = tableColumns.get(targetTableKey);
+      if (!targetColumns) {
+        throw new Error(`${sourceTableKey}.${column.name} references unknown table ${targetTableKey}.`);
+      }
+      if (!targetColumns.has(column.references.column)) {
+        throw new Error(
+          `${sourceTableKey}.${column.name} references unknown column ${targetTableKey}.${column.references.column}.`,
+        );
+      }
+
+      if (table.schema !== column.references.schema) {
         const key = referenceKey({
           from: {
             schema: table.schema,
@@ -707,24 +711,6 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
             `${sourceTableKey}.${column.name} crosses module boundary to ${targetTableKey}.${column.references.column} but is not listed in relationshipRegister.`,
           );
         }
-      }
-
-      const targetColumns = tableColumns.get(targetTableKey);
-      if (!targetColumns) {
-        // A registered cross-module reference may point at a table this file
-        // does not declare: the authoring layer promotes its entities into the
-        // same manifest later (active-manifest.ts), which is how a platform
-        // bookkeeping row links to a Relation. The reference is checked again
-        // against the merged manifest in generateArtifacts, where the target
-        // either exists or the build fails naming it; a same-schema reference
-        // has no later layer to wait for and is refused here.
-        if (crossModule) continue;
-        throw new Error(`${sourceTableKey}.${column.name} references unknown table ${targetTableKey}.`);
-      }
-      if (!targetColumns.has(column.references.column)) {
-        throw new Error(
-          `${sourceTableKey}.${column.name} references unknown column ${targetTableKey}.${column.references.column}.`,
-        );
       }
     }
   }

@@ -48,7 +48,7 @@ export function invitationDeliveryUnconfirmed(
   );
 }
 
-/** Only called behind a verified control-realm session (control-session.ts); never synthesizes a tenant identity. */
+/** Only called behind resolvePlatformAdministrator; never synthesizes a tenant identity. */
 export async function inviteFirstTenantAdministrator(
   deps: { db: OpenShapeForgeDatabase; administrator: PlatformAdministrator; firstAdministrator?: FirstAdministratorClients; log?: (error: unknown) => void; correlationId?: string },
   input: { slug: string; email: string },
@@ -62,7 +62,7 @@ export async function inviteFirstTenantAdministrator(
   const actor = `${deps.administrator.issuer}#${deps.administrator.subject}`;
   try {
     return await withSystemSession(deps.db, systemSessionForAdministrator(deps.administrator,
-      `control.invite-first-tenant-admin ${input.slug}`), async trx => {
+      `invite_first_tenant_admin ${input.slug}`), async trx => {
       // Serialize bootstrap decisions per existing tenant, including remote mail.
       const tenant = (await sql<{ id: string; status: string; keycloak_realm: string | null; keycloak_organization_id: string | null }>`
         select id, status, keycloak_realm, keycloak_organization_id from platform.tenants

@@ -13,7 +13,6 @@
 import { describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import type { RuntimeModule } from "../../modules/contract.js";
@@ -24,7 +23,6 @@ import {
 } from "../generated-mcp-server.js";
 
 const READ = "Widgets.All.Read";
-const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
 
 const session = (...roles: string[]) =>
   ({
@@ -122,7 +120,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session(READ),
-      modules: [documentsRuntime, {
+      modules: [{
         name: "workflow",
         operationHandlers: {
           startWebhook: async () => ({ value: undefined }),
@@ -173,7 +171,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, {
+      modules: [{
         name: "workflow",
         operationHandlers: {
           startWebhook: async () => ({ value: undefined }),
@@ -237,7 +235,7 @@ describe("resourcesForSession", () => {
     const server = __buildGeneratedMcpServerForTests({
       db,
       session: session("Other.Role"),
-      modules: [documentsRuntime, {
+      modules: [{
         name: "workflow",
         operationHandlers: {
           startWebhook: async () => ({ value: undefined }),

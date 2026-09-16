@@ -126,8 +126,6 @@ export type KeycloakOrganizationMembersClient = {
    * message here repeats that rather than inventing a different explanation).
    */
   inviteUser(organizationId: string, input: InviteOrganizationMemberInput): Promise<void>;
-  /** Re-send the same pending invitation without accepting new recipient or role input. */
-  resendInvitation?(organizationId: string, invitationId: string): Promise<void>;
   /**
    * The invitations the organization still has outstanding. An organization
    * with none answers an empty array, not an error.
@@ -152,33 +150,6 @@ export type KeycloakOrganizationMembersClient = {
     organizationId: string,
     email: string,
   ): Promise<KeycloakOrganizationInvitation | null>;
-};
-
-export type KeycloakTenantMemberAdminClient = KeycloakOrganizationMembersClient & {
-  listMembers(organizationId: string, clientId: string): Promise<KeycloakOrganizationMember[]>;
-  getMember(organizationId: string, userId: string, clientId: string): Promise<KeycloakOrganizationMember | null>;
-  listCredentials(userId: string): Promise<KeycloakMemberCredential[]>;
-  deleteCredential(userId: string, credentialId: string): Promise<boolean>;
-  removeMember(organizationId: string, userId: string): Promise<boolean>;
-  sendPasskeyRecovery(userId: string): Promise<void>;
-};
-
-export type KeycloakOrganizationMember = {
-  memberId: string;
-  username: string | null;
-  email: string | null;
-  firstName: string | null;
-  lastName: string | null;
-  enabled: boolean;
-  emailVerified: boolean;
-  roles: string[];
-};
-
-export type KeycloakMemberCredential = {
-  credentialId: string;
-  type: string;
-  label: string | null;
-  createdAt: number | null;
 };
 
 export type KeycloakOrganizationMembersOptions = {
@@ -210,7 +181,7 @@ function normalizeEmail(email: string): string {
 export function createKeycloakOrganizationMembersClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationMembersOptions = {},
-): KeycloakTenantMemberAdminClient & OrganizationBootstrapReads {
+): KeycloakOrganizationMembersClient & OrganizationBootstrapReads {
   const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const now = options.now ?? (() => Date.now());
   const realmBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
@@ -356,114 +327,19 @@ export function createKeycloakOrganizationMembersClient(
   async function listInvitations(
     organizationId: string,
   ): Promise<KeycloakOrganizationInvitation[]> {
-    const invitations: KeycloakOrganizationInvitation[] = [];
-    for (let first = 0; first < 10000; first += 100) {
-      const { body } = await request(
-        `${invitationsUrl(organizationId)}?first=${first}&max=100`,
-        { method: "GET" },
-        "listing the pending invitations",
-        "list_invitations",
-      );
-      if (!Array.isArray(body)) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_UNAVAILABLE",
-          "Invalid invitation list response.",
-        );
-      }
-      for (const row of body) {
-        const invitation = toInvitation(row);
-        if (!invitation || !invitation.email) {
-          throw new KeycloakAdminError(
-            "KEYCLOAK_ADMIN_UNAVAILABLE",
-            "Invalid invitation response.",
-          );
-        }
-        invitations.push(invitation);
-      }
-      if (body.length < 100) return invitations;
-    }
-    throw new KeycloakAdminError(
-      "KEYCLOAK_ADMIN_UNAVAILABLE",
-      "Invitation listing exceeds the supported bound; no partial list is returned.",
+    const { body } = await request(
+      invitationsUrl(organizationId),
+      { method: "GET" },
+      "listing the pending invitations",
+      "list_invitations",
     );
-  }
-
-  async function roleClientUuid(clientId: string): Promise<string> {
-    const { body } = await request(`${realmBase}/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" }, "resolving the role client", "resolve_role_client");
-    const matches = Array.isArray(body) ? body.filter((row) => row?.clientId === clientId && typeof row?.id === "string") : [];
-    if (matches.length !== 1) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", "The organization role client is missing or ambiguous.");
-    return matches[0].id;
-  }
-
-  async function memberRoles(userId: string, clientUuid: string): Promise<string[]> {
-    const { body } = await request(`${realmBase}/users/${encodeURIComponent(userId)}/role-mappings/clients/${encodeURIComponent(clientUuid)}/composite`, { method: "GET" }, "listing member roles", "list_member_roles");
-    if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid member roles response.");
-    return body.flatMap((row) => typeof row?.name === "string" ? [row.name] : []).sort();
-  }
-
-  function toMember(row: unknown, roles: string[]): KeycloakOrganizationMember | null {
-    const value = (row ?? {}) as Record<string, unknown>;
-    if (typeof value.id !== "string" || !value.id) return null;
-    return {
-      memberId: value.id,
-      username: optionalString(value.username),
-      email: optionalString(value.email),
-      firstName: optionalString(value.firstName),
-      lastName: optionalString(value.lastName),
-      enabled: value.enabled !== false,
-      emailVerified: value.emailVerified === true,
-      roles,
-    };
+    const rows = Array.isArray(body) ? body : [];
+    return rows
+      .map(toInvitation)
+      .filter((invitation): invitation is KeycloakOrganizationInvitation => invitation !== null);
   }
 
   return {
-    async listMembers(organizationId, clientId) {
-      const clientUuid = await roleClientUuid(clientId);
-      const members: KeycloakOrganizationMember[] = [];
-      for (let first = 0; first < 10000; first += 100) {
-        const { body } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`, { method: "GET" }, "listing organization members", "list_organization_members");
-        if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization members response.");
-        for (const row of body) {
-          const userId = typeof row?.id === "string" ? row.id : "";
-          const member = toMember(row, userId ? await memberRoles(userId, clientUuid) : []);
-          if (!member) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member response.");
-          members.push(member);
-        }
-        if (body.length < 100) return members;
-      }
-      throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Organization member listing exceeds the supported bound.");
-    },
-
-    async getMember(organizationId, userId, clientId) {
-      return (await this.listMembers(organizationId, clientId)).find((member) => member.memberId === userId) ?? null;
-    },
-
-    async listCredentials(userId) {
-      const { body } = await request(`${realmBase}/users/${encodeURIComponent(userId)}/credentials`, { method: "GET" }, "listing member credentials", "list_member_credentials");
-      if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid credential list response.");
-      return body.flatMap((row): KeycloakMemberCredential[] => {
-        if (typeof row?.id !== "string" || typeof row?.type !== "string") return [];
-        return [{ credentialId: row.id, type: row.type, label: optionalString(row.userLabel), createdAt: optionalNumber(row.createdDate) }];
-      });
-    },
-
-    async deleteCredential(userId, credentialId) {
-      const { status } = await request(`${realmBase}/users/${encodeURIComponent(userId)}/credentials/${encodeURIComponent(credentialId)}`, { method: "DELETE" }, "deleting a member credential", "delete_member_credential", true);
-      return status !== 404;
-    },
-
-    async removeMember(organizationId, userId) {
-      const { status } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" }, "removing an organization member", "remove_organization_member", true);
-      return status !== 404;
-    },
-
-    async sendPasskeyRecovery(userId) {
-      await request(`${realmBase}/users/${encodeURIComponent(userId)}/execute-actions-email?lifespan=900`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(["webauthn-register-passwordless"]),
-      }, "sending passkey recovery", "send_passkey_recovery");
-    },
     async hasInvitationMailConfiguration() {
       const { body } = await request(realmBase, { method: "GET" }, "checking invitation mail configuration", "check_invitation_smtp");
       const smtp = (body as { smtpServer?: Record<string, string> })?.smtpServer;
@@ -501,15 +377,6 @@ export function createKeycloakOrganizationMembersClient(
         },
         "inviting a member",
         "invite_member",
-      );
-    },
-
-    async resendInvitation(organizationId, invitationId) {
-      await request(
-        `${invitationsUrl(organizationId)}/${encodeURIComponent(invitationId)}/resend`,
-        { method: "POST" },
-        "resending an invitation",
-        "resend_invitation",
       );
     },
 

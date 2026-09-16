@@ -50,16 +50,18 @@ const DATABASE_URL =
 
 const ROLE_CLIENT = "erp-provider";
 const MANAGE_ROLE = "Platform.ApiKeys.Manage";
-/** Read-only entity role. The suite grants this one to prove per-operation
- *  enforcement flows through a key. */
+/** Read-only entity role. `directie` ships with ReadWrite only, so the suite
+ *  grants this one to prove per-OPERATION enforcement flows through a key. */
 const READ_ROLE = "Relations.All.Read";
 const WRITE_ROLE = "Relations.All.ReadWrite";
-/** Held by the test admin, but no generated entity is gated by it — a key
- *  granted only this must reach no entity at all. */
+/** Held by `directie`, but no generated entity is gated by it — a key granted
+ *  only this must reach no entity at all. */
 const OTHER_DOMAIN_ROLE = "RealEstate.All.ReadWrite";
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET =
   process.env.E2E_KEYCLOAK_ADMIN_SECRET ?? "openshapeforge-apikey-provisioner-secret";
+const TENANT_ACME = "11111111-1111-4111-8111-111111111111";
+
 // Set BEFORE the app modules read them. identity.ts caches the verifier lazily
 // and exposes a reset, so ordering only has to hold at first use.
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
@@ -80,8 +82,7 @@ const { __resetSessionResolverForTests } = await import("../../identity.js");
 const { __resetExchangeCacheForTests } = await import("../exchange.js");
 const { KeycloakAdmin } = await import("../keycloak-admin.js");
 const { REST_MOUNT_PATH } = await import("../../../rest/rest-paths.js");
-const { createDatabaseRuntime, readMigrateDatabaseUrl } = await import("../../../db/connection.js");
-const { seedKeycloakTokenPeople } = await import("../../../graphql/__tests__/e2e/keycloak.js");
+const { createDatabaseRuntime } = await import("../../../db/connection.js");
 const { sql } = await import("kysely");
 
 type App = Awaited<ReturnType<typeof createApiApp>>;
@@ -243,7 +244,7 @@ async function ensureUserRoles(
     }
   }
 
-  const users = (await raw.json("GET", `/users?username=tenant-a-admin&exact=true`)) as Array<{
+  const users = (await raw.json("GET", `/users?username=acme-directie&exact=true`)) as Array<{
     id: string;
   }>;
   const userId = users[0]?.id;
@@ -289,7 +290,7 @@ const ready = await (async () => {
     return false;
   }
   // Fetched AFTER the grant so the token actually carries the role.
-  adminToken = await userToken("tenant-a-admin");
+  adminToken = await userToken("acme-directie");
   if (!adminToken) return false;
   // The grant only takes effect in a token minted after it, and the suite
   // asserts against roles it named itself rather than guessing from claims.
@@ -302,19 +303,6 @@ const ready = await (async () => {
 
 beforeAll(async () => {
   if (!ready) return;
-  // Own the tenant-membership precondition instead of depending on whichever
-  // GraphQL E2E file Bun happens to execute first in the combined CI process.
-  const seedRuntime = createDatabaseRuntime({
-    databaseUrl: readMigrateDatabaseUrl(),
-  });
-  try {
-    await seedKeycloakTokenPeople(seedRuntime.db, [
-      adminToken,
-      await userToken("tenant-a-user"),
-    ]);
-  } finally {
-    await seedRuntime.close();
-  }
   __resetSessionResolverForTests();
   __resetExchangeCacheForTests();
   app = createApiApp({ cors: false, databaseUrl: DATABASE_URL });
@@ -394,15 +382,6 @@ async function rolesViaGraphql(credential: string): Promise<string[] | undefined
   });
   if (response.statusCode !== 200) return undefined;
   return JSON.parse(response.body).data ? [] : undefined;
-}
-
-/** Canonical entity Operations report refusals in-band, below the root field. */
-function graphqlOperationErrorCode(body: string, field: string): string | undefined {
-  const parsed = JSON.parse(body) as {
-    errors?: Array<{ extensions?: { code?: string } }>;
-    data?: Record<string, { error?: { code?: string } } | null> | null;
-  };
-  return parsed.errors?.[0]?.extensions?.code ?? parsed.data?.[field]?.error?.code;
 }
 
 describe.skipIf(!ready)("API keys end to end", () => {
@@ -533,14 +512,12 @@ describe.skipIf(!ready)("API keys end to end", () => {
         method: "POST",
         url: "/api/graphql",
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
-        payload: JSON.stringify({
-          query: "{ relations(first: 1) { data { totalCount } error { code } } }",
-        }),
+        payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
       });
 
     const allowed = await readRelations((full.body as CreateResponse).token);
     expect(allowed.statusCode).toBe(200);
-    expect(graphqlOperationErrorCode(allowed.body, "relations")).toBeUndefined();
+    expect(JSON.parse(allowed.body).errors ?? []).toEqual([]);
 
     // Narrowed key: the subset names ONLY a role the integration's service
     // account does not hold. The caller holds it, so the ceiling permits the
@@ -555,7 +532,9 @@ describe.skipIf(!ready)("API keys end to end", () => {
     expect(narrowed.status).toBe(201);
 
     const denied = await readRelations((narrowed.body as CreateResponse).token);
-    expect(graphqlOperationErrorCode(denied.body, "relations")).toBe("FORBIDDEN");
+    const errors = JSON.parse(denied.body).errors ?? [];
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].extensions?.code).toBe("FORBIDDEN");
   }, 30_000);
 
   test("the ceiling applies to the subset path too, not just to creation", async () => {
@@ -585,9 +564,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
         method: "POST",
         url: "/api/graphql",
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
-        payload: JSON.stringify({
-          query: "{ relations(first: 1) { data { totalCount } error { code } } }",
-        }),
+        payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
       });
     const createRelation = (credential: string) =>
       app!.inject({
@@ -596,9 +573,13 @@ describe.skipIf(!ready)("API keys end to end", () => {
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
         payload: JSON.stringify({
           query:
-            "mutation { createRelation(input: { displayName: \"perm-matrix\", relationType: \"person\" }) { data { id } error { code } } }",
+            "mutation { createRelation(input: { displayName: \"perm-matrix\" }) { id } }",
         }),
       });
+    const forbidden = (body: string) =>
+      (JSON.parse(body).errors ?? []).some(
+        (error: { extensions?: { code?: string } }) => error.extensions?.code === "FORBIDDEN",
+      );
 
     const keys: Record<string, string> = {};
     for (const [label, body] of [
@@ -621,22 +602,22 @@ describe.skipIf(!ready)("API keys end to end", () => {
     }
 
     // writer: reads and writes.
-    expect(graphqlOperationErrorCode((await readRelations(keys.writer!)).body, "relations")).toBeUndefined();
-    expect(graphqlOperationErrorCode((await createRelation(keys.writer!)).body, "createRelation")).toBeUndefined();
+    expect(forbidden((await readRelations(keys.writer!)).body)).toBe(false);
+    expect(forbidden((await createRelation(keys.writer!)).body)).toBe(false);
 
     // reader: reads, but the SAME credential is refused the write. This is the
     // load-bearing assertion — per-operation enforcement reaches an API key
     // exactly as it reaches an interactive bearer, because by the time the
     // guard runs there is no difference between them.
-    expect(graphqlOperationErrorCode((await readRelations(keys.reader!)).body, "relations")).toBeUndefined();
-    expect(graphqlOperationErrorCode((await createRelation(keys.reader!)).body, "createRelation")).toBe("FORBIDDEN");
+    expect(forbidden((await readRelations(keys.reader!)).body)).toBe(false);
+    expect(forbidden((await createRelation(keys.reader!)).body)).toBe(true);
 
     // other-domain: authenticated, and reaches no relation at all.
-    expect(graphqlOperationErrorCode((await readRelations(keys["other-domain"]!)).body, "relations")).toBe("FORBIDDEN");
+    expect(forbidden((await readRelations(keys["other-domain"]!)).body)).toBe(true);
 
     // narrowed-to-nothing: the subset intersected to empty, so it did NOT
     // confer the role it named.
-    expect(graphqlOperationErrorCode((await readRelations(keys["narrowed-to-nothing"]!)).body, "relations")).toBe("FORBIDDEN");
+    expect(forbidden((await readRelations(keys["narrowed-to-nothing"]!)).body)).toBe(true);
   }, 60_000);
 
   test("two keys on one integration can carry different permissions", async () => {
@@ -665,23 +646,27 @@ describe.skipIf(!ready)("API keys end to end", () => {
         url: "/api/graphql",
         headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
         payload: JSON.stringify({
-          query: "mutation { createRelation(input: { displayName: \"split\", relationType: \"person\" }) { data { id } error { code } } }",
+          query: "mutation { createRelation(input: { displayName: \"split\" }) { id } }",
         }),
       });
+    const isForbidden = (body: string) =>
+      (JSON.parse(body).errors ?? []).some(
+        (error: { extensions?: { code?: string } }) => error.extensions?.code === "FORBIDDEN",
+      );
 
-    expect(graphqlOperationErrorCode((await write(unrestricted)).body, "createRelation")).toBeUndefined();
-    expect(graphqlOperationErrorCode((await write(readOnly)).body, "createRelation")).toBe("FORBIDDEN");
+    expect(isForbidden((await write(unrestricted)).body)).toBe(false);
+    expect(isForbidden((await write(readOnly)).body)).toBe(true);
   }, 60_000);
 
   test("a user without the management role cannot provision at all", async () => {
     // A real seeded identity, broadly privileged on business data and holding
     // no Platform.* role — the shape an ordinary employee has.
-    const ordinaryUser = await userToken("tenant-a-user");
-    expect(ordinaryUser).not.toBeNull();
+    const consultant = await userToken("acme-verhuurconsulent");
+    expect(consultant).not.toBeNull();
 
     const refused = await createKey(
       { displayName: "unauthorized", roles: [] },
-      ordinaryUser,
+      consultant,
     );
     expect(refused.status).toBe(403);
     expect(refused.body.error.message).toContain("Not authorized to manage API keys");
@@ -729,11 +714,9 @@ describe.skipIf(!ready)("API keys end to end", () => {
       method: "POST",
       url: "/api/graphql",
       headers: { "content-type": "application/json", authorization: `Bearer ${minted.token}` },
-      payload: JSON.stringify({
-        query: "{ relations(first: 1) { data { totalCount } error { code } } }",
-      }),
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
     });
-    expect(graphqlOperationErrorCode(used.body, "relations")).toBeUndefined();
+    expect(parse(used.body).errors ?? []).toEqual([]);
 
     // Listing never returns the credential again.
     const listed = parse((await graphql("{ apiKeys { id displayName roleSubset } }", {})).body);
@@ -780,7 +763,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("the privilege ceiling refuses a role the caller does not hold", async () => {
     const refused = await createKey({
       displayName: "e2e escalation attempt",
-      // The neutral test admin is broadly privileged but holds no such role — a
+      // acme-directie is broadly privileged but holds no such role — a
       // fabricated name is the cleanest proof the check is by membership and
       // not by a denylist.
       roles: ["Platform.SystemBypass", "Totally.Made.Up"],

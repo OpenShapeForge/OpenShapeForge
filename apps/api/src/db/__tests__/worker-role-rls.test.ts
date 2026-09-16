@@ -241,8 +241,8 @@ describe("worker-role RLS axis", () => {
             [fixture.tenantA, fixture.tenantB].sort(),
           );
 
-          // (c) The widening is exactly the explicitly granted tables that
-          // declared it. Same GUC, RAW counts, no tenant set.
+          // (c) The widening is exactly the tables that declared it. Same GUC,
+          // RAW counts, no tenant set — business data stays invisible.
           await db.connection().execute(async (conn) => {
             await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
 
@@ -258,9 +258,12 @@ describe("worker-role RLS axis", () => {
             expect(await count("workflow.schedules")).toBe(1);
             expect(await count("workflow.schedule_fires")).toBe(1);
 
-            // Explicit workerDml → granted but tenant-scoped, hence invisible
-            // until the tenant is set. Business tables such as erp.relations
-            // are not granted at all and are asserted in the grant test below.
+            // NOT declared → invisible. This is the half that makes the change
+            // worth making: under app.bypass_rls every one of these was 1. The
+            // worker is GRANTED these tables (it reaches them one tenant at a
+            // time) and still sees nothing without a tenant, because the grant
+            // and the policy are different questions.
+            expect(await count("erp.relations")).toBe(0);
             expect(await count("workflow.instances")).toBe(0);
             expect(await count("workflow.definitions")).toBe(0);
           });
@@ -497,14 +500,13 @@ describe("worker-role RLS axis", () => {
                 await sql`select 1 from ${sql.raw(table)} limit 1`.execute(conn);
                 return true;
               } catch (error) {
-                if (/permission denied for (?:table|schema)/i.test(String(error))) return false;
+                if (/permission denied for table/i.test(String(error))) return false;
                 throw error;
               }
             };
 
-            // Granted: only the queue, run tables and catalogs that explicitly
-            // declare worker access. Business Operations use the canonical API
-            // under a fresh service identity, not this restricted DB role.
+            // Granted: the queue, the run tables, the catalogs a worker boots
+            // from, and the business entities its generated entity nodes reach.
             for (const table of [
               "workflow.control_commands",
               "workflow.schedules",
@@ -520,6 +522,7 @@ describe("worker-role RLS axis", () => {
               "platform.entity_trigger_registry",
               "platform.entity_events",
               "platform.org_unit_closure",
+              "erp.relations",
             ]) {
               expect([table, await reachable(table)]).toEqual([table, true]);
             }
@@ -540,7 +543,6 @@ describe("worker-role RLS axis", () => {
               "platform.entity_field_suggestions",
               "platform.org_unit",
               "platform.system_bypass_audit",
-              "erp.relations",
             ]) {
               expect([table, await reachable(table)]).toEqual([table, false]);
             }

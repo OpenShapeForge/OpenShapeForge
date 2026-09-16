@@ -14,14 +14,11 @@
  * test below arms one column for its own duration with withClassifiedColumn
  * rather than asserting nothing. That arming is in-process, hence skipped when
  * the suite runs against a remote server.
- *
- * Shape-aware through e2e/gql-shapes.ts: the refusal a canonical list answers
- * with sits in band, and expectOperationError checks that it did not answer
- * the question it refused at either generation.
  */
 import { expect } from "bun:test";
 import {
   describe,
+  expectData,
   gql,
   readOnly,
   registerSuiteLifecycle,
@@ -35,18 +32,24 @@ import {
   createRow,
   fieldName,
   redactableColumnFor,
-  graphqlTables as tables,
+  tables,
   tablesByTypeName,
   withClassifiedColumn,
 } from "./e2e/entity-factory.js";
-import {
-  collectionOf,
-  expectOperationError,
-  fetchRecord,
-  listDoc,
-} from "./e2e/gql-shapes.js";
 
 registerSuiteLifecycle();
+
+async function expectForbidden(
+  identity: Identity,
+  query: string,
+  variables?: Record<string, unknown>,
+) {
+  const result = await gql(identity, query, variables);
+  expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+  // A refusal that still answered the query would defeat its own purpose; the
+  // list field is non-null, so the error nulls the whole data payload.
+  expect(result.data ?? null).toBeNull();
+}
 
 for (const table of tables) {
   const graphql = table.source!.graphql!;
@@ -54,22 +57,12 @@ for (const table of tables) {
   const classified = redactableColumnFor(table);
   if (!classified) continue;
   const field = fieldName(classified);
-  const countOnly = listDoc(table, { variables: ["filter"], args: "first: 1", totalCount: true });
-
-  async function expectForbidden(
-    identity: Identity,
-    query: string,
-    variables?: Record<string, unknown>,
-  ) {
-    expectOperationError(
-      table,
-      await gql(identity, query, variables),
-      graphql.listQueryName,
-      "FORBIDDEN",
-    );
-  }
 
   describe(`${typeName} field-level classification`, () => {
+    const singleQuery = `query($id: ID!) {
+      ${graphql.singleQueryName}(id: $id) { id ${field} }
+    }`;
+
     test.skipIf(remoteUrl)(
       `${field} is nulled for a read-only reader on single and list reads`,
       async () => {
@@ -77,34 +70,30 @@ for (const table of tables) {
         const id = await createRow(table, tenantA, { [field]: value });
 
         // Control: unclassified, a read-only reader sees the value.
-        const control = await fetchRecord(readOnly, table, id, `id ${field}`);
-        expect(control[field]).toBe(value);
+        const control = await expectData(readOnly, singleQuery, { id });
+        expect(control[graphql.singleQueryName][field]).toBe(value);
 
         await withClassifiedColumn(classified, "pii", async () => {
-          const single = await fetchRecord(readOnly, table, id, `id ${field}`);
-          expect(single[field]).toBeNull();
-          expect(single.id).toBe(id);
+          const single = await expectData(readOnly, singleQuery, { id });
+          expect(single[graphql.singleQueryName][field]).toBeNull();
+          expect(single[graphql.singleQueryName].id).toBe(id);
 
-          const listed = collectionOf(
-            table,
-            await gql(
-              readOnly,
-              listDoc(table, {
-                variables: ["filter"],
-                args: "first: 1",
-                selection: `id ${field}`,
-                totalCount: true,
-              }),
-              { filter: { id } },
-            ),
-            graphql.listQueryName,
+          const listed = await expectData(
+            readOnly,
+            `query($filter: ${typeName}Filter) {
+               ${graphql.listQueryName}(filter: $filter, first: 1) {
+                 totalCount
+                 edges { node { id ${field} } }
+               }
+             }`,
+            { filter: { id } },
           );
-          expect(listed.totalCount).toBe(1);
-          expect(listed.items[0].id).toBe(id);
-          expect(listed.items[0][field]).toBeNull();
+          expect(listed[graphql.listQueryName].totalCount).toBe(1);
+          expect(listed[graphql.listQueryName].edges[0].node.id).toBe(id);
+          expect(listed[graphql.listQueryName].edges[0].node[field]).toBeNull();
 
-          const asWriter = await fetchRecord(tenantA, table, id, `id ${field}`);
-          expect(asWriter[field]).toBe(value);
+          const asWriter = await expectData(tenantA, singleQuery, { id });
+          expect(asWriter[graphql.singleQueryName][field]).toBe(value);
         });
       },
     );
@@ -116,21 +105,26 @@ for (const table of tables) {
         await createRow(table, tenantA, { [field]: value });
 
         await withClassifiedColumn(classified, "pii", async () => {
-          await expectForbidden(readOnly, countOnly, { filter: { [field]: value } });
-          await expectForbidden(readOnly, countOnly, { filter: { [`${field}In`]: [value] } });
+          const filterQuery = `query($filter: ${typeName}Filter) {
+            ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
+          }`;
+          await expectForbidden(readOnly, filterQuery, { filter: { [field]: value } });
+          await expectForbidden(readOnly, filterQuery, {
+            filter: { [`${field}In`]: [value] },
+          });
           await expectForbidden(
             readOnly,
-            listDoc(table, { variables: ["sort"], args: "first: 1", totalCount: true }),
+            `query($sort: ${typeName}Sort) {
+               ${graphql.listQueryName}(sort: $sort, first: 1) { totalCount }
+             }`,
             { sort: { field, direction: "asc" } },
           );
 
           // Unchanged for a write grant.
-          const allowed = collectionOf(
-            table,
-            await gql(tenantA, countOnly, { filter: { [field]: value } }),
-            graphql.listQueryName,
-          );
-          expect(allowed.totalCount).toBe(1);
+          const allowed = await expectData(tenantA, filterQuery, {
+            filter: { [field]: value },
+          });
+          expect(allowed[graphql.listQueryName].totalCount).toBe(1);
         });
       },
     );
@@ -150,6 +144,7 @@ const belongsTo = tables.flatMap((table) =>
 )[0];
 
 if (belongsTo) {
+  const graphql = belongsTo.table.source!.graphql!;
   const field = fieldName(belongsTo.classified);
   const foreignKeyField = fieldName(
     belongsTo.table.columns.find(
@@ -168,16 +163,23 @@ if (belongsTo) {
           const parentId = await createRow(belongsTo.table, tenantA, {
             [foreignKeyField]: targetId,
           });
-          const selection = `id ${belongsTo.relationship.name} { id ${field} }`;
+          const query = `query($id: ID!) {
+            ${graphql.singleQueryName}(id: $id) {
+              id
+              ${belongsTo.relationship.name} { id ${field} }
+            }
+          }`;
 
           await withClassifiedColumn(belongsTo.classified, "pii", async () => {
-            const asReader = await fetchRecord(readOnly, belongsTo.table, parentId, selection);
-            const traversed = asReader[belongsTo.relationship.name];
+            const asReader = await expectData(readOnly, query, { id: parentId });
+            const traversed = asReader[graphql.singleQueryName][belongsTo.relationship.name];
             expect(traversed.id).toBe(targetId);
             expect(traversed[field]).toBeNull();
 
-            const asWriter = await fetchRecord(tenantA, belongsTo.table, parentId, selection);
-            expect(asWriter[belongsTo.relationship.name][field]).toBe(value);
+            const asWriter = await expectData(tenantA, query, { id: parentId });
+            expect(asWriter[graphql.singleQueryName][belongsTo.relationship.name][field]).toBe(
+              value,
+            );
           });
         },
       );
@@ -204,6 +206,7 @@ const hasMany = tables.flatMap((table) =>
 )[0];
 
 if (hasMany) {
+  const graphql = hasMany.table.source!.graphql!;
   const sortField = fieldName(hasMany.sortColumn);
   const foreignKeyField = fieldName(
     hasMany.target.columns.find(
@@ -227,21 +230,29 @@ if (hasMany) {
               [sortField]: `${marker}-defaultsort-${seed}`,
             });
           }
-          const selection = `id ${hasMany.relationship.name} { id }`;
-          const idsOf = async (identity: Identity) =>
-            (await fetchRecord(identity, hasMany.table, parentId, selection))[
-              hasMany.relationship.name
-            ].map((node: { id: string }) => node.id);
+          const query = `query($id: ID!) {
+            ${graphql.singleQueryName}(id: $id) {
+              id
+              ${hasMany.relationship.name} { id }
+            }
+          }`;
+          const idsOf = (data: Record<string, any>) =>
+            data[graphql.singleQueryName][hasMany.relationship.name].map(
+              (node: { id: string }) => node.id,
+            );
 
-          expect(await idsOf(tenantA)).toEqual([created.aaa!, created.bbb!, created.ccc!]);
+          const asWriter = await expectData(tenantA, query, { id: parentId });
+          expect(idsOf(asWriter)).toEqual([created.aaa!, created.bbb!, created.ccc!]);
 
           await withClassifiedColumn(hasMany.sortColumn, "pii", async () => {
+            const asReader = await expectData(readOnly, query, { id: parentId });
             // Falls back to the primary-key ordering the CRUD layer uses when
             // no sort is supplied; uuid text order matches Postgres uuid order.
-            expect(await idsOf(readOnly)).toEqual([...Object.values(created)].sort());
+            expect(idsOf(asReader)).toEqual([...Object.values(created)].sort());
             // A write grant keeps the declared ordering while the column is
             // classified.
-            expect(await idsOf(tenantA)).toEqual([created.aaa!, created.bbb!, created.ccc!]);
+            const stillSorted = await expectData(tenantA, query, { id: parentId });
+            expect(idsOf(stillSorted)).toEqual([created.aaa!, created.bbb!, created.ccc!]);
           });
         },
       );

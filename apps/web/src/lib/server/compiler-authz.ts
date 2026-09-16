@@ -21,7 +21,7 @@ export type PersonaSummary = {
   tid: string | null;
   realmRoles: string[];
   groupPaths: string[];
-  /** Flat role set, expanded from realm/client roles and group memberships. */
+  /** Flat client-role set, expanded from realmRoles + clientRoles. */
   effectiveClientRoles: ReadonlySet<string>;
 };
 
@@ -111,7 +111,7 @@ export function canPersonaPerform(
 /**
  * Same logic as `canPersonaPerform` but driven by an explicit role set
  * from the live session. Roles may be flat client roles or generated
- * authored realm- or audience-client composite names.
+ * realm-role names with generated composite client roles.
  */
 export function rolesGrantOp(
   roles: readonly string[],

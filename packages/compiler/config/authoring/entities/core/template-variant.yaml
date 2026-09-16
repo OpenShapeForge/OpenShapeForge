@@ -1,122 +1,280 @@
-schemaVersion: 3
+schemaVersion: 1
 kind: coreEntity
 module: core
 entity: TemplateVariant
-title: Template variant
+title: Template Variant
+description: A channel-specific rendering variant of a template.
 language: en
-labels: { en: Template variant, nl: Template variant }
-domains: [documents]
+displayTemplate: "{{channel}}"
+filterField: channel
+labels:
+  en: Template Variant
+  nl: Templatevariant
+domains:
+  - messaging
 authorization:
   roles:
-    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [Organization.All.ReadWrite]
-    update: [Organization.All.ReadWrite]
-    delete: [Organization.All.ReadWrite]
-displayTemplate: "{{channel}} · {{locale}}"
-indexes:
-  - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, version, channel, locale], unique: true }
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
 fields:
-  - key: version
-    label: { en: Template version, nl: Templateversie }
-    semanticType: TemplateVersion
-    required: true
-    immutable: true
   - key: channel
-    label: { en: Channel, nl: Kanaal }
     valueType: string
     required: true
+    label:
+      en: Channel
+      nl: Kanaal
+    description:
+      en: Delivery channel this variant is intended for.
+      nl: Afleverkanaal waarvoor deze variant bedoeld is.
     options:
-      type: static
-      items:
-        - { value: document, label: { en: Document, nl: Document } }
-        - { value: email, label: { en: Email, nl: E-mail } }
-        - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
-    persisted: { column: channel, storageClass: core }
+      type: referentiedata
+      referentieGroep: MESSAGINGCHANNEL
+    persisted:
+      column: channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MESSAGINGCHANNEL
+        clearable: false
   - key: locale
     valueType: string
+    required: false
+    label:
+      en: Locale
+      nl: Taalcode
+    description:
+      en: Optional locale code for this variant, such as en or nl.
+      nl: Optionele taalcode voor deze variant, zoals en of nl.
+    validation:
+      maxLength: 10
+    options:
+      type: referentiedata
+      referentieGroep: MESSAGINGLOCALE
+    persisted:
+      column: locale
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MESSAGINGLOCALE
+        clearable: true
+  - key: subjectTemplate
+    valueType: string
+    required: false
+    label:
+      en: Subject template
+      nl: Onderwerptemplate
+    description:
+      en: Subject or title template used for channels that support it.
+      nl: Onderwerp- of titelsjabloon voor kanalen die dat ondersteunen.
+    semanticType: variableTemplate
+    validation:
+      maxLength: 1000
+    persisted:
+      column: subject_template
+      storageClass: core
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 2
+        maxLength: 1000
+    variables: template
+    suggestions:
+      sourceKey: templateParameters
+  - key: bodyTemplate
+    valueType: string
     required: true
-    defaultValue: nl
-    validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
-    label: { en: Content language, nl: Inhoudstaal }
-    persisted: { column: locale, storageClass: core }
-  - key: blocks
-    label: { en: Blocks, nl: Blokken }
-    semanticType: Block
-    cardinality: collection
-    sortable: true
-    relationship: { inverse: variant, ownership: owned }
-    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
-operations:
-  insertBlock:
-    name: { en: Add block, nl: Blok toevoegen }
-    description: Insert an allowed block into this variant atomically.
-    implementation: { type: collection, action: insert, field: blocks }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
-  moveBlock:
-    name: { en: Move block, nl: Blok verplaatsen }
-    description: Move a block within this variant atomically.
-    implementation: { type: collection, action: move, field: blocks }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
-  list:
-    name: List template variant
-    description: Read accessible template variant records.
-    implementation: { type: entity, action: list }
-    effects: { data: read, external: none }
-    reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
-  get:
-    name: Read template variant
-    description: Read one accessible template variant record.
-    implementation: { type: entity, action: get }
-    effects: { data: read, external: none }
-    reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
-  create:
-    name: Create template variant
-    description: Create a template variant record.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
-  update:
-    name: Update template variant
-    description: Update a template variant draft.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
-interfaces:
-  rest: {}
-  graphql: {}
-  mcp: { tools: generic }
-  web:
-    views:
-      collection:
-        route: /template-variants
-        title: { en: Template variants, nl: Templatevarianten }
-        columns: [{ key: channel }, { key: locale }]
-      record:
-        routes: { read: "/template-variants/:id", create: /template-variants/new }
-        title: "{{channel}} · {{locale}}"
-        layout:
-          tabs:
-            - id: variant
-              label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
-            - id: blocks
-              label: { en: Blocks, nl: Blokken }
-              relationship: blocks
-        modes:
-          create:
-            title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
-          update:
-            title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale] }]
+    label:
+      en: Body template
+      nl: Berichttemplate
+    description:
+      en: Template body containing the actual message content and dynamic placeholders.
+      nl: Templatebody met de daadwerkelijke berichtinhoud en dynamische placeholders.
+    semanticType: variableTemplate
+    validation:
+      minLength: 1
+      maxLength: 20000
+    persisted:
+      column: body_template
+      storageClass: core
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 10
+        maxLength: 20000
+    variables: template
+    suggestions:
+      sourceKey: templateParameters
+  - key: bodyFormat
+    valueType: string
+    required: true
+    label:
+      en: Body format
+      nl: Berichtformaat
+    description:
+      en: Rendering format of the template body.
+      nl: Renderformaat van de templatebody.
+    options:
+      type: referentiedata
+      referentieGroep: TEMPLATEBODYFORMAAT
+    persisted:
+      column: body_format
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TEMPLATEBODYFORMAAT
+        clearable: false
+  - key: isDefault
+    valueType: boolean
+    required: false
+    label:
+      en: Default variant
+      nl: Standaardvariant
+    description:
+      en: Whether this variant should be treated as the default for the channel.
+      nl: Of deze variant als standaard voor het kanaal moet gelden.
+    persisted:
+      column: is_default
+      storageClass: core
+  - key: sortOrder
+    valueType: integer
+    required: false
+    label:
+      en: Sort order
+      nl: Sorteervolgorde
+    description:
+      en: Optional ordering number for variants of the same template.
+      nl: Optioneel volgnummer voor varianten van dezelfde template.
+    persisted:
+      column: sort_order
+      storageClass: core
+relationships:
+  - key: template
+    kind: belongsTo
+    target: Template
+    foreignKey: template_id
+    label:
+      en: Template
+      nl: Template
+ui:
+  routes:
+    list:
+      en: /template-variants
+      nl: /templatevarianten
+    detail:
+      en: /template-variants/:id
+      nl: /templatevarianten/:id
+    create:
+      en: /template-variants/create
+      nl: /templatevarianten/aanmaken
+    edit:
+      en: /template-variants/:id/edit
+      nl: /templatevarianten/:id/bewerken
+    delete:
+      en: /template-variants/:id/delete
+      nl: /templatevarianten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Template Variants
+        nl: Templatevarianten
+      columns:
+        - key: channel
+          sortable: true
+        - key: locale
+          sortable: true
+        - key: bodyFormat
+          sortable: true
+        - key: isDefault
+          sortable: true
+      defaultSort:
+        key: channel
+        direction: asc
+      rowLink:
+        en: /template-variants/:id
+        nl: /templatevarianten/:id
+    detail:
+      header:
+        title: "{{channel}}"
+        subtitle: "{{locale}}"
+        badges:
+          - bodyFormat
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Variant details
+                nl: Variantgegevens
+              fields:
+                - channel
+                - locale
+                - bodyFormat
+                - isDefault
+                - sortOrder
+                - subjectTemplate
+                - bodyTemplate
+    form:
+      variableSources:
+        - key: templateParameters
+          resolver: templateParameters
+          params:
+            templateIdField: templateId
+      variants:
+        create:
+          title:
+            en: Create template variant
+            nl: Templatevariant aanmaken
+          groups:
+            - title:
+                en: Variant details
+                nl: Variantgegevens
+              fields:
+                - channel
+                - locale
+                - bodyFormat
+                - isDefault
+                - sortOrder
+                - subjectTemplate
+                - bodyTemplate
+        edit:
+          extends: create
+          title:
+            en: Edit template variant
+            nl: Templatevariant bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

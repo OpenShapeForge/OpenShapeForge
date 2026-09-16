@@ -15,7 +15,6 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 | `views.ts` | `buildViews()` — multi-context list/detail/form/summary presentations |
 | `profiles.ts` | `buildProfiles()` — per-profile mappings, projections, field extensions |
 | `authorization.ts` | `buildAuthorization()` — roles, composite roles, field-level policies |
-| `entity-operations.ts` | `buildEntityOperations()` — canonical CRUD operation contracts shared by every interface |
 | `canonical/` | `buildCanonicalCompilerKernel()` — workflow-engine canonical kernel |
 | `helpers.ts` | `deriveTableName`, `pluralize`, `FIELD_TYPE_TO_SQL`, `FIELD_TYPE_TO_GQL` |
 
@@ -31,8 +30,7 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 6. `buildViews(coreEntity, profiles, componentCatalog, viewDefinition?)`
 7. `buildProfiles(profiles, mappings)`
 8. `buildAuthorization(coreEntity, profiles, modelFields)` — must run after model so it sees compiled classifications
-9. `buildEntityOperations({ entity, storage, model, crud, authorization })` — stable input/output/rights contracts for REST, MCP, web, and future interfaces
-10. `buildCanonicalCompilerKernel({ model, graphql, views })` — consumes earlier outputs, not raw artifacts
+9. `buildCanonicalCompilerKernel({ model, graphql, views })` — consumes earlier outputs, not raw artifacts
 
 The result is assembled with table name, retention, hooks, permissions, and version metadata.
 
@@ -54,9 +52,6 @@ Most complex sub-compiler. Normalizes single- vs multi-context view shapes via `
 - Does NOT auto-derive field-level read roles from `classification.sensitivity`. That synthesized `${slug}:field:*` roles nobody could be granted (they were absent from `authorization.yaml`). Field-level authorizations are emitted only when a field/profile carries an explicit `authorization` block.
 - Data classification (`pii`/`bsn`/`confidential`) is carried through to the runtime DB manifest (see `../backend-manifest.ts` — column `classification`, and `generate.ts`) and enforced field-level at runtime: the generated GraphQL resolvers redact classified columns for readers who lack a write grant on the entity. The compiler only propagates the classification; it does not turn it into a role.
 - Composite roles (`${slug}:manage`/`${slug}:full`) are intentionally no longer emitted.
-
-### `entity-operations.ts`
-Compiles the common `crud:` upper bound into stable `${Entity}.${intent}` contracts. Transport generators may narrow exposure, but must reference these operation ids rather than reconstructing them. The generated operation catalog is the runtime authority; REST, MCP, web, and future interfaces are projections/adapters of it.
 
 ### `canonical/`
 Transforms the compiler's own outputs (model, graphql, views) into a self-contained workflow-ready kernel: path-based field refs, condition expressions, form layouts. See `canonical/index.ts` for entry point.

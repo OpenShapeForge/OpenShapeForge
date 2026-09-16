@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 1
 kind: coreEntity
 module: core
 entity: Agreement
@@ -55,9 +55,11 @@ fields:
     persisted:
       column: role
       storageClass: core
-    options:
-      type: referentiedata
-      referentieGroep: AGREEMENTROLE
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTROLE
+        clearable: false
   - key: agreementType
     valueType: string
     required: true
@@ -70,9 +72,11 @@ fields:
     persisted:
       column: agreement_type
       storageClass: core
-    options:
-      type: referentiedata
-      referentieGroep: AGREEMENTTYPE
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTTYPE
+        clearable: false
   - key: agreementSubType
     valueType: string
     required: false
@@ -99,9 +103,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    options:
-      type: referentiedata
-      referentieGroep: AGREEMENTSTATUS
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTSTATUS
+        clearable: true
   - key: startDate
     valueType: date
     required: false
@@ -114,6 +120,9 @@ fields:
     persisted:
       column: start_date
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: endDate
     valueType: date
     required: false
@@ -126,6 +135,9 @@ fields:
     persisted:
       column: end_date
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: billingStartDate
     valueType: date
     required: false
@@ -138,6 +150,9 @@ fields:
     persisted:
       column: billing_start_date
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: billingEndDate
     valueType: date
     required: false
@@ -150,6 +165,9 @@ fields:
     persisted:
       column: billing_end_date
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: conceptSentAt
     valueType: datetime
     required: false
@@ -162,6 +180,9 @@ fields:
     persisted:
       column: concept_sent_at
       storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
   - key: sentAt
     valueType: datetime
     required: false
@@ -174,6 +195,9 @@ fields:
     persisted:
       column: sent_at
       storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
   - key: dispatchStatus
     valueType: string
     required: false
@@ -200,6 +224,9 @@ fields:
     persisted:
       column: notice_date
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: noticeTerm
     valueType: string
     required: false
@@ -299,138 +326,11 @@ relationships:
     label:
       en: Child agreements
       nl: Onderliggende overeenkomsten
-  - key: parties
-    kind: hasMany
-    target: AgreementParty
-    foreignKey: agreement_id
-    label:
-      en: Parties
-      nl: Partijen
-operations:
-  list:
-    name: { en: List agreements, nl: Overeenkomsten tonen }
-    description:
-      en: Returns a filtered and sorted page of agreements.
-      nl: Geeft een gefilterde en gesorteerde pagina met overeenkomsten terug.
-    implementation: { type: entity, action: list }
-    effects: { data: read, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    confirmation: { mode: none }
-  get:
-    name: { en: Get agreement, nl: Overeenkomst ophalen }
-    description:
-      en: Returns one agreement by its canonical id.
-      nl: Geeft één overeenkomst terug op basis van het canonieke id.
-    implementation: { type: entity, action: get }
-    effects: { data: read, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    confirmation: { mode: none }
-  create:
-    name: { en: Create agreement, nl: Overeenkomst aanmaken }
-    description:
-      en: Creates one agreement after validating its canonical fields.
-      nl: Maakt één overeenkomst aan na validatie van de canonieke velden.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability:
-      idempotency: { mode: none }
-    confirmation: { mode: none }
-  update:
-    name: { en: Update agreement, nl: Overeenkomst wijzigen }
-    description:
-      en: Updates one agreement while holding its server-issued edit lease and current version.
-      nl: Wijzigt één overeenkomst met de server-uitgegeven bewerkingslease en actuele versie.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability:
-      idempotency: { mode: none }
-    concurrency:
-      version: { mode: required, field: updatedAt }
-      editLease: { mode: required, expiresAfterInactivity: PT15M }
-    confirmation: { mode: none }
-  delete:
-    name: { en: Delete agreement, nl: Overeenkomst verwijderen }
-    description:
-      en: Permanently deletes one agreement after a server-issued, version-bound confirmation challenge.
-      nl: Verwijdert één overeenkomst definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
-    implementation: { type: entity, action: delete }
-    effects: { data: delete, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    concurrency:
-      version: { mode: required, field: updatedAt }
-      editLease: { mode: required, expiresAfterInactivity: PT15M }
-    confirmation:
-      mode: challenge
-      challenge:
-        kind: type-current-field
-        field: code
-        issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
-        expiresAfter: PT5M
-        singleUse: true
-
-interfaces:
-  rest: {}
-  graphql: {}
-  mcp:
-    tools: generic
-  web:
-    views:
-      collection:
-        route: { en: /agreements, nl: /overeenkomsten }
-        title: { en: Agreements, nl: Overeenkomsten }
-        columns:
-          - { key: code, sortable: true }
-          - { key: agreementType, sortable: true }
-          - { key: role, sortable: true }
-          - { key: status, sortable: true }
-          - { key: startDate, sortable: true }
-          - { key: endDate, sortable: true }
-        defaultSort: { key: code, direction: asc }
-      record:
-        routes:
-          read: { en: /agreements/:id, nl: /overeenkomsten/:id }
-          create: { en: /agreements/new, nl: /overeenkomsten/nieuw }
-        title: "{{code}}"
-        subtitle: "{{agreementType}}"
-        actions: [update, delete]
-        layout:
-          context:
-            fields: [status, role, startDate, endDate]
-            relationships: [relation, case, parentAgreement]
-          tabs:
-            - id: overview
-              label: { en: Overview, nl: Overzicht }
-              groups:
-                - title: { en: Agreement, nl: Overeenkomst }
-                  fields: [code, role, agreementType, agreementSubType, status]
-                - title: { en: Term, nl: Looptijd }
-                  fields: [startDate, endDate, billingStartDate, billingEndDate, noticeDate, noticeTerm]
-                - title: { en: Dispatch, nl: Verzending }
-                  fields: [conceptSentAt, sentAt, dispatchStatus]
-                - title: { en: Termination, nl: Beëindiging }
-                  fields: [terminationReason, terminationReasonDetail]
-                - title: { en: References, nl: Referenties }
-                  fields: [sequenceNumber, externalCode]
-            - id: childAgreements
-              label: { en: Child agreements, nl: Onderliggende overeenkomsten }
-              relationship: childAgreements
-        modes:
-          create:
-            title: { en: Create agreement, nl: Overeenkomst aanmaken }
-            groups:
-              - title: { en: Agreement, nl: Overeenkomst }
-                fields: [code, role, agreementType, agreementSubType, status]
-              - title: { en: Term, nl: Looptijd }
-                fields: [startDate, endDate, billingStartDate, billingEndDate, noticeDate, noticeTerm]
-              - title: { en: Dispatch, nl: Verzending }
-                fields: [conceptSentAt, sentAt, dispatchStatus]
-              - title: { en: Termination, nl: Beëindiging }
-                fields: [terminationReason, terminationReasonDetail]
-              - title: { en: References, nl: Referenties }
-                fields: [sequenceNumber, externalCode]
-          update:
-            title: { en: Update agreement, nl: Overeenkomst wijzigen }
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

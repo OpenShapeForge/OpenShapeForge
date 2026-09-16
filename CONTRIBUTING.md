@@ -18,7 +18,6 @@ bun install
 cp apps/api/.env.example apps/api/.env   # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build
 bun run generate       # compile authoring YAML into generated artifacts
-bun run db:provision-roles # once per Postgres volume
 bun run db:migrate     # create/roll-forward the schema
 bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 ```
@@ -119,13 +118,11 @@ plugins included, and fails on any byte drift. Study the two examples under
 - **Additive is automatic.** New entities/fields: `bun run generate && bun run
   db:migrate`. The migrator diffs the manifest against the live schema and rolls
   forward.
-- **Non-additive means a rebuild.** Drops, renames, type changes, or required
-  no-default columns fail `db:migrate` with an exact drift listing. The schema is
-  versioned by git and a database is built from the manifest, so rebuild it:
-  `OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION=<db> bun run db:reset`.
-- **No hand-written migration history.** What the manifest cannot express (checks,
-  functions, triggers, bespoke policies) is idempotent DDL under
-  `apps/api/src/db/migrations/`, applied on every run; edit it in place.
+- **Non-additive needs a versioned migration.** Drops, renames, type changes, or
+  required no-default columns fail `db:migrate` with an exact drift listing. Scaffold
+  with `bun run db:migration:new <name>` and write its `up()`.
+- **Applied migrations are immutable.** Each is recorded with a checksum verified on
+  every run; editing an applied migration fails loudly — write a new one instead.
 
 ## Code style
 

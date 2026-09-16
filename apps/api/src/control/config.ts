@@ -102,9 +102,8 @@ export type ControlPlaneEnv = {
    * Optional comma-separated `clientId`s the scope is attached to as an
    * optional client scope. Defaults to `codex`, `openshapeforge-gateway`,
    * `openshapeforge-inspector`; a listed client the realm does not have is
-   * skipped. Tenant resource scopes are never realm defaults: a realm may
-   * serve multiple Organizations and a control MCP, so each client must ask
-   * for or be assigned only the resource it is connecting to.
+   * skipped. The realm's default optional scopes are always extended, so
+   * dynamically registered MCP clients need no entry here.
    */
   OPENSHAPEFORGE_MCP_CLIENTS?: string | undefined;
   /**

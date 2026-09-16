@@ -88,7 +88,7 @@ test("platform audit is filtered, paginated, secret-free and records its own rea
 
     const reads = await sql<{ reason: string; succeeded: boolean }>`
       select reason, succeeded from platform.system_bypass_audit
-       where reason = 'platform-mcp: control.list-platform-audit'
+       where reason = 'platform-mcp: list_platform_audit'
     `.execute(runtime.db as Kysely<DB>);
     expect(reads.rows).toHaveLength(6);
     expect(reads.rows.every((row) => row.succeeded)).toBe(true);

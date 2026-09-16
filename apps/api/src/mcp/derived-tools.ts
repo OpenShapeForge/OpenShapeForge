@@ -55,14 +55,6 @@ export type DerivedToolsCatalogEntry = {
     instructionField: string;
     set: { name: string; description: string };
   };
-  /** Generated internal execution bridge; never projected as a tool. */
-  compatibility?: {
-    plugin: string;
-    providerId: string;
-    connectOperation?: string;
-    dryRunOperation?: string;
-    setPreferenceOperation?: string;
-  };
 };
 
 export type DerivedTool = {

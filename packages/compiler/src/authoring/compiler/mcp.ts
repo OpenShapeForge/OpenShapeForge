@@ -30,7 +30,6 @@ import type {
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
-import { isCoreEntityV2, v2McpConfig, v2OperationByAction } from "../entity-v2.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -78,9 +77,7 @@ export function buildMcp(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): McpSection | undefined {
-  const authored = isCoreEntityV2(coreEntity)
-    ? v2McpConfig(coreEntity)
-    : coreEntity.mcp;
+  const authored = coreEntity.mcp;
   if (authored === undefined || authored === false) return undefined;
 
   const config: McpConfig = authored === true ? {} : authored;
@@ -110,20 +107,6 @@ export function buildMcp(
   const operations = crud
     ? limitCrudOperations(requestedOperations, crud)
     : requestedOperations;
-  const operationInstructions = isCoreEntityV2(coreEntity)
-    ? Object.fromEntries(
-        MCP_OPERATION_KEYS.flatMap((action) => {
-          const operationKey = v2OperationByAction(coreEntity)[action]?.[0];
-          const projection = operationKey
-            ? coreEntity.interfaces?.mcp?.operations?.[operationKey]
-            : undefined;
-          const instructions = projection && typeof projection === "object"
-            ? projection.instructions
-            : undefined;
-          return instructions === undefined ? [] : [[action, instructions]];
-        }),
-      )
-    : undefined;
 
   const toolOverrides: Partial<
     Record<McpOperationKey, { name?: string; description?: string }>
@@ -433,9 +416,6 @@ export function buildMcp(
     toolPrefix,
     tools: style,
     operations,
-    ...(operationInstructions && Object.keys(operationInstructions).length > 0
-      ? { operationInstructions }
-      : {}),
     ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
     ...(resource ? { resource } : {}),
     ...(derivedTools ? { derivedTools } : {}),

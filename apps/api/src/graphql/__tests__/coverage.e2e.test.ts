@@ -5,11 +5,7 @@
  */
 import { expect } from "bun:test";
 import { describe, registerSuiteLifecycle, test } from "./e2e/harness.js";
-import {
-  eligibleTables,
-  graphqlTables as tables,
-  partialPolicyTables,
-} from "./e2e/entity-factory.js";
+import { eligibleTables, partialPolicyTables, tables } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 
@@ -31,12 +27,10 @@ describe("coverage", () => {
    * from `column.immutable`, so a manifest that carried the flag for no column
    * would register none of them and still report success — the same vacuous
    * pass `EXPECTED_SCHEMA_COVERAGE` exists to prevent for authoring schemas.
-   * This states the expectation instead of inferring it (#177). Read over
-   * every GraphQL-exposed entity: the flag is an authoring fact, not a
-   * property of the full-CRUD policy set.
+   * This states the expectation instead of inferring it (#177).
    */
   test("the manifest declares at least one immutable column", () => {
-    const immutable = eligibleTables.flatMap((table) =>
+    const immutable = tables.flatMap((table) =>
       table.columns
         .filter((column) => column.immutable)
         .map((column) => `${table.name}.${column.name}`),

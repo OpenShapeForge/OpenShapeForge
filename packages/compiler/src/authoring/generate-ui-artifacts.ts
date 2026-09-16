@@ -18,7 +18,6 @@ import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
-import { buildWebManifest, renderWebManifest, type WebStandaloneOperationsInput } from "./web-manifest.js";
 
 export type AuthoringUiArtifact = {
   path: string;
@@ -77,11 +76,6 @@ async function loadViewDefinitions(authoringDir: string): Promise<Map<string, Vi
 
 type RuntimeAuthorizationConfig = {
   realmRoles?: Record<string, { composites?: Record<string, string[]> }>;
-  clientRoleComposites?: Record<
-    string,
-    Record<string, { composites: Record<string, string[]> }>
-  >;
-  groups?: RuntimeAuthorizationGroup[];
   users?: Array<{
     username: string;
     tid?: string;
@@ -89,13 +83,6 @@ type RuntimeAuthorizationConfig = {
     groups?: string[];
     clientRoles?: Record<string, string[]>;
   }>;
-};
-
-type RuntimeAuthorizationGroup = {
-  name: string;
-  realmRoles?: string[];
-  clientRoles?: Record<string, string[]>;
-  subGroups?: RuntimeAuthorizationGroup[];
 };
 
 async function loadAuthorizationConfig(authoringDir: string): Promise<RuntimeAuthorizationConfig> {
@@ -107,74 +94,26 @@ function normalizeRoleList(roles: string[] | undefined): string[] {
   return [...new Set((roles ?? []).map(normalizeKeycloakRoleName))].sort();
 }
 
-export function buildRuntimeAuthMetadata(
+function buildRuntimeAuthMetadata(
   authConfig: RuntimeAuthorizationConfig,
 ): Pick<RuntimeMetadataData, "realmRoleComposites" | "personas"> {
   const realmRoleComposites: Record<string, string[]> = {};
   for (const [roleName, role] of Object.entries(authConfig.realmRoles ?? {})) {
     const roles = Object.values(role.composites ?? {}).flat();
-    realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(roles);
+    realmRoleComposites[roleName] = normalizeRoleList(roles);
   }
-
-  for (const definitions of Object.values(authConfig.clientRoleComposites ?? {})) {
-    for (const [roleName, role] of Object.entries(definitions)) {
-      realmRoleComposites[normalizeKeycloakRoleName(roleName)] = normalizeRoleList(
-        Object.values(role.composites).flat(),
-      );
-    }
-  }
-
-  const groupRoles = new Map<
-    string,
-    { realmRoles: string[]; clientRoles: string[] }
-  >();
-  const collectGroups = (groups: RuntimeAuthorizationGroup[], parentPath: string) => {
-    for (const group of groups) {
-      const path = `${parentPath}/${group.name}`;
-      groupRoles.set(path, {
-        realmRoles: normalizeRoleList(group.realmRoles),
-        clientRoles: normalizeRoleList(Object.values(group.clientRoles ?? {}).flat()),
-      });
-      collectGroups(group.subGroups ?? [], path);
-    }
-  };
-  collectGroups(authConfig.groups ?? [], "");
-
-  const expandComposites = (initialRoles: string[]): string[] => {
-    const expanded = new Set(normalizeRoleList(initialRoles));
-    const pending = [...expanded];
-    for (const roleName of pending) {
-      for (const composite of realmRoleComposites[roleName] ?? []) {
-        if (!expanded.has(composite)) {
-          expanded.add(composite);
-          pending.push(composite);
-        }
-      }
-    }
-    return [...expanded];
-  };
 
   const personas = (authConfig.users ?? []).map((user) => {
-    const memberships = (user.groups ?? []).flatMap((path) => {
-      const membership = groupRoles.get(path);
-      return membership ? [membership] : [];
-    });
-    const realmRoles = normalizeRoleList([
-      ...(user.realmRoles ?? []),
-      ...memberships.flatMap((membership) => membership.realmRoles),
-    ]);
-    const directClientRoles = normalizeRoleList([
-      ...Object.values(user.clientRoles ?? {}).flat(),
-      ...memberships.flatMap((membership) => membership.clientRoles),
-    ]);
+    const directRoles = Object.values(user.clientRoles ?? {}).flat();
+    const compositeRoles = (user.realmRoles ?? []).flatMap(
+      (roleName) => realmRoleComposites[roleName] ?? [],
+    );
     return {
       username: user.username,
       tid: user.tid ?? null,
-      realmRoles,
+      realmRoles: normalizeRoleList(user.realmRoles),
       groupPaths: [...(user.groups ?? [])].sort(),
-      effectiveClientRoles: normalizeRoleList(
-        expandComposites([...realmRoles, ...directClientRoles]),
-      ),
+      effectiveClientRoles: normalizeRoleList([...directRoles, ...compositeRoles]),
     };
   }).sort((left, right) => left.username.localeCompare(right.username));
 
@@ -366,8 +305,6 @@ function keepGreenfieldSafeArtifacts(files: Map<string, string>): AuthoringUiArt
 export async function generateAuthoringUiArtifacts(
   authoringDir: string,
   repoRoot: string,
-  standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
-  referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -499,16 +436,6 @@ export async function generateAuthoringUiArtifacts(
   for (const [path, contents] of routeFiles) {
     generatedFiles.set(path, contents);
   }
-
-  generatedFiles.set(
-    "generated/web/web-manifest.json",
-    renderWebManifest(buildWebManifest(
-      compiled.map(({ name, contract }) => ({ slug: name, contract })),
-      {},
-      standalone,
-      referentiedata,
-    )),
-  );
 
   const persisted = await generatePersistedOperationArtifacts({
     repoRoot,

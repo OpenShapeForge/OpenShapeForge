@@ -54,6 +54,11 @@ export type WebSchemaOperationRef<
   };
   input: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
   output: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
+  /** Record-value gate authored at the operation's entity placement. */
+  visibleWhen?: {
+    conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
+    logic?: "and" | "or";
+  };
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
   effects: {

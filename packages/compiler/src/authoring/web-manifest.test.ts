@@ -916,7 +916,16 @@ describe("standalone Operation pages", () => {
             tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
               slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
               name: { type: "string", "x-osf-i18n": { title: text("Name", "Naam") } },
-            }, required: ["slug", "name"] }, "x-osf-i18n": { title: text("Tenants") } },
+              status: {
+                type: "string",
+                "x-osf-i18n": {
+                  title: text("Status"),
+                  enum: { PENDING: text("Pending", "In afwachting"), EXPIRED: text("Expired", "Verlopen") },
+                },
+              },
+              sentAt: { type: "string", format: "date-time", "x-osf-i18n": { title: text("Sent at", "Verzonden op") } },
+              canUpdate: { type: "boolean", "x-osf-i18n": { title: text("Can update") } },
+            }, required: ["slug", "name", "status", "sentAt", "canUpdate"] }, "x-osf-i18n": { title: text("Tenants") } },
           }, required: ["tenants"] } },
         },
       },
@@ -924,8 +933,15 @@ describe("standalone Operation pages", () => {
         pages: {}, operations: {}, entities: {
           Tenant: {
             title: text("Tenants"), route: "/tenants", recordRoute: "/tenants/:slug",
-            idField: "slug", displayField: "name", fields: ["slug", "name"], columns: ["name", "slug"],
-            operations: { list: { operation: "listTenants", resultField: "tenants" }, get: { operation: "getTenant" }, recordActions: ["updateTenant"] },
+            idField: "slug", displayField: "name", fields: ["slug", "name", "status", "sentAt"], columns: ["name", "slug", "status", "sentAt"],
+            operations: {
+              list: { operation: "listTenants", resultField: "tenants" },
+              get: { operation: "getTenant" },
+              recordActions: [{
+                operation: "updateTenant",
+                visibleWhen: { conditions: [{ field: "canUpdate", operator: "eq", value: true }] },
+              }],
+            },
           },
         },
       } },
@@ -937,11 +953,19 @@ describe("standalone Operation pages", () => {
       views: {
         collection: { renderer: "operation.entity.collection", route: "/tenants", operations: { read: { id: "control.list-tenants" } } },
         record: { renderer: "operation.entity.record", routes: { read: "/tenants/:slug" }, operations: {
-          read: { id: "control.get-tenant" }, actions: [{ id: "control.update-tenant" }],
+          read: { id: "control.get-tenant" }, actions: [{
+            id: "control.update-tenant",
+            visibleWhen: { conditions: [{ field: "canUpdate", operator: "eq", value: true }] },
+          }],
         } },
       },
     });
     expect(manifest.entities.Tenant?.fields.name?.label).toEqual(text("Name", "Naam"));
+    expect(manifest.entities.Tenant?.fields.status?.options).toEqual([
+      { value: "PENDING", label: text("Pending", "In afwachting") },
+      { value: "EXPIRED", label: text("Expired", "Verlopen") },
+    ]);
+    expect(manifest.entities.Tenant?.fields.sentAt?.valueType).toBe("datetime");
   });
 
   test("projects catalog pages and their Operations next to the entities", () => {

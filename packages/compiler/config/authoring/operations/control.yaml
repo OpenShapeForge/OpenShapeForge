@@ -611,13 +611,28 @@ operations:
                 email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
                 firstName: { type: [string, 'null'], x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
                 lastName: { type: [string, 'null'], x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
-                status: { type: [string, 'null'], x-osf-i18n: { title: { en: Status, nl: Status } } }
-                sentAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Sent at, nl: Verzonden op } } }
-                expiresAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Expires at, nl: Verloopt op } } }
+                status:
+                  type: [string, 'null']
+                  x-osf-i18n:
+                    title: { en: Status, nl: Status }
+                    enum:
+                      PENDING: { en: Pending, nl: In afwachting }
+                      EXPIRED: { en: Expired, nl: Verlopen }
+                sentAt: { type: [string, 'null'], format: date-time, x-osf-i18n: { title: { en: Sent at, nl: Verzonden op } } }
+                expiresAt: { type: [string, 'null'], format: date-time, x-osf-i18n: { title: { en: Expires at, nl: Verloopt op } } }
                 role: { type: [string, 'null'], x-osf-i18n: { title: { en: Role, nl: Rol } } }
-                registrationStatus: { type: string, x-osf-i18n: { title: { en: Registration status, nl: Registratiestatus } } }
+                registrationStatus:
+                  type: string
+                  x-osf-i18n:
+                    title: { en: Registration status, nl: Registratiestatus }
+                    enum:
+                      pending: { en: Pending role assignment, nl: Openstaande roltoekenning }
+                      accepted: { en: Accepted, nl: Geaccepteerd }
+                      revoked: { en: Revoked, nl: Ingetrokken }
+                      untracked: { en: Not registered locally, nl: Niet lokaal geregistreerd }
                 canResend: { type: boolean, x-osf-i18n: { title: { en: Can resend, nl: Opnieuw versturen mogelijk } } }
-              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+                canRevoke: { type: boolean, x-osf-i18n: { title: { en: Can revoke, nl: Intrekken mogelijk } } }
+              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend, canRevoke]
           unresolved:
             type: array
             items: { type: object, additionalProperties: true }
@@ -692,8 +707,8 @@ operations:
       en: Revoke tenant invitation
       nl: Tenantuitnodiging intrekken
     description:
-      en: Revokes one currently outstanding invitation selected from List tenant invitations. Invalidates the delivered link and cancels its pending role assignment without removing an accepted member.
-      nl: Trekt één actuele uitnodiging uit Tenantuitnodigingen bekijken in. Maakt de verzonden link ongeldig en annuleert de openstaande roltoekenning zonder een geaccepteerd lid te verwijderen.
+      en: Invalidates this invitation link and cancels its pending role assignment without removing an accepted member.
+      nl: Maakt de link van deze uitnodiging ongeldig en annuleert de openstaande roltoekenning zonder een geaccepteerd lid te verwijderen.
     implementation:
       type: plugin
       plugin: osf-control
@@ -2208,13 +2223,17 @@ interfaces:
         recordRoute: /tenants/:slug/invitations/:invitationId
         idField: invitationId
         displayField: email
-        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus]
         columns: [email, role, status, registrationStatus, sentAt, expiresAt]
         operations:
           list: { operation: listTenantInvitations, resultField: invitations }
           get: { operation: getTenantInvitation }
           collectionActions: [createTenantInvitation]
-          recordActions: [resendTenantInvitation, revokeTenantInvitation]
+          recordActions:
+            - operation: resendTenantInvitation
+              visibleWhen: { conditions: [{ field: canResend, operator: eq, value: true }] }
+            - operation: revokeTenantInvitation
+              visibleWhen: { conditions: [{ field: canRevoke, operator: eq, value: true }] }
       TenantCredential:
         title: { en: Credentials, nl: Credentials }
         route: /tenants/:slug/members/:memberId/credentials

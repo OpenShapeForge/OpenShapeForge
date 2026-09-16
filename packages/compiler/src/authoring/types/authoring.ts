@@ -705,7 +705,7 @@ export interface OperationCatalogWebInterface {
       list: { operation: string; resultField: string; bindings?: Record<string, string> };
       get?: { operation: string; resultField?: string; bindings?: Record<string, string> };
       collectionActions?: string[];
-      recordActions?: string[];
+      recordActions?: Array<string | { operation: string; visibleWhen?: VisibilityConfig }>;
     };
     related?: Array<{ entity: string; label: LocalizedText; route: string }>;
   }>;

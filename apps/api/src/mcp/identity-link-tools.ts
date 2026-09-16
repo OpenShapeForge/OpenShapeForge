@@ -26,7 +26,7 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
-  EMPLOYEE_INVITATION_ROLE_GRANTS,
+  employeeInvitationRoleGrants,
   memberRoleClientId,
 } from "../auth/employee-invitations.js";
 import {
@@ -59,8 +59,6 @@ export const SET_MEMBER_ROLE_TOOL = "set_member_role";
  * it; see `scripts/runtime-config.ts` in the host and
  * `authoring/hubble-demo/authorization.yaml`'s `renameClient`).
  */
-const MEMBER_ROLE_GRANTS = EMPLOYEE_INVITATION_ROLE_GRANTS;
-
 const LINK_IDENTITY: Tool = {
   name: LINK_IDENTITY_TOOL,
   title: "Link a login to a Relation",
@@ -346,7 +344,8 @@ export async function callIdentityLinkTool(
         );
       }
       const admin = createMemberRoleAdminClient(controlPlane.config.keycloak);
-      await admin.grantClientRoles(subject.subject, memberRoleClientId(), MEMBER_ROLE_GRANTS[role]);
+      const clientRoles = employeeInvitationRoleGrants(role);
+      await admin.grantClientRoles(subject.subject, memberRoleClientId(), clientRoles);
       await clearNeedsRoleAssignment(db, scoped, identityId);
 
       // Best-effort: the role grant above already succeeded and is durable
@@ -370,7 +369,7 @@ export async function callIdentityLinkTool(
         granted: true,
         identityId,
         role,
-        clientRoles: MEMBER_ROLE_GRANTS[role],
+        clientRoles,
         forcedReauthentication,
         note: forcedReauthentication
           ? "Their current sign-in was ended; they need to sign in again for the new role to take effect."

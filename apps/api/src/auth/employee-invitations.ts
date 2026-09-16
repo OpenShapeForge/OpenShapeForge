@@ -108,6 +108,24 @@ export const EMPLOYEE_INVITATION_ROLE_GRANTS: Readonly<
 };
 
 /**
+ * A host may attach its product persona to the canonical organization intent.
+ * The OSF baseline role always remains part of the grant: authorization of the
+ * shared invitation and identity tools must not depend on a host role name.
+ */
+export function employeeInvitationRoleGrants(
+  role: EmployeeInvitationRole,
+  env: NodeJS.ProcessEnv = process.env,
+): readonly string[] {
+  const configured = (role === "org_admin"
+    ? env.OPENSHAPEFORGE_ORG_ADMIN_CLIENT_ROLE
+    : env.OPENSHAPEFORGE_ORG_EMPLOYEE_CLIENT_ROLE)?.trim();
+  const baseline = EMPLOYEE_INVITATION_ROLE_GRANTS[role];
+  return configured && !baseline.includes(configured)
+    ? [...baseline, configured]
+    : baseline;
+}
+
+/**
  * The client entity roles live on. Reuses the same env var the API key path
  * already reads for the identical question (auth/api-key/runtime-config.ts)
  * rather than inventing a second name for "which client is the audience
@@ -469,7 +487,7 @@ export async function acceptInvitation(
   keycloakSubject: string,
   grantInvitedRole: GrantInvitedRole = grantThroughKeycloak,
 ): Promise<AcceptInvitationResult> {
-  const clientRoles = EMPLOYEE_INVITATION_ROLE_GRANTS[invitation.role];
+  const clientRoles = employeeInvitationRoleGrants(invitation.role);
 
   try {
     await grantInvitedRole(keycloakSubject, memberRoleClientId(), clientRoles);

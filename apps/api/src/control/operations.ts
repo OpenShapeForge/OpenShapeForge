@@ -79,6 +79,16 @@ import {
   type ControlDeps,
 } from "./tenant-registry.js";
 import {
+  changeTenantMemberRoles,
+  getTenantMember,
+  getTenantCredential,
+  listTenantCredentials,
+  listTenantMembers,
+  removeTenantMembership,
+  requestPasskeyRecovery,
+  revokeTenantCredential,
+} from "./tenant-member-admin.js";
+import {
   listUpdateNotices,
   publishUpdateNotice,
   validateUpdateNotice,
@@ -191,6 +201,18 @@ function optionalString(input: Record<string, unknown>, field: string): string |
   return value;
 }
 
+function requiredString(input: Record<string, unknown>, field: string): string {
+  const value = optionalString(input, field);
+  if (!value) throw new ControlInputError(`${field} is required.`);
+  return value;
+}
+
+function memberDeps(context: ControlHandlerContext) {
+  if (!context.runtime.clients?.identityMembers || !context.runtime.clients.memberRoles) throw new ControlAuthorizationError("CONTROL_PLANE_NOT_CONFIGURED", "Tenant identity administration is not configured.");
+  return { db: context.db, administrator: context.session.administrator,
+    members: context.runtime.clients.identityMembers, memberRoles: context.runtime.clients.memberRoles };
+}
+
 /** What whoami says a session can use when the transport did not say. */
 function accessFromContracts(context: ControlHandlerContext): { tools: number; resources: number } {
   const tools = context.runtime.operations.filter((operation) =>
@@ -267,6 +289,18 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
       "list",
       { slug: requireSlug(input, "slug") },
     ),
+  getTenantInvitation: (input, context) =>
+    manageTenantInvitations({ db: context.db, administrator: context.session.administrator,
+      ...(context.runtime.clients ? { firstAdministrator: context.runtime.clients.firstAdministrator } : {}), log: context.log, correlationId: context.correlationId },
+    "get", { slug: requireSlug(input, "slug"), invitationId: requiredString(input, "invitationId") }),
+  createTenantInvitation: (input, context) => {
+    const firstName = optionalString(input, "firstName");
+    const lastName = optionalString(input, "lastName");
+    return manageTenantInvitations({ db: context.db, administrator: context.session.administrator,
+      ...(context.runtime.clients ? { firstAdministrator: context.runtime.clients.firstAdministrator } : {}), log: context.log, correlationId: context.correlationId },
+    "create", { slug: requireSlug(input, "slug"), email: requiredString(input, "email"), role: requiredString(input, "role"),
+      ...(firstName ? { firstName } : {}), ...(lastName ? { lastName } : {}) });
+  },
   revokeTenantInvitation: (input, context) =>
     manageTenantInvitations(
       {
@@ -301,6 +335,15 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
         invitationId: String(input.invitationId ?? ""),
       },
     ),
+  listTenantMembers: (input, context) => listTenantMembers(memberDeps(context), requireSlug(input, "slug")),
+  getTenantMember: (input, context) => getTenantMember(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
+  assignTenantMemberRoles: (input, context) => changeTenantMemberRoles(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), input.roles, "assign"),
+  removeTenantMemberRoles: (input, context) => changeTenantMemberRoles(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), input.roles, "remove"),
+  removeTenantMembership: (input, context) => removeTenantMembership(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
+  requestPasskeyRecovery: (input, context) => requestPasskeyRecovery(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
+  listTenantCredentials: (input, context) => listTenantCredentials(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId")),
+  getTenantCredential: (input, context) => getTenantCredential(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), requiredString(input, "credentialId")),
+  revokeTenantCredential: (input, context) => revokeTenantCredential(memberDeps(context), requireSlug(input, "slug"), requiredString(input, "memberId"), requiredString(input, "credentialId"), input.recoveryConfirmed === true),
   getTenantOrganizationTree: (input, context) =>
     listOrgUnits(controlDeps(context), requireSlug(input, "slug")),
   createTenantOrganization: (input, context) => {

@@ -692,6 +692,23 @@ export interface OperationCatalogWebOperation {
 export interface OperationCatalogWebInterface {
   pages: Record<string, OperationCatalogWebPage>;
   operations: Record<string, OperationCatalogWebOperation>;
+  /** Provider-backed resources that use normal entity collection/detail views. */
+  entities?: Record<string, {
+    title: LocalizedText;
+    route: string;
+    recordRoute?: string;
+    idField: string;
+    displayField: string;
+    fields: string[];
+    columns: string[];
+    operations: {
+      list: { operation: string; resultField: string; bindings?: Record<string, string> };
+      get?: { operation: string; resultField?: string; bindings?: Record<string, string> };
+      collectionActions?: string[];
+      recordActions?: string[];
+    };
+    related?: Array<{ entity: string; label: LocalizedText; route: string }>;
+  }>;
 }
 
 /** YAML-owned module/global Operations that have no honest entity target. */

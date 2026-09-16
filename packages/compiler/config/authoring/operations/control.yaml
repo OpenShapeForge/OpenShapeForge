@@ -172,9 +172,47 @@ operations:
         properties:
           tenants:
             type: array
-            items: &id004
+            items:
               type: object
-              additionalProperties: true
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  x-osf-i18n: { title: { en: ID, nl: ID } }
+                slug:
+                  type: string
+                  x-osf-i18n: { title: { en: Slug, nl: Slug } }
+                name:
+                  type: string
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                status:
+                  type: string
+                  x-osf-i18n: { title: { en: Status, nl: Status } }
+                tenantKind:
+                  type: string
+                  x-osf-i18n: { title: { en: Tenant kind, nl: Tenantsoort } }
+                relationId:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Relation ID, nl: Relatie-ID } }
+                relationLabel:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Relation, nl: Relatie } }
+                keycloakOrganizationId:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Keycloak organization ID, nl: Keycloak-organisatie-ID } }
+                organizationAlias:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Organization alias, nl: Organisatie-alias } }
+                installedEntries:
+                  type: integer
+                  x-osf-i18n: { title: { en: Installed services, nl: Geïnstalleerde services } }
+                overriddenEntries:
+                  type: integer
+                  x-osf-i18n: { title: { en: Overridden services, nl: Overschreven services } }
+                updatesAvailable:
+                  type: integer
+                  x-osf-i18n: { title: { en: Updates available, nl: Updates beschikbaar } }
+              required: [id, slug, name, status, tenantKind, relationId, relationLabel, keycloakOrganizationId, organizationAlias, installedEntries, overriddenEntries, updatesAvailable]
             x-osf-i18n:
               title: *id003
         required:
@@ -222,7 +260,9 @@ operations:
         required:
         - slug
     output:
-      schema: *id004
+      schema: &id004
+        type: object
+        additionalProperties: true
     auth:
       mode: control
       roles:
@@ -554,7 +594,35 @@ operations:
         required:
         - slug
     output:
-      schema: *id004
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenant: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          invitations:
+            type: array
+            x-osf-i18n: { title: { en: Invitations, nl: Uitnodigingen } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                invitationId: { type: string, x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
+                email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+                firstName: { type: [string, 'null'], x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+                lastName: { type: [string, 'null'], x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+                status: { type: [string, 'null'], x-osf-i18n: { title: { en: Status, nl: Status } } }
+                sentAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Sent at, nl: Verzonden op } } }
+                expiresAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Expires at, nl: Verloopt op } } }
+                role: { type: [string, 'null'], x-osf-i18n: { title: { en: Role, nl: Rol } } }
+                registrationStatus: { type: string, x-osf-i18n: { title: { en: Registration status, nl: Registratiestatus } } }
+                canResend: { type: boolean, x-osf-i18n: { title: { en: Can resend, nl: Opnieuw versturen mogelijk } } }
+              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+          unresolved:
+            type: array
+            items: { type: object, additionalProperties: true }
+            x-osf-i18n: { title: { en: Unresolved invitations, nl: Onopgeloste uitnodigingen } }
+        required: [tenant, invitations, unresolved]
     auth:
       mode: control
       roles:
@@ -571,6 +639,52 @@ operations:
         mode: natural
     confirmation:
       mode: none
+    errors: *id002
+  getTenantInvitation:
+    id: control.get-tenant-invitation
+    name: { en: Get tenant invitation, nl: Tenantuitnodiging opvragen }
+    description: { en: Reads one currently outstanding invitation without returning its invitation link., nl: Leest één actuele uitnodiging zonder de uitnodigingslink terug te geven. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantInvitation }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId: { type: string, pattern: '^[a-zA-Z0-9_-]{1,128}$', x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
+        required: [slug, invitationId]
+    output: { schema: { type: object, additionalProperties: true } }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  createTenantInvitation:
+    id: control.create-tenant-invitation
+    name: { en: Invite tenant member, nl: Tenantlid uitnodigen }
+    description: { en: Invites one member through Keycloak and records the allowlisted role applied after acceptance., nl: Nodigt één lid uit via Keycloak en legt de toegestane rol vast die na acceptatie wordt toegepast. }
+    implementation: { type: plugin, plugin: osf-control, handler: createTenantInvitation }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          email: { type: string, format: email, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+          firstName: { type: string, x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+          lastName: { type: string, x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+          role:
+            type: string
+            enum: [org_admin, org_employee]
+            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+        required: [slug, email, role]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
     errors: *id002
   revokeTenantInvitation:
     id: control.revoke-tenant-invitation
@@ -1060,7 +1174,63 @@ operations:
             x-osf-i18n:
               title: *id014
     output:
-      schema: *id004
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          entries:
+            type: array
+            x-osf-i18n: { title: { en: Services, nl: Services } }
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                kind:
+                  type: string
+                  enum: [service, adapter, capability]
+                  x-osf-i18n:
+                    title: { en: Kind, nl: Soort }
+                    enum:
+                      service: { en: Service, nl: Service }
+                      adapter: { en: Adapter, nl: Adapter }
+                      capability: { en: Capability, nl: Capability }
+                key:
+                  type: string
+                  x-osf-i18n: { title: { en: Key, nl: Sleutel } }
+                name:
+                  anyOf: [{ type: string }, { type: 'null' }]
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                latestVersion:
+                  type: integer
+                  x-osf-i18n: { title: { en: Latest version, nl: Nieuwste versie } }
+                authority:
+                  type: string
+                  enum: [platform_release, host, tenant_shared]
+                  x-osf-i18n:
+                    title: { en: Authority, nl: Autoriteit }
+                    enum:
+                      platform_release: { en: Platform release, nl: Platformrelease }
+                      host: { en: Host, nl: Host }
+                      tenant_shared: { en: Shared by tenant, nl: Gedeeld door tenant }
+                source:
+                  type: string
+                  x-osf-i18n: { title: { en: Source, nl: Bron } }
+                publishedAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Published at, nl: Gepubliceerd op } }
+                retired:
+                  type: boolean
+                  x-osf-i18n: { title: { en: Retired, nl: Ingetrokken } }
+                tenants:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                  x-osf-i18n: { title: { en: Tenant installations, nl: Tenantinstallaties } }
+              required: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+          nextCursor:
+            anyOf: [{ type: string }, { type: 'null' }]
+            x-osf-i18n: { title: { en: Next page, nl: Volgende pagina } }
+        required: [entries, nextCursor]
     auth:
       mode: control
       roles:
@@ -1436,6 +1606,236 @@ operations:
     confirmation:
       mode: none
     errors: *id002
+  listTenantMembers:
+    id: control.list-tenant-members
+    name: { en: List tenant members, nl: Tenantleden bekijken }
+    description: { en: Lists the bounded Keycloak Organization members of one tenant with roles and a safe credential summary., nl: Toont de begrensde Keycloak-organisatieleden van één tenant met rollen en een veilige credentialsamenvatting. }
+    implementation: { type: plugin, plugin: osf-control, handler: listTenantMembers }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties: { slug: *id005 }
+        required: [slug]
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          members:
+            type: array
+            x-osf-i18n: { title: { en: Members, nl: Leden } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+                username: { type: [string, 'null'], x-osf-i18n: { title: { en: Username, nl: Gebruikersnaam } } }
+                email: { type: [string, 'null'], x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+                firstName: { type: [string, 'null'], x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+                lastName: { type: [string, 'null'], x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+                enabled: { type: boolean, x-osf-i18n: { title: { en: Enabled, nl: Actief } } }
+                emailVerified: { type: boolean, x-osf-i18n: { title: { en: Email verified, nl: E-mail geverifieerd } } }
+                roles: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } } }
+                credentialCount: { type: integer, x-osf-i18n: { title: { en: Credentials, nl: Credentials } } }
+                credentialTypes: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Credential types, nl: Credentialtypen } } }
+              required: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
+        required: [tenantSlug, members]
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  getTenantMember:
+    id: control.get-tenant-member
+    name: { en: Get tenant member, nl: Tenantlid opvragen }
+    description: { en: Reads one member only after verifying membership in the named tenant., nl: Leest één lid pas na controle van het lidmaatschap van de genoemde tenant. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantMember }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  assignTenantMemberRoles:
+    id: control.assign-tenant-member-roles
+    name: { en: Assign member roles, nl: Lidrollen toekennen }
+    description: { en: Assigns only allowlisted tenant roles to an existing member., nl: Kent uitsluitend toegestane tenantrollen toe aan een bestaand lid. }
+    implementation: { type: plugin, plugin: osf-control, handler: assignTenantMemberRoles }
+    input: &memberRoleInput
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          roles:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              type: string
+              enum: [org_admin, org_employee]
+              x-osf-i18n: { enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+        required: [slug, memberId, roles]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  removeTenantMemberRoles:
+    id: control.remove-tenant-member-roles
+    name: { en: Remove member roles, nl: Lidrollen intrekken }
+    description: { en: Removes selected allowlisted tenant roles without deleting the realm user., nl: Trekt geselecteerde toegestane tenantrollen in zonder de realmgebruiker te verwijderen. }
+    implementation: { type: plugin, plugin: osf-control, handler: removeTenantMemberRoles }
+    input: *memberRoleInput
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  removeTenantMembership:
+    id: control.remove-tenant-membership
+    name: { en: Remove tenant membership, nl: Tenantlidmaatschap verwijderen }
+    description: { en: Removes one organization membership without deleting a shared realm account., nl: Verwijdert één organisatielidmaatschap zonder een gedeeld realmaccount te verwijderen. }
+    implementation: { type: plugin, plugin: osf-control, handler: removeTenantMembership }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: delete, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  requestPasskeyRecovery:
+    id: control.request-passkey-recovery
+    name: { en: Request passkey recovery, nl: Passkeyherstel aanvragen }
+    description: { en: Sends a short-lived Keycloak action email allowing this member to register a new passwordless WebAuthn credential., nl: Stuurt een kortlevende Keycloak-actiemail waarmee dit lid een nieuwe passwordless WebAuthn-credential kan registreren. }
+    implementation: { type: plugin, plugin: osf-control, handler: requestPasskeyRecovery }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  listTenantCredentials:
+    id: control.list-tenant-credentials
+    name: { en: List member credentials, nl: Lidcredentials bekijken }
+    description: { en: Lists only safe credential metadata for one verified tenant member., nl: Toont uitsluitend veilige credentialmetadata van één gecontroleerd tenantlid. }
+    implementation: { type: plugin, plugin: osf-control, handler: listTenantCredentials }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentials:
+            type: array
+            x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+                credentialId: { type: string, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+                type: { type: string, x-osf-i18n: { title: { en: Type, nl: Type } } }
+                label: { type: [string, 'null'], x-osf-i18n: { title: { en: Label, nl: Label } } }
+                createdAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Created at, nl: Aangemaakt op } } }
+              required: [tenantSlug, memberId, credentialId, type, label, createdAt]
+        required: [tenantSlug, memberId, credentials]
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  revokeTenantCredential:
+    id: control.revoke-tenant-credential
+    name: { en: Revoke credential, nl: Credential intrekken }
+    description: { en: Revokes one selected credential; deleting the last credential requires a confirmed recovery route., nl: Trekt één geselecteerde credential in; voor de laatste credential is een bevestigde herstelroute vereist. }
+    implementation: { type: plugin, plugin: osf-control, handler: revokeTenantCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+          reason: { type: string, minLength: 3, maxLength: 500, x-osf-i18n: { title: { en: Reason, nl: Reden } } }
+          recoveryConfirmed: { type: boolean, x-osf-i18n: { title: { en: Recovery route confirmed, nl: Herstelroute bevestigd } } }
+        required: [slug, memberId, credentialId, reason, recoveryConfirmed]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: delete, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  getTenantCredential:
+    id: control.get-tenant-credential
+    name: { en: Get member credential, nl: Lidcredential opvragen }
+    description: { en: Reads safe metadata for one selected credential after verifying tenant membership., nl: Leest veilige metadata van één geselecteerde credential na controle van het tenantlidmaatschap. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+        required: [slug, memberId, credentialId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
 interfaces:
   rest:
     operations:
@@ -1499,6 +1899,14 @@ interfaces:
         response:
           status: 200
           kind: json
+      getTenantInvitation:
+        method: GET
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId
+        response: { status: 200, kind: json }
+      createTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations
+        response: { status: 201, kind: json }
       revokeTenantInvitation:
         method: POST
         path: /api/control/v1/tenants/:slug/invitations/:invitationId/revoke
@@ -1511,6 +1919,42 @@ interfaces:
         response:
           status: 200
           kind: json
+      listTenantMembers:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members
+        response: { status: 200, kind: json }
+      getTenantMember:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId
+        response: { status: 200, kind: json }
+      assignTenantMemberRoles:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/roles/assign
+        response: { status: 200, kind: json }
+      removeTenantMemberRoles:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/roles/remove
+        response: { status: 200, kind: json }
+      removeTenantMembership:
+        method: DELETE
+        path: /api/control/v1/tenants/:slug/members/:memberId
+        response: { status: 200, kind: json }
+      requestPasskeyRecovery:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/passkey-recovery
+        response: { status: 200, kind: json }
+      listTenantCredentials:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials
+        response: { status: 200, kind: json }
+      revokeTenantCredential:
+        method: DELETE
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId
+        response: { status: 200, kind: json }
+      getTenantCredential:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId
+        response: { status: 200, kind: json }
       getTenantOrganizationTree:
         method: GET
         path: /api/control/v1/tenants/:slug/organizations
@@ -1617,10 +2061,32 @@ interfaces:
         name: invite_first_tenant_admin
       listTenantInvitations:
         name: list_tenant_invitations
+      getTenantInvitation:
+        name: get_tenant_invitation
+      createTenantInvitation:
+        name: create_tenant_invitation
       revokeTenantInvitation:
         name: revoke_tenant_invitation
       resendTenantInvitation:
         name: resend_tenant_invitation
+      listTenantMembers:
+        name: list_tenant_members
+      getTenantMember:
+        name: get_tenant_member
+      assignTenantMemberRoles:
+        name: assign_tenant_member_roles
+      removeTenantMemberRoles:
+        name: remove_tenant_member_roles
+      removeTenantMembership:
+        name: remove_tenant_membership
+      requestPasskeyRecovery:
+        name: request_passkey_recovery
+      listTenantCredentials:
+        name: list_tenant_credentials
+      revokeTenantCredential:
+        name: revoke_tenant_credential
+      getTenantCredential:
+        name: get_tenant_credential
       getTenantOrganizationTree:
         name: get_tenant_organization_tree
       createTenantOrganization:
@@ -1651,27 +2117,12 @@ interfaces:
         name: withdraw_update_notice
   web:
     pages:
-      tenants:
-        title:
-          en: Tenants
-          nl: Tenants
-        icon: buildings
-        order: 1
-        description:
-          en: Tenants of this deployment, their blueprint library and first administrator.
-          nl: Tenants van deze omgeving, hun blueprintbibliotheek en eerste beheerder.
       organizations:
         title:
           en: Organisations
           nl: Organisaties
         icon: tree-structure
         order: 2
-      services:
-        title:
-          en: Services
-          nl: Services
-        icon: plugs-connected
-        order: 3
       notices:
         title:
           en: Update notices
@@ -1685,37 +2136,6 @@ interfaces:
         icon: gear
         order: 5
     operations:
-      listTenants:
-        page: tenants
-        order: 0
-        landing: true
-      getTenant:
-        page: tenants
-        order: 1
-      createTenant:
-        page: tenants
-        order: 2
-      updateTenant:
-        page: tenants
-        order: 3
-      getBlueprintLibrary:
-        page: tenants
-        order: 4
-      assignBlueprintLibrary:
-        page: tenants
-        order: 5
-      inviteFirstTenantAdmin:
-        page: tenants
-        order: 6
-      listTenantInvitations:
-        page: tenants
-        order: 7
-      revokeTenantInvitation:
-        page: tenants
-        order: 8
-      resendTenantInvitation:
-        page: tenants
-        order: 9
       getTenantOrganizationTree:
         page: organizations
         order: 0
@@ -1725,22 +2145,6 @@ interfaces:
       updateTenantOrganization:
         page: organizations
         order: 2
-      listCatalogEntries:
-        page: services
-        order: 0
-        landing: true
-      getCatalogEntry:
-        page: services
-        order: 1
-      publishCatalogEntry:
-        page: services
-        order: 2
-      retireCatalogEntry:
-        page: services
-        order: 3
-      applyCatalogUpdateForTenant:
-        page: services
-        order: 4
       listUpdateNotices:
         page: notices
         order: 0
@@ -1767,3 +2171,72 @@ interfaces:
       listPlatformAudit:
         page: platform
         order: 4
+    entities:
+      Tenant:
+        title: { en: Tenants, nl: Tenants }
+        route: /tenants
+        recordRoute: /tenants/:slug
+        idField: slug
+        displayField: name
+        fields: [id, name, slug, status, tenantKind, relationId, relationLabel, keycloakOrganizationId, organizationAlias, installedEntries, overriddenEntries, updatesAvailable]
+        columns: [name, slug, status, tenantKind, organizationAlias, relationLabel]
+        operations:
+          list: { operation: listTenants, resultField: tenants }
+          get: { operation: getTenant }
+          collectionActions: [createTenant]
+          recordActions: [updateTenant, getBlueprintLibrary, assignBlueprintLibrary, inviteFirstTenantAdmin]
+        related:
+          - { entity: TenantMember, label: { en: Members, nl: Leden }, route: /tenants/:slug/members }
+          - { entity: TenantInvitation, label: { en: Invitations, nl: Uitnodigingen }, route: /tenants/:slug/invitations }
+      TenantMember:
+        title: { en: Members, nl: Leden }
+        route: /tenants/:slug/members
+        recordRoute: /tenants/:slug/members/:memberId
+        idField: memberId
+        displayField: email
+        fields: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
+        columns: [email, username, enabled, emailVerified, roles, credentialCount]
+        operations:
+          list: { operation: listTenantMembers, resultField: members }
+          get: { operation: getTenantMember }
+          recordActions: [assignTenantMemberRoles, removeTenantMemberRoles, removeTenantMembership, requestPasskeyRecovery]
+        related:
+          - { entity: TenantCredential, label: { en: Credentials, nl: Credentials }, route: /tenants/:slug/members/:memberId/credentials }
+      TenantInvitation:
+        title: { en: Invitations, nl: Uitnodigingen }
+        route: /tenants/:slug/invitations
+        recordRoute: /tenants/:slug/invitations/:invitationId
+        idField: invitationId
+        displayField: email
+        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+        columns: [email, role, status, registrationStatus, sentAt, expiresAt]
+        operations:
+          list: { operation: listTenantInvitations, resultField: invitations }
+          get: { operation: getTenantInvitation }
+          collectionActions: [createTenantInvitation]
+          recordActions: [resendTenantInvitation, revokeTenantInvitation]
+      TenantCredential:
+        title: { en: Credentials, nl: Credentials }
+        route: /tenants/:slug/members/:memberId/credentials
+        recordRoute: /tenants/:slug/members/:memberId/credentials/:credentialId
+        idField: credentialId
+        displayField: label
+        fields: [tenantSlug, memberId, credentialId, type, label, createdAt]
+        columns: [label, type, createdAt]
+        operations:
+          list: { operation: listTenantCredentials, resultField: credentials }
+          get: { operation: getTenantCredential }
+          recordActions: [revokeTenantCredential]
+      CatalogEntry:
+        title: { en: Services, nl: Services }
+        route: /services
+        recordRoute: /services/:kind/:key
+        idField: key
+        displayField: name
+        fields: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+        columns: [name, key, kind, latestVersion, authority, retired]
+        operations:
+          list: { operation: listCatalogEntries, resultField: entries }
+          get: { operation: getCatalogEntry }
+          collectionActions: [publishCatalogEntry]
+          recordActions: [publishCatalogEntry, retireCatalogEntry, applyCatalogUpdateForTenant]

@@ -145,6 +145,18 @@ const AUTHORED: readonly Authored[] = [
     rest: { method: "GET", path: "/api/control/v1/tenants/:slug/invitations", status: 200 }, mcp: "list_tenant_invitations",
   },
   {
+    id: "control.get-tenant-invitation", handler: "getTenantInvitation", title: "Get tenant invitation",
+    description: "Reads safe metadata for one outstanding tenant invitation.", roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug, invitationId: { type: "string" } }, required: ["slug", "invitationId"] },
+    rest: { method: "GET", path: "/api/control/v1/tenants/:slug/invitations/:invitationId", status: 200 }, mcp: "get_tenant_invitation",
+  },
+  {
+    id: "control.create-tenant-invitation", handler: "createTenantInvitation", title: "Create tenant invitation",
+    description: "Invites one tenant member and records the selected allowlisted role.", roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug, email: { type: "string", format: "email" }, role: { type: "string", enum: ["org_admin", "org_employee"] }, firstName: { type: "string" }, lastName: { type: "string" } }, required: ["slug", "email", "role"] },
+    rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations", status: 201 }, mcp: "create_tenant_invitation",
+  },
+  {
     id: "control.revoke-tenant-invitation", handler: "revokeTenantInvitation", title: "Revoke tenant invitation",
     description: "Revokes an outstanding invitation and its pending role assignment without removing an accepted member.",
     roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
@@ -157,6 +169,47 @@ const AUTHORED: readonly Authored[] = [
     roles: BOTH, effects: WRITE_EXTERNAL, idempotency: "none", acknowledgement: true,
     input: { properties: { slug, invitationId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,128}$" } }, required: ["slug", "invitationId"] },
     rest: { method: "POST", path: "/api/control/v1/tenants/:slug/invitations/:invitationId/resend", status: 200 }, mcp: "resend_tenant_invitation",
+  },
+  {
+    id: "control.list-tenant-members", handler: "listTenantMembers", title: "List tenant members",
+    description: "Lists members of one tenant organization with safe identity metadata.", roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug }, required: ["slug"] }, rest: { method: "GET", path: "/api/control/v1/tenants/:slug/members", status: 200 }, mcp: "list_tenant_members",
+  },
+  {
+    id: "control.get-tenant-member", handler: "getTenantMember", title: "Get tenant member",
+    description: "Reads one verified tenant member.", roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug, memberId: { type: "string" } }, required: ["slug", "memberId"] }, rest: { method: "GET", path: "/api/control/v1/tenants/:slug/members/:memberId", status: 200 }, mcp: "get_tenant_member",
+  },
+  ...(["assign", "remove"] as const).map((mode): Authored => ({
+    id: `control.${mode}-tenant-member-roles`, handler: `${mode}TenantMemberRoles`, title: `${mode} tenant member roles`,
+    description: `${mode} allowlisted roles for one verified tenant member.`, roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    input: { properties: { slug, memberId: { type: "string" }, roles: { type: "array", items: { type: "string", enum: ["org_admin", "org_employee"] } } }, required: ["slug", "memberId", "roles"] },
+    rest: { method: "POST", path: `/api/control/v1/tenants/:slug/members/:memberId/roles/${mode}`, status: 200 }, mcp: `${mode}_tenant_member_roles`,
+  })),
+  {
+    id: "control.remove-tenant-membership", handler: "removeTenantMembership", title: "Remove tenant membership",
+    description: "Removes an organization membership without deleting the realm user.", roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    input: { properties: { slug, memberId: { type: "string" } }, required: ["slug", "memberId"] }, rest: { method: "DELETE", path: "/api/control/v1/tenants/:slug/members/:memberId", status: 200 }, mcp: "remove_tenant_membership",
+  },
+  {
+    id: "control.request-passkey-recovery", handler: "requestPasskeyRecovery", title: "Request passkey recovery",
+    description: "Sends the fixed passwordless WebAuthn registration action to one verified member.", roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "none", acknowledgement: true,
+    input: { properties: { slug, memberId: { type: "string" } }, required: ["slug", "memberId"] }, rest: { method: "POST", path: "/api/control/v1/tenants/:slug/members/:memberId/passkey-recovery", status: 200 }, mcp: "request_passkey_recovery",
+  },
+  {
+    id: "control.list-tenant-credentials", handler: "listTenantCredentials", title: "List member credentials",
+    description: "Lists safe credential metadata for one verified member.", roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug, memberId: { type: "string" } }, required: ["slug", "memberId"] }, rest: { method: "GET", path: "/api/control/v1/tenants/:slug/members/:memberId/credentials", status: 200 }, mcp: "list_tenant_credentials",
+  },
+  {
+    id: "control.get-tenant-credential", handler: "getTenantCredential", title: "Get member credential",
+    description: "Reads safe metadata for one credential.", roles: BOTH, effects: READ_EXTERNAL, idempotency: "natural",
+    input: { properties: { slug, memberId: { type: "string" }, credentialId: { type: "string" } }, required: ["slug", "memberId", "credentialId"] }, rest: { method: "GET", path: "/api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId", status: 200 }, mcp: "get_tenant_credential",
+  },
+  {
+    id: "control.revoke-tenant-credential", handler: "revokeTenantCredential", title: "Revoke member credential",
+    description: "Revokes one credential with last-credential recovery protection.", roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural", acknowledgement: true,
+    input: { properties: { slug, memberId: { type: "string" }, credentialId: { type: "string" }, recoveryConfirmed: { type: "boolean" } }, required: ["slug", "memberId", "credentialId", "recoveryConfirmed"] }, rest: { method: "DELETE", path: "/api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId", status: 200 }, mcp: "revoke_tenant_credential",
   },
   {
     id: "control.get-tenant-organization-tree", handler: "getTenantOrganizationTree", title: "Get organization tree",

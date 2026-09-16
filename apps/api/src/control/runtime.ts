@@ -19,16 +19,20 @@ import type { OperationContract } from "../operations/runtime.js";
 import { readControlPlaneConfig, type ControlPlaneConfig, type ControlPlaneConfigResult } from "./config.js";
 import type { FirstAdministratorClients } from "./first-tenant-administrator.js";
 import { createKeycloakOrganizationMembersClient } from "./keycloak-organization-members.js";
+import type { KeycloakTenantMemberAdminClient } from "./keycloak-organization-members.js";
 import { createKeycloakOrganizationAdminClient, KeycloakAdminError } from "./keycloak-organization-admin.js";
 import { createServiceAccountTokenProvider } from "./keycloak-service-account.js";
 import { createKeycloakSpiClient, KeycloakSpiError } from "./keycloak-spi-client.js";
 import { createOrganizationScopeAdminClient } from "./organization-scopes.js";
+import { createMemberRoleAdminClient, type MemberRoleAdminClient } from "./member-role-admin.js";
 import type { PlatformCatalogProvider } from "./platform-catalog.js";
 import type { ControlDeps } from "./tenant-registry.js";
 
 /** The Keycloak surfaces the control Operations reach, built from one configuration. */
 export type PlatformKeycloakClients = {
   firstAdministrator: FirstAdministratorClients;
+  identityMembers?: KeycloakTenantMemberAdminClient;
+  memberRoles?: MemberRoleAdminClient;
   control: Omit<ControlDeps, "db" | "operator">;
 };
 
@@ -103,12 +107,15 @@ export function createPlatformKeycloakClients(
     ...options,
     tokens: adminTokens,
   });
+  const memberRoles = createMemberRoleAdminClient(config.keycloak, { ...options, tokens: adminTokens });
   return {
     firstAdministrator: {
       tenantRealm: config.keycloak.tenantRealm,
       members,
       organizations: keycloakAdmin,
     },
+    identityMembers: members,
+    memberRoles,
     control: {
       keycloak,
       keycloakAdmin,

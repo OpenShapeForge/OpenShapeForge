@@ -11,10 +11,9 @@ for (const entity of ["LabelRule", "TenantSetting"]) {
     // Resolve compiler sources at runtime so this API test remains inside the
     // API TypeScript root while still exercising the current checkout.
     const compilerRoot = new URL("../../../../../packages/compiler/src/", import.meta.url);
-    const { loadActivePlatformCompile } = await import(new URL("active-manifest.ts", compilerRoot).pathname);
-    const { generateArtifacts } = await import(new URL("generate.ts", compilerRoot).pathname);
-    const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../../.."));
-    const manifest = JSON.parse(generateArtifacts(active.manifest).find(
+    const { collectAllArtifacts } = await import(new URL("index.ts", compilerRoot).pathname);
+    const artifacts = await collectAllArtifacts(join(import.meta.dir, "../../../../.."));
+    const manifest = JSON.parse(artifacts.all.find(
       (artifact: { path: string; contents: string }) => artifact.path.endsWith("db/manifest.json"),
     )!.contents) as { tables: GeneratedCrudTable[] };
     const table = (manifest.tables as GeneratedCrudTable[]).find(table => table.source?.authoringEntityName === entity)!;

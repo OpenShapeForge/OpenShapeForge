@@ -8,6 +8,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -57,6 +58,7 @@ import {
 // Match the runtime loader boundary: the public plugin uses an unbound Kysely
 // database generic, while the API contract specializes it to the generated DB.
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 const workflowRuntime: RuntimeModule = (await import(new URL(
   "../../../../examples/plugins/workflow/runtime.ts", import.meta.url,
 ).pathname)).default;
@@ -64,7 +66,7 @@ const completeModuleSets = new WeakMap<readonly RuntimeModule[], RuntimeModule[]
 function withDocuments(modules: readonly RuntimeModule[]): RuntimeModule[] {
   let complete = completeModuleSets.get(modules);
   if (!complete) {
-    complete = [documentsRuntime, ...modules];
+    complete = [documentsRuntime, versioningRuntime, ...modules];
     completeModuleSets.set(modules, complete);
   }
   return complete;

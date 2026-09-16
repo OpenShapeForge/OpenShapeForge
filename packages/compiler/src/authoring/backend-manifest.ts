@@ -780,10 +780,10 @@ function compileCoreCandidate(
       ...artifacts.coreEntity,
       fields: [...artifacts.coreEntity.fields, ...artifacts.profiles.flatMap((profile) => profile.fields ?? [])],
     }, artifacts.semanticTypes).fields, artifacts.componentCatalog, artifacts.semanticTypes),
-    fieldsByKey: flattenFields([
-      ...(artifacts.coreEntity.fields ?? []),
-      ...artifacts.profiles.flatMap((profile) => profile.fields ?? []),
-    ]),
+    // The compiled model also contains compiler-owned fields, such as the
+    // lifecycle default added by published-snapshot versioning. SQL defaults
+    // must follow that effective contract rather than only the authored YAML.
+    fieldsByKey: new Map(contract.model.fields.map((field) => [field.key, field as Field])),
   };
 }
 
@@ -800,7 +800,7 @@ function compileContextCandidate(
     path: `${sourcePathPrefix}/contexts/${spec.context}/full/${spec.name}.yaml`,
     contract,
     effectiveFields: contract.model.fields,
-    fieldsByKey: flattenFields(artifacts.coreEntity.fields ?? []),
+    fieldsByKey: new Map(contract.model.fields.map((field) => [field.key, field as Field])),
   };
 }
 

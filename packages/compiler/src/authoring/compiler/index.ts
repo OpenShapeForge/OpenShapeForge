@@ -42,6 +42,57 @@ import {
   v2WebUi,
 } from "../entity-v2.js";
 
+function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntity): import("../types.js").CoreEntity {
+  const versioning = entity.versioning;
+  if (!versioning) return entity;
+  const publishOperation = `${entity.entity}.publish`;
+  const has = (key: string) => entity.fields.some((field) => field.key === key);
+  const managedFields: import("../types.js").Field[] = [
+    { key: "latestVersion", valueType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Latest version", nl: "Laatste versie" }, persisted: { column: "latest_version", storageClass: "core" } },
+    { key: "latestVersionId", valueType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Latest version id", nl: "Id van laatste versie" }, persisted: { column: "latest_version_id", storageClass: "core" } },
+    { key: "publishedVersion", valueType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Published version", nl: "Gepubliceerde versie" }, persisted: { column: "published_version", storageClass: "core" } },
+    { key: "publishedVersionId", valueType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
+    { key: "lifecycleStatus", valueType: "string", required: true, readOnly: true, writtenBy: [publishOperation], defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
+  ];
+  const publish = {
+    id: publishOperation,
+    name: { en: "Publish", nl: "Publiceren" },
+    description: { en: "Freeze the current editable content as a new immutable version.", nl: "Leg de huidige bewerkbare inhoud vast als een nieuwe onveranderlijke versie." },
+    implementation: { type: "plugin" as const, plugin: "core-versioning", handler: `publish${entity.entity}To${versioning.versionEntity}` },
+    target: { scope: "record" as const, inputField: "id" },
+    input: { schema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", format: "uuid" } } } },
+    output: { schema: { type: "object" } },
+    errors: [
+      { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },
+      { status: 409, code: "VERSION_CONFLICT", description: "The editable source changed before publication." },
+    ],
+    auth: { mode: "session" as const, roles: [...(entity.authorization?.roles?.update ?? [])] },
+    tenancy: { mode: "required" as const },
+    effects: { data: "write" as const, external: "none" as const },
+    reliability: { idempotency: { mode: "none" as const } },
+    concurrency: { version: { mode: "required" as const, field: "updatedAt" } },
+    confirmation: { mode: "none" as const },
+  };
+  const views = entity.interfaces?.web?.views;
+  return {
+    ...entity,
+    fields: [...entity.fields, ...managedFields.filter((field) => !has(field.key))],
+    operations: { ...(entity.operations ?? {}), publish },
+    ...(views ? {
+      interfaces: {
+        ...entity.interfaces,
+        web: {
+          ...entity.interfaces!.web,
+          views: {
+            ...views,
+            record: views.record ? { ...views.record, actions: [...new Set([...(views.record.actions ?? []), "publish"])] } : views.record,
+          },
+        },
+      },
+    } : {}),
+  };
+}
+
 function visitGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   visitor: (group: CompiledViewGroup) => void,
@@ -94,7 +145,7 @@ export function validateTimelineIncludes(
 }
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
-  artifacts = { ...artifacts, coreEntity: normalizeEntityFields(artifacts.coreEntity, artifacts.semanticTypes) };
+  artifacts = { ...artifacts, coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.semanticTypes) };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
   const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
 
@@ -171,6 +222,15 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     ...(blueprint ? { blueprint } : {}),
     ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
     model: { fields: modelFields, relationships },
+    ...(coreEntity.versioning ? {
+      versioning: {
+        strategy: coreEntity.versioning.strategy,
+        versionEntity: coreEntity.versioning.versionEntity,
+        versionsField: coreEntity.versioning.versionsField,
+        snapshot: { ownedRelationships: coreEntity.versioning.snapshot?.ownedRelationships ?? "recursive" },
+        publishOperation: `${coreEntity.entity}.publish`,
+      },
+    } : {}),
     crud,
     entityOperations,
     ...(isCoreEntityV2(coreEntity)

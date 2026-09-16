@@ -771,6 +771,17 @@ export interface CoreEntity {
    * naturally tenant-isolated.
    */
   indexes?: AuthoredEntityIndex[];
+  /**
+   * Opt-in immutable publication history for an editable entity head.
+   * The compiler supplies lifecycle fields and the canonical publish Operation;
+   * the version entity stores the frozen snapshot.
+   */
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot?: { ownedRelationships?: "recursive" };
+  };
   fields: Field[];
   relationships?: Relationship[];
   hooks?: EntityHooks;

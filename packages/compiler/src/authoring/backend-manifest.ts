@@ -1339,6 +1339,7 @@ export function compileAuthoringBackendManifest(
           ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
           : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
+        ...(candidate.contract.versioning ? { versioning: candidate.contract.versioning } : {}),
         crud: { operations: crudOperations },
         ...(() => {
           const secureInput = candidate.contract.entityOperations.create

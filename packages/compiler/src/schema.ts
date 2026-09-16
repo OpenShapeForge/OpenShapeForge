@@ -327,6 +327,13 @@ export type TableSourceDefinition = {
   /** Present for strict entity authoring; absence means legacy v1. */
   authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot: { ownedRelationships: "recursive" };
+    publishOperation: string;
+  };
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",
    * nl: "Contactmoment" }`). Surfaced for service-side consumers that render

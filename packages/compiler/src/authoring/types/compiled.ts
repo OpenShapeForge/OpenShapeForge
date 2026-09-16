@@ -709,6 +709,13 @@ export interface CompiledEntityContract {
     fields: CompiledField[];
     relationships: CompiledRelationship[];
   };
+  versioning?: {
+    strategy: "publishedSnapshot";
+    versionEntity: string;
+    versionsField: string;
+    snapshot: { ownedRelationships: "recursive" };
+    publishOperation: string;
+  };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */

@@ -14,11 +14,11 @@ authorization:
     delete: [Organization.All.ReadWrite]
 displayTemplate: "{{channel}} · {{locale}}"
 indexes:
-  - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, version, channel, locale], unique: true }
+  - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, template, channel, locale], unique: true }
 fields:
-  - key: version
-    label: { en: Template version, nl: Templateversie }
-    semanticType: TemplateVersion
+  - key: template
+    label: { en: Template, nl: Template }
+    semanticType: Template
     required: true
     immutable: true
   - key: channel
@@ -109,14 +109,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [version, channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale] }]
           update:
             title: { en: Edit, nl: Bewerken }
             groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale] }]

@@ -1,0 +1,29 @@
+{
+  "name": "@openshapeforge/versioning",
+  "version": "0.1.0",
+  "description": "Generic immutable published-snapshot versioning for OpenShapeForge entities.",
+  "license": "BUSL-1.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./runtime": "./src/runtime.ts",
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "!src/**/*.test.ts"],
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+    "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0"
+  },
+  "dependencies": {
+    "@openshapeforge/operations": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.0"
+  },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" }
+}

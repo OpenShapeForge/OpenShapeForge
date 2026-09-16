@@ -380,6 +380,10 @@ async function applyGeneratedRowUpdate(
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
+    const lifecycleStatus = table.source?.versioning
+      ? table.columns.find((column) => fieldNameForColumn(column) === "lifecycleStatus")
+      : undefined;
+    if (lifecycleStatus) assignments.push(sql`${sql.id(lifecycleStatus.name)} = 'draft'`);
     if (updatedAt) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
 
     if (assignments.length === 0) {

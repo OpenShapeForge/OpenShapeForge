@@ -30,20 +30,36 @@ fields:
   - key: status
     valueType: string
     required: true
-    defaultValue: draft
-    # Publication must be an immutable-version Operation, not a writable status.
-    options: { type: static, items: [{ value: draft, label: { en: Draft, nl: Concept } }] }
+    immutable: true
+    defaultValue: published
+    options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
     persisted: { column: status, storageClass: core }
-  - key: parameters
+  - key: snapshot
     valueType: object
-    semanticType: fieldDefinition
-    cardinality: collection
-    label: { en: Local parameters, nl: Lokale parameters }
-    persisted: { column: parameters, storageClass: core }
-  - key: variants
-    semanticType: TemplateVariant
-    cardinality: collection
-    relationship: { inverse: version, ownership: owned }
+    required: true
+    immutable: true
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    valueType: string
+    required: true
+    immutable: true
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    valueType: string
+    required: true
+    immutable: true
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    valueType: datetime
+    required: true
+    immutable: true
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
 operations:
   renderSnapshot:
     name: { en: Render frozen content, nl: Vastgelegde inhoud weergeven }
@@ -95,14 +111,6 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
-  insertVariant:
-    name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
-    description: Create an owned channel and language variant atomically.
-    implementation: { type: collection, action: insert, field: variants }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
   materialize:
     name: { en: Preview template, nl: Template bekijken }
     description: Resolve one channel and locale, preserving exact values and source versions without changing any stored content.
@@ -130,7 +138,6 @@ operations:
             x-osf-i18n: { title: { en: Language, nl: Taal } }
           parameters:
             type: object
-            x-osf-inputFields: parameters
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
     output: { schema: { type: object } }
     errors: []
@@ -175,7 +182,6 @@ operations:
             x-osf-i18n: { title: { en: Language, nl: Taal } }
           parameters:
             type: object
-            x-osf-inputFields: parameters
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
           documentId:
             type: string
@@ -237,21 +243,6 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
-  create:
-    name: Create template version
-    description: Create a template version record.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
-  update:
-    name: Update template version
-    description: Update a template version draft.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
 interfaces:
   rest:
     operations:
@@ -269,21 +260,11 @@ interfaces:
         title: { en: Template versions, nl: Templateversies }
         columns: [{ key: versionNumber }, { key: status }]
       record:
-        routes: { read: "/template-versions/:id", create: /template-versions/new }
+        routes: { read: "/template-versions/:id" }
         title: "{{versionNumber}}"
         actions: [materialize, createDocument]
         layout:
           tabs:
-            - id: parameters
-              label: { en: Parameters, nl: Parameters }
-              groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, parameters] }]
-            - id: variants
-              label: { en: Variants, nl: Varianten }
-              relationship: variants
-        modes:
-          create:
-            title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, parameters] }]
-          update:
-            title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Parameters, nl: Parameters }, fields: [parameters] }]
+            - id: version
+              label: { en: Published version, nl: Gepubliceerde versie }
+              groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, publishedAt, publishedBy, contentHash] }]

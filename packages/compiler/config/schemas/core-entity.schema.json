@@ -104,6 +104,23 @@
         "$ref": "#/$defs/entityIndex"
       }
     },
+    "versioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "versionEntity", "versionsField"],
+      "properties": {
+        "strategy": { "type": "string", "const": "publishedSnapshot" },
+        "versionEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+        "versionsField": { "$ref": "#/$defs/fieldKey" },
+        "snapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ownedRelationships": { "type": "string", "const": "recursive" }
+          }
+        }
+      }
+    },
     "fields": {
       "type": "array",
       "minItems": 1,

@@ -16,6 +16,11 @@ displayTemplate: "{{name}}"
 filterField: name
 indexes:
   - { name: templates_tenant_key_uidx, fields: [tenantId, key], unique: true }
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: TemplateVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
 fields:
   - key: key
     label: { en: Key, nl: Sleutel }
@@ -34,16 +39,26 @@ fields:
     valueType: string
     label: { en: Description, nl: Omschrijving }
     persisted: { column: description, storageClass: core }
+  - key: parameters
+    valueType: object
+    semanticType: fieldDefinition
+    cardinality: collection
+    label: { en: Local variables, nl: Lokale variabelen }
+    persisted: { column: parameters, storageClass: core }
+  - key: variants
+    semanticType: TemplateVariant
+    cardinality: collection
+    relationship: { inverse: template, ownership: owned }
   - key: versions
     label: { en: Versions, nl: Versies }
     semanticType: TemplateVersion
     cardinality: collection
     relationship: { inverse: template, ownership: owned }
 operations:
-  insertVersion:
-    name: { en: Add version, nl: Versie toevoegen }
-    description: Create an owned template version atomically.
-    implementation: { type: collection, action: insert, field: versions }
+  insertVariant:
+    name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
+    description: Create an owned channel and language variant in the editable template.
+    implementation: { type: collection, action: insert, field: variants }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
@@ -92,11 +107,17 @@ interfaces:
         title: "{{name}}"
         layout:
           tabs:
+            - id: variants
+              label: { en: Variants, nl: Varianten }
+              relationship: variants
+            - id: variables
+              label: { en: Variables, nl: Variabelen }
+              groups: [{ title: { en: Local variables, nl: Lokale variabelen }, fields: [parameters] }]
             - id: details
               label: { en: Details, nl: Details }
-              groups: [{ title: { en: Template, nl: Template }, fields: [name, description] }]
+              groups: [{ title: { en: Template, nl: Template }, fields: [name, description, lifecycleStatus, publishedVersion] }]
             - id: versions
-              label: { en: Versions, nl: Versies }
+              label: { en: Version history, nl: Versiehistorie }
               relationship: versions
         modes:
           create:

@@ -17,6 +17,7 @@ layers:
   - connectors/dynamics-finance/authoring
   - connectors/twinfield/authoring
 plugins:
+  - "@openshapeforge/versioning"
   - "@openshapeforge/documents"
   - ./examples/plugins/entity-docs.ts
   # Workflow node catalogs: contributes the platform workflow catalog tables,

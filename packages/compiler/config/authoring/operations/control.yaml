@@ -165,6 +165,66 @@ operations:
       schema:
         type: object
         additionalProperties: false
+        properties:
+          name:
+            type: string
+            maxLength: 200
+            x-osf-i18n: { title: { en: Name, nl: Naam } }
+          slug:
+            type: string
+            maxLength: 120
+            x-osf-i18n: { title: { en: Slug, nl: Slug } }
+          status:
+            type: string
+            maxLength: 50
+            x-osf-i18n: { title: { en: Status, nl: Status } }
+          tenantKind:
+            type: string
+            enum: [standard, blueprint]
+            x-osf-i18n:
+              title: { en: Tenant kind, nl: Tenantsoort }
+              enum:
+                standard: { en: Standard, nl: Standaard }
+                blueprint: { en: Blueprint, nl: Blueprint }
+          organizationAlias:
+            type: string
+            maxLength: 120
+            x-osf-i18n: { title: { en: Organization alias, nl: Organisatie-alias } }
+          relationLabel:
+            type: string
+            maxLength: 200
+            x-osf-i18n: { title: { en: Relation, nl: Relatie } }
+          sortField:
+            type: string
+            enum: [name, slug, status, tenantKind, organizationAlias, relationLabel]
+            default: slug
+            x-osf-i18n:
+              title: { en: Sort field, nl: Sorteerveld }
+              enum:
+                name: { en: Name, nl: Naam }
+                slug: { en: Slug, nl: Slug }
+                status: { en: Status, nl: Status }
+                tenantKind: { en: Tenant kind, nl: Tenantsoort }
+                organizationAlias: { en: Organization alias, nl: Organisatie-alias }
+                relationLabel: { en: Relation, nl: Relatie }
+          sortDirection:
+            type: string
+            enum: [asc, desc]
+            default: asc
+            x-osf-i18n:
+              title: { en: Sort direction, nl: Sorteerrichting }
+              enum:
+                asc: { en: Ascending, nl: Oplopend }
+                desc: { en: Descending, nl: Aflopend }
+          first:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+            x-osf-i18n: { title: { en: Page size, nl: Paginagrootte } }
+          after:
+            type: string
+            x-osf-i18n: { title: { en: Cursor, nl: Cursor } }
     output:
       schema:
         type: object
@@ -215,8 +275,14 @@ operations:
               required: [id, slug, name, status, tenantKind, relationId, relationLabel, keycloakOrganizationId, organizationAlias, installedEntries, overriddenEntries, updatesAvailable]
             x-osf-i18n:
               title: *id003
-        required:
-        - tenants
+          totalCount:
+            type: integer
+            minimum: 0
+            x-osf-i18n: { title: { en: Total tenants, nl: Totaal tenants } }
+          nextCursor:
+            type: [string, 'null']
+            x-osf-i18n: { title: { en: Next cursor, nl: Volgende cursor } }
+        required: [tenants, totalCount, nextCursor]
     auth:
       mode: control
       roles:

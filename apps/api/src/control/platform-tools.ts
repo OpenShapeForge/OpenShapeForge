@@ -196,6 +196,6 @@ export function buildPlatformSessionInfo(input: {
 /** The tenant count for whoami; null rather than a failure when the registry cannot be read. */
 export function listPlatformTenantsCount(context: PlatformCatalogDeps): Promise<number | null> {
   return listPlatformTenants(context)
-    .then((rows) => rows.length)
+    .then((page) => page.totalCount)
     .catch(() => null);
 }

@@ -236,9 +236,7 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
     });
   },
   platformGuide: async () => ({ guide: PLATFORM_GUIDE }),
-  listTenants: async (_input, context) => ({
-    tenants: await listPlatformTenants(catalogDeps(context)),
-  }),
+  listTenants: (input, context) => listPlatformTenants(catalogDeps(context), input),
   getTenant: (input, context) =>
     getPlatformTenant(catalogDeps(context), requireSlug(input, "slug")),
   createTenant: (input, context) => {

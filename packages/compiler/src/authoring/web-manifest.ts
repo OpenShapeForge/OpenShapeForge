@@ -1057,9 +1057,6 @@ export function buildWebManifest(
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
   const projected = projectable.map((entity) => projectEntity(entity, byName));
   const pages = projectStandalone(standalone);
-  for (const entityId of Object.keys(pages?.entities ?? {})) {
-    if (projected.some((entity) => entity.entityId === entityId)) throw new Error(`Duplicate web entity id "${entityId}".`);
-  }
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {
@@ -1085,8 +1082,12 @@ export function buildWebManifest(
     version: 1,
     locale: resolved.locale,
     entities: {
-      ...Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
       ...(pages?.entities ?? {}),
+      // A host's canonical entity projection owns its normal application
+      // route. A provider-backed projection with the same name remains usable
+      // in a dedicated manifest (for example the platform-admin app), but may
+      // not replace the canonical entity in the composed product manifest.
+      ...Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
     },
     ...(pages ? { operations: pages.operations, pages: pages.pages } : {}),
     ...(definitions.length ? { entityValueDefinitions } : {}),

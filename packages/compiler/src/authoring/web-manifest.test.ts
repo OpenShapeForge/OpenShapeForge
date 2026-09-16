@@ -966,6 +966,11 @@ describe("standalone Operation pages", () => {
       { value: "EXPIRED", label: text("Expired", "Verlopen") },
     ]);
     expect(manifest.entities.Tenant?.fields.sentAt?.valueType).toBe("datetime");
+
+    const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
+    const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));
+    expect(composed.entities.Tenant?.operationSource).toBeUndefined();
+    expect(composed.entities.Tenant?.entityId).toBe("Tenant");
   });
 
   test("projects catalog pages and their Operations next to the entities", () => {

@@ -211,13 +211,26 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     const result = await manage('list') as any;
     expect(result.invitations).toHaveLength(1);
     expect(result.invitations[0]).toMatchObject({
-      email: 'admin@example.com', role: 'org_admin', canResend: true,
+      email: 'admin@example.com', role: 'org_admin', canResend: true, canRevoke: true,
+      sentAt: '2026-09-05T22:39:20.000Z', expiresAt: '2026-09-06T10:39:20.000Z',
     });
     expect(JSON.stringify(result)).not.toContain('inviteLink');
     const audit = (await sql<any>`select reason, actor_subject from platform.system_bypass_audit order by started_at desc limit 1`.execute(owner.db)).rows[0];
     expect(audit).toMatchObject({
       reason: 'platform-mcp: control.list-tenant-invitations acme',
       actor_subject: `${administrator.issuer}#operator (platform-admin)`,
+    });
+  });
+
+  it('keeps expired provider history readable without offering an invalid revoke', async () => {
+    pending.add('org-acme:expired@example.com');
+    clients.members.listInvitations = async () => [{
+      id: 'expired-invite', email: 'expired@example.com', firstName: null, lastName: null,
+      status: 'EXPIRED', sentDate: 1788647960, expiresAt: 1788691160,
+    }];
+    const result = await manage('list') as any;
+    expect(result.invitations[0]).toMatchObject({
+      invitationId: 'expired-invite', status: 'EXPIRED', canResend: false, canRevoke: false,
     });
   });
 

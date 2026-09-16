@@ -167,7 +167,9 @@ function mapRelationshipField(field: DetailFieldConfig) {
           ...(field.render.props ? { props: field.render.props } : {}),
         }
       : undefined,
-    options: field.options?.type ? (field.options as Field["options"]) : undefined,
+    options: Array.isArray(field.options)
+      ? ({ type: "static", items: field.options } as Field["options"])
+      : field.options?.type ? (field.options as Field["options"]) : undefined,
   };
 }
 
@@ -298,7 +300,9 @@ function mapDetailFieldToRendererField(field: DetailFieldConfig): Field {
       component: field.render.component,
       ...(field.render.props ? { props: field.render.props } : {}),
     } : undefined,
-    options: field.options?.type ? (field.options as Field["options"]) : undefined,
+    options: Array.isArray(field.options)
+      ? ({ type: "static", items: field.options } as Field["options"])
+      : field.options?.type ? (field.options as Field["options"]) : undefined,
     suggestions: field.suggestions,
     children: field.children?.map(mapDetailFieldToRendererField),
     item: field.item ? mapDetailFieldToRendererField(field.item) : undefined,

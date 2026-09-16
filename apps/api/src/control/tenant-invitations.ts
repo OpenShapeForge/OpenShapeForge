@@ -25,6 +25,14 @@ const AUDIT_ACTION: Readonly<Record<InvitationAction, string>> = {
   resend: "control.resend-tenant-invitation",
 };
 
+function invitationTimestamp(value: number | null): string | null {
+  return value == null ? null : new Date(value * 1000).toISOString();
+}
+
+function invitationCanBeRevoked(status: string | null): boolean {
+  return status?.toUpperCase() !== "EXPIRED";
+}
+
 /** Platform metadata only; never constructs a tenant member session or changes an invited role. */
 export async function manageTenantInvitations(
   deps: Dependencies,
@@ -110,13 +118,14 @@ export async function manageTenantInvitations(
                 firstName: invitation.firstName,
                 lastName: invitation.lastName,
                 status: invitation.status,
-                sentAt: invitation.sentDate,
-                expiresAt: invitation.expiresAt,
+                sentAt: invitationTimestamp(invitation.sentDate),
+                expiresAt: invitationTimestamp(invitation.expiresAt),
                 role: local?.role ?? null,
                 registrationStatus: local?.status ?? "untracked",
                 canResend: Boolean(
                   local?.status === "pending" && tenant.status === "active" && organization.enabled,
                 ),
+                canRevoke: invitationCanBeRevoked(invitation.status),
               };
             }),
             unresolved: rows
@@ -149,9 +158,11 @@ export async function manageTenantInvitations(
           if (!invitation) throw new FirstAdministratorError("INVITATION_NOT_FOUND", "This invitation is no longer outstanding in this organization.");
           const local = localFor(invitation.email);
           return { tenantSlug: input.slug, invitationId: invitation.id, email: invitation.email, firstName: invitation.firstName,
-            lastName: invitation.lastName, status: invitation.status, sentAt: invitation.sentDate, expiresAt: invitation.expiresAt,
+            lastName: invitation.lastName, status: invitation.status,
+            sentAt: invitationTimestamp(invitation.sentDate), expiresAt: invitationTimestamp(invitation.expiresAt),
             role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",
-            canResend: Boolean(local?.status === "pending" && tenant.status === "active" && organization.enabled) };
+            canResend: Boolean(local?.status === "pending" && tenant.status === "active" && organization.enabled),
+            canRevoke: invitationCanBeRevoked(invitation.status) };
         }
         if (!invitation && action === "revoke") {
           const unresolved = rows.find((row) => row.id === input.invitationId && row.status === "pending");

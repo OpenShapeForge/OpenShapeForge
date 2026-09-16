@@ -184,7 +184,7 @@
                       "list": { "$ref": "#/$defs/entityRead" },
                       "get": { "$ref": "#/$defs/entityRead" },
                       "collectionActions": { "$ref": "#/$defs/operationKeys" },
-                      "recordActions": { "$ref": "#/$defs/operationKeys" }
+                      "recordActions": { "$ref": "#/$defs/recordActions" }
                     }
                   },
                   "related": {
@@ -212,6 +212,24 @@
       "operationKeys": {
         "type": "array", "uniqueItems": true,
         "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }
+      },
+      "recordActions": {
+        "type": "array",
+        "uniqueItems": true,
+        "items": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operation"],
+              "properties": {
+                "operation": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+                "visibleWhen": { "$ref": "core-entity.schema.json#/$defs/field/properties/visibility" }
+              }
+            }
+          ]
+        }
       },
       "entityRead": {
         "type": "object",

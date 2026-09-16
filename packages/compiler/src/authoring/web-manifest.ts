@@ -883,11 +883,14 @@ function projectStandalone(
     }
 
     for (const [entityName, entity] of Object.entries(web.entities ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+      const recordActionKeys = (entity.operations.recordActions ?? []).map((action) =>
+        typeof action === "string" ? action : action.operation
+      );
       const operationKeys = [
         entity.operations.list.operation,
         ...(entity.operations.get ? [entity.operations.get.operation] : []),
         ...(entity.operations.collectionActions ?? []),
-        ...(entity.operations.recordActions ?? []),
+        ...recordActionKeys,
       ];
       const refs = Object.fromEntries(operationKeys.map((key) => {
         const ref = operationRef(key);
@@ -905,17 +908,46 @@ function projectStandalone(
       if (!recordProperties) {
         throw new Error(`Operation-backed entity "${entityName}" list result "${entity.operations.list.resultField}" must be an array of objects with properties.`);
       }
+      for (const action of entity.operations.recordActions ?? []) {
+        if (typeof action === "string" || !action.visibleWhen) continue;
+        for (const condition of action.visibleWhen.conditions) {
+          if (!recordProperties[condition.field]) {
+            throw new Error(
+              `Operation-backed entity "${entityName}" record action "${action.operation}" ` +
+                `visibility field "${condition.field}" is absent from its list result schema.`,
+            );
+          }
+        }
+      }
       const fields = Object.fromEntries(entity.fields.map((key) => {
         const schema = recordProperties[key];
         if (!schema) throw new Error(`Operation-backed entity "${entityName}" field "${key}" is absent from its list result schema.`);
-        const title = (schema["x-osf-i18n"] as { title?: CompiledLocalizedText } | undefined)?.title;
+        const i18n = schema["x-osf-i18n"] as {
+          title?: CompiledLocalizedText;
+          enum?: Record<string, CompiledLocalizedText>;
+        } | undefined;
+        const title = i18n?.title;
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
+        const valueType = schema.format === "date-time"
+          ? "datetime"
+          : schema.format === "date"
+            ? "date"
+            : typeof rawType === "string" ? rawType : "string";
+        const enumValues = Array.isArray(schema.enum)
+          ? schema.enum.filter((value): value is string => typeof value === "string")
+          : Object.keys(i18n?.enum ?? {});
         return [key, {
           id: `${entityName}.${key}`,
           key,
           label: localized(title, key),
           description: localized(undefined, ""),
-          valueType: typeof rawType === "string" ? rawType : "string",
+          valueType,
+          ...(enumValues.length ? {
+            options: enumValues.map((value) => ({
+              value,
+              label: localized(i18n?.enum?.[value], value),
+            })),
+          } : {}),
           cardinality: "one" as const,
           required: false,
           supports: { read: true, create: false, update: false },
@@ -923,7 +955,15 @@ function projectStandalone(
       }));
       const listRef = refs[entity.operations.list.operation]!;
       const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
-      const recordActions = (entity.operations.recordActions ?? []).map((key) => refs[key]!);
+      const recordActions = (entity.operations.recordActions ?? []).map((action) => {
+        const key = typeof action === "string" ? action : action.operation;
+        return {
+          ...refs[key]!,
+          ...(typeof action === "string" || !action.visibleWhen
+            ? {}
+            : { visibleWhen: action.visibleWhen }),
+        };
+      });
       const collectionActions = (entity.operations.collectionActions ?? []).map((key) => refs[key]!);
       const recordRoute = entity.recordRoute ?? `${entity.route}/:${entity.idField}`;
       entities[entityName] = {

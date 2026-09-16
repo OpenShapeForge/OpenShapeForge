@@ -55,7 +55,7 @@ describe("granting a client role onto a person's user", () => {
       "http://keycloak.test:8080/admin/realms/openshapeforge/clients?clientId=hubble-api",
     );
     expect(calls[2]!.url).toBe(
-      "http://keycloak.test:8080/admin/realms/openshapeforge/clients/client-uuid/roles",
+      "http://keycloak.test:8080/admin/realms/openshapeforge/clients/client-uuid/roles?first=0&max=100",
     );
     const roleMappingCall = calls[3]!;
     expect(roleMappingCall.url).toBe(
@@ -98,6 +98,28 @@ describe("granting a client role onto a person's user", () => {
     );
 
     expect(effective).toEqual(["org_admin", "Relations.All.ReadWrite"]);
+  });
+
+  it("finds persona roles beyond Keycloak's first roles page", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `role-${index}`,
+      name: `Capability.${index}`,
+      composite: false,
+    }));
+    const { fetch, calls } = stubFetch([
+      () => Response.json([{ id: "client-uuid", clientId: "hubble-api" }]),
+      () => Response.json(firstPage),
+      () => Response.json([{ id: "admin", name: "org_admin", composite: false }]),
+      () => new Response(null, { status: 204 }),
+    ]);
+
+    await createMemberRoleAdminClient(config, { fetch }).grantClientRoles(
+      "user-sub-123",
+      "hubble-api",
+      ["org_admin"],
+    );
+
+    expect(calls[3]!.url).toContain("roles?first=100&max=100");
   });
 
   it("refuses a role name that does not exist on the client, rather than silently granting fewer", async () => {

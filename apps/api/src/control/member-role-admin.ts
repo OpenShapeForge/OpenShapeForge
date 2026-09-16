@@ -200,8 +200,17 @@ export function createMemberRoleAdminClient(
     const clientUuid = (Array.isArray(clients) ? clients : []).map((row) => (row as Record<string, unknown>).id)
       .find((id): id is string => typeof id === "string");
     if (!clientUuid) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", `Client "${clientId}" does not exist in this realm.`);
-    const { body: available } = await request(`/clients/${encodeURIComponent(clientUuid)}/roles`, { method: "GET" });
-    const byName = new Map((Array.isArray(available) ? available : []).map((row) => row as Record<string, unknown>)
+    const available: unknown[] = [];
+    for (let first = 0; ; first += 100) {
+      const { body: page } = await request(
+        `/clients/${encodeURIComponent(clientUuid)}/roles?first=${first}&max=100`,
+        { method: "GET" },
+      );
+      const rows = Array.isArray(page) ? page : [];
+      available.push(...rows);
+      if (rows.length < 100) break;
+    }
+    const byName = new Map(available.map((row) => row as Record<string, unknown>)
       .filter((row): row is { id: string; name: string; composite?: boolean } => typeof row.id === "string" && typeof row.name === "string")
       .map((row) => [row.name, row]));
     const missing = roleNames.filter((name) => !byName.has(name));

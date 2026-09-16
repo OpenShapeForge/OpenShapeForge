@@ -15,7 +15,10 @@ const source = () => {
   const template = loadEntity(authoringDir, "template").coreEntity;
   const parameterField = template.fields.find(field => field.key === "parameters")!;
   artifacts.coreEntity.fields.push(structuredClone(parameterField));
-  const materializeParameters = artifacts.coreEntity.operations!.materialize!.input!.schema.properties!.parameters as Record<string, unknown>;
+  const materializeSchema = artifacts.coreEntity.operations!.materialize!.input!.schema as {
+    properties: Record<string, unknown>;
+  };
+  const materializeParameters = materializeSchema.properties.parameters as Record<string, unknown>;
   materializeParameters["x-osf-inputFields"] = "parameters";
   return artifacts;
 };

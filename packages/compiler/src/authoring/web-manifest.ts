@@ -27,6 +27,7 @@ import type {
 } from "./types.js";
 import type {
   LocalizedText as WebLocalizedText,
+  WebCollectionQueryContract,
   WebCollectionView,
   WebCustomOperationRef,
   WebEntityInterface,
@@ -801,6 +802,78 @@ type ProjectedStandalone = {
   metadata: { path: string; value: unknown }[];
 };
 
+type OperationEntityCollectionQuery = {
+  input: WebCollectionQueryContract;
+  nextCursorField: string;
+  totalCountField: string;
+  defaultSort?: { key: string; direction: "asc" | "desc" };
+};
+
+function objectProperties(schema: unknown): Record<string, Record<string, unknown>> {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return {};
+  const properties = (schema as { properties?: unknown }).properties;
+  return properties && typeof properties === "object" && !Array.isArray(properties)
+    ? properties as Record<string, Record<string, unknown>>
+    : {};
+}
+
+/**
+ * A module list Operation opts into the same query contract as generated CRUD
+ * by declaring the standard first/after/sortField/sortDirection schema. The
+ * Operation remains authoritative: only entity fields accepted by its input
+ * and sort enum are offered to Web, and pagination is projected only when the
+ * Operation also returns the standard cursor and count fields.
+ */
+function operationEntityCollectionQuery(
+  operationId: string,
+  inputSchema: unknown,
+  outputSchema: unknown,
+  fields: readonly string[],
+): OperationEntityCollectionQuery | undefined {
+  const input = objectProperties(inputSchema);
+  const reserved = ["first", "after", "sortField", "sortDirection"] as const;
+  if (!reserved.some((key) => key in input)) return undefined;
+  const missing = reserved.filter((key) => !(key in input));
+  if (missing.length) {
+    throw new Error(`Operation-backed list "${operationId}" has an incomplete collection query; missing ${missing.join(", ")}.`);
+  }
+  const first = input.first!;
+  const defaultLimit = first.default;
+  const maxLimit = first.maximum;
+  if (!Number.isInteger(defaultLimit) || !Number.isInteger(maxLimit) || Number(defaultLimit) < 1 || Number(maxLimit) < Number(defaultLimit)) {
+    throw new Error(`Operation-backed list "${operationId}" must declare integer first.default and first.maximum bounds.`);
+  }
+  const allowedFields = new Set(fields);
+  const filterFields = fields.filter((field) => field in input);
+  const sortFields = Array.isArray(input.sortField!.enum)
+    ? input.sortField!.enum.filter((field): field is string => typeof field === "string" && allowedFields.has(field))
+    : [];
+  if (sortFields.length === 0) {
+    throw new Error(`Operation-backed list "${operationId}" must offer at least one entity field in sortField.enum.`);
+  }
+  const output = objectProperties(outputSchema);
+  if (!("nextCursor" in output) || !("totalCount" in output)) {
+    throw new Error(`Operation-backed list "${operationId}" must return nextCursor and totalCount for collection pagination.`);
+  }
+  const defaultSortField = input.sortField!.default;
+  const defaultSortDirection = input.sortDirection!.default;
+  const defaultSort: OperationEntityCollectionQuery["defaultSort"] = typeof defaultSortField === "string" && sortFields.includes(defaultSortField)
+    && (defaultSortDirection === "asc" || defaultSortDirection === "desc")
+    ? { key: defaultSortField, direction: defaultSortDirection }
+    : undefined;
+  return {
+    input: {
+      kind: "collection-query",
+      filterFields,
+      sortFields,
+      pagination: { kind: "cursor", defaultLimit: Number(defaultLimit), maxLimit: Number(maxLimit) },
+    },
+    nextCursorField: "nextCursor",
+    totalCountField: "totalCount",
+    ...(defaultSort ? { defaultSort } : {}),
+  };
+}
+
 /**
  * Project the web block of every standalone catalog. Pages are keyed by their
  * authored id and routed at `/<id>` relative to the surface root; the host
@@ -959,6 +1032,12 @@ function projectStandalone(
         }];
       }));
       const listRef = refs[entity.operations.list.operation]!;
+      const listQuery = operationEntityCollectionQuery(
+        listRef.id,
+        listDefinition.input?.schema,
+        listDefinition.output?.schema,
+        entity.fields,
+      );
       const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
       const recordActions = (entity.operations.recordActions ?? []).map((action) => {
         const key = typeof action === "string" ? action : action.operation;
@@ -983,6 +1062,11 @@ function projectStandalone(
           collection: {
             resultField: entity.operations.list.resultField,
             ...(entity.operations.list.bindings ? { bindings: entity.operations.list.bindings } : {}),
+            ...(listQuery ? { query: {
+              input: listQuery.input,
+              nextCursorField: listQuery.nextCursorField,
+              totalCountField: listQuery.totalCountField,
+            } } : {}),
           },
           ...(entity.operations.get ? { record: {
             ...(entity.operations.get.resultField ? { resultField: entity.operations.get.resultField } : {}),
@@ -1000,6 +1084,7 @@ function projectStandalone(
             title: localized(entity.title, entityName),
             searchPlaceholder: localized(undefined, `Search ${entityName}`),
             displayField: entity.displayField,
+            ...(listQuery?.defaultSort ? { defaultSort: listQuery.defaultSort } : {}),
             columns: entity.columns.map((key) => ({ fieldId: `${entityName}.${key}`, key, label: fields[key]!.label })),
           },
           ...(getRef ? { record: {

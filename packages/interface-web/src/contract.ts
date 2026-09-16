@@ -283,6 +283,12 @@ export type WebEntityInterface = {
       resultField: string;
       /** Operation input field -> route parameter. Equal names need no entry. */
       bindings?: Record<string, string>;
+      /** Canonical query capabilities declared by the list Operation itself. */
+      query?: {
+        input: WebCollectionQueryContract;
+        nextCursorField: string;
+        totalCountField?: string;
+      };
     };
     record?: {
       resultField?: string;

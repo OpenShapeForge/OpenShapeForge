@@ -912,6 +912,13 @@ describe("standalone Operation pages", () => {
         ...controlCatalog.operations,
         listTenants: {
           ...controlCatalog.operations.listTenants!,
+          input: { schema: { type: "object", additionalProperties: false, properties: {
+            name: { type: "string" }, slug: { type: "string" }, status: { type: "string" },
+            sortField: { type: "string", enum: ["name", "slug", "status"], default: "slug" },
+            sortDirection: { type: "string", enum: ["asc", "desc"], default: "asc" },
+            first: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+            after: { type: "string" },
+          } } },
           output: { schema: { type: "object", additionalProperties: false, properties: {
             tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
               slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
@@ -926,7 +933,9 @@ describe("standalone Operation pages", () => {
               sentAt: { type: "string", format: "date-time", "x-osf-i18n": { title: text("Sent at", "Verzonden op") } },
               canUpdate: { type: "boolean", "x-osf-i18n": { title: text("Can update") } },
             }, required: ["slug", "name", "status", "sentAt", "canUpdate"] }, "x-osf-i18n": { title: text("Tenants") } },
-          }, required: ["tenants"] } },
+            totalCount: { type: "integer" },
+            nextCursor: { type: ["string", "null"] },
+          }, required: ["tenants", "totalCount", "nextCursor"] } },
         },
       },
       interfaces: { ...controlCatalog.interfaces, web: {
@@ -949,9 +958,14 @@ describe("standalone Operation pages", () => {
     const manifest = buildWebManifest([], {}, standalone(operationEntities));
     expect(manifest.entities.Tenant).toMatchObject({
       entityId: "Tenant",
-      operationSource: { idField: "slug", collection: { resultField: "tenants" }, record: {} },
+      operationSource: { idField: "slug", collection: { resultField: "tenants", query: {
+        input: { kind: "collection-query", filterFields: ["slug", "name", "status"], sortFields: ["name", "slug", "status"],
+          pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 100 } },
+        nextCursorField: "nextCursor", totalCountField: "totalCount",
+      } }, record: {} },
       views: {
-        collection: { renderer: "operation.entity.collection", route: "/tenants", operations: { read: { id: "control.list-tenants" } } },
+        collection: { renderer: "operation.entity.collection", route: "/tenants", defaultSort: { key: "slug", direction: "asc" },
+          operations: { read: { id: "control.list-tenants" } } },
         record: { renderer: "operation.entity.record", routes: { read: "/tenants/:slug" }, operations: {
           read: { id: "control.get-tenant" }, actions: [{
             id: "control.update-tenant",

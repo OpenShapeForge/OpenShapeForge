@@ -103,6 +103,7 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
       tenantRealm: 'tenant',
       organizations: { getOrganization: async id => ({ id, alias: id.slice(4), name: id, enabled: true }) },
       members: {
+        hasMemberByEmail: async (_id, email) => admins.some(admin => admin.email?.toLowerCase() === email.toLowerCase()),
         hasInvitationMailConfiguration: async () => smtp,
         organizationAdministrators: async () => admins,
         findPendingInvitationByEmail: async (id, email) => pending.has(`${id}:${email}`) ? { id: 'invite', email } as never : null,
@@ -168,11 +169,13 @@ describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keyc
     expect((await invite()).status).toBe('pending'); expect(sends).toHaveLength(0);
     expect((await sql`select * from platform.employee_invitations`.execute(owner.db)).rows).toHaveLength(1);
   });
-  it('refuses an existing different administrator; same administrator is a no-op', async () => {
+  it('refuses an existing different administrator; same administrator gets local admission without mail', async () => {
     admins = [{ email: 'someone@example.com' }];
     await expect(invite()).rejects.toMatchObject({ code: 'FIRST_ADMIN_ALREADY_ASSIGNED' });
     admins = [{ email: 'admin@example.com' }];
-    expect((await invite()).status).toBe('already_admin'); expect(sends).toHaveLength(0);
+    expect((await invite()).status).toBe('pending'); expect(sends).toHaveLength(0);
+    expect((await sql<any>`select email, role, status from platform.employee_invitations`.execute(owner.db)).rows)
+      .toEqual([{ email: 'admin@example.com', role: 'org_admin', status: 'pending' }]);
   });
   it('does not elevate a pending employee invitation', async () => {
     await sql`insert into platform.employee_invitations (tenant_id,email,role,invited_by)

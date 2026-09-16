@@ -91,9 +91,13 @@ function sessionFor(tenantId: string, roles: string[]) {
 function fakeKeycloak(): KeycloakOrganizationMembersClient & {
   calls: Array<{ organizationId: string; email: string }>;
   pending: Array<{ id: string; organizationId: string; email: string }>;
+  members: Set<string>;
 } {
   const calls: Array<{ organizationId: string; email: string }> = [];
   const pending: Array<{ id: string; organizationId: string; email: string }> = [];
+  const members = new Set<string>();
+  const memberKey = (organizationId: string, email: string) =>
+    `${organizationId}:${email.trim().toLowerCase()}`;
   const match = (organizationId: string, email: string) =>
     pending.findIndex(
       (row) =>
@@ -112,6 +116,10 @@ function fakeKeycloak(): KeycloakOrganizationMembersClient & {
   return {
     calls,
     pending,
+    members,
+    async hasMemberByEmail(organizationId, email) {
+      return members.has(memberKey(organizationId, email));
+    },
     async inviteUser(organizationId, input) {
       calls.push({ organizationId, email: input.email });
       if (match(organizationId, input.email) >= 0) {
@@ -227,6 +235,34 @@ describe("employee invitations", () => {
         // And the Keycloak side is scoped by organization too, so B's attempt
         // could not have withdrawn A's invitation even before RLS spoke.
         expect(keycloak.pending).toHaveLength(1);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "an existing Keycloak member gets local admission without redundant mail",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const keycloak = fakeKeycloak();
+        keycloak.members.add("kc-org-a:existing@example.com");
+
+        const invitation = await inviteEmployee(
+          appDb,
+          sessionFor(tenantA, ADMIN_ROLES),
+          keycloak,
+          { email: "Existing@Example.com", role: "org_admin" },
+        );
+
+        expect(invitation).toMatchObject({
+          email: "Existing@Example.com",
+          role: "org_admin",
+          status: "pending",
+        });
+        expect(keycloak.calls).toEqual([]);
+        expect(await listInvitations(appDb, sessionFor(tenantA, ADMIN_ROLES)))
+          .toHaveLength(1);
       });
     },
     TEST_TIMEOUT,

@@ -5,10 +5,10 @@
  * way `link_identity` is (`IDENTITY_LINK_ADMIN_ROLE`, i.e.
  * `Organization.All.ReadWrite`):
  *
- *   inviteEmployee    — call Keycloak's Organization `invite-user` (a mail
- *                       with a signed action-token link the person accepts;
- *                       see keycloak-organization-members.ts for what that
- *                       endpoint does and does not persist) and record the
+ *   inviteEmployee    — converge Keycloak Organization membership with a
+ *                       local admission. A new member receives Keycloak's
+ *                       signed invitation e-mail; an existing member skips
+ *                       that redundant delivery. Both paths record the
  *                       intended role in `platform.employee_invitations` so
  *                       it can be applied once the person actually signs in.
  *   listInvitations   — the tenant's invitations still `status = 'pending'`.
@@ -250,11 +250,11 @@ export function toInvitation(row: InvitationRow): EmployeeInvitation {
 
 /**
  * Invite `input.email` into the tenant's Keycloak Organization and record the
- * pre-selected role. The Keycloak call happens first: recording an intent
- * this deployment never actually sent is worse than a Keycloak call whose
- * intent never got recorded (the administrator can retry `invite_employee`
- * either way, and a lost DB row after a successful invite is the strictly
- * safer failure of the two — the person still gets the e-mail).
+ * pre-selected role. An existing organization member needs no second e-mail,
+ * but still needs this local admission record: Keycloak membership alone does
+ * not create an OSF Relation or identity link. A 409 is accepted only after a
+ * fresh membership read proves that this exact address became a member in a
+ * race; every other Keycloak failure remains fail-closed.
  */
 export async function inviteEmployee(
   db: OpenShapeForgeDatabase,
@@ -278,11 +278,20 @@ export async function inviteEmployee(
   );
 
   try {
-    await keycloak.inviteUser(organizationId, {
-      email,
-      firstName: input.firstName,
-      lastName: input.lastName,
-    });
+    const existingMember = await keycloak.hasMemberByEmail(organizationId, email);
+    if (!existingMember) {
+      try {
+        await keycloak.inviteUser(organizationId, {
+          email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+        });
+      } catch (error) {
+        const converged = error instanceof KeycloakAdminError && error.status === 409 &&
+          await keycloak.hasMemberByEmail(organizationId, email);
+        if (!converged) throw error;
+      }
+    }
   } catch (error) {
     rethrowKeycloakError(error);
   }

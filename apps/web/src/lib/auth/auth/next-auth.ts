@@ -6,7 +6,7 @@ import { getSession, setSession } from "../redis";
 import type { StoredSession } from "../redis";
 import {
   decodeJwtExp,
-  hasApplicationRealmRole,
+  hasApplicationTenantContext,
   mergeUserProfileIntoStoredSession,
   resolveInitialActorType,
   resolveInitialGroups,
@@ -29,12 +29,14 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
   secret: authSecret,
   providers,
   callbacks: {
-    async signIn({ account }) {
+    async signIn({ account, profile }) {
       const accessTokenClaims = readJwtClaims(account?.access_token as string | undefined);
       const idTokenClaims = readJwtClaims(account?.id_token as string | undefined);
-      const roles = resolveInitialRoles(accessTokenClaims, idTokenClaims, undefined);
-
-      return hasApplicationRealmRole(roles);
+      return hasApplicationTenantContext(
+        profile as Record<string, unknown> | undefined,
+        accessTokenClaims,
+        idTokenClaims,
+      );
     },
 
     async jwt({ token, account, profile }) {
@@ -44,7 +46,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
         const idTokenClaims = readJwtClaims(account.id_token as string | undefined);
         const roles = resolveInitialRoles(accessTokenClaims, idTokenClaims, prof);
         const tenantId = resolveInitialTenantId(prof, accessTokenClaims, idTokenClaims);
-        const groups = resolveInitialGroups(accessTokenClaims, idTokenClaims, prof, tenantId, roles);
+        const groups = resolveInitialGroups(accessTokenClaims, idTokenClaims, prof);
         const actorType = resolveInitialActorType(tenantId, prof, accessTokenClaims, idTokenClaims);
         const storedUserProfile = parseUserProfile({
           sub: token.sub,

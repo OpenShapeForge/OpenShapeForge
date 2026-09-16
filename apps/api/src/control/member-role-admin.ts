@@ -107,6 +107,7 @@ export type MemberRoleAdminClient = {
    * grant that did not fully happen.
    */
   grantClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<void>;
+  revokeClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<void>;
 
   /**
    * End the user's regular SSO sessions and the refresh tokens issued under
@@ -194,53 +195,40 @@ export function createMemberRoleAdminClient(
     );
   }
 
+  async function roleRepresentations(clientId: string, roleNames: readonly string[]) {
+    const { body: clients } = await request(`/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" });
+    const clientUuid = (Array.isArray(clients) ? clients : []).map((row) => (row as Record<string, unknown>).id)
+      .find((id): id is string => typeof id === "string");
+    if (!clientUuid) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", `Client "${clientId}" does not exist in this realm.`);
+    const { body: available } = await request(`/clients/${encodeURIComponent(clientUuid)}/roles`, { method: "GET" });
+    const byName = new Map((Array.isArray(available) ? available : []).map((row) => row as Record<string, unknown>)
+      .filter((row): row is { id: string; name: string } => typeof row.id === "string" && typeof row.name === "string")
+      .map((row) => [row.name, row]));
+    const missing = roleNames.filter((name) => !byName.has(name));
+    if (missing.length) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", `Roles do not exist on client "${clientId}": ${missing.sort().join(", ")}.`);
+    return { clientUuid, roles: roleNames.map((name) => byName.get(name)!) };
+  }
+
   return {
     async grantClientRoles(userId, clientId, roleNames) {
       if (roleNames.length === 0) return;
-
-      const { body: clients } = await request(
-        `/clients?clientId=${encodeURIComponent(clientId)}`,
-        { method: "GET" },
-      );
-      const clientUuid = (Array.isArray(clients) ? clients : [])
-        .map((row) => (row as Record<string, unknown>).id)
-        .find((id): id is string => typeof id === "string");
-      if (!clientUuid) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_REJECTED",
-          `Client "${clientId}" does not exist in this realm.`,
-        );
-      }
-
-      const { body: available } = await request(
-        `/clients/${encodeURIComponent(clientUuid)}/roles`,
-        { method: "GET" },
-      );
-      const byName = new Map(
-        (Array.isArray(available) ? available : [])
-          .map((row) => row as Record<string, unknown>)
-          .filter(
-            (row): row is { id: string; name: string } =>
-              typeof row.id === "string" && typeof row.name === "string",
-          )
-          .map((row) => [row.name, row]),
-      );
-
-      const missing = roleNames.filter((name) => !byName.has(name));
-      if (missing.length > 0) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_REJECTED",
-          `Roles do not exist on client "${clientId}": ${missing.sort().join(", ")}.`,
-        );
-      }
+      const resolved = await roleRepresentations(clientId, roleNames);
 
       await request(
-        `/users/${encodeURIComponent(userId)}/role-mappings/clients/${encodeURIComponent(clientUuid)}`,
+        `/users/${encodeURIComponent(userId)}/role-mappings/clients/${encodeURIComponent(resolved.clientUuid)}`,
         {
           method: "POST",
-          body: JSON.stringify(roleNames.map((name) => byName.get(name))),
+          body: JSON.stringify(resolved.roles),
         },
       );
+    },
+
+    async revokeClientRoles(userId, clientId, roleNames) {
+      if (roleNames.length === 0) return;
+      const resolved = await roleRepresentations(clientId, roleNames);
+      await request(`/users/${encodeURIComponent(userId)}/role-mappings/clients/${encodeURIComponent(resolved.clientUuid)}`, {
+        method: "DELETE", body: JSON.stringify(resolved.roles),
+      });
     },
 
     async forceReauthentication(userId) {

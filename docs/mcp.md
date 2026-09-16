@@ -32,6 +32,25 @@ not generated-CRUD enabled fails the build, exactly as `rest:` does — MCP tool
 delegate to the CRUD layer, so the authoring intent would otherwise evaporate
 silently.
 
+Strict-v2 entities keep this technical projection under `interfaces.mcp` and
+name canonical operations rather than CRUD action flags:
+
+```yaml
+interfaces:
+  mcp:
+    tools: generic # optional; omitted means dedicated
+    operations:
+      delete: false # the only authored entry: an interface-specific exclusion
+```
+
+Declaring an interface projects every canonical Operation declared by the
+entity. Do not write `operations: all` (there is no such sentinel) and do not
+repeat the common list. The optional `operations` map contains only real
+interface-specific instructions or `false` exclusions.
+
+`tools` changes only how the projected operations are advertised. It does not
+define a new operation, permission, workflow, or product concept.
+
 The common entity `crud.operations` policy is the upper bound. MCP operation
 flags may hide additional tools but cannot restore an operation disabled by
 that policy; the shared CRUD service enforces the same decision at invocation.
@@ -178,10 +197,12 @@ longer exists (`ORGANIZATION_SCOPE_*`), and a re-apply
 (`POST /api/control/v1/reconciliation/reapply`) repairs all four in one
 realm-wide pass — the only place the control plane deletes anything in
 Keycloak, because a scope is derived configuration with no members behind it.
-The scope is hidden from consent and from the provider metadata, and is
-attached as an *optional* scope to the configured clients and to the realm's
-default optional scopes, so dynamically registered MCP clients can request it
-too. What it is provisioned for comes from the control plane's environment:
+The scope is hidden from consent and from the provider metadata. It is attached
+only to the explicitly configured tenant clients; it is never a realm default.
+Dynamic clients may request it when the DCR allow-list admits that exact scope,
+without causing unrelated clients (such as the platform-admin MCP client) to
+inherit it. What it is provisioned for comes from the control plane's
+environment:
 
 | variable | meaning |
 | --- | --- |
@@ -205,16 +226,19 @@ another path is `403`.
 ### The platform administrator resource
 
 `/api/control/mcp` is a different server on the same transport plumbing: the
-control plane's MCP for a platform administrator, who has no tenant. It
+control plane's MCP for a control-realm user, who has no tenant. It
 authenticates against the **control** realm (its metadata document names that
-realm as authorization server), requires the realm role `platform_admin`, and
-offers a deliberately bounded set of tools for tenant inventory, integration
-catalog administration, update notices, first-administrator bootstrap and the
-safe platform audit projection. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
+realm as authorization server), requires `platform_admin` or
+`platform-operator`, and exposes only the Operations allowed by the user's
+roles. `platform-operator` owns tenant lifecycle, organization changes and
+reconciliation; `platform_admin` owns catalog administration, update notices
+and audit; both can inspect shared platform state. See
+[api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
 
 ## Tool surface
 
-Two catalog styles, chosen per entity:
+Two catalog styles, chosen per entity with either legacy `mcp.tools` or
+strict-v2 `interfaces.mcp.tools`:
 
 - **`dedicated`** (default) — one tool per enabled operation:
   `relation_list`, `relation_get`, `relation_create`, `relation_update`,

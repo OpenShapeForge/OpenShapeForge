@@ -1,24 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The platform administrator MCP's tool contracts: the list a client sees,
- * the argument validation that runs BEFORE any elevation, the whoami
- * projection, and how a refusal is presented.
- *
- * No database: every case here is refused (or answered) before the system
- * session would open, or is a pure projection. The database path is covered
- * by the plugin's own catalog tests and the runtime proof.
+ * What the platform administrator MCP says about itself: the guide the
+ * `platform_guide` Operation returns, and the whoami projection. Pure; no
+ * database. The Operations themselves are covered by
+ * control-operations.unit.test.ts.
  */
 import { describe, expect, it } from "bun:test";
 import type { PlatformAdministrator } from "../platform-admin.js";
-import {
-  buildPlatformSessionInfo,
-  callPlatformTool,
-  failedPlatformTool,
-  PLATFORM_GUIDE,
-  PLATFORM_TOOLS,
-  type PlatformToolContext,
-} from "../platform-tools.js";
-import { PlatformCatalogError } from "../platform-catalog.js";
+import { buildPlatformSessionInfo, PLATFORM_GUIDE, PLATFORM_SERVER_INSTRUCTIONS } from "../platform-tools.js";
 
 const NOW = Date.parse("2026-09-05T10:00:00.000Z");
 
@@ -32,176 +21,13 @@ const administrator: PlatformAdministrator = {
   expiresAtMs: NOW + 12 * 60_000,
 };
 
-/** A context whose database would explode if touched: the point is that it is not. */
-const untouchable: PlatformToolContext = {
-  db: new Proxy({}, { get: () => { throw new Error("database touched"); } }) as never,
-  administrator,
-  provider: undefined,
-  access: () => ({ tools: PLATFORM_TOOLS.length, resources: 1 }),
-};
-
-function errorOf(result: Awaited<ReturnType<typeof callPlatformTool>>) {
-  expect(result.isError).toBe(true);
-  return (result.structuredContent as { error: { code: string; message: string } }).error;
-}
-
-describe("the tool list", () => {
-  it("is exactly the platform surface, every tool with a title, description and closed schema", () => {
-    expect(PLATFORM_TOOLS.map((tool) => tool.name)).toEqual([
-      "invite_first_tenant_admin",
-      "whoami",
-      "platform_guide",
-      "list_tenants",
-      "get_tenant",
-      "create_tenant",
-      "update_tenant",
-      "get_tenant_organization_tree",
-      "create_tenant_organization",
-      "update_tenant_organization",
-      "get_reconciliation_report",
-      "reapply_reconciliation",
-      "list_platform_audit",
-      "list_catalog_entries",
-      "get_catalog_entry",
-      "publish_catalog_entry",
-      "retire_catalog_entry",
-      "publish_update_notice",
-      "list_update_notices",
-      "withdraw_update_notice",
-      "apply_catalog_update_for_tenant",
-    ]);
-    for (const tool of PLATFORM_TOOLS) {
-      expect(tool.title?.length).toBeGreaterThan(0);
-      expect(tool.description?.length).toBeGreaterThan(60);
-      expect(tool.inputSchema.type).toBe("object");
-      expect((tool.inputSchema as { additionalProperties?: boolean }).additionalProperties).toBe(false);
-    }
-  });
-
-  it("marks reads read-only and the two platform-wide writes as not", () => {
-    const annotations = Object.fromEntries(
-      PLATFORM_TOOLS.map((tool) => [tool.name, tool.annotations?.readOnlyHint]),
-    );
-    expect(annotations.list_catalog_entries).toBe(true);
-    expect(annotations.list_platform_audit).toBe(true);
-    expect(annotations.get_tenant_organization_tree).toBe(true);
-    expect(annotations.get_reconciliation_report).toBe(true);
-    expect(annotations.create_tenant).toBe(false);
-    expect(annotations.update_tenant).toBe(false);
-    expect(annotations.reapply_reconciliation).toBe(false);
-    expect(annotations.publish_catalog_entry).toBe(false);
-    expect(annotations.retire_catalog_entry).toBe(false);
-    expect(annotations.apply_catalog_update_for_tenant).toBe(false);
-    expect(PLATFORM_TOOLS.find((tool) => tool.name === "retire_catalog_entry")?.annotations?.destructiveHint).toBe(true);
-  });
-
-  it("requires kind and key where a key is addressed, and the slug for the per-tenant force", () => {
-    const required = Object.fromEntries(
-      PLATFORM_TOOLS.map((tool) => [tool.name, (tool.inputSchema as { required?: string[] }).required ?? []]),
-    );
-    expect(required.get_catalog_entry).toEqual(["kind", "key"]);
-    expect(required.publish_catalog_entry).toEqual(["kind", "key", "definition"]);
-    expect(required.retire_catalog_entry).toEqual(["kind", "key"]);
-    expect(required.apply_catalog_update_for_tenant).toEqual(["slug", "kind", "key"]);
-    expect(required.create_tenant).toEqual(["slug", "name"]);
-    expect(required.create_tenant_organization).toEqual(["tenantSlug", "slug", "name"]);
-    expect(required.update_tenant_organization).toEqual(["tenantSlug", "orgUnitId"]);
-  });
-});
-
-describe("argument validation happens before any elevation", () => {
-  it("bounds first-admin invitations to slug/email and refuses missing configuration before DB access", async () => {
-    for (const field of ['role', 'organizationId', 'tenantId', 'actor']) {
-      expect(errorOf(await callPlatformTool('invite_first_tenant_admin', { slug: 'acme', email: 'admin@example.com', [field]: 'injected' }, untouchable)).code).toBe('CONTROL_INVALID_INPUT');
-    }
-    expect(errorOf(await callPlatformTool('invite_first_tenant_admin', { slug: 'acme', email: 'invalid' }, untouchable)).code).toBe('INVALID_INPUT');
-    expect(errorOf(await callPlatformTool('invite_first_tenant_admin', { slug: 'acme', email: 'admin@example.com' }, untouchable)).code).toBe('INVITATIONS_NOT_CONFIGURED');
-  });
-  it("refuses an unknown tool as NOT_FOUND without listing what exists", async () => {
-    const error = errorOf(await callPlatformTool("finding_list", {}, untouchable));
-    expect(error.code).toBe("CONTROL_TENANT_NOT_FOUND");
-    expect(error.message).not.toContain("publish_catalog_entry");
-  });
-
-  it("refuses a bad kind, a non-kebab key and a missing definition as invalid input", async () => {
-    expect(errorOf(await callPlatformTool("get_catalog_entry", { kind: "widget", key: "x" }, untouchable)).code).toBe(
-      "CONTROL_INVALID_INPUT",
-    );
-    expect(errorOf(await callPlatformTool("get_catalog_entry", { kind: "service", key: "Record Finding" }, untouchable)).message).toContain(
-      "kebab-case",
-    );
-    expect(
-      errorOf(await callPlatformTool("publish_catalog_entry", { kind: "service", key: "record-finding" }, untouchable)).message,
-    ).toContain("definition must be a JSON object");
-    expect(
-      errorOf(
-        await callPlatformTool(
-          "publish_catalog_entry",
-          { kind: "service", key: "record-finding", definition: {}, authority: "vendor" },
-          untouchable,
-        ),
-      ).message,
-    ).toContain("authority must be one of");
-  });
-
-  it("refuses arguments that are not the tool's", async () => {
-    const error = errorOf(await callPlatformTool("list_tenants", { tenantId: "x" }, untouchable));
-    expect(error.code).toBe("CONTROL_INVALID_INPUT");
-    expect(error.message).toContain('"tenantId" is not an argument');
-  });
-
-  it("refuses a limit that is not a positive integer", async () => {
-    expect(errorOf(await callPlatformTool("list_catalog_entries", { limit: 0 }, untouchable)).message).toContain("limit");
-    expect(errorOf(await callPlatformTool("list_catalog_entries", { limit: "ten" }, untouchable)).message).toContain("limit");
-  });
-
-  it("validates platform audit filters before opening an elevated session", async () => {
-    expect(errorOf(await callPlatformTool("list_platform_audit", { limit: 201 }, untouchable)).message).toContain("1 through 200");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { result: "maybe" }, untouchable)).message).toContain("succeeded, failed or in_progress");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "yesterday" }, untouchable)).message).toContain("ISO date-time");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-09-09" }, untouchable)).message).toContain("ISO date-time");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-02-30T00:00:00Z" }, untouchable)).message).toContain("ISO date-time");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-09-10T00:00:00Z", until: "2026-09-09T00:00:00Z" }, untouchable)).message).toContain("earlier than until");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { query: "password" }, untouchable)).message).toContain("not an argument");
-    expect(errorOf(await callPlatformTool("list_platform_audit", { cursor: "not-a-cursor" }, untouchable)).message).toContain("nextCursor");
-  });
-
-  it("validates lifecycle and organization changes before opening an elevated session", async () => {
-    expect(errorOf(await callPlatformTool("create_tenant", { slug: "Not valid", name: "Acme" }, untouchable)).code).toBe("CONTROL_INVALID_INPUT");
-    expect(errorOf(await callPlatformTool("update_tenant", { slug: "acme" }, untouchable)).message).toContain("changes nothing");
-    expect(errorOf(await callPlatformTool("update_tenant", { slug: "acme", status: "deleted" }, untouchable)).message).toContain("status must be one of");
-    expect(errorOf(await callPlatformTool("create_tenant_organization", { tenantSlug: "acme", slug: "sales", name: "Sales", keycloakOrganizationId: "injected" }, untouchable)).message).toContain("not an argument");
-    expect(errorOf(await callPlatformTool("update_tenant_organization", { tenantSlug: "acme", orgUnitId: "not-a-uuid", name: "Sales" }, untouchable)).code).toBe("CONTROL_INVALID_INPUT");
-    expect(errorOf(await callPlatformTool("reapply_reconciliation", { tenantSlug: 42 }, untouchable)).message).toContain("tenantSlug is required");
-  });
-
-  it("answers the guide without a database and says what the surface never does", async () => {
-    const result = await callPlatformTool("platform_guide", {}, untouchable);
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0]?.text).toBe(PLATFORM_GUIDE);
+describe("the guide and the instructions", () => {
+  it("say what the surface never does and name the tools by their MCP names", () => {
     expect(PLATFORM_GUIDE).toContain("Never");
     expect(PLATFORM_GUIDE).toContain("apply_catalog_update_for_tenant");
-  });
-
-  it("says when no module administers a catalog", async () => {
-    const error = errorOf(await callPlatformTool("list_catalog_entries", {}, untouchable));
-    expect(error.code).toBe("PLATFORM_CATALOG_UNAVAILABLE");
-  });
-});
-
-describe("refusals as tool results", () => {
-  it("presents a classified refusal with its code and problems, and redacts anything else", () => {
-    const classified = failedPlatformTool(
-      new PlatformCatalogError("CATALOG_INVALID_DEFINITION", "Not publishable.", ["name is required"]),
-    );
-    expect(classified.isError).toBe(true);
-    expect(classified.structuredContent).toEqual({
-      error: { code: "CATALOG_INVALID_DEFINITION", message: "Not publishable.", problems: ["name is required"] },
-    });
-    const logged: unknown[] = [];
-    const redacted = failedPlatformTool(new Error("select * from secret"), (error) => logged.push(error));
-    expect(redacted.structuredContent).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal server error." } });
-    expect(logged).toHaveLength(1);
+    expect(PLATFORM_GUIDE).toContain("publish_update_notice");
+    expect(PLATFORM_SERVER_INSTRUCTIONS).toContain("platform_guide");
+    expect(PLATFORM_SERVER_INSTRUCTIONS).toContain("invite_first_tenant_admin");
   });
 });
 
@@ -209,6 +35,7 @@ describe("buildPlatformSessionInfo", () => {
   it("describes a platform administrator with platform scope and a tenant count, and no identifiers", () => {
     const info = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       sessionIdleDays: 14,
@@ -234,6 +61,7 @@ describe("buildPlatformSessionInfo", () => {
   it("names the MCP client that opened the session, and stays silent without one", () => {
     const info = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
       access: { tools: 9, resources: 1 },
@@ -243,6 +71,7 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.summary).toContain("signed in via Codex. Connected through Claude Code 2.1.0.");
     const silent = buildPlatformSessionInfo({
       administrator,
+      roles: ["platform_admin"],
       tenants: 3,
       access: { tools: 9, resources: 1 },
       nowMs: NOW,
@@ -255,6 +84,7 @@ describe("buildPlatformSessionInfo", () => {
   it("names the admin gateway as the Hubble control plane and copes with an unreadable registry", () => {
     const info = buildPlatformSessionInfo({
       administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
+      roles: ["platform_admin"],
       tenants: null,
       access: { tools: 9, resources: 1 },
       nowMs: NOW,
@@ -262,5 +92,27 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.signedInVia).toBe("Hubble control plane");
     expect(info.accessTokenExpiresAt).toBeUndefined();
     expect(info.summary).toContain("could not be counted");
+  });
+
+  it("distinguishes operator-only and combined control sessions", () => {
+    const operator = buildPlatformSessionInfo({
+      administrator,
+      roles: ["platform-operator"],
+      tenants: 1,
+      access: { tools: 8, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(operator.role).toBe("Platform operator");
+    expect(operator.summary).toContain("a platform operator of this deployment");
+
+    const combined = buildPlatformSessionInfo({
+      administrator,
+      roles: ["platform_admin", "platform-operator"],
+      tenants: 1,
+      access: { tools: 23, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(combined.role).toBe("Platform administrator and operator");
+    expect(combined.summary).toContain("a platform administrator and operator of this deployment");
   });
 });

@@ -1,0 +1,94 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: Block
+title: Block
+language: en
+labels: { en: Block, nl: Block }
+domains: [documents]
+authorization:
+  roles:
+    read: [Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{definitionKey}}"
+fields:
+  - key: variant
+    semanticType: TemplateVariant
+    required: true
+    immutable: true
+  - key: definitionKey
+    valueType: string
+    required: true
+    immutable: true
+    label: { en: Block type, nl: Bloktype }
+    persisted: { column: definition_key, storageClass: core }
+  - key: definitionVersion
+    label: { en: Definition version, nl: Definitieversie }
+    valueType: integer
+    required: true
+    defaultValue: 1
+    immutable: true
+    persisted: { column: definition_version, storageClass: core }
+  - key: values
+    semanticType: entityValue
+    entityValue: { definitionField: definitionKey }
+    required: true
+    label: { en: Values, nl: Waarden }
+    persisted: { column: values, storageClass: core }
+operations:
+  list:
+    name: List block
+    description: Read accessible block records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read block
+    description: Read one accessible block record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create block
+    description: Create a block record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update block
+    description: Update a block draft.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        route: /blocks
+        title: { en: Blocks, nl: Blokken }
+        columns: [{ key: definitionKey }, { key: values }]
+      record:
+        routes: { read: "/blocks/:id", create: /blocks/new }
+        title: "{{definitionKey}}"
+        layout:
+          tabs:
+            - id: values
+              label: { en: Content, nl: Inhoud }
+              groups: [{ title: { en: Block, nl: Blok }, fields: [variant, definitionKey, values] }]
+        modes:
+          create:
+            title: { en: Add block, nl: Blok toevoegen }
+            groups: [{ title: { en: Block, nl: Blok }, fields: [variant, definitionKey, values] }]
+          update:
+            title: { en: Edit block, nl: Blok bewerken }
+            groups: [{ title: { en: Content, nl: Inhoud }, fields: [values] }]

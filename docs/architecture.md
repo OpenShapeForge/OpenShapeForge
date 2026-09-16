@@ -148,9 +148,9 @@ configs, empty table, nothing reading it.
 
 ## Dormant surfaces (present, intentionally inactive)
 
-- **Entity events have no consumers yet.** Mutations append journal rows in
-  `platform.entity_events`; no outbox/realtime fanout ships in this repo, and
-  no GraphQL query exposes the journal. See
+- **Entity events:** mutations append journal rows in
+  `platform.entity_events`; authenticated `/api/events` projects authorized
+  change hints across replicas. No GraphQL query exposes the journal. See
   [api.md](api.md#the-entity-event-journal).
 - **Entity hooks** (`hooks:` in entity YAML — before/after
   create/update/delete) are parsed and carried on the compiled contract, but
@@ -175,5 +175,5 @@ configs, empty table, nothing reading it.
 | Compiler plugin contract + shipped examples | [plugins.md](plugins.md) |
 | GraphQL engine, auth, RLS, events, local stack | [api.md](api.md) |
 | Proof gates, e2e suite, HTML reports, k6 | [testing.md](testing.md) |
-| Roll-forward + versioned migrations, drift | [migrations.md](migrations.md) |
+| The reset model: build chain, db:reset, drift | [migrations.md](migrations.md) |
 | Using the compiler from a host repo | [consuming.md](consuming.md) |

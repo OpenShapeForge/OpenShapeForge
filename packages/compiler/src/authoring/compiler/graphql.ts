@@ -26,6 +26,7 @@ import type {
 import type { LoadedArtifacts } from "../loader.js";
 import { fieldGraphqlBaseType, capitalize, uncapitalize, pluralize } from "./helpers.js";
 import { resolveFieldOptions, resolveRender } from "./model.js";
+import { isCoreEntityV2, v2GraphqlOperationActions } from "../entity-v2.js";
 
 export function buildGraphQL(
   coreEntity: LoadedArtifacts["coreEntity"],
@@ -35,7 +36,7 @@ export function buildGraphQL(
   semanticTypes?: Record<string, SemanticTypeDefinition>
 ): GraphQLSection {
   const typeName = coreEntity.entity;
-  const fields: GraphQLField[] = coreEntity.fields.map((f) => {
+  const fields: GraphQLField[] = coreEntity.fields.filter((f) => !f.relationship?.target).map((f) => {
     const baseType = f.graphqlType ?? fieldGraphqlBaseType(f);
     return {
       name: f.key,
@@ -47,6 +48,7 @@ export function buildGraphQL(
   const fieldNames = new Set(fields.map((field) => field.name));
 
   for (const relationship of relationships) {
+    if (relationship.fieldKey) continue;
     if (relationship.kind !== "belongsTo") continue;
     const syntheticIdFieldName = `${relationship.key}Id`;
     if (fieldNames.has(syntheticIdFieldName)) continue;
@@ -128,6 +130,9 @@ export function buildGraphQL(
       update: { name: `update${typeName}`, input: `Update${typeName}Input!` },
       delete: { name: `delete${typeName}`, args: [{ name: "id", type: "ID!" }] },
     },
+    ...(isCoreEntityV2(coreEntity)
+      ? { operations: v2GraphqlOperationActions(coreEntity) }
+      : {}),
   };
 }
 

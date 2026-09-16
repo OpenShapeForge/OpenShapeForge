@@ -20,6 +20,8 @@ import {
   type LoadedCompilerPlugin,
 } from "./plugins.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import { buildCoreReferentiedataSnapshot, loadCoreReferentiedataCatalog } from "./core-referentiedata-artifacts.js";
+import { materializeEntityInputSources } from "./entity-input-sources.js";
 
 export const activeManifestSource =
   "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
@@ -46,7 +48,7 @@ function tableKey(table: Pick<TableDefinition, "schema" | "name">) {
   return `${table.schema}.${table.name}`;
 }
 
-function mergePromotedTables(
+export function mergePromotedTables(
   baseManifest: PlatformSchemaManifest,
   promotedManifest: PlatformSchemaManifest,
 ): PlatformSchemaManifest {
@@ -63,12 +65,19 @@ function mergePromotedTables(
   );
   const retainedTables = baseManifest.tables.filter((table) => !promotedKeys.has(tableKey(table)));
   const insertAt = firstPromotedIndex < 0 ? retainedTables.length : firstPromotedIndex;
+  const relationships = new Map(
+    [...(baseManifest.relationshipRegister ?? []), ...(promotedManifest.relationshipRegister ?? [])].map((entry) => [
+      `${entry.from.schema}.${entry.from.table}.${entry.from.column}->${entry.to.schema}.${entry.to.table}.${entry.to.column}`,
+      entry,
+    ]),
+  );
 
   return {
     ...baseManifest,
+    ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
     description:
       "Greenfield platform schema with authoring-catalog generated backend tables.",
-    relationshipRegister: baseManifest.relationshipRegister ?? [],
+    relationshipRegister: [...relationships.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, entry]) => entry),
     tables: [
       ...retainedTables.slice(0, insertAt),
       ...promotedManifest.tables,
@@ -142,6 +151,11 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           onCandidate: (candidate) => entities.push(candidate),
         },
       );
+
+      // Public compile consumers must receive executable schemas too, not just
+      // consumers of collectAllArtifacts. Resolve once before caching contracts.
+      const referentiedata = buildCoreReferentiedataSnapshot(await loadCoreReferentiedataCatalog(repoRoot));
+      materializeEntityInputSources(entities.map(entity => entity.contract), referentiedata);
 
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),

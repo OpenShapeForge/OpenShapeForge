@@ -191,6 +191,71 @@ describe("platform schema generator", () => {
     // The plain tenant-isolation policy should NOT be emitted alongside the
     // row-scope policy; rowScope subsumes it.
     expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_tenant_isolation" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_tenant_isolation"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_row_scope"'),
+    );
+  });
+
+  it("drops the generated row-scope policy when a table returns to tenant isolation", () => {
+    const tenantOnlyManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+      ],
+    };
+
+    const sql = generateArtifacts(tenantOnlyManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents ?? "";
+
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_row_scope" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_row_scope"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_tenant_isolation"'),
+    );
+    expect(sql).not.toContain('CREATE POLICY "cases_row_scope"');
+  });
+
+  it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {
+    const manifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "protected_records",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "authorization", type: "jsonb", required: true },
+        ],
+        rowScope: {
+          recordPermissions: { column: "authorization", empty: "public" },
+        },
+      }],
+    };
+    const contents = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql")
+    )?.contents ?? "";
+
+    expect(contents).toContain(
+      `USING (app.bypass_rls() OR (tenant_id = app.current_tenant() AND app.record_permission_allows("authorization", 'view', true)))`,
+    );
+    expect(contents).toContain(
+      `WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
+    );
+    expect(contents.match(/record_permission_allows/g)?.length).toBe(1);
   });
 
   it("fails compile if a rowScope column is missing from the table", () => {
@@ -1920,6 +1985,8 @@ describe("writtenBy columns", () => {
 
   const reviewOperation = {
     key: "pentest.finding.review",
+    id: "pentest.finding.review",
+    intent: "invoke",
     transports: {
       rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
       mcp: { enabled: false },
@@ -1944,11 +2011,258 @@ describe("writtenBy columns", () => {
     ]);
   });
 
+  it("resolves an entity create writer through its generated REST and generic MCP routes", () => {
+    const manifest = writtenByManifest("Finding.create");
+    manifest.tables[0]!.source = {
+      path: "entities/finding.yaml",
+      authoringEntityName: "Finding",
+      authoringEntitySlug: "finding",
+      generatedCrudEligibility: "explicitly_enabled",
+      crud: {
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      graphql: {
+        typeName: "Finding",
+        singleQueryName: "finding",
+        listQueryName: "findings",
+        createMutationName: "createFinding",
+        updateMutationName: "updateFinding",
+        deleteMutationName: "deleteFinding",
+        relationships: [],
+      },
+      rest: {
+        basePath: "findings",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      mcp: {
+        toolPrefix: "finding",
+        tools: "generic",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+    };
+    const createOperation = {
+      id: "Finding.create",
+      key: "create",
+      intent: "create",
+      entityId: "pentest.Finding",
+      entityName: "Finding",
+    } as any;
+    const manifestJson = JSON.parse(
+      generateArtifacts(manifest, { operations: [createOperation] })
+        .find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables[0].columns.find(
+      (candidate: { name: string }) => candidate.name === "reviewed_at",
+    );
+    expect(column.writtenBy).toEqual([{
+      operation: "Finding.create",
+      rest: "POST /api/rest/v1/findings",
+      mcp: "osf_create",
+    }]);
+  });
+
   it("fails the build when the named operation does not exist", () => {
     expect(() =>
       generateArtifacts(writtenByManifest("pentest.finding.reviw"), {
         operations: [reviewOperation],
       }),
     ).toThrow(/no.*compiled operation has that key/i);
+  });
+});
+
+/**
+ * The shapes platform bookkeeping tables need and authored entities never do:
+ * a composite primary key, a text array, and a reference into a table that
+ * another layer promotes into the manifest later. Each exists so a runtime-
+ * owned table can be declared in platform-schema.yaml rather than in a
+ * hand-written migration next to it.
+ */
+describe("platform bookkeeping shapes", () => {
+  const linkManifest: PlatformSchemaManifest = {
+    version: 1,
+    tables: [
+      {
+        schema: "platform",
+        name: "identity_links",
+        tenantScoped: false,
+        domainInternal: true,
+        generatedCrud: false,
+        columns: [
+          { name: "identity_id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", primaryKey: true },
+          { name: "guides_read", type: "text[]", required: true, default: "'{}'" },
+          { name: "linked_at", type: "timestamptz" },
+        ],
+      },
+    ],
+  };
+
+  it("renders a composite primary key once, as a table constraint", () => {
+    const artifacts = generateArtifacts(linkManifest);
+    const sql = artifacts.find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
+
+    expect(sql).toContain(
+      [
+        'CREATE TABLE IF NOT EXISTS "platform"."identity_links" (',
+        '  "identity_id" uuid NOT NULL,',
+        '  "tenant_id" uuid NOT NULL,',
+        "  \"guides_read\" text[] NOT NULL DEFAULT '{}',",
+        '  "linked_at" timestamptz,',
+        '  PRIMARY KEY ("identity_id", "tenant_id")',
+        ");",
+      ].join("\n"),
+    );
+    // Neither member carries an inline key of its own.
+    expect(sql).not.toContain('"identity_id" uuid PRIMARY KEY');
+
+    const manifestJson = JSON.parse(
+      artifacts.find((artifact) => artifact.path.endsWith("manifest.json"))!.contents,
+    );
+    // Generated CRUD addresses a row by ONE column; a composite key has none.
+    expect(manifestJson.tables[0].primaryKey).toBeNull();
+    expect(
+      manifestJson.tables[0].columns.map((column: { name: string; primaryKey: boolean }) => [
+        column.name,
+        column.primaryKey,
+      ]),
+    ).toEqual([
+      ["identity_id", true],
+      ["tenant_id", true],
+      ["guides_read", false],
+      ["linked_at", false],
+    ]);
+
+    const types = artifacts.find((artifact) => artifact.path.endsWith("types.ts"))!.contents;
+    expect(types).toContain("  identity_id: string;");
+    expect(types).toContain("  tenant_id: string;");
+    expect(types).toContain("  guides_read: Generated<string[]>;");
+  });
+
+  it("keeps the inline PRIMARY KEY for a single-column key", () => {
+    const sql = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )!.contents;
+    expect(sql).toContain('"id" uuid PRIMARY KEY NOT NULL DEFAULT gen_random_uuid()');
+    expect(sql).not.toContain("  PRIMARY KEY (");
+  });
+
+  it("defers a registered cross-module reference to the merged manifest", async () => {
+    // The base platform schema links a tenant to its Relation, a table the
+    // authoring layer promotes into the manifest later. The loader accepts
+    // the registered reference; rendering the merged manifest checks it.
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+relationshipRegister:
+  - from: { schema: platform, table: tenants, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+`,
+      "utf8",
+    );
+
+    try {
+      const loaded = await loadManifest(path);
+      expect(() => generateArtifacts(loaded)).toThrow(
+        /platform\.tenants\.relation_id references unknown table erp\.relations/,
+      );
+
+      const relations: TableDefinition = {
+        schema: "erp",
+        name: "relations",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+        ],
+      };
+      const sql = generateArtifacts({ ...loaded, tables: [...loaded.tables, relations] }).find(
+        (artifact) => artifact.path.endsWith("schema.sql"),
+      )!.contents;
+      expect(sql).toContain(
+        'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("relation_id")',
+      );
+      expect(sql).toContain('REFERENCES "erp"."relations"("id") ON DELETE SET NULL;');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still refuses an unregistered or same-schema reference to an unknown table", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: parent_id, type: uuid, references: { schema: platform, table: organizations, column: id } }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /platform\.tenants\.parent_id references unknown table platform\.organizations/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("deriveOnCreate columns", () => {
+  it("publishes the compiler-resolved source and race-safe conflict target", () => {
+    const source: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "templates",
+        tenantScoped: true,
+        columns: [
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "name", type: "text", required: true, sourceField: "name" },
+          {
+            name: "key",
+            type: "text",
+            required: true,
+            sourceField: "key",
+            deriveOnCreate: {
+              sourceField: "name",
+              sourceColumn: "name",
+              transform: "slug",
+              onConflict: "suffix",
+              conflictColumns: ["tenant_id", "key"],
+              maxLength: 100,
+            },
+          },
+        ],
+      }],
+    };
+    const generated = JSON.parse(
+      generateArtifacts(source).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    expect(generated.tables[0].columns[2].deriveOnCreate).toEqual({
+      sourceField: "name",
+      sourceColumn: "name",
+      transform: "slug",
+      onConflict: "suffix",
+      conflictColumns: ["tenant_id", "key"],
+      maxLength: 100,
+    });
   });
 });

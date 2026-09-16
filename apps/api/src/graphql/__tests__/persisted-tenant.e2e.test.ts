@@ -1,10 +1,26 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+ * Persisted operations against live tenant data: the compiled manifest's
+ * `Get<Entity>` and `Delete<Entity>` documents drive a real row through the
+ * persisted endpoint, and cross-tenant isolation holds there too.
+ *
+ * The entity is chosen by what the manifest actually persists — the first
+ * GraphQL table with both documents — not by position. The readers are
+ * shape-aware (e2e/gql-shapes.ts); today every persisted CRUD document is
+ * v1-shaped, so the canonical branch stays unexercised until the generator
+ * emits persisted documents for a converted entity.
+ */
 import { expect } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { getOperationAST, parse } from "graphql";
 import persistedManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { createApiApp } from "../../roles/api.js";
-import { createRow, tables, untrackRow } from "./e2e/entity-factory.js";
+import {
+  createRow,
+  graphqlTables as tables,
+  untrackRow,
+} from "./e2e/entity-factory.js";
+import { deletedOf, deleteVariables, recordOf } from "./e2e/gql-shapes.js";
 import {
   describe,
   registerSuiteLifecycle,
@@ -15,10 +31,26 @@ import {
   type GqlResponse,
   type Identity,
 } from "./e2e/harness.js";
+import { acquireLease, isCanonical, isEntityBackedCreate } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
 const contextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!;
+
+const persistedNames = new Set(
+  Object.values(persistedManifest.operations).flatMap((query) => {
+    const name = getOperationAST(parse(query))?.name?.value;
+    return name ? [name] : [];
+  }),
+);
+
+/** The first entity the manifest persists a Get and a Delete for. */
+const table = tables.find(
+  (candidate) =>
+    isEntityBackedCreate(candidate) &&
+    persistedNames.has(`Get${candidate.source!.graphql!.typeName}`) &&
+    persistedNames.has(`Delete${candidate.source!.graphql!.typeName}`),
+);
 
 function operation(operationName: string): { hash: string; query: string } {
   const candidates = Object.entries(persistedManifest.operations)
@@ -68,21 +100,28 @@ async function requestPersisted(
 }
 
 describe("persisted operations with live tenant data", () => {
+  test("the manifest persists a Get and a Delete for at least one entity", () => {
+    expect(table).toBeDefined();
+  });
+
   test("preserve authenticated query, mutation, and cross-tenant isolation", async () => {
-    const table = tables[0]!;
-    const graphql = table.source!.graphql!;
-    const id = await createRow(table, tenantA);
+    const graphql = table!.source!.graphql!;
+    const id = await createRow(table!, tenantA);
     const own = await requestPersisted(tenantA, `Get${graphql.typeName}`, { id });
-    expect(own.errors ?? []).toEqual([]);
-    expect(own.data?.[graphql.singleQueryName]?.id).toBe(id);
+    expect(recordOf(table!, own, graphql.singleQueryName)?.id).toBe(id);
 
     const foreign = await requestPersisted(tenantB, `Get${graphql.typeName}`, { id });
     expect(foreign.errors?.[0]?.extensions?.code).not.toBe("FORBIDDEN");
-    expect(foreign.data?.[graphql.singleQueryName]).toBeNull();
+    expect(recordOf(table!, foreign, graphql.singleQueryName)).toBeNull();
 
-    const deleted = await requestPersisted(tenantA, `Delete${graphql.typeName}`, { id });
-    expect(deleted.errors ?? []).toEqual([]);
-    expect(deleted.data?.[graphql.deleteMutationName]).toBe(true);
+    // A canonical delete carries its lease controls in the persisted input.
+    const controls = isCanonical(table!) ? await acquireLease(tenantA, table!, id, "delete") : {};
+    const deleted = await requestPersisted(
+      tenantA,
+      `Delete${graphql.typeName}`,
+      deleteVariables(table!, id, controls),
+    );
+    expect(deletedOf(table!, deleted)).toBe(true);
     untrackRow(id);
   });
 });

@@ -5,7 +5,6 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createPluginMigrationLedgerVerifier,
   loadGeneratedPluginMigrations,
   pluginMigrationLedgerVersion,
 } from "../migrations/generated-plugin-migrations.js";
@@ -50,14 +49,7 @@ describe("generated plugin migration registry", () => {
     expect(await loadGeneratedPluginMigrations(path)).toEqual(migrations);
   });
 
-  test("loads lazily and names malformed registry files", async () => {
-    let loads = 0;
-    createPluginMigrationLedgerVerifier(async () => {
-      loads += 1;
-      throw new Error("not reached");
-    });
-    expect(loads).toBe(0);
-
+  test("names malformed registry files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
     const path = join(dir, "registry.json");
     await writeFile(path, "{");

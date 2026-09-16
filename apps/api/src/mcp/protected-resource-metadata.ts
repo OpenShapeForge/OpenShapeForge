@@ -21,6 +21,7 @@
  * fatal in production when unset (see config/production-guard.ts).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import {
   isOrganizationAlias,
   MCP_MOUNT_PATH,
@@ -65,6 +66,7 @@ export function resourcePathOf(request: FastifyRequest, alias?: string | null): 
  * and the legacy `/api/mcp` is the fallback.
  */
 export function canonicalResourceUri(request: FastifyRequest, alias?: string | null): string {
+  if (usesHostOrganizationContext()) return hostMcpResource();
   return `${requestOrigin(request)}${resourcePathOf(request, alias)}`;
 }
 
@@ -105,7 +107,7 @@ export function buildAuthenticateChallenge(
   request: FastifyRequest,
   options: AuthenticateChallengeOptions = {},
 ): string {
-  const alias = options.alias ?? organizationAliasFromPath(request.url);
+  const alias = usesHostOrganizationContext() ? null : options.alias ?? organizationAliasFromPath(request.url);
   const metadataPath = alias
     ? `${PROTECTED_RESOURCE_METADATA_PATH}${organizationMcpPath(alias)}`
     : PROTECTED_RESOURCE_METADATA_PATH;
@@ -117,8 +119,10 @@ export function buildAuthenticateChallenge(
       'error_description="The token is not bound to this organization resource."',
     );
   }
-  attributes.push(`resource_metadata="${requestOrigin(request)}${metadataPath}"`);
-  if (alias) attributes.push(`scope="${organizationResourceScopes(alias).join(" ")}"`);
+  const origin = usesHostOrganizationContext() ? new URL(hostMcpResource()).origin : requestOrigin(request);
+  attributes.push(`resource_metadata="${origin}${metadataPath}"`);
+  if (usesHostOrganizationContext()) attributes.push('scope="organization"');
+  else if (alias) attributes.push(`scope="${organizationResourceScopes(alias).join(" ")}"`);
   return `${parts.join(" ")} ${attributes.join(", ")}`;
 }
 
@@ -147,7 +151,7 @@ export function buildProtectedResourceMetadata(
     // Per-organization resources name their scopes so a client requests the
     // token this path accepts (RFC 9728 §2; MCP clients pass these to the
     // authorization request). The legacy mount advertises none, see above.
-    ...(alias ? { scopes_supported: organizationResourceScopes(alias) } : {}),
+    ...(usesHostOrganizationContext() ? { scopes_supported: ["organization"] } : alias ? { scopes_supported: organizationResourceScopes(alias) } : {}),
   };
 }
 
@@ -198,6 +202,7 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
     request: FastifyRequest,
     reply: FastifyReply,
   ) => {
+    if (usesHostOrganizationContext()) return reply.code(404).send({ error: "unknown resource" });
     const alias = (request.params as { alias?: unknown }).alias;
     if (!isOrganizationAlias(alias) || RESERVED_ROOT_SEGMENTS.has(alias.toLowerCase())) {
       return reply.code(404).send({ error: "unknown resource" });
@@ -209,6 +214,10 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   };
 
   app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias`, organizationMetadata);
+  // The explicit MCP spelling `https://host/zerocopter/mcp` is what a person
+  // types into a hosted client, and RFC 9728 path insertion turns it into
+  // `/.well-known/oauth-protected-resource/zerocopter/mcp`. Same document.
+  app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias/mcp`, organizationMetadata);
   app.get(
     `${PROTECTED_RESOURCE_METADATA_PATH}${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
     organizationMetadata,

@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import {
-  buildMcpCatalog,
-  MAX_DEDICATED_TOOLS,
-  type McpCatalogInput,
-} from "./generate-mcp.js";
+import Ajv2020 from "ajv/dist/2020.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 import type {
   CompiledEntityContract,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
+import {
+  buildMcpCatalog,
+  MAX_DEDICATED_TOOLS,
+  operationMcpServer,
+  type McpCatalogInput,
+} from "./generate-mcp.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -25,6 +29,7 @@ const field = (
 
 const contract = (
   overrides: {
+    authoringVersion?: 1 | 2;
     name?: string;
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
@@ -32,8 +37,9 @@ const contract = (
     relationships?: CompiledRelationship[];
     columns?: CompiledEntityContract["storage"]["columns"];
   } = {},
-): CompiledEntityContract =>
-  ({
+): CompiledEntityContract => {
+  const compiled = {
+    authoringVersion: overrides.authoringVersion ?? 1,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -72,11 +78,21 @@ const contract = (
         delete: true,
       },
     },
-    authorization: undefined as never,
+    authorization: {
+      entitySlug: (overrides.name ?? "Widget").toLowerCase(),
+      roles: { read: [], create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    },
     views: {},
     canonical: {} as never,
     profiles: {},
-  }) as CompiledEntityContract;
+    entityOperations: {},
+  } as unknown as CompiledEntityContract;
+  compiled.entityOperations = buildEntityOperations(compiled);
+  return compiled;
+};
 
 const input = (
   c: CompiledEntityContract,
@@ -86,6 +102,32 @@ const input = (
   slug,
   contract: c,
   table,
+});
+
+const staticOperation = (index: number): CompiledPluginOperation => ({
+  key: `demo.operation.${String(index).padStart(3, "0")}`,
+  id: `demo.operation.${String(index).padStart(3, "0")}`,
+  intent: "invoke",
+  plugin: "demo",
+  title: `Demo operation ${index}`,
+  description: `Runs demo operation ${index}.`,
+  handler: `operation${index}`,
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  outputSchema: { type: "object", properties: {}, additionalProperties: false },
+  errors: [],
+  auth: { mode: "session", roles: ["Demo.Read"] },
+  tenancy: { mode: "required" },
+  idempotency: { mode: "none" },
+  transports: {
+    rest: {
+      method: "POST",
+      path: `/api/demo/operations/${index}`,
+      response: { status: 200, kind: "json" },
+    },
+    mcp: { enabled: true, name: `demo_operation_${index}` },
+    graphql: { enabled: false, reason: "Not exposed in this fixture." },
+    typescript: { enabled: false, reason: "Not exposed in this fixture." },
+  },
 });
 
 /** Read a named sub-schema, failing the test rather than returning undefined. */
@@ -135,22 +177,296 @@ describe("buildMcpCatalog", () => {
       "widget_list",
       "widget_get",
     ]);
+    expect(catalog.tools[0]).toMatchObject({
+      operation: "list",
+    });
+    expect(catalog.tools[0]).not.toHaveProperty("operationId");
+    expect(catalog.tools[0]).not.toHaveProperty("outputSchema");
   });
 
-  it("routes generic-style entities through the shared osf_* tools", () => {
+  it("emits canonical output envelopes for every generated entity operation", () => {
     const catalog = buildMcpCatalog(
       [
         input(
           contract({
+            authoringVersion: 2,
+            fields: [
+              field({ key: "id", required: true, validation: { format: "uuid" } }),
+              field({ key: "name" }),
+            ],
+            columns: [
+              {
+                field: "id",
+                column: "id",
+                type: "uuid",
+                nullable: false,
+                storageClass: "core",
+              },
+              {
+                field: "name",
+                column: "name",
+                type: "text",
+                nullable: true,
+                storageClass: "core",
+              },
+            ],
+          }),
+        ),
+      ],
+      "test",
+    );
+    const byOperation = new Map(
+      catalog.tools.map((tool) => [tool.operation, tool]),
+    );
+    for (const tool of catalog.tools) {
+      expect(tool.operationId).toBe(`Widget.${tool.operation}`);
+    }
+    const success = (operation: "list" | "get" | "create" | "update" | "delete") =>
+      (byOperation.get(operation)!.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+
+    const record = (
+      success("get").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    expect(record).toMatchObject({
+      type: "object",
+      additionalProperties: true,
+      required: ["id", "tenantId", "createdAt", "updatedAt"],
+    });
+    expect(prop(record, "name").anyOf).toEqual([
+      expect.objectContaining({ type: "string" }),
+      { type: "null" },
+    ]);
+
+    const listData = (
+      success("list").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    const listItems = prop(listData, "items").items as Record<string, unknown>;
+    expect(listItems.required).toEqual(["data", "operations"]);
+    expect(prop(listItems, "operations").items).toEqual({
+      $ref: "#/$defs/OperationOffer",
+    });
+    expect(listData.required).toEqual(["items", "totalCount", "nextCursor"]);
+
+    const deleted = (
+      success("delete").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    expect(prop(deleted, "deleted")).toEqual({ type: "boolean", const: true });
+
+    for (const tool of catalog.tools) {
+      expect(tool.outputSchema!.type).toBe("object");
+      expect(tool.outputSchema!.$defs).toMatchObject({
+        OperationReference: expect.any(Object),
+        OperationOffer: expect.any(Object),
+        OperationError: expect.any(Object),
+        OperationConcurrency: expect.any(Object),
+      });
+      expect((tool.outputSchema!.oneOf as Record<string, unknown>[])[1]).toMatchObject({
+        required: ["error"],
+        properties: { error: { $ref: "#/$defs/OperationError" } },
+      });
+    }
+
+    const ajv = new Ajv2020.default({ strict: false, validateFormats: false });
+    const instant = "2026-09-11T12:00:00.000Z";
+    const recordValue = {
+      id: "00000000-0000-4000-8000-000000000001",
+      tenantId: "00000000-0000-4000-8000-000000000002",
+      createdAt: instant,
+      updatedAt: instant,
+      name: null,
+    };
+    const offers = [
+      {
+        operation: { id: "Widget.update", intent: "update" },
+        available: true,
+        concurrency: {
+          version: { mode: "required", field: "updatedAt" },
+          editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+        },
+      },
+    ];
+    const successes: Record<string, unknown> = {
+      list: {
+        data: {
+          items: [{ data: recordValue, operations: offers }],
+          totalCount: 1,
+          nextCursor: null,
+        },
+        operations: offers,
+      },
+      get: { data: recordValue, operations: offers },
+      create: { data: recordValue, operations: offers },
+      update: { data: recordValue, operations: offers },
+      delete: { data: { deleted: true }, operations: offers },
+    };
+    for (const tool of catalog.tools) {
+      const validate = ajv.compile(tool.outputSchema!);
+      expect(validate(successes[tool.operation])).toBe(true);
+      expect(
+        validate({
+          error: {
+            code: "LOCKED",
+            message: "This record is being edited.",
+            detail: "The lease is still active.",
+            retryable: true,
+            retryAt: instant,
+          },
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("does not advertise update as idempotent while it repeats events and updatedAt", () => {
+    const catalog = buildMcpCatalog([input(contract())], "test");
+    const update = catalog.tools.find((tool) => tool.operation === "update")!;
+    expect(update.annotations.idempotentHint).toBe(false);
+  });
+
+  it("projects version, lease and confirmation controls into v2 mutation inputs", () => {
+    const secured = contract({ authoringVersion: 2 });
+    secured.entityOperations.create = {
+      ...secured.entityOperations.create!,
+      interaction: { confirmation: { mode: "acknowledgement" } },
+    };
+    secured.entityOperations.update = {
+      ...secured.entityOperations.update!,
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "name",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+    secured.entityOperations.delete = {
+      ...secured.entityOperations.delete!,
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "name",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+
+    const catalog = buildMcpCatalog([input(secured)], "test");
+    const create = catalog.tools.find((tool) => tool.operation === "create")!;
+    const update = catalog.tools.find((tool) => tool.operation === "update")!;
+    const deletion = catalog.tools.find((tool) => tool.operation === "delete")!;
+
+    expect(create.inputSchema.required).not.toContain("confirmed");
+    expect(prop(create.inputSchema, "confirmed")).toMatchObject({
+      type: "boolean",
+    });
+    expect(prop(create.inputSchema, "confirmed")).not.toHaveProperty("const");
+    expect(update.inputSchema.required).toEqual([
+      "id",
+      "values",
+      "expectedVersion",
+      "leaseToken",
+    ]);
+    expect(update.inputSchema.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(prop(update.inputSchema, "expectedVersion")).toMatchObject({
+      type: "string",
+      format: "date-time",
+    });
+    expect(prop(update.inputSchema, "leaseToken")).toMatchObject({ minLength: 1 });
+    expect(deletion.inputSchema.required).toEqual([
+      "id",
+      "expectedVersion",
+      "leaseToken",
+    ]);
+    expect(deletion.inputSchema.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(prop(deletion.inputSchema, "confirmationAnswer").description).toContain(
+      "name",
+    );
+
+    const validateDelete = new Ajv2020.default({
+      strict: false,
+      validateFormats: false,
+    }).compile(deletion.inputSchema);
+    const firstCall = {
+      id: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: "2026-09-11T12:00:00.000Z",
+      leaseToken: "edit-lease-token",
+    };
+    expect(validateDelete(firstCall)).toBe(true);
+    expect(validateDelete({ ...firstCall, confirmationToken: "challenge-token" })).toBe(
+      false,
+    );
+    expect(
+      validateDelete({
+        ...firstCall,
+        confirmationToken: "challenge-token",
+        confirmationAnswer: "Current name",
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves acknowledgement to the canonical runtime instead of MCP schema rejection", () => {
+    const acknowledged = contract({ authoringVersion: 2 });
+    for (const intent of ["create", "update", "delete"] as const) {
+      acknowledged.entityOperations[intent] = {
+        ...acknowledged.entityOperations[intent]!,
+        interaction: { confirmation: { mode: "acknowledgement" } },
+      };
+    }
+
+    const catalog = buildMcpCatalog([input(acknowledged)], "test");
+    for (const intent of ["create", "update", "delete"] as const) {
+      const tool = catalog.tools.find((candidate) => candidate.operation === intent)!;
+      expect(tool.inputSchema.required).not.toContain("confirmed");
+      expect(prop(tool.inputSchema, "confirmed")).toMatchObject({
+        type: "boolean",
+      });
+      expect(prop(tool.inputSchema, "confirmed")).not.toHaveProperty("const");
+      expect(prop(tool.inputSchema, "confirmed").description).toContain(
+        "Only true",
+      );
+    }
+  });
+
+  it("keeps the five shared osf_* tools for a generic strict-v2 projection", () => {
+    const catalog = buildMcpCatalog(
+      [
+        input(
+          contract({
+            authoringVersion: 2,
             mcp: {
               toolPrefix: "widget",
               tools: "generic",
               operations: {
                 list: true,
-                get: false,
-                create: false,
-                update: false,
-                delete: false,
+                get: true,
+                create: true,
+                update: true,
+                delete: true,
               },
             },
           }),
@@ -158,7 +474,92 @@ describe("buildMcpCatalog", () => {
       ],
       "test",
     );
-    expect(catalog.tools[0]?.name).toBe("osf_list");
+    expect(catalog.tools.map((tool) => tool.name)).toEqual([
+      "osf_list",
+      "osf_get",
+      "osf_create",
+      "osf_update",
+      "osf_delete",
+    ]);
+    const success = (
+      catalog.tools[0]?.outputSchema!.oneOf as Record<string, unknown>[]
+    )[0]!;
+    const listData = (
+      success.properties as Record<string, Record<string, unknown>>
+    ).data!;
+    const item = prop(listData, "items").items as Record<string, unknown>;
+    const itemData = prop(item, "data");
+    expect(itemData).toEqual({ type: "object", additionalProperties: true });
+  });
+
+  it("keeps plugin-backed CRUD schemas under the canonical generic tools", () => {
+    const pluginBacked = contract({
+      authoringVersion: 2,
+      mcp: {
+        toolPrefix: "widget",
+        tools: "generic",
+        operations: {
+          list: true,
+          get: true,
+          create: true,
+          update: true,
+          delete: true,
+        },
+      },
+    });
+    pluginBacked.entityOperations.create = {
+      ...pluginBacked.entityOperations.create!,
+      implementation: { type: "plugin", plugin: "example", handler: "createWidget" },
+      target: {
+        entityId: pluginBacked.entity.id,
+        entityName: pluginBacked.entity.name,
+        scope: "collection",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["requestKey", "definition"],
+          properties: {
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object", "x-osf-sourceField": "name" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "name"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            name: { type: "string" },
+          },
+        },
+      },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+    };
+
+    const catalog = buildMcpCatalog([input(pluginBacked)], "test");
+    const create = catalog.tools.find((tool) => tool.name === "osf_create")!;
+    expect(create.operationId).toBe("Widget.create");
+    expect(create.inputSchema).toMatchObject({
+      required: ["requestKey", "definition"],
+      properties: {
+        requestKey: { type: "string", format: "uuid" },
+        definition: { type: "object", "x-osf-sourceField": "name" },
+      },
+    });
+    expect(create.inputSchema.properties).not.toHaveProperty("values");
+    expect(create.annotations).toMatchObject({ idempotentHint: true });
+    const success = (create.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    expect((success.properties as Record<string, unknown>).data).toEqual(
+      pluginBacked.entityOperations.create.output.kind === "json-schema"
+        ? pluginBacked.entityOperations.create.output.schema
+        : undefined,
+    );
   });
 
   describe("field-level schema", () => {
@@ -647,6 +1048,33 @@ describe("buildMcpCatalog", () => {
         ),
     );
     expect(() => buildMcpCatalog(many, "test")).toThrow(/over the 60 limit/);
+  });
+
+  it("retains every static Operation and switches the advertised projection over the limit", () => {
+    const operations = Array.from(
+      { length: MAX_DEDICATED_TOOLS + 1 },
+      (_unused, index) => staticOperation(index),
+    );
+    const catalog = buildMcpCatalog([], "test", {}, operations);
+
+    expect(catalog.operationTools).toHaveLength(MAX_DEDICATED_TOOLS + 1);
+    expect(new Set(catalog.operationTools.map((tool) => tool.key)).size)
+      .toBe(MAX_DEDICATED_TOOLS + 1);
+    expect(catalog.operationToolProjection).toEqual({
+      mode: "searchable",
+      search: "osf_search_operations",
+      execute: "osf_execute_operation",
+    });
+  });
+
+  it("keeps static Operations dedicated while the combined catalog fits", () => {
+    const catalog = buildMcpCatalog(
+      [],
+      "test",
+      {},
+      [staticOperation(1), staticOperation(2)],
+    );
+    expect(catalog.operationToolProjection.mode).toBe("dedicated");
   });
 });
 
@@ -1277,5 +1705,49 @@ describe("relationship keys", () => {
     const build = () =>
       JSON.stringify(buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test"));
     expect(build()).toBe(build());
+  });
+});
+
+describe("control-realm Operation tools", () => {
+  const controlOperation = (index: number): CompiledPluginOperation => ({
+    ...staticOperation(index),
+    key: `control.operation-${index}`,
+    id: `control.operation-${index}`,
+    plugin: "osf-control",
+    auth: { mode: "control", roles: ["platform_admin"] },
+    tenancy: { mode: "none" },
+    transports: {
+      ...staticOperation(index).transports,
+      rest: {
+        method: "GET",
+        path: `/api/control/v1/operations/${index}`,
+        response: { status: 200, kind: "json" },
+      },
+      mcp: { enabled: true, name: `control_operation_${index}` },
+    },
+  });
+
+  it("lists control tools by the auth mode the control server filters on, outside the tenant budget", () => {
+    const control = Array.from(
+      { length: MAX_DEDICATED_TOOLS + 1 },
+      (_unused, index) => controlOperation(index),
+    );
+    const catalog = buildMcpCatalog([], "test", {}, [staticOperation(1), ...control]);
+
+    expect(catalog.operationTools).toHaveLength(MAX_DEDICATED_TOOLS + 2);
+    expect(catalog.operationTools.filter((tool) => tool.auth.mode === "control"))
+      .toHaveLength(MAX_DEDICATED_TOOLS + 1);
+    expect(catalog.operationTools.find((tool) => tool.key === "control.operation-0")).toMatchObject({
+      plugin: "osf-control",
+      name: "control_operation_0",
+      auth: { mode: "control", roles: ["platform_admin"] },
+      // No authored effects, so the hint follows the GET projection.
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
+    });
+    // Sixty-one tenant tools would flip the catalog to searchable; these
+    // belong to the control server, so the tenant projection is untouched.
+    expect(catalog.operationToolProjection.mode).toBe("dedicated");
+    expect(operationMcpServer(control[0]!)).toBe("control");
+    expect(operationMcpServer(staticOperation(1))).toBe("tenant");
   });
 });

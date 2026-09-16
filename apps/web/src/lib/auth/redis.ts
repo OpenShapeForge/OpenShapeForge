@@ -35,7 +35,7 @@ export interface StoredSession {
   roles?: string[];
   /**
    * Keycloak group paths the user belongs to, e.g.
-   * "/openshapeforge-demo/tenant-acme/role-directie". Forwarded to the API in
+   * "/customer/region/editors". Forwarded to the API in
    * trusted-context headers so app/API gates can authorize on group
    * membership. Translation to internal org-unit UUIDs (for RLS) happens
    * downstream once the path→org-unit lookup lands.

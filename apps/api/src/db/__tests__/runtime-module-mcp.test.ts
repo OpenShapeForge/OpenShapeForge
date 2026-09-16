@@ -5,6 +5,7 @@ import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import type { DB } from "../../generated/db/types.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import { createDatabaseRuntime } from "../connection.js";
@@ -16,10 +17,18 @@ import type {
   ModuleToolExecutionOptions,
   RuntimeModule,
 } from "../../modules/contract.js";
+
 import { ModulePlatformRuntime } from "../../modules/platform.js";
-import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
+import {
+  __buildGeneratedMcpServerForTests,
+  createRuntimeDeclarativeServiceExecutor,
+} from "../../mcp/generated-mcp-server.js";
 import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
+
+// The public plugin keeps its database generic unbound; the API runtime
+// specializes the same contract to the generated DB at its loader boundary.
+const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -848,7 +857,7 @@ describe("generated MCP runtime module security boundary", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [workflowModule, module],
+          modules: [documentsRuntime, workflowModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,
@@ -1467,6 +1476,50 @@ describe("generated MCP runtime module security boundary", () => {
             await sql`delete from public.module_connection_test
              where id in (${secondConnectionId}::uuid, ${sharedConnectionId}::uuid)
             `.execute(trx);
+          });
+
+          // Strict-v2 providers expose this same stored Service through the
+          // canonical Operation catalog. Its compatibility entry stays out of
+          // public MCP listing, while REST/GraphQL/workers can still execute
+          // the exact id/key/version through the transport-neutral engine.
+          (entry as typeof entry & {
+            compatibility?: { plugin: string; providerId: string };
+          }).compatibility = {
+            plugin: "example",
+            providerId: "example.services",
+          };
+          expect((await client.listTools()).tools.map((tool) => tool.name))
+            .not.toContain("public_read");
+          const directExecutor = createRuntimeDeclarativeServiceExecutor({
+            db,
+            modules: [documentsRuntime, workflowModule, module],
+            modulePlatform: platform,
+            egressOwner: module.egress,
+            tablesForTests: tables,
+          });
+          const direct = await platform.withActiveOperationSession(
+            {
+              tenantId,
+              userId,
+              roles: ["reader"],
+              groups: [],
+              oauthScopes: [],
+              scope: "self",
+              credential: "bearer",
+            },
+            (active) => directExecutor(active, {
+              definition: {
+                entity: "Definition",
+                id: publicDefinitionId,
+                key: "public_read",
+                version: 1,
+              },
+              input: {},
+            }),
+          );
+          expect(direct).toMatchObject({
+            data: { value: "ok" },
+            operations: [],
           });
 
           const beforeCollisionRead = moduleReads;

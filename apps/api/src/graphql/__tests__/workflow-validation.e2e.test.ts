@@ -77,15 +77,15 @@ function scratchUrl(): string {
 }
 
 /**
- * One writer for the whole file. `directie` is the realm role that may author
- * workflows at all; tenant and user are real UUIDs because the database session
+ * One generic workflow writer for the whole file. Tenant and user are real
+ * UUIDs because the database session
  * layer validates the version and variant nibbles before it will set the tenant
  * GUC, and a placeholder string is rejected there rather than here.
  */
 const writer = {
   tenantId: randomUUID(),
   userId: randomUUID(),
-  roles: ["directie"],
+  roles: ["workflow-admin"],
   groups: [] as string[],
   scope: "tenant" as const,
 };

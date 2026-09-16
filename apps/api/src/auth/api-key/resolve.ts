@@ -33,7 +33,7 @@ export type ApiKeyResolverDeps = {
   keyring: SecretKeyring;
   issuer: string;
   /** Verifies a Keycloak token exactly as the interactive bearer path does. */
-  verifyToken: (token: string) => Promise<{
+  verifyToken: (token: string, credential: { tenantId: string; keycloakClientId: string }) => Promise<{
     tenantId: string | null;
     userId: string | null;
     roles: string[];
@@ -96,7 +96,9 @@ export async function resolveApiKeySession(
 
   let identity: Awaited<ReturnType<ApiKeyResolverDeps["verifyToken"]>>;
   try {
-    identity = await deps.verifyToken(token);
+    identity = await deps.verifyToken(token, {
+      tenantId: key.tenantId, keycloakClientId: key.keycloakClientId,
+    });
   } catch (error) {
     console.warn(
       "[auth] API key exchanged a token that failed verification:",
@@ -134,6 +136,7 @@ export async function resolveApiKeySession(
     roles,
     oauthScopes: identity.scopes ?? [],
     groups: identity.groups,
+    relationGroupIds: [],
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",
   };

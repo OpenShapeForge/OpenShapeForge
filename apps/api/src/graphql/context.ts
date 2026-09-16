@@ -10,6 +10,8 @@ import type {
 export type GraphqlSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Opaque binding to the verified interactive login session, when present. */
+  loginSessionBinding?: string;
   roles: string[];
   /** OAuth scopes from a verified bearer or API-key identity. */
   oauthScopes?: string[];
@@ -19,6 +21,8 @@ export type GraphqlSessionContext = {
    * tokens without the group-membership protocol mapper).
    */
   groups: string[];
+  /** Active server-derived RelationGroup memberships; never token claims. */
+  relationGroupIds?: readonly string[];
   /**
    * Effective access scope resolved upstream (tenant/group/self). Threaded
    * through to the DB session layer as `DbSessionInput.scope`, which sets the
@@ -55,9 +59,13 @@ export async function createGraphqlContext(
   const session: GraphqlSessionContext = {
     tenantId: resolved.tenantId,
     userId: resolved.userId,
+    ...(resolved.loginSessionBinding
+      ? { loginSessionBinding: resolved.loginSessionBinding }
+      : {}),
     roles: [...resolved.roles],
     oauthScopes: [...(resolved.oauthScopes ?? [])],
     groups: [...resolved.groups],
+    relationGroupIds: [...(resolved.relationGroupIds ?? [])],
     scope: resolved.scope,
     credential: resolved.credential,
   };

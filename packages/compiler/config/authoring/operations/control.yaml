@@ -1,0 +1,2242 @@
+# The platform's own administration as canonical Operations.
+#
+# One operation per thing a platform operator does — tenants, organisations,
+# the Service catalog, update notices, reconciliation, audit — bound to the
+# core `osf-control` runtime module, projected to REST (the web talks here),
+# to MCP (`/admin/mcp`, the assistant talks here) and to web pages. Every
+# operation is `auth.mode: control`: the bearer is verified against the
+# platform's control realm and must hold one of the listed realm roles;
+# `platform_admin` holds the catalog, `platform-operator` the tenant
+# lifecycle, and both may see the registry. No tenant context ever exists.
+#
+# Confirmation `acknowledgement` marks the operations whose blast radius is a
+# tenant's access or every tenant at once: a caller passes `confirmed: true`
+# after saying so to the person. The web and MCP projections carry that field.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-control
+operations:
+  whoami:
+    id: control.whoami
+    name:
+      en: Who am I
+      nl: Wie ben ik
+    description:
+      en: 'Describes the signed-in platform operator: name, role, scope (the whole platform), how many tenants exist
+        and when the sign-in expires. Takes no arguments.'
+      nl: 'Beschrijft de aangemelde platformbeheerder: naam, rol, reikwijdte (het hele platform), aantal tenants
+        en wanneer de aanmelding verloopt. Zonder argumenten.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: whoami
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        properties:
+          name:
+            type: string
+            x-osf-i18n:
+              title:
+                en: Name
+                nl: Naam
+          role:
+            type: string
+            x-osf-i18n:
+              title:
+                en: Role
+                nl: Rol
+          scope:
+            type: string
+            x-osf-i18n:
+              title:
+                en: Scope
+                nl: Reikwijdte
+          tenants:
+            type: integer
+            x-osf-i18n:
+              title: &id003
+                en: Tenants
+                nl: Tenants
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: &id001
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: &id002
+    - status: 400
+      code: VALIDATION
+      description: The input does not describe a valid request.
+    - status: 401
+      code: UNAUTHENTICATED
+      description: A control-realm operator token is required.
+    - status: 403
+      code: FORBIDDEN
+      description: The operator lacks a required control-realm role.
+    - status: 404
+      code: NOT_FOUND
+      description: The tenant, organization, entry or notice does not exist.
+    - status: 409
+      code: CONFLICT
+      description: The request contradicts the current platform state.
+    - status: 502
+      code: IDENTITY_PROVIDER_ERROR
+      description: The identity provider refused or failed the request.
+    - status: 503
+      code: CONTROL_PLANE_NOT_CONFIGURED
+      description: The control plane is not configured on this deployment.
+  platformGuide:
+    id: control.platform-guide
+    name:
+      en: Platform administration guide
+      nl: Gids platformbeheer
+    description:
+      en: 'The fixed process for administering the Service catalog: what an entry is, how a new version reaches
+        tenants, when to force an update, how retirement behaves, and what never to do.'
+      nl: 'Het vaste proces voor het beheren van de Service-catalogus: wat een entry is, hoe een nieuwe versie tenants
+        bereikt, wanneer je een update forceert, hoe intrekken werkt en wat je nooit doet.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: platformGuide
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          guide:
+            type: string
+            x-osf-i18n:
+              title:
+                en: Guide
+                nl: Gids
+        required:
+        - guide
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  listTenants:
+    id: control.list-tenants
+    name:
+      en: List tenants
+      nl: Tenants
+    description:
+      en: 'Every tenant of the deployment: slug, display name, lifecycle status, Keycloak organization alias, and
+        how many catalog entries it has installed, overridden and pending. Never returns tenant data.'
+      nl: 'Alle tenants van deze omgeving: slug, naam, status, Keycloak-organisatie en hoeveel catalogus-entries
+        geïnstalleerd, overschreven en in afwachting zijn. Geeft nooit tenantdata terug.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listTenants
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenants:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                id:
+                  type: string
+                  x-osf-i18n: { title: { en: ID, nl: ID } }
+                slug:
+                  type: string
+                  x-osf-i18n: { title: { en: Slug, nl: Slug } }
+                name:
+                  type: string
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                status:
+                  type: string
+                  x-osf-i18n: { title: { en: Status, nl: Status } }
+                tenantKind:
+                  type: string
+                  x-osf-i18n: { title: { en: Tenant kind, nl: Tenantsoort } }
+                relationId:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Relation ID, nl: Relatie-ID } }
+                relationLabel:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Relation, nl: Relatie } }
+                keycloakOrganizationId:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Keycloak organization ID, nl: Keycloak-organisatie-ID } }
+                organizationAlias:
+                  type: [string, 'null']
+                  x-osf-i18n: { title: { en: Organization alias, nl: Organisatie-alias } }
+                installedEntries:
+                  type: integer
+                  x-osf-i18n: { title: { en: Installed services, nl: Geïnstalleerde services } }
+                overriddenEntries:
+                  type: integer
+                  x-osf-i18n: { title: { en: Overridden services, nl: Overschreven services } }
+                updatesAvailable:
+                  type: integer
+                  x-osf-i18n: { title: { en: Updates available, nl: Updates beschikbaar } }
+              required: [id, slug, name, status, tenantKind, relationId, relationLabel, keycloakOrganizationId, organizationAlias, installedEntries, overriddenEntries, updatesAvailable]
+            x-osf-i18n:
+              title: *id003
+        required:
+        - tenants
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  getTenant:
+    id: control.get-tenant
+    name:
+      en: Get tenant
+      nl: Tenant opvragen
+    description:
+      en: One tenant by slug with the same fields list_tenants shows.
+      nl: Eén tenant op slug, met dezelfde velden als de tenantlijst.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: getTenant
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: &id005
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+            description: The tenant's slug as list_tenants reports it (e.g. acme-dev).
+            x-osf-i18n:
+              title: &id010
+                en: Tenant slug
+                nl: Tenant-slug
+        required:
+        - slug
+    output:
+      schema: &id004
+        type: object
+        additionalProperties: true
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  createTenant:
+    id: control.create-tenant
+    name:
+      en: Create tenant
+      nl: Tenant aanmaken
+    description:
+      en: Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization. Use
+        a stable kebab-case slug and a human display name. A replay returns the existing tenant and repairs an incomplete
+        Keycloak projection; it never deletes or replaces a tenant.
+      nl: Maakt ÉÉN tenant aan in het platformregister met zijn Keycloak-hoofdorganisatie, of herhaalt dat veilig.
+        Gebruik een stabiele kebab-case slug en een leesbare naam. Een herhaling geeft de bestaande tenant terug
+        en herstelt een onvolledige Keycloak-projectie; verwijdert of vervangt nooit.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: createTenant
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          name:
+            type: string
+            minLength: 1
+            description: Human display name.
+            x-osf-i18n:
+              title: &id006
+                en: Name
+                nl: Naam
+        required:
+        - slug
+        - name
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: &id007
+      data: write
+      external: write
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  updateTenant:
+    id: control.update-tenant
+    name:
+      en: Update tenant
+      nl: Tenant wijzigen
+    description:
+      en: Renames ONE tenant and/or changes its lifecycle status. The slug stays immutable. Setting inactive or
+        suspended disables the root Keycloak Organization and can interrupt access. Repeating the same state is
+        a no-op.
+      nl: Hernoemt ÉÉN tenant en/of wijzigt zijn status. De slug blijft onveranderlijk. Inactief of geschorst zetten
+        schakelt de Keycloak-hoofdorganisatie uit en kan toegang onderbreken. Dezelfde status herhalen doet niets.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: updateTenant
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          name:
+            type: string
+            minLength: 1
+            x-osf-i18n:
+              title: *id006
+          status:
+            type: string
+            enum:
+            - active
+            - inactive
+            - suspended
+            x-osf-i18n:
+              title:
+                en: Status
+                nl: Status
+              enum:
+                active:
+                  en: Active
+                  nl: Actief
+                inactive:
+                  en: Inactive
+                  nl: Inactief
+                suspended:
+                  en: Suspended
+                  nl: Geschorst
+        required:
+        - slug
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id007
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  getBlueprintLibrary:
+    id: control.get-blueprint-library
+    name:
+      en: Get blueprint library
+      nl: Blueprintbibliotheek opvragen
+    description:
+      en: Which tenant's published blueprints ONE tenant may copy from, or null when none is assigned.
+      nl: Van welke tenant ÉÉN tenant gepubliceerde blueprints mag kopiëren, of null als er geen is toegewezen.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: getBlueprintLibrary
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+        required:
+        - slug
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        properties:
+          tenant:
+            type: string
+            x-osf-i18n:
+              title: &id008
+                en: Tenant
+                nl: Tenant
+          blueprintTenant:
+            type:
+            - string
+            - 'null'
+            x-osf-i18n:
+              title: &id009
+                en: Blueprint library tenant
+                nl: Blueprintbibliotheek-tenant
+        required:
+        - tenant
+        - blueprintTenant
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  assignBlueprintLibrary:
+    id: control.assign-blueprint-library
+    name:
+      en: Assign blueprint library
+      nl: Blueprintbibliotheek toewijzen
+    description:
+      en: Marks ONE active tenant as the blueprint library another tenant copies from. Pass null to clear the assignment.
+        Existing copies keep their recorded source; a tenant cannot be its own library.
+      nl: Markeert ÉÉN actieve tenant als de blueprintbibliotheek waaruit een andere tenant kopieert. Geef null
+        om de toewijzing te wissen. Bestaande kopieën houden hun bron; een tenant kan niet zijn eigen bibliotheek
+        zijn.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: assignBlueprintLibrary
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          blueprintTenantSlug:
+            anyOf:
+            - type: string
+              pattern: ^[a-z][a-z0-9-]*$
+            - type: 'null'
+            description: The library tenant's slug, or null to clear.
+            x-osf-i18n:
+              title:
+                en: Blueprint library tenant
+                nl: Blueprintbibliotheek-tenant
+        required:
+        - slug
+        - blueprintTenantSlug
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        properties:
+          tenant:
+            type: string
+            x-osf-i18n:
+              title: *id008
+          blueprintTenant:
+            type:
+            - string
+            - 'null'
+            x-osf-i18n:
+              title: *id009
+          changed:
+            type: boolean
+            x-osf-i18n:
+              title:
+                en: Changed
+                nl: Gewijzigd
+        required:
+        - tenant
+        - blueprintTenant
+        - changed
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: &id017
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  inviteFirstTenantAdmin:
+    id: control.invite-first-tenant-admin
+    name:
+      en: Invite first tenant administrator
+      nl: Eerste tenantbeheerder uitnodigen
+    description:
+      en: Invites the first organization administrator by email for ONE existing active tenant, through the Keycloak organization
+        invitation flow. Repeating the same request reuses the invitation without resending. Refuses a different
+        first administrator once one exists or is pending.
+      nl: Nodigt per e-mail de eerste org_admin uit voor ÉÉN bestaande actieve tenant, via de Keycloak-organisatie-uitnodiging.
+        Herhalen hergebruikt de uitnodiging zonder opnieuw te versturen. Weigert een andere eerste beheerder zodra
+        er één bestaat of in afwachting is.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: inviteFirstTenantAdmin
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          email:
+            type: string
+            format: email
+            x-osf-i18n:
+              title:
+                en: E-mail address
+                nl: E-mailadres
+        required:
+        - slug
+        - email
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id007
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  listTenantInvitations:
+    id: control.list-tenant-invitations
+    name:
+      en: List tenant invitations
+      nl: Tenantuitnodigingen bekijken
+    description:
+      en: Lists the outstanding Keycloak invitations for one tenant together with their stored roles, delivery dates, expiry and any pending local role assignments missing at the provider. Never returns invitation links.
+      nl: Toont de openstaande Keycloak-uitnodigingen voor één tenant met hun opgeslagen rollen, verzenddata, vervaldatum en lokale roltoekenningen die bij de provider ontbreken. Geeft nooit uitnodigingslinks terug.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listTenantInvitations
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+        required:
+        - slug
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenant: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          invitations:
+            type: array
+            x-osf-i18n: { title: { en: Invitations, nl: Uitnodigingen } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                invitationId: { type: string, x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
+                email: { type: string, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+                firstName: { type: [string, 'null'], x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+                lastName: { type: [string, 'null'], x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+                status: { type: [string, 'null'], x-osf-i18n: { title: { en: Status, nl: Status } } }
+                sentAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Sent at, nl: Verzonden op } } }
+                expiresAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Expires at, nl: Verloopt op } } }
+                role: { type: [string, 'null'], x-osf-i18n: { title: { en: Role, nl: Rol } } }
+                registrationStatus: { type: string, x-osf-i18n: { title: { en: Registration status, nl: Registratiestatus } } }
+                canResend: { type: boolean, x-osf-i18n: { title: { en: Can resend, nl: Opnieuw versturen mogelijk } } }
+              required: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+          unresolved:
+            type: array
+            items: { type: object, additionalProperties: true }
+            x-osf-i18n: { title: { en: Unresolved invitations, nl: Onopgeloste uitnodigingen } }
+        required: [tenant, invitations, unresolved]
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: read
+      external: read
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  getTenantInvitation:
+    id: control.get-tenant-invitation
+    name: { en: Get tenant invitation, nl: Tenantuitnodiging opvragen }
+    description: { en: Reads one currently outstanding invitation without returning its invitation link., nl: Leest één actuele uitnodiging zonder de uitnodigingslink terug te geven. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantInvitation }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId: { type: string, pattern: '^[a-zA-Z0-9_-]{1,128}$', x-osf-i18n: { title: { en: Invitation ID, nl: Uitnodigings-ID } } }
+        required: [slug, invitationId]
+    output: { schema: { type: object, additionalProperties: true } }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  createTenantInvitation:
+    id: control.create-tenant-invitation
+    name: { en: Invite tenant member, nl: Tenantlid uitnodigen }
+    description: { en: Invites one member through Keycloak and records the allowlisted role applied after acceptance., nl: Nodigt één lid uit via Keycloak en legt de toegestane rol vast die na acceptatie wordt toegepast. }
+    implementation: { type: plugin, plugin: osf-control, handler: createTenantInvitation }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          email: { type: string, format: email, x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+          firstName: { type: string, x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+          lastName: { type: string, x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+          role:
+            type: string
+            enum: [org_admin, org_employee]
+            x-osf-i18n: { title: { en: Role, nl: Rol }, enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+        required: [slug, email, role]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  revokeTenantInvitation:
+    id: control.revoke-tenant-invitation
+    name:
+      en: Revoke tenant invitation
+      nl: Tenantuitnodiging intrekken
+    description:
+      en: Revokes one currently outstanding invitation selected from List tenant invitations. Invalidates the delivered link and cancels its pending role assignment without removing an accepted member.
+      nl: Trekt één actuele uitnodiging uit Tenantuitnodigingen bekijken in. Maakt de verzonden link ongeldig en annuleert de openstaande roltoekenning zonder een geaccepteerd lid te verwijderen.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: revokeTenantInvitation
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId:
+            type: string
+            pattern: ^[a-zA-Z0-9_-]{1,128}$
+            description: Opaque invitationId returned by List tenant invitations.
+            x-osf-i18n:
+              title:
+                en: Invitation ID
+                nl: Uitnodigings-ID
+        required:
+        - slug
+        - invitationId
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: write
+      external: write
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  resendTenantInvitation:
+    id: control.resend-tenant-invitation
+    name:
+      en: Resend tenant invitation
+      nl: Tenantuitnodiging opnieuw versturen
+    description:
+      en: Explicitly resends one currently outstanding invitation selected from List tenant invitations, preserving its recipient and pending role. Never retries automatically after an uncertain mail response.
+      nl: Verstuurt één actuele uitnodiging uit Tenantuitnodigingen bekijken expliciet opnieuw met behoud van ontvanger en openstaande rol. Probeert na een onzekere mailrespons nooit automatisch opnieuw.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: resendTenantInvitation
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          invitationId:
+            type: string
+            pattern: ^[a-zA-Z0-9_-]{1,128}$
+            description: Opaque invitationId returned by List tenant invitations.
+            x-osf-i18n:
+              title:
+                en: Invitation ID
+                nl: Uitnodigings-ID
+        required:
+        - slug
+        - invitationId
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform administrator acts across every tenant; no tenant context exists.
+    effects:
+      data: write
+      external: write
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  getTenantOrganizationTree:
+    id: control.get-tenant-organization-tree
+    name:
+      en: Get organization tree
+      nl: Organisatieboom opvragen
+    description:
+      en: The complete bounded sub-organization tree of ONE tenant beneath its Keycloak Organization, with the opaque
+        org-unit ids used to create or move children. Never returns members or credentials.
+      nl: De volledige boom van suborganisaties van ÉÉN tenant onder zijn Keycloak-organisatie, met de org-unit-ids
+        om kinderen aan te maken of te verplaatsen. Geeft nooit leden of inloggegevens terug.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: getTenantOrganizationTree
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+        required:
+        - slug
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: &id012
+      data: read
+      external: read
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  createTenantOrganization:
+    id: control.create-tenant-organization
+    name:
+      en: Create organization
+      nl: Organisatie aanmaken
+    description:
+      en: Creates or safely replays ONE sub-organization beneath a tenant root or an explicit parent org unit, and
+        provisions its Keycloak Organization and MCP audience scope.
+      nl: Maakt ÉÉN suborganisatie aan onder de tenantroot of een expliciete bovenliggende org-unit, of herhaalt
+        dat veilig, inclusief Keycloak-organisatie en MCP-audience-scope.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: createTenantOrganization
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: *id005
+          slug:
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+            description: Immutable kebab-case path segment.
+            x-osf-i18n:
+              title: *id010
+          name:
+            type: string
+            minLength: 1
+            description: Human display name.
+            x-osf-i18n:
+              title: *id006
+          parentOrgUnitId:
+            type: string
+            format: uuid
+            description: Opaque parent org-unit id; omit for the tenant root.
+            x-osf-i18n:
+              title: &id011
+                en: Parent organization unit
+                nl: Bovenliggende organisatie-eenheid
+        required:
+        - tenantSlug
+        - slug
+        - name
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id007
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  updateTenantOrganization:
+    id: control.update-tenant-organization
+    name:
+      en: Update organization
+      nl: Organisatie wijzigen
+    description:
+      en: Renames and/or reparents ONE existing sub-organization inside its tenant. Reparenting reprojects every
+        descendant path in Keycloak and can affect access; null moves the unit directly beneath the tenant root.
+      nl: Hernoemt en/of verplaatst ÉÉN bestaande suborganisatie binnen zijn tenant. Verplaatsen projecteert alle
+        onderliggende paden opnieuw in Keycloak en kan toegang beïnvloeden; null zet de unit direct onder de tenantroot.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: updateTenantOrganization
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: *id005
+          orgUnitId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Organization unit
+                nl: Organisatie-eenheid
+          name:
+            type: string
+            minLength: 1
+            x-osf-i18n:
+              title: *id006
+          parentOrgUnitId:
+            anyOf:
+            - type: string
+              format: uuid
+            - type: 'null'
+            description: New parent id, or null for the tenant root; omit to keep the current parent.
+            x-osf-i18n:
+              title: *id011
+        required:
+        - tenantSlug
+        - orgUnitId
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id007
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  getReconciliationReport:
+    id: control.get-reconciliation-report
+    name:
+      en: Reconciliation report
+      nl: Reconciliatierapport
+    description:
+      en: Compares the authoritative tenant and organization registry with its Keycloak projection and returns every
+        bounded drift finding, including safe non-repairable ones. Inspect this before reapplying.
+      nl: Vergelijkt het gezaghebbende tenant- en organisatieregister met de Keycloak-projectie en geeft elke afwijking
+        terug, ook de veilige niet-herstelbare. Bekijk dit voordat je opnieuw toepast.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: getReconciliationReport
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id012
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  reapplyReconciliation:
+    id: control.reapply-reconciliation
+    name:
+      en: Reapply reconciliation
+      nl: Reconciliatie opnieuw toepassen
+    description:
+      en: Pushes authoritative registry state back into Keycloak for repairable drift, for ONE tenant slug or for
+        every affected tenant when omitted. It never deletes unclaimed Organizations; replay may change identity
+        access.
+      nl: Zet de gezaghebbende registerstaat terug in Keycloak voor herstelbare afwijkingen, voor ÉÉN tenant of
+        voor alle betrokken tenants als je geen slug geeft. Verwijdert nooit niet-opgeëiste organisaties; kan toegang
+        veranderen.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: reapplyReconciliation
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: *id005
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform-operator
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id007
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  listPlatformAudit:
+    id: control.list-platform-audit
+    name:
+      en: Platform audit
+      nl: Platformaudit
+    description:
+      en: 'Recent audited platform actions, newest first: actor, time, action, target and result. Filter by exact
+        actor or action, result and a time window; pass nextCursor back as cursor to continue. Never returns tokens,
+        credentials or request bodies.'
+      nl: 'Recente geauditeerde platformacties, nieuwste eerst: actor, tijd, actie, doel en resultaat. Filter op
+        actor, actie, resultaat en tijdvenster; geef nextCursor terug als cursor om verder te bladeren. Geeft nooit
+        tokens, inloggegevens of request-bodies terug.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listPlatformAudit
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          actor:
+            type: string
+            description: Exact audited actor subject.
+            x-osf-i18n:
+              title:
+                en: Actor
+                nl: Actor
+          action:
+            type: string
+            description: Exact audited action, the operation key such as control.publish-catalog-entry.
+            x-osf-i18n:
+              title: &id019
+                en: Action
+                nl: Actie
+          result:
+            type: string
+            enum:
+            - succeeded
+            - failed
+            - in_progress
+            x-osf-i18n:
+              title:
+                en: Result
+                nl: Resultaat
+              enum:
+                succeeded:
+                  en: Succeeded
+                  nl: Geslaagd
+                failed:
+                  en: Failed
+                  nl: Mislukt
+                in_progress:
+                  en: In progress
+                  nl: Bezig
+          since:
+            type: string
+            format: date-time
+            x-osf-i18n:
+              title:
+                en: Since
+                nl: Vanaf
+          until:
+            type: string
+            format: date-time
+            x-osf-i18n:
+              title:
+                en: Until
+                nl: Tot
+          cursor:
+            type: string
+            x-osf-i18n:
+              title: &id013
+                en: Cursor
+                nl: Cursor
+          limit:
+            type: integer
+            minimum: 1
+            maximum: 200
+            description: Page size, default 50.
+            x-osf-i18n:
+              title: &id014
+                en: Page size
+                nl: Paginagrootte
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  listCatalogEntries:
+    id: control.list-catalog-entries
+    name:
+      en: Service catalog
+      nl: Servicecatalogus
+    description:
+      en: 'The Service catalog, newest version per key, with per-tenant installation state: installed version, whether
+        the tenant overrode it, and whether an update is pending. Filter by kind and/or key; paged.'
+      nl: 'De Servicecatalogus, nieuwste versie per sleutel, met per tenant de installatiestand: geïnstalleerde
+        versie, overschreven of niet, update in afwachting. Filter op soort en/of sleutel; gepagineerd.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listCatalogEntries
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          kind: &id015
+            type: string
+            enum:
+            - service
+            - adapter
+            - capability
+            description: Catalog entry kind.
+            x-osf-i18n:
+              title:
+                en: Kind
+                nl: Soort
+              enum:
+                service:
+                  en: Service
+                  nl: Service
+                adapter:
+                  en: Adapter
+                  nl: Adapter
+                capability:
+                  en: Capability
+                  nl: Capability
+          key: &id016
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+            description: Stable catalog key, kebab-case.
+            x-osf-i18n:
+              title: &id018
+                en: Key
+                nl: Sleutel
+          cursor:
+            type: string
+            x-osf-i18n:
+              title: *id013
+          limit:
+            type: integer
+            minimum: 1
+            maximum: 200
+            x-osf-i18n:
+              title: *id014
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          entries:
+            type: array
+            x-osf-i18n: { title: { en: Services, nl: Services } }
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                kind:
+                  type: string
+                  enum: [service, adapter, capability]
+                  x-osf-i18n:
+                    title: { en: Kind, nl: Soort }
+                    enum:
+                      service: { en: Service, nl: Service }
+                      adapter: { en: Adapter, nl: Adapter }
+                      capability: { en: Capability, nl: Capability }
+                key:
+                  type: string
+                  x-osf-i18n: { title: { en: Key, nl: Sleutel } }
+                name:
+                  anyOf: [{ type: string }, { type: 'null' }]
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                latestVersion:
+                  type: integer
+                  x-osf-i18n: { title: { en: Latest version, nl: Nieuwste versie } }
+                authority:
+                  type: string
+                  enum: [platform_release, host, tenant_shared]
+                  x-osf-i18n:
+                    title: { en: Authority, nl: Autoriteit }
+                    enum:
+                      platform_release: { en: Platform release, nl: Platformrelease }
+                      host: { en: Host, nl: Host }
+                      tenant_shared: { en: Shared by tenant, nl: Gedeeld door tenant }
+                source:
+                  type: string
+                  x-osf-i18n: { title: { en: Source, nl: Bron } }
+                publishedAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Published at, nl: Gepubliceerd op } }
+                retired:
+                  type: boolean
+                  x-osf-i18n: { title: { en: Retired, nl: Ingetrokken } }
+                tenants:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                  x-osf-i18n: { title: { en: Tenant installations, nl: Tenantinstallaties } }
+              required: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+          nextCursor:
+            anyOf: [{ type: string }, { type: 'null' }]
+            x-osf-i18n: { title: { en: Next page, nl: Volgende pagina } }
+        required: [entries, nextCursor]
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  getCatalogEntry:
+    id: control.get-catalog-entry
+    name:
+      en: Get catalog entry
+      nl: Catalogus-entry opvragen
+    description:
+      en: 'One catalog entry by kind and key: its definition and every tenant''s installation state.'
+      nl: 'Eén catalogus-entry op soort en sleutel: de definitie en de installatiestand per tenant.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: getCatalogEntry
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          kind: *id015
+          key: *id016
+        required:
+        - kind
+        - key
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  publishCatalogEntry:
+    id: control.publish-catalog-entry
+    name:
+      en: Publish catalog entry
+      nl: Catalogus-entry publiceren
+    description:
+      en: 'Publishes a new version of ONE catalog entry to every tenant: tenants that did not override it are updated,
+        overridden tenants are flagged. There is no dry run; every tenant is affected.'
+      nl: 'Publiceert een nieuwe versie van ÉÉN catalogus-entry naar alle tenants: tenants zonder eigen overschrijving
+        worden bijgewerkt, overschreven tenants worden gemarkeerd. Geen proefdraai; elke tenant wordt geraakt.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: publishCatalogEntry
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          kind: *id015
+          key: *id016
+          definition:
+            type: object
+            additionalProperties: true
+            description: The complete entry definition, exactly as the catalog stores it.
+            x-osf-i18n:
+              title:
+                en: Definition
+                nl: Definitie
+          authority:
+            type: string
+            enum:
+            - platform_release
+            - host
+            - tenant_shared
+            description: Who owns changes after publication.
+            x-osf-i18n:
+              title:
+                en: Authority
+                nl: Autoriteit
+              enum:
+                platform_release:
+                  en: Platform release
+                  nl: Platformrelease
+                host:
+                  en: Host
+                  nl: Host
+                tenant_shared:
+                  en: Shared by tenant
+                  nl: Gedeeld door tenant
+        required:
+        - kind
+        - key
+        - definition
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id017
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  retireCatalogEntry:
+    id: control.retire-catalog-entry
+    name:
+      en: Retire catalog entry
+      nl: Catalogus-entry intrekken
+    description:
+      en: 'Publishes a version marked retired: the Service becomes draft for every tenant that did not override
+        it; overridden tenants are flagged and keep it until the update is applied.'
+      nl: 'Publiceert een versie gemarkeerd als ingetrokken: de Service wordt concept voor elke tenant zonder overschrijving;
+        overschreven tenants worden gemarkeerd en houden hem tot de update is toegepast.'
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: retireCatalogEntry
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          kind: *id015
+          key: *id016
+        required:
+        - kind
+        - key
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id017
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  applyCatalogUpdateForTenant:
+    id: control.apply-catalog-update-for-tenant
+    name:
+      en: Apply catalog update for tenant
+      nl: Catalogus-update toepassen voor tenant
+    description:
+      en: Forces the latest published version of ONE entry onto ONE tenant that overrode it, discarding the tenant's
+        override.
+      nl: Forceert de nieuwste gepubliceerde versie van ÉÉN entry op ÉÉN tenant die hem overschreef, en gooit de
+        overschrijving van de tenant weg.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: applyCatalogUpdateForTenant
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          kind: *id015
+          key: *id016
+        required:
+        - slug
+        - kind
+        - key
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id017
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: acknowledgement
+    errors: *id002
+  publishUpdateNotice:
+    id: control.publish-update-notice
+    name:
+      en: Publish update notice
+      nl: Updatebericht publiceren
+    description:
+      en: Tells everyone on this deployment what changed. Every person's assistant sees it once; serviceChanges
+        brings each affected personal instruction up for review. Republishing a key replaces it for people not yet
+        told.
+      nl: Vertelt iedereen op deze omgeving wat er veranderd is. Elke assistent ziet het één keer; serviceChanges
+        legt elke geraakte persoonlijke instructie ter beoordeling voor. Opnieuw publiceren vervangt het bericht
+        voor wie het nog niet zag.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: publishUpdateNotice
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          key:
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+            description: Stable notice key, kebab-case (e.g. day-start-v3).
+            x-osf-i18n:
+              title: *id018
+          title:
+            type: string
+            minLength: 1
+            x-osf-i18n:
+              title:
+                en: Title
+                nl: Titel
+          changed:
+            type: string
+            minLength: 1
+            description: What changed, for the assistant to put in the person's own words.
+            x-osf-i18n:
+              title:
+                en: What changed
+                nl: Wat er veranderd is
+          assistantChanges:
+            type: array
+            items:
+              type: string
+            description: What an assistant now does differently. One sentence per entry.
+            x-osf-i18n:
+              title:
+                en: Assistant changes
+                nl: Veranderingen voor de assistent
+          userActions:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                action:
+                  type: string
+                  x-osf-i18n:
+                    title: *id019
+                why:
+                  type: string
+                  x-osf-i18n:
+                    title:
+                      en: Why
+                      nl: Waarom
+              required:
+              - action
+            description: Steps only the person can take.
+            x-osf-i18n:
+              title:
+                en: User actions
+                nl: Acties voor de gebruiker
+          serviceChanges:
+            type: object
+            additionalProperties:
+              type: string
+            description: Catalog key of each changed Service mapped to what changed on it.
+            x-osf-i18n:
+              title:
+                en: Service changes
+                nl: Veranderingen per Service
+        required:
+        - key
+        - title
+        - changed
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id017
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  listUpdateNotices:
+    id: control.list-update-notices
+    name:
+      en: Update notices
+      nl: Updateberichten
+    description:
+      en: Every published update notice, newest first, with how many people have been told.
+      nl: Elk gepubliceerd updatebericht, nieuwste eerst, met hoeveel mensen het gezien hebben.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: listUpdateNotices
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id001
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  withdrawUpdateNotice:
+    id: control.withdraw-update-notice
+    name:
+      en: Withdraw update notice
+      nl: Updatebericht intrekken
+    description:
+      en: Withdraws ONE notice so nobody else is told; people already told keep their record.
+      nl: Trekt ÉÉN bericht in zodat niemand het nog te zien krijgt; wie het al zag houdt dat.
+    implementation:
+      type: plugin
+      plugin: osf-control
+      handler: withdrawUpdateNotice
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          key: *id016
+        required:
+        - key
+    output:
+      schema: *id004
+    auth:
+      mode: control
+      roles:
+      - platform_admin
+    tenancy:
+      mode: none
+      description: A platform operator acts across every tenant; no tenant context exists.
+    effects: *id017
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *id002
+  listTenantMembers:
+    id: control.list-tenant-members
+    name: { en: List tenant members, nl: Tenantleden bekijken }
+    description: { en: Lists the bounded Keycloak Organization members of one tenant with roles and a safe credential summary., nl: Toont de begrensde Keycloak-organisatieleden van één tenant met rollen en een veilige credentialsamenvatting. }
+    implementation: { type: plugin, plugin: osf-control, handler: listTenantMembers }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties: { slug: *id005 }
+        required: [slug]
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          members:
+            type: array
+            x-osf-i18n: { title: { en: Members, nl: Leden } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+                username: { type: [string, 'null'], x-osf-i18n: { title: { en: Username, nl: Gebruikersnaam } } }
+                email: { type: [string, 'null'], x-osf-i18n: { title: { en: Email, nl: E-mail } } }
+                firstName: { type: [string, 'null'], x-osf-i18n: { title: { en: First name, nl: Voornaam } } }
+                lastName: { type: [string, 'null'], x-osf-i18n: { title: { en: Last name, nl: Achternaam } } }
+                enabled: { type: boolean, x-osf-i18n: { title: { en: Enabled, nl: Actief } } }
+                emailVerified: { type: boolean, x-osf-i18n: { title: { en: Email verified, nl: E-mail geverifieerd } } }
+                roles: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Roles, nl: Rollen } } }
+                credentialCount: { type: integer, x-osf-i18n: { title: { en: Credentials, nl: Credentials } } }
+                credentialTypes: { type: array, items: { type: string }, x-osf-i18n: { title: { en: Credential types, nl: Credentialtypen } } }
+              required: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
+        required: [tenantSlug, members]
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  getTenantMember:
+    id: control.get-tenant-member
+    name: { en: Get tenant member, nl: Tenantlid opvragen }
+    description: { en: Reads one member only after verifying membership in the named tenant., nl: Leest één lid pas na controle van het lidmaatschap van de genoemde tenant. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantMember }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  assignTenantMemberRoles:
+    id: control.assign-tenant-member-roles
+    name: { en: Assign member roles, nl: Lidrollen toekennen }
+    description: { en: Assigns only allowlisted tenant roles to an existing member., nl: Kent uitsluitend toegestane tenantrollen toe aan een bestaand lid. }
+    implementation: { type: plugin, plugin: osf-control, handler: assignTenantMemberRoles }
+    input: &memberRoleInput
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          roles:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items:
+              type: string
+              enum: [org_admin, org_employee]
+              x-osf-i18n: { enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+        required: [slug, memberId, roles]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  removeTenantMemberRoles:
+    id: control.remove-tenant-member-roles
+    name: { en: Remove member roles, nl: Lidrollen intrekken }
+    description: { en: Removes selected allowlisted tenant roles without deleting the realm user., nl: Trekt geselecteerde toegestane tenantrollen in zonder de realmgebruiker te verwijderen. }
+    implementation: { type: plugin, plugin: osf-control, handler: removeTenantMemberRoles }
+    input: *memberRoleInput
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  removeTenantMembership:
+    id: control.remove-tenant-membership
+    name: { en: Remove tenant membership, nl: Tenantlidmaatschap verwijderen }
+    description: { en: Removes one organization membership without deleting a shared realm account., nl: Verwijdert één organisatielidmaatschap zonder een gedeeld realmaccount te verwijderen. }
+    implementation: { type: plugin, plugin: osf-control, handler: removeTenantMembership }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: delete, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  requestPasskeyRecovery:
+    id: control.request-passkey-recovery
+    name: { en: Request passkey recovery, nl: Passkeyherstel aanvragen }
+    description: { en: Sends a short-lived Keycloak action email allowing this member to register a new passwordless WebAuthn credential., nl: Stuurt een kortlevende Keycloak-actiemail waarmee dit lid een nieuwe passwordless WebAuthn-credential kan registreren. }
+    implementation: { type: plugin, plugin: osf-control, handler: requestPasskeyRecovery }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  listTenantCredentials:
+    id: control.list-tenant-credentials
+    name: { en: List member credentials, nl: Lidcredentials bekijken }
+    description: { en: Lists only safe credential metadata for one verified tenant member., nl: Toont uitsluitend veilige credentialmetadata van één gecontroleerd tenantlid. }
+    implementation: { type: plugin, plugin: osf-control, handler: listTenantCredentials }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+        required: [slug, memberId]
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+          memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentials:
+            type: array
+            x-osf-i18n: { title: { en: Credentials, nl: Credentials } }
+            items:
+              type: object
+              additionalProperties: false
+              properties:
+                tenantSlug: { type: string, x-osf-i18n: { title: { en: Tenant, nl: Tenant } } }
+                memberId: { type: string, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+                credentialId: { type: string, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+                type: { type: string, x-osf-i18n: { title: { en: Type, nl: Type } } }
+                label: { type: [string, 'null'], x-osf-i18n: { title: { en: Label, nl: Label } } }
+                createdAt: { type: [number, 'null'], x-osf-i18n: { title: { en: Created at, nl: Aangemaakt op } } }
+              required: [tenantSlug, memberId, credentialId, type, label, createdAt]
+        required: [tenantSlug, memberId, credentials]
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+  revokeTenantCredential:
+    id: control.revoke-tenant-credential
+    name: { en: Revoke credential, nl: Credential intrekken }
+    description: { en: Revokes one selected credential; deleting the last credential requires a confirmed recovery route., nl: Trekt één geselecteerde credential in; voor de laatste credential is een bevestigde herstelroute vereist. }
+    implementation: { type: plugin, plugin: osf-control, handler: revokeTenantCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+          reason: { type: string, minLength: 3, maxLength: 500, x-osf-i18n: { title: { en: Reason, nl: Reden } } }
+          recoveryConfirmed: { type: boolean, x-osf-i18n: { title: { en: Recovery route confirmed, nl: Herstelroute bevestigd } } }
+        required: [slug, memberId, credentialId, reason, recoveryConfirmed]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: delete, external: write }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors: *id002
+  getTenantCredential:
+    id: control.get-tenant-credential
+    name: { en: Get member credential, nl: Lidcredential opvragen }
+    description: { en: Reads safe metadata for one selected credential after verifying tenant membership., nl: Leest veilige metadata van één geselecteerde credential na controle van het tenantlidmaatschap. }
+    implementation: { type: plugin, plugin: osf-control, handler: getTenantCredential }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          slug: *id005
+          memberId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Member ID, nl: Lid-ID } } }
+          credentialId: { type: string, minLength: 1, x-osf-i18n: { title: { en: Credential ID, nl: Credential-ID } } }
+        required: [slug, memberId, credentialId]
+    output: { schema: *id004 }
+    auth: { mode: control, roles: [platform_admin, platform-operator] }
+    tenancy: { mode: none, description: A platform identity operation names one tenant explicitly. }
+    effects: { data: read, external: read }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+    errors: *id002
+interfaces:
+  rest:
+    operations:
+      whoami:
+        method: GET
+        path: /api/control/v1/whoami
+        response:
+          status: 200
+          kind: json
+      platformGuide:
+        method: GET
+        path: /api/control/v1/guide
+        response:
+          status: 200
+          kind: json
+      listTenants:
+        method: GET
+        path: /api/control/v1/tenants
+        response:
+          status: 200
+          kind: json
+      getTenant:
+        method: GET
+        path: /api/control/v1/tenants/:slug
+        response:
+          status: 200
+          kind: json
+      createTenant:
+        method: POST
+        path: /api/control/v1/tenants
+        response:
+          status: 201
+          kind: json
+      updateTenant:
+        method: PATCH
+        path: /api/control/v1/tenants/:slug
+        response:
+          status: 200
+          kind: json
+      getBlueprintLibrary:
+        method: GET
+        path: /api/control/v1/tenants/:slug/blueprint-library
+        response:
+          status: 200
+          kind: json
+      assignBlueprintLibrary:
+        method: PUT
+        path: /api/control/v1/tenants/:slug/blueprint-library
+        response:
+          status: 200
+          kind: json
+      inviteFirstTenantAdmin:
+        method: POST
+        path: /api/control/v1/tenants/:slug/first-administrator
+        response:
+          status: 200
+          kind: json
+      listTenantInvitations:
+        method: GET
+        path: /api/control/v1/tenants/:slug/invitations
+        response:
+          status: 200
+          kind: json
+      getTenantInvitation:
+        method: GET
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId
+        response: { status: 200, kind: json }
+      createTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations
+        response: { status: 201, kind: json }
+      revokeTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId/revoke
+        response:
+          status: 200
+          kind: json
+      resendTenantInvitation:
+        method: POST
+        path: /api/control/v1/tenants/:slug/invitations/:invitationId/resend
+        response:
+          status: 200
+          kind: json
+      listTenantMembers:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members
+        response: { status: 200, kind: json }
+      getTenantMember:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId
+        response: { status: 200, kind: json }
+      assignTenantMemberRoles:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/roles/assign
+        response: { status: 200, kind: json }
+      removeTenantMemberRoles:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/roles/remove
+        response: { status: 200, kind: json }
+      removeTenantMembership:
+        method: DELETE
+        path: /api/control/v1/tenants/:slug/members/:memberId
+        response: { status: 200, kind: json }
+      requestPasskeyRecovery:
+        method: POST
+        path: /api/control/v1/tenants/:slug/members/:memberId/passkey-recovery
+        response: { status: 200, kind: json }
+      listTenantCredentials:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials
+        response: { status: 200, kind: json }
+      revokeTenantCredential:
+        method: DELETE
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId
+        response: { status: 200, kind: json }
+      getTenantCredential:
+        method: GET
+        path: /api/control/v1/tenants/:slug/members/:memberId/credentials/:credentialId
+        response: { status: 200, kind: json }
+      getTenantOrganizationTree:
+        method: GET
+        path: /api/control/v1/tenants/:slug/organizations
+        response:
+          status: 200
+          kind: json
+      createTenantOrganization:
+        method: POST
+        path: /api/control/v1/tenants/:tenantSlug/organizations
+        response:
+          status: 201
+          kind: json
+      updateTenantOrganization:
+        method: PATCH
+        path: /api/control/v1/tenants/:tenantSlug/organizations/:orgUnitId
+        response:
+          status: 200
+          kind: json
+      getReconciliationReport:
+        method: GET
+        path: /api/control/v1/reconciliation
+        response:
+          status: 200
+          kind: json
+      reapplyReconciliation:
+        method: POST
+        path: /api/control/v1/reconciliation/reapply
+        response:
+          status: 200
+          kind: json
+      listPlatformAudit:
+        method: GET
+        path: /api/control/v1/audit
+        response:
+          status: 200
+          kind: json
+      listCatalogEntries:
+        method: GET
+        path: /api/control/v1/catalog
+        response:
+          status: 200
+          kind: json
+      getCatalogEntry:
+        method: GET
+        path: /api/control/v1/catalog/:kind/:key
+        response:
+          status: 200
+          kind: json
+      publishCatalogEntry:
+        method: POST
+        path: /api/control/v1/catalog/:kind/:key/publish
+        response:
+          status: 200
+          kind: json
+      retireCatalogEntry:
+        method: POST
+        path: /api/control/v1/catalog/:kind/:key/retire
+        response:
+          status: 200
+          kind: json
+      applyCatalogUpdateForTenant:
+        method: POST
+        path: /api/control/v1/tenants/:slug/catalog/:kind/:key/apply
+        response:
+          status: 200
+          kind: json
+      publishUpdateNotice:
+        method: POST
+        path: /api/control/v1/notices
+        response:
+          status: 201
+          kind: json
+      listUpdateNotices:
+        method: GET
+        path: /api/control/v1/notices
+        response:
+          status: 200
+          kind: json
+      withdrawUpdateNotice:
+        method: POST
+        path: /api/control/v1/notices/:key/withdraw
+        response:
+          status: 200
+          kind: json
+  mcp:
+    operations:
+      whoami:
+        name: whoami
+      platformGuide:
+        name: platform_guide
+      listTenants:
+        name: list_tenants
+      getTenant:
+        name: get_tenant
+      createTenant:
+        name: create_tenant
+      updateTenant:
+        name: update_tenant
+      getBlueprintLibrary:
+        name: get_blueprint_library
+      assignBlueprintLibrary:
+        name: assign_blueprint_library
+      inviteFirstTenantAdmin:
+        name: invite_first_tenant_admin
+      listTenantInvitations:
+        name: list_tenant_invitations
+      getTenantInvitation:
+        name: get_tenant_invitation
+      createTenantInvitation:
+        name: create_tenant_invitation
+      revokeTenantInvitation:
+        name: revoke_tenant_invitation
+      resendTenantInvitation:
+        name: resend_tenant_invitation
+      listTenantMembers:
+        name: list_tenant_members
+      getTenantMember:
+        name: get_tenant_member
+      assignTenantMemberRoles:
+        name: assign_tenant_member_roles
+      removeTenantMemberRoles:
+        name: remove_tenant_member_roles
+      removeTenantMembership:
+        name: remove_tenant_membership
+      requestPasskeyRecovery:
+        name: request_passkey_recovery
+      listTenantCredentials:
+        name: list_tenant_credentials
+      revokeTenantCredential:
+        name: revoke_tenant_credential
+      getTenantCredential:
+        name: get_tenant_credential
+      getTenantOrganizationTree:
+        name: get_tenant_organization_tree
+      createTenantOrganization:
+        name: create_tenant_organization
+      updateTenantOrganization:
+        name: update_tenant_organization
+      getReconciliationReport:
+        name: get_reconciliation_report
+      reapplyReconciliation:
+        name: reapply_reconciliation
+      listPlatformAudit:
+        name: list_platform_audit
+      listCatalogEntries:
+        name: list_catalog_entries
+      getCatalogEntry:
+        name: get_catalog_entry
+      publishCatalogEntry:
+        name: publish_catalog_entry
+      retireCatalogEntry:
+        name: retire_catalog_entry
+      applyCatalogUpdateForTenant:
+        name: apply_catalog_update_for_tenant
+      publishUpdateNotice:
+        name: publish_update_notice
+      listUpdateNotices:
+        name: list_update_notices
+      withdrawUpdateNotice:
+        name: withdraw_update_notice
+  web:
+    pages:
+      organizations:
+        title:
+          en: Organisations
+          nl: Organisaties
+        icon: tree-structure
+        order: 2
+      notices:
+        title:
+          en: Update notices
+          nl: Updateberichten
+        icon: megaphone
+        order: 4
+      platform:
+        title:
+          en: Platform
+          nl: Platform
+        icon: gear
+        order: 5
+    operations:
+      getTenantOrganizationTree:
+        page: organizations
+        order: 0
+      createTenantOrganization:
+        page: organizations
+        order: 1
+      updateTenantOrganization:
+        page: organizations
+        order: 2
+      listUpdateNotices:
+        page: notices
+        order: 0
+        landing: true
+      publishUpdateNotice:
+        page: notices
+        order: 1
+      withdrawUpdateNotice:
+        page: notices
+        order: 2
+      whoami:
+        page: platform
+        order: 0
+        landing: true
+      platformGuide:
+        page: platform
+        order: 1
+      getReconciliationReport:
+        page: platform
+        order: 2
+      reapplyReconciliation:
+        page: platform
+        order: 3
+      listPlatformAudit:
+        page: platform
+        order: 4
+    entities:
+      Tenant:
+        title: { en: Tenants, nl: Tenants }
+        route: /tenants
+        recordRoute: /tenants/:slug
+        idField: slug
+        displayField: name
+        fields: [id, name, slug, status, tenantKind, relationId, relationLabel, keycloakOrganizationId, organizationAlias, installedEntries, overriddenEntries, updatesAvailable]
+        columns: [name, slug, status, tenantKind, organizationAlias, relationLabel]
+        operations:
+          list: { operation: listTenants, resultField: tenants }
+          get: { operation: getTenant }
+          collectionActions: [createTenant]
+          recordActions: [updateTenant, getBlueprintLibrary, assignBlueprintLibrary, inviteFirstTenantAdmin]
+        related:
+          - { entity: TenantMember, label: { en: Members, nl: Leden }, route: /tenants/:slug/members }
+          - { entity: TenantInvitation, label: { en: Invitations, nl: Uitnodigingen }, route: /tenants/:slug/invitations }
+      TenantMember:
+        title: { en: Members, nl: Leden }
+        route: /tenants/:slug/members
+        recordRoute: /tenants/:slug/members/:memberId
+        idField: memberId
+        displayField: email
+        fields: [tenantSlug, memberId, username, email, firstName, lastName, enabled, emailVerified, roles, credentialCount, credentialTypes]
+        columns: [email, username, enabled, emailVerified, roles, credentialCount]
+        operations:
+          list: { operation: listTenantMembers, resultField: members }
+          get: { operation: getTenantMember }
+          recordActions: [assignTenantMemberRoles, removeTenantMemberRoles, removeTenantMembership, requestPasskeyRecovery]
+        related:
+          - { entity: TenantCredential, label: { en: Credentials, nl: Credentials }, route: /tenants/:slug/members/:memberId/credentials }
+      TenantInvitation:
+        title: { en: Invitations, nl: Uitnodigingen }
+        route: /tenants/:slug/invitations
+        recordRoute: /tenants/:slug/invitations/:invitationId
+        idField: invitationId
+        displayField: email
+        fields: [tenantSlug, invitationId, email, firstName, lastName, status, sentAt, expiresAt, role, registrationStatus, canResend]
+        columns: [email, role, status, registrationStatus, sentAt, expiresAt]
+        operations:
+          list: { operation: listTenantInvitations, resultField: invitations }
+          get: { operation: getTenantInvitation }
+          collectionActions: [createTenantInvitation]
+          recordActions: [resendTenantInvitation, revokeTenantInvitation]
+      TenantCredential:
+        title: { en: Credentials, nl: Credentials }
+        route: /tenants/:slug/members/:memberId/credentials
+        recordRoute: /tenants/:slug/members/:memberId/credentials/:credentialId
+        idField: credentialId
+        displayField: label
+        fields: [tenantSlug, memberId, credentialId, type, label, createdAt]
+        columns: [label, type, createdAt]
+        operations:
+          list: { operation: listTenantCredentials, resultField: credentials }
+          get: { operation: getTenantCredential }
+          recordActions: [revokeTenantCredential]
+      CatalogEntry:
+        title: { en: Services, nl: Services }
+        route: /services
+        recordRoute: /services/:kind/:key
+        idField: key
+        displayField: name
+        fields: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+        columns: [name, key, kind, latestVersion, authority, retired]
+        operations:
+          list: { operation: listCatalogEntries, resultField: entries }
+          get: { operation: getCatalogEntry }
+          collectionActions: [publishCatalogEntry]
+          recordActions: [publishCatalogEntry, retireCatalogEntry, applyCatalogUpdateForTenant]

@@ -57,39 +57,96 @@ function decodeCursor(value: string): AuditCursor {
     ) throw new Error("invalid cursor");
     return { startedAt: new Date(parsed.startedAt).toISOString(), id: parsed.id };
   } catch {
-    throw new ControlInputError("cursor must be a nextCursor returned by list_platform_audit.");
+    throw new ControlInputError("cursor must be a nextCursor returned by the platform audit listing.");
   }
 }
 
-const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = {
-  invite_first_tenant_admin: /^[a-z][a-z0-9-]*$/,
-  list_tenants: null,
-  get_tenant: /^slug="[a-z][a-z0-9-]*"$/,
-  create_tenant:
-    /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
-  update_tenant:
-    /^(rename|set status="(active|inactive|suspended)") on tenant slug="[a-z][a-z0-9-]*"$/,
-  get_tenant_organization_tree:
-    /^read the sub-organisation tree of tenant slug="[a-z][a-z0-9-]*"$/,
-  create_tenant_organization:
-    /^(create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
-  update_tenant_organization:
-    /^(rename|reparent|rename and reparent) sub-organisation "[0-9a-f-]{36}" in tenant "[a-z][a-z0-9-]*"$/i,
-  get_reconciliation_report:
-    /^scan the tenant registry and org-unit tree for Keycloak drift$/,
-  reapply_reconciliation:
-    /^(scan the tenant registry and org-unit tree for Keycloak drift|create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}"|create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
-  list_platform_audit: null,
-  list_catalog_entries: null,
-  get_catalog_entry: /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/,
-  publish_catalog_entry: /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/,
-  retire_catalog_entry: /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/,
-  publish_update_notice: /^[a-z][a-z0-9-]*$/,
-  list_update_notices: null,
-  withdraw_update_notice: /^[a-z][a-z0-9-]*$/,
-  apply_catalog_update_for_tenant:
-    /^(adapter|capability|service)\/[a-z][a-z0-9-]* tenant="[a-z][a-z0-9-]*"$/,
-};
+/**
+ * What the target half of a reason may look like, per action. Keyed by the
+ * canonical Operation key, which is what every control transport writes
+ * since the platform's administration became Operations; the tool names the
+ * platform MCP wrote before that cutover are kept as aliases so those rows
+ * still classify instead of collapsing into `other_platform_action`.
+ */
+const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = Object.fromEntries(
+  ([
+    ["control.invite-first-tenant-admin", "invite_first_tenant_admin", /^[a-z][a-z0-9-]*$/],
+    ["control.list-tenant-invitations", "list_tenant_invitations", /^[a-z][a-z0-9-]*$/],
+    ["control.revoke-tenant-invitation", "revoke_tenant_invitation", /^[a-z][a-z0-9-]* invitation="[A-Za-z0-9_-]{1,128}"$/],
+    ["control.resend-tenant-invitation", "resend_tenant_invitation", /^[a-z][a-z0-9-]* invitation="[A-Za-z0-9_-]{1,128}"$/],
+    ["control.get-tenant-invitation", "get_tenant_invitation", /^[a-z][a-z0-9-]* invitation="[A-Za-z0-9_-]{1,128}"$/],
+    ["control.create-tenant-invitation", "create_tenant_invitation", /^[a-z][a-z0-9-]*$/],
+    ["control.list-tenant-members", "list_tenant_members", /^tenant="[a-z][a-z0-9-]*"$/],
+    ["control.get-tenant-member", "get_tenant_member", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.assign-tenant-member-roles", "assign_tenant_member_roles", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.remove-tenant-member-roles", "remove_tenant_member_roles", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.remove-tenant-membership", "remove_tenant_membership", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.request-passkey-recovery", "request_passkey_recovery", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.list-tenant-credentials", "list_tenant_credentials", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.get-tenant-credential", "get_tenant_credential", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}" credential="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.revoke-tenant-credential", "revoke_tenant_credential", /^tenant="[a-z][a-z0-9-]*" member="[A-Za-z0-9._:-]{1,128}" credential="[A-Za-z0-9._:-]{1,128}"$/],
+    ["control.list-tenants", "list_tenants", null],
+    ["control.get-tenant", "get_tenant", /^slug="[a-z][a-z0-9-]*"$/],
+    [
+      "control.create-tenant",
+      "create_tenant",
+      /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+    ],
+    [
+      "control.update-tenant",
+      "update_tenant",
+      /^(rename|set status="(active|inactive|suspended)") on tenant slug="[a-z][a-z0-9-]*"$/,
+    ],
+    [
+      "control.get-blueprint-library",
+      "get_blueprint_library",
+      /^read blueprint library of tenant slug="[a-z][a-z0-9-]*"$/,
+    ],
+    [
+      "control.assign-blueprint-library",
+      "assign_blueprint_library",
+      /^(clear blueprint library of tenant slug="[a-z][a-z0-9-]*"|assign blueprint library "[a-z][a-z0-9-]*" to tenant slug="[a-z][a-z0-9-]*")$/,
+    ],
+    [
+      "control.get-tenant-organization-tree",
+      "get_tenant_organization_tree",
+      /^read the sub-organisation tree of tenant slug="[a-z][a-z0-9-]*"$/,
+    ],
+    [
+      "control.create-tenant-organization",
+      "create_tenant_organization",
+      /^(create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+    ],
+    [
+      "control.update-tenant-organization",
+      "update_tenant_organization",
+      /^(rename|reparent|rename and reparent) sub-organisation "[0-9a-f-]{36}" in tenant "[a-z][a-z0-9-]*"$/i,
+    ],
+    [
+      "control.get-reconciliation-report",
+      "get_reconciliation_report",
+      /^scan the tenant registry and org-unit tree for Keycloak drift$/,
+    ],
+    [
+      "control.reapply-reconciliation",
+      "reapply_reconciliation",
+      /^(scan the tenant registry and org-unit tree for Keycloak drift|create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}"|create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+    ],
+    ["control.list-platform-audit", "list_platform_audit", null],
+    ["control.list-catalog-entries", "list_catalog_entries", null],
+    ["control.get-catalog-entry", "get_catalog_entry", /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/],
+    ["control.publish-catalog-entry", "publish_catalog_entry", /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/],
+    ["control.retire-catalog-entry", "retire_catalog_entry", /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/],
+    ["control.publish-update-notice", "publish_update_notice", /^[a-z][a-z0-9-]*$/],
+    ["control.list-update-notices", "list_update_notices", null],
+    ["control.withdraw-update-notice", "withdraw_update_notice", /^[a-z][a-z0-9-]*$/],
+    [
+      "control.apply-catalog-update-for-tenant",
+      "apply_catalog_update_for_tenant",
+      /^(adapter|capability|service)\/[a-z][a-z0-9-]* tenant="[a-z][a-z0-9-]*"$/,
+    ],
+  ] as const).flatMap(([key, legacy, pattern]) => [[key, pattern], [legacy, pattern]]),
+);
 
 function toEntry(row: AuditRow): PlatformAuditEntry {
   const reason = row.reason.startsWith("platform-mcp: ")
@@ -118,7 +175,7 @@ export async function listPlatformAudit(
   const cursor = input.cursor ? decodeCursor(input.cursor) : null;
   return withSystemSession(
     deps.db,
-    systemSessionForAdministrator(deps.administrator, "list_platform_audit"),
+    systemSessionForAdministrator(deps.administrator, "control.list-platform-audit"),
     async (trx, audit) => {
       const result = await sql<AuditRow>`
         select id, actor_subject, reason, started_at, ended_at, succeeded

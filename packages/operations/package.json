@@ -1,0 +1,30 @@
+{
+  "name": "@openshapeforge/operations",
+  "version": "0.1.0",
+  "description": "Transport-independent operation results and availability offers for OpenShapeForge.",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git",
+    "directory": "packages/operations"
+  },
+  "license": "BUSL-1.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.0"
+  }
+}

@@ -16,13 +16,18 @@
  * spelling must keep working alongside the Keycloak-normalized (English) one,
  * since the compiler emits the union of both. All identities share tenant A so
  * role denial is isolated from RLS/tenant denial.
+ *
+ * Shape-aware: a v1 entity throws FORBIDDEN as a top-level GraphQL error, a
+ * canonical entity reports it in band at `data.<field>.error`; the readers in
+ * e2e/gql-shapes.ts look in the right place. Authorization precedes the
+ * canonical lease/version checks, so a denied mutation carries placeholder
+ * controls rather than acquiring a lease it must never be granted.
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import {
   describe,
   eventsFor,
-  expectData,
   gql,
   noRoles,
   readOnly,
@@ -32,13 +37,27 @@ import {
   type Identity,
 } from "./e2e/harness.js";
 import {
+  createInput,
   createRow,
   fieldName,
   sampleValue,
-  tables,
+  graphqlTables as tables,
   tablesByTypeName,
   untrackRow,
 } from "./e2e/entity-factory.js";
+import {
+  collectionOf,
+  createDoc,
+  deleteDoc,
+  deleteVariables,
+  expectDeleted,
+  expectOperationError,
+  fetchRecord,
+  getDoc,
+  listDoc,
+  updateDoc,
+} from "./e2e/gql-shapes.js";
+import { isEntityBackedCreate, placeholderControls } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -49,106 +68,74 @@ registerSuiteLifecycle();
 // per-entity test below therefore iterates whatever the list actually
 // contains, instead of hardcoding a Dutch spelling that no longer exists.
 
-async function expectForbidden(
-  identity: Identity,
-  query: string,
-  variables?: Record<string, unknown>,
-) {
-  const result = await gql(identity, query, variables);
-  expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
-}
-
 for (const table of tables) {
   const graphql = table.source!.graphql!;
   const typeName = graphql.typeName;
+  const countOnly = listDoc(table, { variables: ["filter"], args: "first: 1", totalCount: true });
+
+  async function expectForbidden(
+    identity: Identity,
+    field: string,
+    query: string,
+    variables?: Record<string, unknown>,
+  ) {
+    expectOperationError(table, await gql(identity, query, variables), field, "FORBIDDEN");
+  }
+
+  /** Every mutation a denied caller can attempt, controls included. */
+  const denied = (identity: Identity, id: string) => [
+    expectForbidden(identity, graphql.createMutationName, createDoc(table), { input: {} }),
+    // Empty-body update: authorized by the UPDATE role alone — the caller must
+    // be denied even though no column would change.
+    expectForbidden(identity, graphql.updateMutationName, updateDoc(table), {
+      input: { id, ...placeholderControls(table, "update") },
+    }),
+    expectForbidden(
+      identity,
+      graphql.deleteMutationName,
+      deleteDoc(table),
+      deleteVariables(table, id, placeholderControls(table, "delete")),
+    ),
+  ];
 
   describe(`${typeName} (${table.name}) role enforcement`, () => {
     test("a session without roles is denied every operation", async () => {
       const id = await createRow(table, tenantA);
+      await expectForbidden(noRoles, graphql.singleQueryName, getDoc(table), { id });
       await expectForbidden(
         noRoles,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id },
+        graphql.listQueryName,
+        listDoc(table, { args: "first: 1", totalCount: true }),
       );
-      await expectForbidden(
-        noRoles,
-        `{ ${graphql.listQueryName}(first: 1) { totalCount } }`,
-      );
-      await expectForbidden(
-        noRoles,
-        `mutation($input: Create${typeName}Input!) { ${graphql.createMutationName}(input: $input) { id } }`,
-        { input: {} },
-      );
-      await expectForbidden(
-        noRoles,
-        `mutation($input: Update${typeName}Input!) { ${graphql.updateMutationName}(input: $input) { id } }`,
-        { input: { id } },
-      );
-      await expectForbidden(
-        noRoles,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-      );
+      for (const attempt of denied(noRoles, id)) await attempt;
     });
 
     test("a read-only session can read but not mutate (empty update included)", async () => {
       const id = await createRow(table, tenantA);
 
-      const fetched = await expectData(
-        readOnly,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id },
+      expect((await fetchRecord(readOnly, table, id))?.id).toBe(id);
+      const listed = collectionOf(
+        table,
+        await gql(readOnly, countOnly, { filter: { id } }),
+        graphql.listQueryName,
       );
-      expect(fetched[graphql.singleQueryName]?.id).toBe(id);
+      expect(listed.totalCount).toBe(1);
 
-      const listed = await expectData(
-        readOnly,
-        `query($filter: ${typeName}Filter) { ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount } }`,
-        { filter: { id } },
-      );
-      expect(listed[graphql.listQueryName].totalCount).toBe(1);
-
-      await expectForbidden(
-        readOnly,
-        `mutation($input: Create${typeName}Input!) { ${graphql.createMutationName}(input: $input) { id } }`,
-        { input: {} },
-      );
-      // Empty-body update: authorized by the UPDATE role alone — a read-only
-      // session must be denied even though no column would change.
-      await expectForbidden(
-        readOnly,
-        `mutation($input: Update${typeName}Input!) { ${graphql.updateMutationName}(input: $input) { id } }`,
-        { input: { id } },
-      );
-      await expectForbidden(
-        readOnly,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-      );
+      for (const attempt of denied(readOnly, id)) await attempt;
 
       // The rejected delete must not have removed the row.
-      const stillThere = await expectData(
-        tenantA,
-        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
-        { id },
-      );
-      expect(stillThere[graphql.singleQueryName]?.id).toBe(id);
+      expect((await fetchRecord(tenantA, table, id))?.id).toBe(id);
     });
 
     test("forbidden mutations journal no entity events", async () => {
       const id = await createRow(table, tenantA);
-      await expectForbidden(
-        readOnly,
-        `mutation($input: Update${typeName}Input!) { ${graphql.updateMutationName}(input: $input) { id } }`,
-        { input: { id } },
-      );
-      await expectForbidden(
-        readOnly,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-      );
+      for (const attempt of denied(readOnly, id).slice(1)) await attempt;
       const events = await eventsFor(tenantA, table, id);
-      expect(events.map((event) => event.eventType)).toEqual(["created"]);
+      // A plugin-backed create journals nothing through the generic core (see
+      // entity-events); the point here is that the refusals added nothing.
+      expect(events.map((event) => event.eventType)).toEqual(
+        isEntityBackedCreate(table) ? ["created"] : [],
+      );
     });
 
     test("each allow-listed create role grants the operation on its own (vocabulary union)", async () => {
@@ -160,16 +147,19 @@ for (const table of tables) {
           userId: randomUUID(),
           roles: [role],
         };
-        const id = await createRow(table, writer);
+        // The parents a row references are provisioned by the all-roles
+        // identity: the grant under test is this entity's create, not its
+        // dependencies'.
+        const id = await createRow(table, writer, await createInput(table, tenantA));
         // Deleted by the all-write-roles identity: a single create role (e.g.
-        // Support.Issues.Create) need not also appear in the delete list.
-        const data = await expectData(
-          tenantA,
-          `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-          { id },
-        );
-        expect(data[graphql.deleteMutationName]).toBe(true);
-        untrackRow(id);
+        // Support.Issues.Create) need not also appear in the delete list. A
+        // plugin-created row keeps its companion records and cannot be
+        // deleted through the entity delete (see entity-crud); the create
+        // itself is the grant under test.
+        if (isEntityBackedCreate(table)) {
+          await expectDeleted(tenantA, table, id);
+          untrackRow(id);
+        }
       }
     });
 
@@ -179,27 +169,19 @@ for (const table of tables) {
       (column) => (column as { classification?: string }).classification !== undefined,
     );
     if (classifiedColumns.length > 0) {
-      const selection = classifiedColumns.map(fieldName).join(" ");
+      const selection = `id ${classifiedColumns.map(fieldName).join(" ")}`;
 
       test("classified columns are redacted for a read-only reader, visible to a writer", async () => {
         const id = await createRow(table, tenantA);
-        const asWriter = await expectData(
-          tenantA,
-          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id ${selection} } }`,
-          { id },
-        );
-        const asReader = await expectData(
-          readOnly,
-          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id ${selection} } }`,
-          { id },
-        );
+        const asWriter = await fetchRecord(tenantA, table, id, selection);
+        const asReader = await fetchRecord(readOnly, table, id, selection);
         for (const column of classifiedColumns) {
           const field = fieldName(column);
-          expect(asReader[graphql.singleQueryName][field]).toBeNull();
+          expect(asReader[field]).toBeNull();
           // The writer sees the real value (created rows populate required
           // columns; optional classified columns may legitimately be null).
           if (column.required) {
-            expect(asWriter[graphql.singleQueryName][field]).not.toBeNull();
+            expect(asWriter[field]).not.toBeNull();
           }
         }
       });
@@ -209,28 +191,19 @@ for (const table of tables) {
       const probeValue = sampleValue(classifiedColumn, "classified-query");
 
       test("read-only filter on a classified field is rejected before totalCount can leak", async () => {
-        await expectForbidden(
-          readOnly,
-          `query($filter: ${typeName}Filter) {
-             ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
-           }`,
-          { filter: { [classifiedField]: probeValue } },
-        );
-        await expectForbidden(
-          readOnly,
-          `query($filter: ${typeName}Filter) {
-             ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
-           }`,
-          { filter: { [`${classifiedField}In`]: [probeValue] } },
-        );
+        await expectForbidden(readOnly, graphql.listQueryName, countOnly, {
+          filter: { [classifiedField]: probeValue },
+        });
+        await expectForbidden(readOnly, graphql.listQueryName, countOnly, {
+          filter: { [`${classifiedField}In`]: [probeValue] },
+        });
       });
 
       test("read-only sort on a classified field is rejected before ordering can leak", async () => {
         await expectForbidden(
           readOnly,
-          `query($sort: ${typeName}Sort) {
-             ${graphql.listQueryName}(sort: $sort, first: 1) { totalCount }
-           }`,
+          graphql.listQueryName,
+          listDoc(table, { variables: ["sort"], args: "first: 1", totalCount: true }),
           { sort: { field: classifiedField, direction: "asc" } },
         );
       });
@@ -269,14 +242,13 @@ if (parentTable) {
         [fieldName(fkColumn)]: targetId,
       });
 
-      const data = await expectData(
+      const parent = await fetchRecord(
         readOnly,
-        `query($id: ID!) {
-           ${graphql.singleQueryName}(id: $id) { id ${relationship.name} { id } }
-         }`,
-        { id: parentId },
+        parentTable,
+        parentId,
+        `id ${relationship.name} { id }`,
       );
-      expect(data[graphql.singleQueryName]?.[relationship.name]?.id).toBe(targetId);
+      expect(parent?.[relationship.name]?.id).toBe(targetId);
     });
   });
 }

@@ -33,21 +33,29 @@ import {
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
+  nextMarker,
   sampleValue,
   tables,
   tablesByName,
   textColumnFor,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
+import { createDoc, expectOperationError } from "../../graphql/__tests__/e2e/gql-shapes.js";
+import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
 
 registerSuiteLifecycle();
 
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
 
-/** Tables REST and GraphQL expose for create, with a text column to plant the marker in. */
+/**
+ * Tables REST and GraphQL expose for an entity-backed create (a plugin-backed
+ * create takes its own input, not columns), with a text column to plant the
+ * marker in.
+ */
 const candidates = tables.filter(
   (candidate) =>
     candidate.source?.rest?.operations.create &&
     candidate.source?.graphql &&
+    isEntityBackedCreate(candidate) &&
     textColumnFor(candidate) !== undefined,
 );
 /** Chosen in beforeAll: the first candidate whose relation exists in this database. */
@@ -159,12 +167,19 @@ async function createBody(
       }
       continue;
     }
-    if (column.required) body[field] = sampleValue(column, `refusal-${seed}`);
+    if (column.required) body[field] = sampleValue(column, nextMarker());
   }
   return { ...body, ...overrides };
 }
 
-const REFUSED = {
+const CANONICAL_REFUSED = {
+  code: "OPERATION_REFUSED",
+  message: RULE_MESSAGE,
+  detail: RULE_DETAIL,
+  retryable: false,
+  data: { hint: RULE_HINT },
+};
+const LEGACY_REFUSED = {
   code: "OPERATION_REFUSED",
   message: RULE_MESSAGE,
   detail: RULE_DETAIL,
@@ -186,26 +201,34 @@ describe("a trigger's refusal", () => {
       body,
     );
     expect(response.status).toBe(409);
-    expect(response.body).toEqual({ error: REFUSED });
+    expect(response.body).toEqual({
+      error: table!.source?.authoringVersion === 2
+        ? CANONICAL_REFUSED
+        : LEGACY_REFUSED,
+    });
   });
 
   test("GraphQL answers the code unmasked, with the trigger's message", async () => {
     const graphql = table!.source!.graphql!;
     const input = await createBody(tenantA, { [fieldName(markerColumn!)]: MARKER });
-    const response = await gql(
-      tenantA,
-      `mutation($input: Create${graphql.typeName}Input!) {
-         ${graphql.createMutationName}(input: $input) { id }
-       }`,
-      { input },
+    const response = await gql(tenantA, createDoc(table!), { input });
+    // A v1 entity throws the refusal as the single top-level error; a canonical
+    // entity reports it in band. Either way the code is unmasked and the
+    // trigger's own message and hint reach the caller.
+    const refused = expectOperationError(
+      table!,
+      response,
+      graphql.createMutationName,
+      "OPERATION_REFUSED",
     );
-    expect(response.data?.[graphql.createMutationName] ?? null).toBeNull();
-    expect(response.errors).toHaveLength(1);
-    expect(response.errors?.[0]?.message).toBe(RULE_MESSAGE);
-    expect(response.errors?.[0]?.extensions).toMatchObject({
-      code: "OPERATION_REFUSED",
-      hint: RULE_HINT,
-    });
+    expect(refused.message).toBe(RULE_MESSAGE);
+    expect(refused.data).toMatchObject({ hint: RULE_HINT });
+    if (table!.source?.authoringVersion === 2) {
+      expect(response.errors).toBeUndefined();
+    } else {
+      // v1-only: the thrown error is the whole answer.
+      expect(response.errors).toHaveLength(1);
+    }
   });
 
   test("a row without the marker is still accepted", async () => {
@@ -246,7 +269,7 @@ describe("a system constraint violation", () => {
         if (column.required) body[field] = await createRow(tablesByName.get(target)!, tenantA);
         continue;
       }
-      if (column.required) body[field] = sampleValue(column, `fk-${seed}`);
+      if (column.required) body[field] = sampleValue(column, nextMarker());
     }
     body[fieldName(fkColumn)] = randomUUID();
     const response = await inject(

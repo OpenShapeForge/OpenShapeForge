@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import { generateArtifacts } from "../generate.js";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
   compileAuthoringBackendManifest,
@@ -83,6 +84,49 @@ describe("rowAccess → rowScope translation (§B.3)", () => {
     });
     expect(table?.rowScope?.nullVisibleColumns).toBeUndefined();
   });
+
+  it("record permissions are a complete restricted row-access axis", () => {
+    const manifest = compileFixtures(["rowaccess-record-permissions"]);
+    const table = tableByName(manifest, "row_access_record_permissionses");
+    expect(table?.rowScope).toEqual({
+      recordPermissions: { column: "authorization", empty: "public" },
+    });
+  });
+});
+
+describe("canonical storage type propagation", () => {
+  it("emits a scalar UUID session owner with strict RLS and no entity foreign key", () => {
+    const manifest = compileFixtures(["rowaccess-scalar-uuid"]);
+    const table = tableByName(manifest, "rowaccess_scalar_uuids");
+    expect(table?.columns.find((column) => column.name === "owner_id")).toMatchObject({ type: "uuid", required: true });
+    expect(table?.columns.find((column) => column.name === "owner_id")?.references).toBeUndefined();
+    expect(table?.rowScope).toEqual({ userColumns: ["owner_id"] });
+    const schema = generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))?.contents;
+    expect(schema).toContain('"owner_id" uuid NOT NULL');
+    expect(schema).toContain('"owner_id" = app.current_user_id()');
+    expect(schema).not.toContain('FOREIGN KEY ("owner_id")');
+  });
+  it("still refuses plain string and UUID-collection owner axes", () => {
+    expect(() => compileFixtures(["rowaccess-scalar-plain"])).toThrow("scalar string with validation.format: uuid");
+    expect(() => compileFixtures(["rowaccess-scalar-collection"])).toThrow("scalar string with validation.format: uuid");
+  });
+  it("keeps compiled wide integers intact through the backend manifest and SQL generator", () => {
+    const manifest = compileFixtures(["wide-integer"]);
+    const table = tableByName(manifest, "wide_integers");
+    const types = new Map(table?.columns.map((column) => [column.name, column.type]));
+
+    expect(types.get("ordinary_integer")).toBe("integer");
+    expect(types.get("direct_wide_integer")).toBe("bigint");
+    expect(types.get("ruled_wide_integer")).toBe("bigint");
+    expect(types.get("reference_id")).toBe("uuid");
+
+    const schema = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents;
+    expect(schema).toContain('"direct_wide_integer" bigint NOT NULL');
+    expect(schema).toContain('"ruled_wide_integer" bigint');
+    expect(schema).not.toContain('"direct_wide_integer" integer');
+  });
 });
 
 describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
@@ -94,9 +138,9 @@ describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
     );
   });
 
-  it("empty:restricted with no owner/group axis throws (§C.2)", () => {
+  it("empty:restricted with no owner/group/record-permissions axis throws (§C.2)", () => {
     expect(() => compileFixtures(["rowaccess-restricted-noaxis"])).toThrow(
-      /authorization\.rowAccess\.empty: restricted requires an owner or group axis/,
+      /authorization\.rowAccess\.empty: restricted requires an owner, group or record-permissions axis/,
     );
   });
 
@@ -150,6 +194,52 @@ describe("deriveRowScope unit guards (§C.1 emit-time fail-closed)", () => {
     expect(
       deriveRowScope({ enabled: true, empty: "restricted", owner }, "X", columns),
     ).toEqual({ userColumns: ["owner_id"] });
+  });
+
+  it("maps a jsonb record-permission field without inventing an owner axis", () => {
+    const columns = new Map<string, ColumnDefinition>([
+      ["authorization", { name: "authorization", type: "jsonb", required: true }],
+    ]);
+    expect(
+      deriveRowScope(
+        {
+          enabled: true,
+          empty: "public",
+          recordPermissions: {
+            field: "authorization",
+            column: "authorization",
+            empty: "restricted",
+            createRequires: ["view", "edit"],
+          },
+        },
+        "ProtectedRecord",
+        columns,
+      ),
+    ).toEqual({
+      recordPermissions: { column: "authorization", empty: "restricted" },
+    });
+  });
+
+  it("refuses a record-permission field that is not jsonb", () => {
+    const columns = new Map<string, ColumnDefinition>([
+      ["authorization", { name: "authorization", type: "text", required: true }],
+    ]);
+    expect(() =>
+      deriveRowScope(
+        {
+          enabled: true,
+          empty: "public",
+          recordPermissions: {
+            field: "authorization",
+            column: "authorization",
+            empty: "public",
+            createRequires: ["view", "edit"],
+          },
+        },
+        "ProtectedRecord",
+        columns,
+      )
+    ).toThrow(/must persist as jsonb/);
   });
 
   // ── group axis unit guards (Phase 2) ──
@@ -329,6 +419,23 @@ describe("generated REST exposure (source.rest bridge)", () => {
       definitionsField: "configuration",
       into: "configuration",
     });
+  });
+
+  it("emits canonical v2 secure input neutrally and mirrors it for the MCP handoff", () => {
+    const manifest = compileRestFixtures(["secure-input-v2"], {
+      generatedCrudAllowlist: ["secure-input-v2"],
+    });
+    const table = tableByName(manifest, "secure_input_v2s");
+    const expected = {
+      sourceField: "name",
+      sourceEntity: "SecureInputV2",
+      definitionsField: "configurationDefinitions",
+      into: "configurationValues",
+    };
+    expect(table?.source?.secureInputOnCreate).toEqual(expected);
+    expect(table?.source?.mcp?.elicitOnCreate).toEqual(expected);
+    expect(table?.source?.rest?.operations.create).toBe(true);
+    expect(table?.source?.graphql?.operations?.create).toBe(true);
   });
 
   it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {

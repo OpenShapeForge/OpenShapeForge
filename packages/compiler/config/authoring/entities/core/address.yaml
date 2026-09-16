@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: Address
@@ -42,11 +42,9 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: ADDRESSTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: ADDRESSTYPE
   - key: street
     valueType: string
     required: false
@@ -61,11 +59,6 @@ fields:
     persisted:
       column: street
       storageClass: core
-    render:
-      component: AddressAutocomplete
-      props:
-        provider: bag
-        country: NL
   - key: houseNumber
     valueType: string
     required: false
@@ -149,15 +142,6 @@ fields:
     persisted:
       column: latitude
       storageClass: core
-    render:
-      component: MapPicker
-      props:
-        defaultZoom: 13
-        defaultCenter:
-          - 52.0907
-          - 5.1214
-        geocodeProvider: nominatim
-        coordinateField: latitude
   - key: longitude
     valueType: number
     required: false
@@ -170,15 +154,6 @@ fields:
     persisted:
       column: longitude
       storageClass: core
-    render:
-      component: MapPicker
-      props:
-        defaultZoom: 13
-        defaultCenter:
-          - 52.0907
-          - 5.1214
-        geocodeProvider: nominatim
-        coordinateField: longitude
 relationships:
   - key: relation
     kind: belongsTo
@@ -201,120 +176,130 @@ relationships:
     label:
       en: Legal entity
       nl: Rechtspersoon
-ui:
-  routes:
-    list:
-      en: /addresses
-      nl: /adressen
-    detail:
-      en: /addresses/:id
-      nl: /adressen/:id
-    create:
-      en: /addresses/create
-      nl: /adressen/aanmaken
-    edit:
-      en: /addresses/:id/edit
-      nl: /adressen/:id/bewerken
-    delete:
-      en: /addresses/:id/delete
-      nl: /adressen/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Addresses
-        nl: Adressen
-      columns:
-        - key: type
-          sortable: true
-        - key: street
-          sortable: true
-        - key: city
-          sortable: true
-        - key: postalCode
-          sortable: true
-      defaultSort:
-        key: city
-        direction: asc
-      rowLink:
-        en: /addresses/:id
-        nl: /adressen/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List addresses, nl: Adressen tonen }
+    description:
+      en: Returns a filtered and sorted page of addresses.
+      nl: Geeft een gefilterde en gesorteerde pagina met adressen terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get address, nl: Adres ophalen }
+    description:
+      en: Returns one address by its canonical id.
+      nl: Geeft één adres terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create address, nl: Adres aanmaken }
+    description:
+      en: Creates one address after validating its canonical fields.
+      nl: Maakt één adres aan na validatie van de canonieke velden.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update address, nl: Adres wijzigen }
+    description:
+      en: Updates one address while holding its server-issued edit lease and current version.
+      nl: Wijzigt één adres met de server-uitgegeven bewerkingslease en actuele versie.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete address, nl: Adres verwijderen }
+    description:
+      en: Permanently deletes one address after a server-issued, version-bound confirmation challenge.
+      nl: Verwijdert één adres definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: city
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    # An address is reached through the relation it belongs to; the shared
+    # osf_* tools cover that without spending dedicated tool slots on it.
+    tools: generic
+    operations:
+      update:
+        instructions:
+          en: Acquire an edit lease first and submit its token with the version returned by get.
+          nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
+      delete:
+        instructions:
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current city.
+          nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact de actuele plaatsnaam.
+    resource:
+      uri: app://addresses
+      name: Addresses
+      description: Read the addresses available to the signed-in identity.
+      templateDescription: Read one address by its canonical id.
+  web:
+    views:
+      collection:
+        route: { en: /addresses, nl: /adressen }
+        title: { en: Addresses, nl: Adressen }
+        columns:
+          - { key: type, sortable: true }
+          - { key: street, sortable: true }
+          - { key: city, sortable: true }
+          - { key: postalCode, sortable: true }
+        defaultSort: { key: city, direction: asc }
+      record:
+        routes:
+          read: { en: /addresses/:id, nl: /adressen/:id }
+          create: { en: /addresses/create, nl: /adressen/aanmaken }
         title: "{{street}} {{houseNumber}}{{houseNumberAddition}}, {{city}}"
         subtitle: "{{type}}"
-        badges:
-          - type
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Address
-                nl: Adres
-              fields:
-                - type
-                - street
-                - houseNumber
-                - houseNumberAddition
-                - postalCode
-                - city
-                - country
-            - title:
-                en: Coordinates
-                nl: Coördinaten
-              fields:
-                - latitude
-                - longitude
-    form:
-      variants:
-        create:
-          title:
-            en: Create address
-            nl: Adres aanmaken
-          groups:
-            - title:
-                en: Address
-                nl: Adres
-              fields:
-                - type
-                - street
-                - houseNumber
-                - houseNumberAddition
-                - postalCode
-                - city
-                - country
-            - title:
-                en: Coordinates
-                nl: Coördinaten
-              fields:
-                - latitude
-                - longitude
-        edit:
-          extends: create
-          title:
-            en: Edit address
-            nl: Adres bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions: [update, delete]
+        layout:
+          context:
+            fields: [type]
+            relationships: [relation]
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Address, nl: Adres }
+                  fields: [type, street, houseNumber, houseNumberAddition, postalCode, city, country]
+                - title: { en: Coordinates, nl: Coördinaten }
+                  fields: [latitude, longitude]
+        modes:
+          create:
+            title: { en: Create address, nl: Adres aanmaken }
+            groups:
+              - title: { en: Address, nl: Adres }
+                fields: [type, street, houseNumber, houseNumberAddition, postalCode, city, country]
+              - title: { en: Coordinates, nl: Coördinaten }
+                fields: [latitude, longitude]
+          update:
+            title: { en: Edit address, nl: Adres bewerken }

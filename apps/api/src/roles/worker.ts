@@ -27,6 +27,9 @@
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
+import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
+import { runtimeSettings } from "../modules/settings.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import {
   closeRuntimeModules,
@@ -207,9 +210,26 @@ export async function startWorkerRole(
       );
     }
 
+    const context = { db: databaseRuntime.db, log, settings: runtimeSettings,
+      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas } };
+    const resolver = resolved.worker.resolveOperationWork;
+    const pinner = resolved.worker.pinOperationContract;
+    if (Boolean(resolver) !== Boolean(pinner)) {
+      throw new Error(
+        `Worker role "${role}" must contribute resolveOperationWork and pinOperationContract together. ` +
+          "Durable execution cannot run without both an exact claim resolver and an atomic contract pin.",
+      );
+    }
+    const durableOperations = resolver && pinner
+      ? configuredDurableWorkerBroker(
+          (reference) => resolver(context, reference),
+          (reference, fingerprint) => pinner(context, reference, fingerprint),
+          options.env,
+        )
+      : undefined;
     const handle: ModuleWorkerHandle = await resolved.worker.start({
-      db: databaseRuntime.db,
-      log,
+      ...context,
+      ...(durableOperations ? { durableOperations } : {}),
     });
     log.info({ role, module: resolved.module }, `Worker role "${role}" started.`);
 

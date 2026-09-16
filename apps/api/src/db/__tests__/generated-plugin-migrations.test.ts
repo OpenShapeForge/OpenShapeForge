@@ -52,37 +52,6 @@ function migration(
 }
 
 describe("generated plugin schema migrations", () => {
-  test("repeatable constraints reconcile a rollback to an earlier ledgered definition", async () => {
-    await withScratchDb(async (url) => {
-      const runtime = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
-      const check = (expression: string, digest: string) => ({
-        ...migration(
-          `ALTER TABLE platform.tenants DROP CONSTRAINT IF EXISTS repeatable_slug_check;\nALTER TABLE platform.tenants ADD CONSTRAINT repeatable_slug_check CHECK (${expression});\n`,
-          `0001_repeatable-slug-${digest}`,
-        ),
-        repeatable: true as const,
-      });
-      const broad = check("slug IN ('alpha', 'beta')", "broad");
-      const narrow = check("slug IN ('alpha')", "narrow");
-      const definition = async () => (await sql<{ definition: string }>`
-        select pg_get_constraintdef(oid) as definition
-        from pg_constraint
-        where conname = 'repeatable_slug_check'
-      `.execute(runtime.db)).rows[0]!.definition;
-      try {
-        await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
-        expect(await definition()).toContain("'beta'");
-        await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad, narrow] }));
-        expect(await definition()).not.toContain("'beta'");
-        const rolledBack = await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
-        expect(rolledBack.pluginMigrationsApplied).toEqual(["plugin:cpq:0001_repeatable-slug-broad"]);
-        expect(await definition()).toContain("'beta'");
-      } finally {
-        await runtime.close();
-      }
-    });
-  });
-
   test(
     "applies after generated tables, refuses edits, and tolerates rollback extras",
     async () => {

@@ -1,12 +1,6 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 import type {
-  OperationConcurrency,
-  OperationConfirmation,
-  OperationPrerequisite,
-  OperationReference,
-} from "@openshapeforge/operations";
-import type {
   LocalizedText,
   FieldValidation,
   FieldPermissions,
@@ -25,7 +19,6 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
-import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
 import type {
   ListColumn,
   ListFilter,
@@ -40,12 +33,6 @@ import type {
 import type {
   AuthoredEntityIndex,
   CrudOperationKey,
-  EntityOperationDefinition,
-  EntityGraphqlOperationProjectionConfig,
-  EntityMcpOperationProjectionConfig,
-  EntityRestOperationProjectionConfig,
-  EntityInterfaceOperationProjectionConfig,
-  EntityWebOperationProjectionConfig,
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
@@ -85,15 +72,8 @@ export interface CompiledField {
     | "datetime"
     | "object";
   cardinality: "single" | "collection";
-  /** Exact authored collection bounds retained after cardinality normalization. */
-  cardinalityBounds?: {
-    min?: number;
-    max?: number | "unbounded";
-  };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
-  entityValue?: { definitionField: string };
-  allowedDefinitions?: string[];
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
@@ -109,8 +89,6 @@ export interface CompiledField {
    * column, the way `immutable` and `classification` do.
    */
   writtenBy?: string[];
-  /** Persisted server-owned create-time derivation retained for every interface projection. */
-  deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;
@@ -140,18 +118,11 @@ export interface CompiledField {
 
 export interface CompiledRelationship {
   key: string;
-  fieldKey?: string;
-  inverse?: string;
-  ownership?: "owned" | "reference";
-  cardinality?: import("./field-definition.js").FieldDefinitionCardinality;
-  sortable?: boolean;
-  unique?: boolean;
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;
   foreignKey?: string;
   via?: string;
   label?: LocalizedText;
-  constraints?: import("./field-definition.js").FieldDefinitionRelationshipConstraints;
 }
 
 export interface GraphQLField {
@@ -211,8 +182,6 @@ export interface GraphQLSection {
     update: { name: string; input: string };
     delete: { name: string; args: { name: string; type: string }[] };
   };
-  /** Explicit only for v2 authoring; v1 continues to use the CRUD upper bound. */
-  operations?: Record<CrudOperationKey, boolean>;
 }
 
 export interface McpSection {
@@ -238,8 +207,6 @@ export interface McpSection {
   toolOverrides?: Partial<
     Record<McpOperationKey, { name?: string; description?: string }>
   >;
-  /** MCP-only guidance refining the canonical v2 operation description. */
-  operationInstructions?: Partial<Record<McpOperationKey, string | LocalizedText>>;
   /**
    * Authored MCP resource exposure, validated but not defaulted — the
    * catalog generator resolves the name/description fallbacks because it
@@ -318,89 +285,6 @@ export interface RestSection {
 export interface CrudSection {
   operations: Record<CrudOperationKey, boolean>;
 }
-
-export type EntityOperationIntent = CrudOperationKey;
-
-export type EntityOperationInput =
-  | {
-      kind: "collection-query";
-      entityId: string;
-      filterMode: "declared-fields";
-      sortMode: "declared-fields";
-      pagination: { kind: "cursor"; defaultLimit: number; maxLimit: number };
-    }
-  | { kind: "identity"; identityField: "id" }
-  | { kind: "entity-create"; entityId: string }
-  | {
-      kind: "entity-update";
-      entityId: string;
-      identityField: "id";
-    }
-  | { kind: "json-schema"; schema: Record<string, unknown> };
-
-export type EntityOperationOutput =
-  | { kind: "entity-connection"; entityId: string }
-  | { kind: "entity-record"; entityId: string; nullable: boolean }
-  | { kind: "deletion-result" }
-  | { kind: "json-schema"; schema: Record<string, unknown> };
-
-export type CompiledEntityOperation = OperationReference<EntityOperationIntent> & {
-  /** Stable interface-neutral identity, e.g. `Relation.update`. */
-  key: string;
-  entityId: string;
-  entityName: string;
-  name: string | LocalizedText;
-  description: string | LocalizedText;
-  /** Core storage execution or a plugin handler for the same CRUD intent. */
-  implementation:
-    | { type: "entity" }
-    | { type: "plugin"; plugin: string; handler: string };
-  /** Canonical binding for a plugin-backed CRUD Operation. */
-  target?:
-    | { entityId: string; entityName: string; scope: "collection" }
-    | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  /** Declared handler failures; platform failures remain core-owned. */
-  errors?: EntityOperationDefinition["errors"];
-  /** Interface aliases retained without creating a second Operation. */
-  interfaces?: {
-    rest?: false | EntityRestOperationProjectionConfig;
-    graphql?: false | EntityGraphqlOperationProjectionConfig;
-    mcp?: false | EntityMcpOperationProjectionConfig;
-    web?: false | EntityWebOperationProjectionConfig;
-  };
-  guidance?: { assistant?: string | LocalizedText };
-  prerequisites?: readonly OperationPrerequisite[];
-  input: EntityOperationInput;
-  output: EntityOperationOutput;
-  authorization: {
-    action: "read" | "create" | "update" | "delete";
-    roles: string[];
-    /** Every listed record permission must pass; RBAC remains the outer gate. */
-    recordPermissions?: import("./common.js").RecordPermissionAction[];
-  };
-  effects: {
-    data: "read" | "write" | "delete";
-    external: "none" | "read" | "write";
-  };
-  reliability: {
-    idempotency: {
-      mode: "natural" | "keyed" | "none";
-      inputField?: string;
-    };
-  };
-  concurrency?: OperationConcurrency;
-  interaction: {
-    confirmation: OperationConfirmation;
-    secureInput?: {
-      type: "secureInput";
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
-  };
-};
 
 export interface CompiledListView {
   name?: string;
@@ -660,26 +544,10 @@ export interface CompiledAuthorization {
       column: string;
       expand: "descendants" | "ancestors" | "exact";
     };
-    recordPermissions?: {
-      field: string;
-      column: string;
-      empty: "public" | "restricted";
-      createRequires: import("./common.js").RecordPermissionAction[];
-      defaultValue?: Record<string, unknown>;
-    };
   };
 }
 
-export interface CompiledBlueprint {
-  fields: string[];
-  labelField: string;
-  operations: { list: string; status: string; reset: string; publish: string };
-}
-
 export interface CompiledEntityContract {
-  blueprint?: CompiledBlueprint;
-  workerAccess?: string;
-  authoringVersion: 1 | 2 | 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {
@@ -687,8 +555,6 @@ export interface CompiledEntityContract {
     name: string;
     module: string;
     title: string;
-    /** Explicit baseEntity:false with no entity identity; usable only as a value definition. */
-    valueDefinition?: boolean;
     description?: string | LocalizedText;
     labels?: LocalizedText;
     domains: string[];
@@ -709,37 +575,6 @@ export interface CompiledEntityContract {
   };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
-  /** Canonical generated operations projected by REST, MCP, web and GraphQL. */
-  entityOperations: Partial<Record<EntityOperationIntent, CompiledEntityOperation>>;
-  /** YAML-owned plugin Operations attached to this entity/record surface. */
-  pluginOperations?: Array<{
-    key: string;
-    id: string;
-    entityId: string;
-    entityName: string;
-    definition: EntityOperationDefinition;
-    interfaces: {
-      rest?: false | EntityRestOperationProjectionConfig;
-      graphql?: false | EntityGraphqlOperationProjectionConfig;
-      mcp?: false | EntityMcpOperationProjectionConfig;
-      web?: false | EntityWebOperationProjectionConfig;
-    };
-  }>;
-  /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
-  interfaces?: {
-    web?: {
-      fields?: Record<string, { render: import("./common.js").FieldRender }>;
-      operations: Partial<Record<EntityOperationIntent, boolean>>;
-      collectionActions?: string[];
-      recordContext?: { fields: string[]; relationships?: string[] };
-      /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
-      renderers?: {
-        collection?: string;
-        record?: string;
-      };
-    };
-    graphql?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
-  };
   graphql: GraphQLSection;
   /** Present only when the entity opts into generated REST exposure. */
   rest?: RestSection;

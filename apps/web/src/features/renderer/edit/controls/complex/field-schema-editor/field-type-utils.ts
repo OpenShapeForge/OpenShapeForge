@@ -12,7 +12,6 @@ import {
   isFieldCardinalityCollection,
   normalizeFieldCardinality,
 } from "./cardinality-utils";
-import { fieldValueType } from "@/lib/field-contract/field-v2";
 import { getEffectiveRequired } from "./validation-utils";
 
 export function getFieldTypeOptions(
@@ -43,7 +42,7 @@ export function getFieldTypeKey(field: Field): CompilerAuthorableFieldType {
       ? FIELD_DEFINITION_SEMANTIC_COLLECTION_TYPE
       : "collection";
   }
-  return fieldValueType(field);
+  return field.valueType;
 }
 
 export function getFieldSelectionTypeKey(selection: {

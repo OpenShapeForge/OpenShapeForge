@@ -27,8 +27,6 @@
  */
 export const API_KEY_MANAGE_ROLE = "Platform.ApiKeys.Manage";
 
-import type { SessionCredential } from "../trusted-context.js";
-
 export class ApiKeyAuthorizationError extends Error {
   readonly code = "FORBIDDEN";
   readonly status = 403;
@@ -40,7 +38,7 @@ export class ApiKeyAuthorizationError extends Error {
 
 export type CeilingSession = {
   roles: readonly string[];
-  credential: SessionCredential;
+  credential: "none" | "bearer" | "api-key" | "trusted-context";
 };
 
 /**

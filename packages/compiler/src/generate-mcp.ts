@@ -18,19 +18,14 @@
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
  */
-import { withBlueprintCreate } from "./blueprint-create-schema.js";
-import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
-  CompiledColumn,
   CompiledEntityContract,
-  CompiledEntityOperation,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
+import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
-import { writableEntityFields } from "./entity-operation-json-schema.js";
-import type { PluginExecutionCompatibility } from "./plugins.js";
 import {
   compiledFieldSchema,
   compiledFieldSchemaWithoutDefinitions,
@@ -55,365 +50,21 @@ function describeMcpField(field: CompiledField): string | undefined {
 
 const MCP_FIELD_SCHEMA_OPTIONS = { describeField: describeMcpField };
 
-const ENTITY_OPERATION_INTENTS = [
-  "list",
-  "get",
-  "create",
-  "update",
-  "delete",
-] as const;
-
-function storageValueSchema(type: CompiledColumn["type"]): JsonObject {
-  switch (type) {
-    case "uuid":
-      return { type: "string", format: "uuid" };
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-    case "bigint":
-      return { type: "integer" };
-    case "numeric":
-      return { type: "number" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "timestamptz":
-      return { type: "string", format: "date-time" };
-    case "jsonb":
-      return {};
-    default:
-      return { type: "string" };
-  }
-}
-
-function nullableSchema(schema: JsonObject): JsonObject {
-  return { anyOf: [schema, { type: "null" }] };
-}
-
-/**
- * The record shape returned by generated CRUD. It follows persisted storage,
- * not the create schema: server-managed values and relationship foreign keys
- * are present in reads too. `additionalProperties` stays open because the MCP
- * runtime may add a safe, server-derived projection such as oauthRedirectUrl.
- */
-function entityRecordOutputSchema(
-  contract: CompiledEntityContract,
-  generic: boolean,
-): JsonObject {
-  if (generic) {
-    return { type: "object", additionalProperties: true };
-  }
-
-  const fields = new Map(
-    contract.model.fields.map((field) => [field.key, field]),
-  );
-  const properties: JsonObject = {};
-  const required: string[] = [];
-
-  const add = (
-    key: string,
-    schema: JsonObject,
-    isRequired: boolean,
-  ): void => {
-    properties[key] = schema;
-    if (isRequired) required.push(key);
-  };
-
-  for (const column of contract.storage.columns) {
-    const field = fields.get(column.field);
-    const label = field ? localizedText(field.label) : undefined;
-    const description = field ? describeMcpField(field) : undefined;
-    // Responses describe what storage can actually contain. Create/update
-    // validation bounds and enums constrain new input, but older/imported rows
-    // are not rewritten by those rules and must remain valid output.
-    const schema = {
-      ...storageValueSchema(column.type),
-      ...(label ? { title: label } : {}),
-      ...(description ? { description } : {}),
-    };
-    add(
-      column.field,
-      column.nullable ? nullableSchema(schema) : schema,
-      !column.nullable,
-    );
-  }
-
-  // Generated CRUD requires id and injects tenant/timestamps into its storage
-  // manifest even when a compact compiled fixture omits the platform fields.
-  if (!("id" in properties)) {
-    add("id", { type: "string", format: "uuid" }, true);
-  }
-  if (!("tenantId" in properties)) {
-    add("tenantId", { type: "string", format: "uuid" }, true);
-  }
-  if (!("createdAt" in properties)) {
-    add("createdAt", { type: "string", format: "date-time" }, true);
-  }
-  if (!("updatedAt" in properties)) {
-    add("updatedAt", { type: "string", format: "date-time" }, true);
-  }
-
-  return {
-    type: "object",
-    properties,
-    required,
-    additionalProperties: true,
-  };
-}
-
-function canonicalOutputDefinitions(): JsonObject {
-  return {
-    OperationReference: {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "intent"],
-      properties: {
-        id: { type: "string" },
-        intent: { type: "string", enum: [...ENTITY_OPERATION_INTENTS] },
-      },
-    },
-    OperationError: {
-      type: "object",
-      additionalProperties: false,
-      required: ["code", "message", "retryable"],
-      properties: {
-        code: { type: "string" },
-        message: { type: "string" },
-        detail: { type: "string" },
-        retryable: { type: "boolean" },
-        retryAt: { type: "string", format: "date-time" },
-        violations: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["code", "message"],
-            properties: {
-              field: { type: "string" },
-              code: { type: "string" },
-              message: { type: "string" },
-              detail: { type: "string" },
-            },
-          },
-        },
-        data: { type: "object", additionalProperties: true },
-      },
-    },
-    OperationConcurrency: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        version: {
-          type: "object",
-          additionalProperties: false,
-          required: ["mode", "field"],
-          properties: {
-            mode: { const: "required" },
-            field: { const: "updatedAt" },
-          },
-        },
-        editLease: {
-          type: "object",
-          additionalProperties: false,
-          required: ["mode", "expiresAfterInactivity"],
-          properties: {
-            mode: { const: "required" },
-            expiresAfterInactivity: { type: "string" },
-          },
-        },
-      },
-    },
-    OperationOffer: {
-      oneOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["operation", "available"],
-          properties: {
-            operation: { $ref: "#/$defs/OperationReference" },
-            available: { const: true },
-            concurrency: { $ref: "#/$defs/OperationConcurrency" },
-            binding: { $ref: "#/$defs/OperationTargetBinding" },
-          },
-        },
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["operation", "available", "error"],
-          properties: {
-            operation: { $ref: "#/$defs/OperationReference" },
-            available: { const: false },
-            error: { $ref: "#/$defs/OperationError" },
-          },
-        },
-      ],
-    },
-    OperationTargetBinding: {
-      type: "object",
-      additionalProperties: false,
-      required: ["target", "input"],
-      properties: {
-        target: {
-          type: "object",
-          additionalProperties: false,
-          required: ["entityId", "id"],
-          properties: {
-            entityId: { type: "string" },
-            id: { type: "string" },
-            version: { type: "string" },
-          },
-        },
-        input: { type: "object", additionalProperties: true },
-      },
-    },
-  };
-}
-
-function offersSchema(): JsonObject {
-  return {
-    type: "array",
-    items: { $ref: "#/$defs/OperationOffer" },
-  };
-}
-
-function recordEnvelopeSchema(record: JsonObject): JsonObject {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: ["data", "operations"],
-    properties: {
-      data: record,
-      operations: offersSchema(),
-    },
-  };
-}
-
-function entityToolOutputSchema(
-  operation: McpToolDefinition["operation"],
-  record: JsonObject,
-): JsonObject {
-  let success: JsonObject;
-  if (operation === "list") {
-    success = {
-      type: "object",
-      additionalProperties: false,
-      required: ["data", "operations"],
-      properties: {
-        data: {
-          type: "object",
-          additionalProperties: false,
-          required: ["items", "totalCount", "nextCursor"],
-          properties: {
-            items: {
-              type: "array",
-              items: recordEnvelopeSchema(record),
-            },
-            totalCount: { type: "integer" },
-            nextCursor: {
-              anyOf: [{ type: "string" }, { type: "null" }],
-            },
-          },
-        },
-        operations: offersSchema(),
-      },
-    };
-  } else if (operation === "delete") {
-    success = {
-      type: "object",
-      additionalProperties: false,
-      required: ["data", "operations"],
-      properties: {
-        data: {
-          type: "object",
-          additionalProperties: false,
-          required: ["deleted"],
-          properties: { deleted: { type: "boolean", const: true } },
-        },
-        operations: offersSchema(),
-      },
-    };
-  } else {
-    success = recordEnvelopeSchema(record);
-  }
-
-  return {
-    type: "object",
-    oneOf: [
-      success,
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["error"],
-        properties: {
-          error: { $ref: "#/$defs/OperationError" },
-        },
-      },
-    ],
-    $defs: {
-      ...canonicalOutputDefinitions(),
-    },
-  };
-}
-
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
 
-function operationControlSchema(
-  operation: CompiledEntityOperation | undefined,
-): {
-  properties: JsonObject;
-  required: string[];
-  dependentRequired?: Record<string, string[]>;
-} {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  let dependentRequired: Record<string, string[]> | undefined;
-  if (operation?.concurrency?.version) {
-    properties.expectedVersion = {
-      type: "string",
-      format: "date-time",
-      description:
-        `Version from the record's ${operation.concurrency.version.field} field.`,
-    };
-    required.push("expectedVersion");
-  }
-  if (operation?.concurrency?.editLease) {
-    properties.leaseToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this operation and record.",
-    };
-    required.push("leaseToken");
-  }
-  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
-      type: "boolean",
-      description:
-        "Only true lets the operation continue after user acknowledgement; this is not a server-issued security proof.",
-    };
-  }
-  if (operation?.interaction?.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
-      type: "string",
-      minLength: 1,
-      description:
-        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
-    };
-    dependentRequired = {
-      confirmationToken: ["confirmationAnswer"],
-      confirmationAnswer: ["confirmationToken"],
-    };
-  }
-  return {
-    properties,
-    required,
-    ...(dependentRequired ? { dependentRequired } : {}),
-  };
-}
+/**
+ * Server-managed columns. A model must never be invited to set these: the id
+ * is generated, the tenant comes from the session, and the timestamps are
+ * maintained by the database. Mirrors writableColumnMap in the API's CRUD
+ * layer and isWritableColumn in the OpenAPI generator.
+ */
+const SERVER_MANAGED_FIELDS = new Set([
+  "id",
+  "tenantId",
+  "createdAt",
+  "updatedAt",
+]);
 
 /**
  * Fields a caller may write, mirroring the CRUD layer's writability rule so the
@@ -437,16 +88,18 @@ function operationControlSchema(
  * check the operation runs before writing it, so create/update must not offer
  * a way around that check. Same shape as `immutable`: the advertised schema
  * and the server's refusal both come from the one authored fact.
- *
- * `deriveOnCreate` is absent from both writes because the entity runtime owns
- * its initial value and keeps it stable afterwards. The shared helper below
- * is also used by the canonical Operation schema, preventing transport drift.
  */
 function writableFields(
   fields: CompiledField[],
   operation: "create" | "update",
 ): CompiledField[] {
-  return writableEntityFields(fields, operation);
+  return fields.filter(
+    (field) =>
+      !SERVER_MANAGED_FIELDS.has(field.key) &&
+      field.computed === undefined &&
+      !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
+      !(operation === "update" && field.immutable === true),
+  );
 }
 
 /**
@@ -581,16 +234,12 @@ function classifiedFieldKeys(fields: CompiledField[]): string[] {
 
 export type McpToolDefinition = {
   name: string;
-  /** Stable interface-neutral operation id, published only by strict v2 authoring. */
-  operationId?: string;
   operation: "list" | "get" | "create" | "update" | "delete";
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: JsonObject;
-  /** Canonical success/error envelope returned by strict v2 tools. */
-  outputSchema?: JsonObject;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -617,9 +266,7 @@ function annotationsFor(operation: McpToolDefinition["operation"]) {
       return {
         readOnlyHint: false,
         destructiveHint: false,
-        // The current runtime appends an event and advances updated_at on each
-        // execution; retrying the same request is therefore not idempotent.
-        idempotentHint: false,
+        idempotentHint: true,
       };
     case "delete":
       return {
@@ -693,22 +340,6 @@ function buildToolsForEntity(
   const sortable = sortableFieldKeys(fields, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
-  const output = entityRecordOutputSchema(
-    contract,
-    mcp.tools === "generic",
-  );
-  const outputSchema = (operation: McpToolDefinition["operation"]) => {
-    const canonicalOutput = contract.entityOperations[operation]?.output;
-    return entityToolOutputSchema(
-      operation,
-      canonicalOutput?.kind === "json-schema" ? canonicalOutput.schema : output,
-    );
-  };
-  const v2Contract = contract.authoringVersion >= 2;
-  const listInput = contract.entityOperations.list?.input;
-  const listPagination = listInput?.kind === "collection-query"
-    ? listInput.pagination
-    : { defaultLimit: 50, maxLimit: 200 };
 
   const idSchema: JsonObject = {
     type: "object",
@@ -728,16 +359,6 @@ function buildToolsForEntity(
       ? (mcp.toolOverrides?.[operation]?.name ??
         `${mcp.toolPrefix}_${operation}`)
       : `osf_${operation}`;
-  const operationId = (intent: McpToolDefinition["operation"]): string => {
-    const operation = contract.entityOperations[intent];
-    if (!operation) {
-      throw new Error(
-        `mcp operation "${intent}" on entity "${contract.entity.name}" ` +
-          "has no canonical entity operation contract.",
-      );
-    }
-    return operation.id;
-  };
 
   // Authored description wins outright: an author writing one is correcting
   // the composed default, so nothing is appended to it — except the writtenBy
@@ -748,36 +369,12 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => {
-    if (contract.authoringVersion >= 2) {
-      const canonical = contract.entityOperations[operation];
-      const parts = [
-        localizedText(canonical?.description) ?? fallback,
-        localizedText(canonical?.guidance?.assistant),
-        localizedText(mcp.operationInstructions?.[operation]),
-      ].filter((part): part is string => Boolean(part));
-      const description = parts.join(" ");
-      return operation === "create" || operation === "update"
-        ? `${description}${writerNote}`
-        : description;
-    }
     const authored = mcp.toolOverrides?.[operation]?.description;
     if (authored === undefined) return fallback;
     return operation === "create" || operation === "update"
       ? `${authored}${writerNote}`
       : authored;
   };
-  const titled = (
-    operation: McpToolDefinition["operation"],
-    fallback: string,
-  ) => contract.authoringVersion >= 2
-    ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
-    : fallback;
-  const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
-    ...annotationsFor(operation),
-    ...(contract.entityOperations[operation]?.reliability.idempotency.mode === "keyed"
-      ? { idempotentHint: true }
-      : {}),
-  });
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
@@ -804,11 +401,10 @@ function buildToolsForEntity(
     }
     tools.push({
       name: named("list"),
-      ...(v2Contract ? { operationId: operationId("list") } : {}),
       operation: "list",
       entity: contract.entity.name,
       table,
-      title: titled("list", `List ${label}`),
+      title: `List ${label}`,
       description: described(
         "list",
         `${description} Returns a page of records. Text filters match on substring; ` +
@@ -836,10 +432,8 @@ function buildToolsForEntity(
           first: {
             type: "integer",
             minimum: 1,
-            maximum: listPagination.maxLimit,
-            default: listPagination.defaultLimit,
-            description:
-              `Page size (1-${listPagination.maxLimit}, default ${listPagination.defaultLimit}).`,
+            maximum: 200,
+            description: "Page size (1-200, default 50).",
           },
           after: {
             type: "string",
@@ -848,82 +442,53 @@ function buildToolsForEntity(
         },
         additionalProperties: false,
       },
-      ...(v2Contract ? { outputSchema: outputSchema("list") } : {}),
-      annotations: entityAnnotations("list"),
+      annotations: annotationsFor("list"),
     });
   }
 
   if (mcp.operations.get) {
     tools.push({
       name: named("get"),
-      ...(v2Contract ? { operationId: operationId("get") } : {}),
       operation: "get",
       entity: contract.entity.name,
       table,
-      title: titled("get", `Get ${label}`),
+      title: `Get ${label}`,
       description: described(
         "get",
         `${description} Fetches a single record by id.`,
       ),
       inputSchema: idSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("get") } : {}),
-      annotations: entityAnnotations("get"),
+      annotations: annotationsFor("get"),
     });
   }
 
   if (mcp.operations.create) {
-    const canonicalCreate = contract.entityOperations.create;
-    const baseInputSchema = canonicalCreate?.input.kind === "json-schema"
-      ? canonicalCreate.input.schema
-      : withRelationshipKeys(
-          compiledObjectSchema(creatable, referentiedata, {
-            requireRequired: true,
-            defaultsAreMaterialized: true,
-            ...MCP_FIELD_SCHEMA_OPTIONS,
-          }),
-          relationships,
-          true,
-        );
-    const inputSchema = withBlueprintCreate(baseInputSchema, contract.blueprint);
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.create)
-      : { properties: {}, required: [] };
     tools.push({
       name: named("create"),
-      ...(v2Contract ? { operationId: operationId("create") } : {}),
       operation: "create",
       entity: contract.entity.name,
       table,
-      title: titled("create", `Create ${label}`),
+      title: `Create ${label}`,
       description: described(
         "create",
         `${description} Creates a new record.${writerNote}`,
       ),
-      inputSchema: v2Contract
-        ? {
-            ...inputSchema,
-            properties: {
-              ...(inputSchema.properties as JsonObject),
-              ...controls.properties,
-            },
-            required: [
-              ...((inputSchema.required as string[] | undefined) ?? []),
-              ...controls.required,
-            ],
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-          }
-        : inputSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("create") } : {}),
-      annotations: entityAnnotations("create"),
+      inputSchema: withRelationshipKeys(
+        compiledObjectSchema(creatable, referentiedata, {
+          requireRequired: true,
+          defaultsAreMaterialized: true,
+          ...MCP_FIELD_SCHEMA_OPTIONS,
+        }),
+        relationships,
+        true,
+      ),
+      annotations: annotationsFor("create"),
     });
   }
 
   if (mcp.operations.update) {
-    // Entity values are a partial: omitting one means "leave it alone", not
-    // "clear it". Canonical concurrency controls remain required separately.
-    const canonicalUpdate = contract.entityOperations.update;
+    // Update is a partial: nothing is required beyond the id, because omitting
+    // a field means "leave it alone", not "clear it".
     const { schema: patch, definitions } = splitBundledDefinitions(
       withRelationshipKeys(
         compiledObjectSchema(updatable, referentiedata, {
@@ -935,97 +500,48 @@ function buildToolsForEntity(
         false,
       ),
     );
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.update)
-      : { properties: {}, required: [] };
     tools.push({
       name: named("update"),
-      ...(v2Contract ? { operationId: operationId("update") } : {}),
       operation: "update",
       entity: contract.entity.name,
       table,
-      title: titled("update", `Update ${label}`),
+      title: `Update ${label}`,
       description: described(
         "update",
         `${description} Partially updates a record; omitted fields are left unchanged.` +
           writerNote,
       ),
-      inputSchema: canonicalUpdate?.input.kind === "json-schema"
-        ? {
-            ...canonicalUpdate.input.schema,
-            properties: {
-              ...((canonicalUpdate.input.schema.properties as JsonObject | undefined) ?? {}),
-              ...controls.properties,
-            },
-            required: [
-              ...((canonicalUpdate.input.schema.required as string[] | undefined) ?? []),
-              ...controls.required,
-            ],
-            ...(controls.dependentRequired
-              ? {
-                  dependentRequired: {
-                    ...((canonicalUpdate.input.schema.dependentRequired as
-                      | Record<string, string[]>
-                      | undefined) ?? {}),
-                    ...controls.dependentRequired,
-                  },
-                }
-              : {}),
-          }
-        : {
-            type: "object",
-            properties: {
-              id: {
-                type: "string",
-                format: "uuid",
-                description: `Identifier of the ${label}.`,
-              },
-              values: patch,
-              ...controls.properties,
-            },
-            required: ["id", "values", ...controls.required],
-            additionalProperties: false,
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-            ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            format: "uuid",
+            description: `Identifier of the ${label}.`,
           },
-      ...(v2Contract ? { outputSchema: outputSchema("update") } : {}),
-      annotations: entityAnnotations("update"),
+          values: patch,
+        },
+        required: ["id", "values"],
+        additionalProperties: false,
+        ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
+      },
+      annotations: annotationsFor("update"),
     });
   }
 
   if (mcp.operations.delete) {
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.delete)
-      : { properties: {}, required: [] };
     tools.push({
       name: named("delete"),
-      ...(v2Contract ? { operationId: operationId("delete") } : {}),
       operation: "delete",
       entity: contract.entity.name,
       table,
-      title: titled("delete", `Delete ${label}`),
+      title: `Delete ${label}`,
       description: described(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
-      inputSchema: v2Contract
-        ? {
-            type: "object",
-            properties: {
-              ...(idSchema.properties as JsonObject),
-              ...controls.properties,
-            },
-            required: ["id", ...controls.required],
-            additionalProperties: false,
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-          }
-        : idSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("delete") } : {}),
-      annotations: entityAnnotations("delete"),
+      inputSchema: idSchema,
+      annotations: annotationsFor("delete"),
     });
   }
 
@@ -1153,14 +669,6 @@ export type McpDerivedToolsDefinition = {
     instructionField: string;
     set: { name: string; description: string };
   };
-  /** Internal removal seam; never projected by an interface adapter. */
-  compatibility?: {
-    plugin: string;
-    providerId: string;
-    connectOperation?: string;
-    dryRunOperation?: string;
-    setPreferenceOperation?: string;
-  };
 };
 
 export type McpGuideToolDefinition = {
@@ -1179,7 +687,6 @@ export type McpDiscoveryToolDefinition = {
   description: string;
   entity: string;
   table: string;
-  compatibility?: { plugin: string; operation: string };
 };
 
 export type McpTestToolDefinition = {
@@ -1187,60 +694,7 @@ export type McpTestToolDefinition = {
   description: string;
   entity: string;
   table: string;
-  compatibility?: { plugin: string; operation: string };
 };
-
-export type ExecutionCompatibilityContribution = {
-  plugin: string;
-  contribution: PluginExecutionCompatibility;
-};
-
-export const SEARCHABLE_OPERATION_TOOL_NAMES = {
-  search: "osf_search_operations",
-  execute: "osf_execute_operation",
-} as const;
-
-export type McpOperationToolProjection = "dedicated" | "searchable";
-
-export type McpOperationServer = "tenant" | "control";
-
-/**
- * Which MCP server advertises an Operation. A control-realm Operation
- * (`auth.mode: control`) is served by the control server behind the control
- * realm's own bearer and never by the tenant server, so it neither counts
- * against the tenant server's dedicated-tool budget nor shares its tool-name
- * space: a control tool may spell the same name as a tenant tool because no
- * client is ever shown both lists. `operationTools` still carries both kinds,
- * each tagged by its `auth.mode`, so one generated catalog feeds both servers
- * and each filters to its own.
- */
-export function operationMcpServer(
-  operation: Pick<CompiledPluginOperation, "auth">,
-): McpOperationServer {
-  return operation.auth.mode === "control" ? "control" : "tenant";
-}
-
-/**
- * Keep the fixed dedicated budget while retaining every canonical Operation.
- * Entity/connector tools cannot be collapsed here; static Operations can use
- * the two fixed searchable tools instead of an unstable truncated subset.
- */
-export function selectOperationToolProjection(
-  dedicatedWithoutOperations: number,
-  operationCount: number,
-  maximum = MAX_DEDICATED_TOOLS,
-): McpOperationToolProjection {
-  if (dedicatedWithoutOperations > maximum) {
-    throw new Error(
-      `MCP tool catalog would advertise ${dedicatedWithoutOperations} dedicated non-Operation tools, ` +
-        `over the ${maximum} limit. Switch entities to \`mcp: { tools: generic }\` or disable ` +
-        "connector operations for MCP.",
-    );
-  }
-  return dedicatedWithoutOperations + operationCount > maximum
-    ? "searchable"
-    : "dedicated";
-}
 
 export type McpCatalog = {
   generatedBy: string;
@@ -1262,18 +716,6 @@ export type McpCatalog = {
     outputSchema: Record<string, unknown>;
     auth: CompiledPluginOperation["auth"];
     annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
-  }[];
-  operationToolProjection: {
-    mode: McpOperationToolProjection;
-    search: typeof SEARCHABLE_OPERATION_TOOL_NAMES.search;
-    execute: typeof SEARCHABLE_OPERATION_TOOL_NAMES.execute;
-  };
-  /** Internal adapter-removal seam; never listed as an MCP tool. */
-  executionCompatibility: {
-    plugin: string;
-    operation: string;
-    toolName: string;
-    auth: CompiledPluginOperation["auth"];
   }[];
 };
 
@@ -1347,8 +789,6 @@ export function buildMcpCatalog(
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
-  executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
-  requestedOperationToolProjection?: McpOperationToolProjection,
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -1363,7 +803,6 @@ export function buildMcpCatalog(
   const discoveryTools: McpDiscoveryToolDefinition[] = [];
   const testTools: McpTestToolDefinition[] = [];
   const guideTools: McpGuideToolDefinition[] = [];
-  const executionCompatibilityOperations: McpCatalog["executionCompatibility"] = [];
 
   // Every entity in the input set is a possible relationship target, whether
   // or not it is MCP-exposed itself; only an exposed one has a list tool to
@@ -1450,7 +889,7 @@ export function buildMcpCatalog(
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
-          ...(field.relationship?.kind && field.relationship.entity
+          ...(field.relationship
             ? {
                 relationship: {
                   kind: field.relationship.kind,
@@ -1654,281 +1093,6 @@ export function buildMcpCatalog(
     }
   }
 
-  const compatibilityNames = new Map<string, string>();
-  type CompatibilityOperation = CompiledPluginOperation & {
-    auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }> & {
-      roles: string[];
-    };
-  };
-  const compatibilityOperation = (
-    plugin: string,
-    key: string,
-  ): CompatibilityOperation => {
-    const operation = operations.find(
-      (candidate) => candidate.plugin === plugin && candidate.key === key,
-    );
-    if (!operation) {
-      throw new Error(
-        `Plugin "${plugin}" execution compatibility references unknown canonical ` +
-          `Operation "${key}".`,
-      );
-    }
-    if (operation.auth.mode !== "session") {
-      throw new Error(
-        `Plugin "${plugin}" compatibility Operation "${key}" must use session authorization.`,
-      );
-    }
-    if (!operation.auth.roles?.length) {
-      throw new Error(
-        `Plugin "${plugin}" compatibility Operation "${key}" must declare at least one role.`,
-      );
-    }
-    return operation as CompatibilityOperation;
-  };
-  const internalCompatibilityName = (
-    plugin: string,
-    operation: CompatibilityOperation,
-  ) => {
-    const existing = compatibilityNames.get(operation.key);
-    if (existing) return existing;
-    const key = operation.key;
-    const name = `osf_internal_${plugin}_${key}`
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, "_")
-      .slice(0, 128);
-    if ([...compatibilityNames.values()].includes(name)) {
-      throw new Error(
-        `Execution compatibility name collision for canonical Operation "${key}".`,
-      );
-    }
-    compatibilityNames.set(operation.key, name);
-    executionCompatibilityOperations.push({
-      plugin,
-      operation: operation.key,
-      toolName: name,
-      auth: operation.auth,
-    });
-    return name;
-  };
-  const compatibilityEntity = (plugin: string, entityName: string) => {
-    const found = inputs.find(
-      (candidate) => candidate.contract.entity.name === entityName,
-    );
-    if (!found) {
-      throw new Error(
-        `Plugin "${plugin}" execution compatibility references unknown entity ` +
-          `"${entityName}".`,
-      );
-    }
-    return found;
-  };
-  const assertCompatibilityField = (
-    plugin: string,
-    entityName: string,
-    field: string,
-    option: string,
-  ) => {
-    const entity = compatibilityEntity(plugin, entityName);
-    const fields = new Set(entity.contract.model.fields.map((candidate) => candidate.key));
-    if (!fields.has(field)) {
-      throw new Error(
-        `Plugin "${plugin}" execution compatibility ${option} references unknown ` +
-          `field "${entityName}.${field}".`,
-      );
-    }
-  };
-
-  for (const { plugin, contribution } of executionCompatibility) {
-    if (contribution.version !== 1) {
-      throw new Error(
-        `Plugin "${plugin}" execution compatibility must declare version 1.`,
-      );
-    }
-    for (const discovery of contribution.discovery ?? []) {
-      const operation = compatibilityOperation(plugin, discovery.operation);
-      const entity = compatibilityEntity(plugin, discovery.entity);
-      discoveryTools.push({
-        name: internalCompatibilityName(plugin, operation),
-        description: operation.description,
-        entity: discovery.entity,
-        table: entity.table,
-        compatibility: { plugin, operation: operation.key },
-      });
-    }
-    for (const test of contribution.tests ?? []) {
-      const operation = compatibilityOperation(plugin, test.operation);
-      const entity = compatibilityEntity(plugin, test.entity);
-      testTools.push({
-        name: internalCompatibilityName(plugin, operation),
-        description: operation.description,
-        entity: test.entity,
-        table: entity.table,
-        compatibility: { plugin, operation: operation.key },
-      });
-    }
-    for (const record of contribution.records ?? []) {
-      const entity = compatibilityEntity(plugin, record.entity);
-      const readOperation = entity.contract.entityOperations.get;
-      if (!readOperation) {
-        throw new Error(
-          `Plugin "${plugin}" execution compatibility record entity ` +
-            `"${record.entity}" must declare canonical get.`,
-        );
-      }
-      for (const [option, field] of [
-        ["keyField", record.keyField],
-        ["descriptionField", record.descriptionField],
-        ["inputFieldsField", record.inputFieldsField],
-        ["versionField", record.versionField],
-        ["bindingsField", record.execution.bindingsField],
-      ] as const) {
-        assertCompatibilityField(plugin, record.entity, field, option);
-      }
-      for (const field of [
-        record.titleField,
-        record.outputFieldsField,
-        record.visibleWhen?.field,
-        record.visibleToRolesField,
-        record.internalOnlyField,
-      ]) {
-        if (field) assertCompatibilityField(plugin, record.entity, field, "record field");
-      }
-      assertCompatibilityField(
-        plugin,
-        record.execution.operationEntity,
-        record.execution.providerRef,
-        "execution.providerRef",
-      );
-      assertCompatibilityField(
-        plugin,
-        record.execution.connectionEntity,
-        record.execution.connectionProviderRef,
-        "execution.connectionProviderRef",
-      );
-      assertCompatibilityField(
-        plugin,
-        record.execution.connectionEntity,
-        record.execution.connectionValuesField,
-        "execution.connectionValuesField",
-      );
-      const connect = record.connectOperation
-        ? compatibilityOperation(plugin, record.connectOperation)
-        : undefined;
-      const dryRun = record.dryRunOperation
-        ? compatibilityOperation(plugin, record.dryRunOperation)
-        : undefined;
-      const personalization = record.personalization
-        ? {
-            authored: record.personalization,
-            operation: compatibilityOperation(
-              plugin,
-              record.personalization.setOperation,
-            ),
-          }
-        : undefined;
-      if (personalization) {
-        assertCompatibilityField(
-          plugin,
-          personalization.authored.entity,
-          personalization.authored.serviceRef,
-          "personalization.serviceRef",
-        );
-        assertCompatibilityField(
-          plugin,
-          personalization.authored.entity,
-          personalization.authored.instructionField,
-          "personalization.instructionField",
-        );
-      }
-      derivedTools.push({
-        entity: record.entity,
-        table: entity.table,
-        roles: [...readOperation.authorization.roles],
-        keyField: record.keyField,
-        ...(record.titleField ? { titleField: record.titleField } : {}),
-        descriptionField: record.descriptionField,
-        inputFieldsField: record.inputFieldsField,
-        ...(record.outputFieldsField
-          ? { outputFieldsField: record.outputFieldsField }
-          : {}),
-        versionField: record.versionField,
-        ...(record.visibleWhen ? { visibleWhen: { ...record.visibleWhen } } : {}),
-        ...(record.visibleToRolesField
-          ? { visibleToRolesField: record.visibleToRolesField }
-          : {}),
-        ...(record.internalOnlyField
-          ? { internalOnlyField: record.internalOnlyField }
-          : {}),
-        ...(connect
-          ? {
-              connect: {
-                name: internalCompatibilityName(plugin, connect),
-                description: connect.description,
-                roles: [...connect.auth.roles],
-              },
-            }
-          : {}),
-        ...(dryRun
-          ? {
-              dryRun: {
-                name: internalCompatibilityName(plugin, dryRun),
-                description: dryRun.description,
-                roles: [...dryRun.auth.roles],
-              },
-            }
-          : {}),
-        ...(personalization
-          ? {
-              personalization: {
-                entity: personalization.authored.entity,
-                table: compatibilityEntity(
-                  plugin,
-                  personalization.authored.entity,
-                ).table,
-                serviceRef: personalization.authored.serviceRef,
-                instructionField: personalization.authored.instructionField,
-                set: {
-                  name: internalCompatibilityName(plugin, personalization.operation),
-                  description: personalization.operation.description,
-                },
-              },
-            }
-          : {}),
-        execution: {
-          bindingsField: record.execution.bindingsField,
-          operationRef: record.execution.operationRef,
-          operationEntity: record.execution.operationEntity,
-          operationTable: compatibilityEntity(
-            plugin,
-            record.execution.operationEntity,
-          ).table,
-          providerRef: record.execution.providerRef,
-          providerEntity: record.execution.providerEntity,
-          providerTable: compatibilityEntity(
-            plugin,
-            record.execution.providerEntity,
-          ).table,
-          connectionEntity: record.execution.connectionEntity,
-          connectionTable: compatibilityEntity(
-            plugin,
-            record.execution.connectionEntity,
-          ).table,
-          connectionProviderRef: record.execution.connectionProviderRef,
-          connectionValuesField: record.execution.connectionValuesField,
-        },
-        compatibility: {
-          plugin,
-          providerId: record.providerId,
-          ...(connect ? { connectOperation: connect.key } : {}),
-          ...(dryRun ? { dryRunOperation: dryRun.key } : {}),
-          ...(personalization
-            ? { setPreferenceOperation: personalization.operation.key }
-            : {}),
-        },
-      });
-    }
-  }
-
   const seenResourceUris = new Map<string, McpResourceDefinition>();
   for (const resource of resources) {
     const existing = seenResourceUris.get(resource.uri);
@@ -2015,27 +1179,23 @@ export function buildMcpCatalog(
       outputSchema: operation.outputSchema,
       auth: operation.auth,
       annotations: {
-        readOnlyHint:
-          operation.effects?.data === "read" ||
-          (!operation.effects && operation.transports.rest.method === "GET"),
-        destructiveHint:
-          operation.effects?.data === "delete" ||
-          (!operation.effects && operation.transports.rest.method === "DELETE"),
+        readOnlyHint: operation.transports.rest.method === "GET",
+        destructiveHint: operation.transports.rest.method === "DELETE",
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));
-  // The projection decides how the TENANT server lists its Operations; the
-  // control server lists its own dedicated tools regardless, so control
-  // Operations are excluded from the count (see operationMcpServer).
-  const locallyRequiredProjection = selectOperationToolProjection(
-    dedicatedCount,
-    operationTools.filter((tool) => operationMcpServer(tool) === "tenant").length,
-  );
-  const operationToolProjection =
-    locallyRequiredProjection === "searchable" ||
-      requestedOperationToolProjection === "searchable"
-      ? "searchable"
-      : "dedicated";
+  if (dedicatedCount + operationTools.length > MAX_DEDICATED_TOOLS) {
+    const offenders = opted
+      .filter((input) => input.contract.mcp!.tools === "dedicated")
+      .map((input) => input.slug)
+      .join(", ");
+    throw new Error(
+      `MCP tool catalog would advertise ${dedicatedCount + operationTools.length} dedicated tools, over the ` +
+        `${MAX_DEDICATED_TOOLS} limit. A model's tool selection degrades badly at that ` +
+        `size. Set \`mcp: { tools: generic }\` on some of these entities so they share ` +
+        `the osf_* tools instead: ${offenders}.`,
+    );
+  }
 
   return {
     generatedBy: "@openshapeforge/compiler",
@@ -2048,11 +1208,6 @@ export function buildMcpCatalog(
     testTools,
     guideTools,
     operationTools,
-    operationToolProjection: {
-      mode: operationToolProjection,
-      ...SEARCHABLE_OPERATION_TOOL_NAMES,
-    },
-    executionCompatibility: executionCompatibilityOperations,
   };
 }
 
@@ -2061,15 +1216,6 @@ export function renderMcpCatalog(
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
-  executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
-  operationToolProjection?: McpOperationToolProjection,
 ): string {
-  return `${JSON.stringify(buildMcpCatalog(
-    inputs,
-    source,
-    referentiedata,
-    operations,
-    executionCompatibility,
-    operationToolProjection,
-  ), null, 2)}\n`;
+  return `${JSON.stringify(buildMcpCatalog(inputs, source, referentiedata, operations), null, 2)}\n`;
 }

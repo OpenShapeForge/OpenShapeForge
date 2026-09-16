@@ -220,5 +220,5 @@ export function carrySessionIdentity(
  * answer in, resolves it through here rather than reaching for the claim.
  */
 export function sessionLocale(session: TrustedSessionContext): ResolvedLocale {
-  return resolveLocale({ user: sessionIdentityOf(session).locale ?? session.locale });
+  return resolveLocale({ user: sessionIdentityOf(session).locale });
 }

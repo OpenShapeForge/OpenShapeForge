@@ -32,7 +32,7 @@
  * Tenant/row RLS is enforced independently at the DB layer; this is the
  * declared operation/field permission model layered on top.
  */
-import { operationFailure } from "@openshapeforge/operations";
+import { GraphQLError } from "graphql";
 import type {
   GeneratedCrudAuthorization,
   GeneratedCrudOperation,
@@ -93,17 +93,17 @@ export function assertOperationAllowed(
 ): void {
   const required = authorization?.roles?.[operation];
   if (!required || required.length === 0) {
-    throw operationFailure({
-      code: "FORBIDDEN",
-      message: `Not authorized: ${typeName} declares no roles for "${operation}"; access is denied by default.`,
-    });
+    throw new GraphQLError(
+      `Not authorized: ${typeName} declares no roles for "${operation}"; access is denied by default.`,
+      { extensions: { code: "FORBIDDEN", status: 403 } },
+    );
   }
   const granted = session?.roles ?? [];
   if (!intersects(granted, required)) {
-    throw operationFailure({
-      code: "FORBIDDEN",
-      message: `Not authorized to ${operation} ${typeName}.`,
-    });
+    throw new GraphQLError(
+      `Not authorized to ${operation} ${typeName}.`,
+      { extensions: { code: "FORBIDDEN", status: 403 } },
+    );
   }
 }
 
@@ -161,10 +161,10 @@ export function assertClassifiedQueryFieldsAllowed(
 
   if (!classifiedField?.column) return;
   const { field } = classifiedField;
-  throw operationFailure({
-    code: "FORBIDDEN",
-    message: `Not authorized to filter or sort by classified field "${field}" on ${typeName}.`,
-  });
+  throw new GraphQLError(
+    `Not authorized to filter or sort by classified field "${field}" on ${typeName}.`,
+    { extensions: { code: "FORBIDDEN", status: 403 } },
+  );
 }
 
 /**

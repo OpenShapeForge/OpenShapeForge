@@ -4,7 +4,7 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "@openshapeforge/ui";
-import type { PlatformTenant } from "@/lib/clients/control-api";
+import type { Tenant } from "@/lib/clients/control-api";
 import { renameTenantAction, setTenantStatusAction } from "../actions";
 import { IDLE_TENANT_FORM_STATE, type TenantFormState } from "../form-state";
 
@@ -65,7 +65,7 @@ const TRANSITIONS = [
   { status: "inactive", label: "Mark inactive", pendingLabel: "Updating…", variant: "outline" },
 ] as const;
 
-export function TenantLifecycleControls({ tenant }: { tenant: Pick<PlatformTenant, "slug" | "status"> }) {
+export function TenantLifecycleControls({ tenant }: { tenant: Tenant }) {
   const [state, formAction] = useActionState<TenantFormState, FormData>(
     setTenantStatusAction,
     IDLE_TENANT_FORM_STATE,
@@ -96,7 +96,7 @@ export function TenantLifecycleControls({ tenant }: { tenant: Pick<PlatformTenan
   );
 }
 
-export function TenantRenameForm({ tenant }: { tenant: Pick<PlatformTenant, "slug" | "name"> }) {
+export function TenantRenameForm({ tenant }: { tenant: Tenant }) {
   const [state, formAction] = useActionState<TenantFormState, FormData>(
     renameTenantAction,
     IDLE_TENANT_FORM_STATE,

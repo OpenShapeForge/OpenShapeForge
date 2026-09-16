@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 //
 // The Keycloak SPI compiles against <keycloak.version> in pom.xml and runs
-// inside the base image named in the same directory's Dockerfile and is deployed
-// by default through the vendored Helm chart. Those are three independent
-// version declarations for one runtime.
+// inside the base image named in the same directory's Dockerfile. Those are two
+// independent version declarations for one runtime.
 //
 // It matters more here than the usual "keep versions tidy": the SPI calls
 // internal server APIs — AppAuthManager.BearerTokenAuthenticator,
@@ -15,12 +14,11 @@
 // identity-configuration SPI down (issue #14). Worse, a changed auth default in
 // requireAdminBearer would alter the security posture with nothing to catch it.
 //
-// Two Dependabot ecosystems move the pom and Dockerfile independently (maven
-// and docker), while the Helm appVersion is maintained by this repository.
-// Drift is therefore the expected steady state without a gate. That is also why
-// this is a check rather than a shared build ARG: a check keeps all declarations
-// literal and update-tool-friendly, and reports the mismatch instead of silently
-// resolving it.
+// Two Dependabot ecosystems move these lines independently (maven for the pom,
+// docker for the Dockerfile), so drift is the expected steady state without a
+// gate. That is also why this is a check rather than a shared build ARG: a check
+// keeps both declarations literal and Dependabot-updatable, and reports the
+// mismatch instead of silently resolving it.
 //
 // Since #488 the image also layers third-party provider jars (the Apple
 // Sign-in provider) whose compatibility is stated per Keycloak minor and whose
@@ -34,34 +32,45 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  assertKeycloakVersionsAgree,
-  keycloakVersionsFromSources,
-} from "./keycloak-version-lockstep.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const POM_PATH = "packages/keycloak-spi/pom.xml";
 const DOCKERFILE_PATH = "packages/keycloak-spi/Dockerfile";
-const CHART_PATH = "deploy/helm/openshapeforge-api/charts/keycloak/Chart.yaml";
 const COMPAT_PATH = "packages/keycloak-spi/provider-compatibility.json";
 
-const [pom, dockerfile, chart, compatSource] = await Promise.all([
-  readFile(join(REPO_ROOT, POM_PATH), "utf8"),
-  readFile(join(REPO_ROOT, DOCKERFILE_PATH), "utf8"),
-  readFile(join(REPO_ROOT, CHART_PATH), "utf8"),
-  readFile(join(REPO_ROOT, COMPAT_PATH), "utf8"),
-]);
-const compat = JSON.parse(compatSource);
-const versions = keycloakVersionsFromSources({ pom, dockerfile, chart });
-const { compileVersion, runtimeVersion } = versions;
+// quay.io/keycloak/keycloak:26.5.3, with or without an @sha256: digest pin.
+const RUNTIME_IMAGE =
+  /^FROM\s+quay\.io\/keycloak\/keycloak:([^\s@]+)(?:@sha256:[0-9a-f]{64})?\s*$/m;
+const POM_PROPERTY = /<keycloak\.version>([^<]+)<\/keycloak\.version>/;
+
+const pom = await readFile(join(REPO_ROOT, POM_PATH), "utf8");
+const dockerfile = await readFile(join(REPO_ROOT, DOCKERFILE_PATH), "utf8");
+const compat = JSON.parse(await readFile(join(REPO_ROOT, COMPAT_PATH), "utf8"));
+
+const compileVersion = pom.match(POM_PROPERTY)?.[1]?.trim();
+const runtimeVersion = dockerfile.match(RUNTIME_IMAGE)?.[1]?.trim();
 
 const failures = [];
 
-try {
-  assertKeycloakVersionsAgree(versions);
-} catch (error) {
-  failures.push(error instanceof Error ? error.message : String(error));
+if (!compileVersion) {
+  failures.push(`${POM_PATH}: no <keycloak.version> property found.`);
 }
+if (!runtimeVersion) {
+  failures.push(
+    `${DOCKERFILE_PATH}: no 'FROM quay.io/keycloak/keycloak:<tag>' line found.`,
+  );
+}
+
+if (compileVersion && runtimeVersion && compileVersion !== runtimeVersion) {
+  failures.push(
+    `Keycloak version drift: the SPI compiles against ${compileVersion} ` +
+      `(${POM_PATH}) but runs on ${runtimeVersion} (${DOCKERFILE_PATH}).\n\n` +
+      `The SPI uses internal Keycloak APIs with no cross-release compatibility ` +
+      `guarantee, so this does not fail the build — it fails at the first ` +
+      `request with NoSuchMethodError. Set both to the same version.`,
+  );
+}
+
 // --- Third-party provider jars -------------------------------------------
 
 function dockerfileArg(name) {
@@ -161,8 +170,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Keycloak SPI compiles against, runs on and deploys ${compileVersion} ` +
-    `(pom.xml, Dockerfile and Helm chart agree).`,
+  `Keycloak SPI compiles against and runs on ${compileVersion} (pom.xml and Dockerfile agree).`,
 );
 for (const [name, entry] of Object.entries(providers)) {
   console.log(

@@ -7,7 +7,6 @@
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";
-import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
 import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
@@ -34,22 +33,14 @@ import {
 } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
-import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
-import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
-import { createControlRuntime } from "../control/runtime.js";
-import { CONTROL_PLUGIN } from "../control/operations.js";
+import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
-import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
-import {
-  createRuntimeDeclarativeServiceExecutor,
-  createRuntimeHostOperationExecutor,
-  registerGeneratedMcpServer,
-} from "../mcp/generated-mcp-server.js";
+import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import {
   registerAuthorizationServerMetadataAliases,
   registerProtectedResourceMetadata,
@@ -65,7 +56,6 @@ import {
   loadRuntimeModules,
   type ModuleRegistry,
 } from "../modules/registry.js";
-import type { ModuleRuntimeContext } from "../modules/contract.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import {
   classifyRequest,
@@ -80,19 +70,11 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
-  entityPluginOperationContracts,
   operationModulesConfigured,
   listOperationContracts,
-  registerRuntimeOperationRestRoutes,
   registerOperationRestRoutes,
-  runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "../operations/runtime.js";
-import {
-  createEntityPluginExecutor,
-  registerEntityPluginExecutor,
-  verifiedSession,
-} from "../operations/entity/plugin-executor.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -295,14 +277,8 @@ export function createApiApp(options: {
     });
 
     const runtime = databaseRuntime;
-    const databaseUrl = options.databaseUrl;
     app.addHook("onReady", async () => {
-      // Runs after the module plugin below has initialised, so the seeds an
-      // empty-database bootstrap applies are the ones this process loaded.
-      await enforceGeneratedSchemaFreshness(app.log, runtime.db, {
-        databaseUrl,
-        moduleSeeds: initialisedModules.flatMap((module) => module.seeds ?? []),
-      });
+      await enforceGeneratedSchemaFreshness(app.log, runtime.db);
     });
   } else {
     app.log.warn("DATABASE_URL is not set; GraphQL runs without a database.");
@@ -347,85 +323,22 @@ export function createApiApp(options: {
     const modulePlatform = databaseRuntime
       ? new ModulePlatformRuntime(databaseRuntime.db)
       : undefined;
-    const moduleContext: ModuleRuntimeContext = {
+    const moduleContext = {
       ...dbOptions,
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
-    // The control plane the `osf-control` Operations run against: its
-    // configuration, Keycloak clients and the loaded module that administers
-    // a catalog. Assembled after init so a module that failed to initialise
-    // cannot supply the catalog, and set on the one context every transport
-    // reads at request time.
-    moduleContext.control = createControlRuntime({
-      modules: initialised.loaded,
-      operations: operationContracts.filter((operation) => operation.plugin === CONTROL_PLUGIN),
-      log: (error) => app.log.error({ err: error }, "Control operation failed."),
-    });
-    modulePlatform?.registerArtifactStorage(initialised.loaded);
-    modulePlatform?.registerOperationProviders(initialised.loaded);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
-    if (modulePlatform) {
-      modulePlatform.registerDeclarativeServiceExecutor(
-        createRuntimeDeclarativeServiceExecutor({
-          db: databaseRuntime!.db,
-          modules: initialised.loaded,
-          modulePlatform,
-          ...(egressOwner ? { egressOwner } : {}),
-        }),
-      );
-      modulePlatform.registerHostOperationExecutor(
-        createRuntimeHostOperationExecutor({
-          db: databaseRuntime!.db,
-          modules: initialised.loaded,
-          modulePlatform,
-          ...(egressOwner ? { egressOwner } : {}),
-        }),
-      );
-    }
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
     // A failed module counts as configured for exactly that reason.
-    // A controlled catalog override is complete: the generated entity-backed
-    // plugin operations belong to the generated catalog it replaces.
-    const entityPluginContracts = options.operationContracts ? [] : entityPluginOperationContracts();
-    const allOperationContracts = [...operationContracts, ...entityPluginContracts];
     const operationsConfigured = operationModulesConfigured(
       [...modules.loaded, ...modules.failures],
-      allOperationContracts,
+      operationContracts,
     );
-    // The core operations always bind; plugin operations — entity-backed
-    // ones included — are required as soon as any operation module was
-    // configured, loaded or failed. A process without one has none of them.
-    {
-      const bindings = bindOperationHandlers(
-        initialised.loaded,
-        allOperationContracts,
-        { pluginOperations: operationsConfigured ? "required" : "absent" },
-      );
-      if (databaseRuntime) registerEntityOperationAvailability(databaseRuntime.db, bindings);
-      if (databaseRuntime && entityPluginContracts.length > 0) {
-        const executeEntityPlugin = createEntityPluginExecutor({ bindings, runtime: moduleContext });
-        registerEntityPluginExecutor(
-          databaseRuntime.db,
-          modulePlatform
-            ? (session, operation, input) => modulePlatform.withActiveOperationSession(
-                verifiedSession(session),
-                (activeSession) => executeEntityPlugin(activeSession, operation, input),
-              )
-            : executeEntityPlugin,
-        );
-      }
-      modulePlatform?.registerStaticOperations(
-        runtimeStaticOperationRegistrations(
-          initialised.loaded,
-          moduleContext,
-          operationContracts,
-        ),
-      );
-    }
+    if (operationsConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
     // Read once, served twice: REST and GraphQL answer from the same
     // configuration, so a deployment cannot mint keys on one transport and
     // say NOT_CONFIGURED on the other.
@@ -540,26 +453,7 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
-    registerEntityChangeStream(routes, dbOptions);
-    registerRuntimeOperationRestRoutes(routes, moduleContext);
-    registerEditLeaseRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
-    if (modulePlatform) {
-      registerArtifactRestRoutes(routes, {
-        ...dbOptions,
-        artifacts: {
-          stage: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.stage(activeSession, input),
-          ),
-          bind: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.bind(activeSession, input),
-          ),
-          read: (session, input) => modulePlatform.withActiveOperationSession(
-            session, (activeSession) => modulePlatform.services.artifacts.read(activeSession, input),
-          ),
-        },
-      });
-    }
     registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
@@ -587,22 +481,21 @@ export function createApiApp(options: {
       ...dbOptions,
       config: apiKeyConfig,
     });
-    // The platform administrator MCP (`/api/control/mcp`): the control realm,
-    // its own small server (mcp/control-mcp-server.ts) over the same bound
-    // control Operations the REST routes below serve under /api/control/v1.
-    registerControlMcpServer(routes, { context: moduleContext, operations: operationContracts });
+    // The tenant control plane, on its own mount and its own realm. Registered
+    // unconditionally so an unconfigured deployment answers 503 naming what is
+    // missing rather than 404, which reads like a version mismatch.
+    registerControlRestRoutes(routes, dbOptions);
+    // The platform administrator MCP (`/api/control/mcp`): same realm as the
+    // control plane, its own small server (mcp/control-mcp-server.ts), and the
+    // loaded modules so the one that administers a catalog can be found.
+    registerControlMcpServer(routes, { ...dbOptions, modules: initialised.loaded });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);
     }
-    // The core Operations — blueprints and the control plane — always have
-    // their REST routes; with an operation module configured the plugin
-    // Operations join them. An unconfigured control plane keeps its routes
-    // and answers 503 naming what is missing rather than 404, which reads
-    // like a version mismatch.
-    registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts, {
-      pluginOperations: operationsConfigured ? "required" : "absent",
-    });
+    if (operationsConfigured) {
+      registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
+    }
   });
 
   return app;

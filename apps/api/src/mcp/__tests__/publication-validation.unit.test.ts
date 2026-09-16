@@ -97,42 +97,6 @@ describe("validateVisibleDefinition", () => {
     });
   });
 
-  it("accepts a presence selector and refuses malformed or ambiguous selectors", async () => {
-    const row = {
-      ...ROW,
-      inputFields: [{ key: "dealId", valueType: "string" }],
-      bindings: [
-        { operationId: "op-1", order: 1, when: { field: "dealId", present: true } },
-      ],
-    };
-    const readRows = readerFor({
-      "core.operations": [OPERATION],
-      "core.providers": [PROVIDER],
-      "core.connections": [CONNECTION],
-      "core.services": [],
-    });
-    await validateVisibleDefinition({
-      entry: ENTRY,
-      row,
-      reservedNames: new Set(),
-      readRows,
-    });
-
-    for (const when of [
-      { field: "dealId" },
-      { field: "dealId", present: false },
-      { field: "dealId", equals: "deal-1", present: true },
-    ]) {
-      const message = await failure({
-        entry: ENTRY,
-        row: { ...row, bindings: [{ operationId: "op-1", order: 1, when }] },
-        reservedNames: new Set(),
-        readRows,
-      });
-      expect(message).toContain("binding 1: when");
-    }
-  });
-
   it("publishes a fixed If-Match mapping from a declared scalar input", async () => {
     await validateVisibleDefinition({
       entry: ENTRY,

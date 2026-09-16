@@ -31,7 +31,6 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { tenantNotFound } from "./errors.js";
-import { hostTenantFilter } from "./host-tenant-filter.js";
 import { assertSlug } from "./organization-naming.js";
 import {
   systemSessionForAdministrator,
@@ -43,7 +42,7 @@ import {
 // (packages/osf-integration/src/authoring/catalog-admin.ts). Kept as plain
 // types so core never imports a plugin package.
 
-export type CatalogKind = "capability" | "adapter" | "service";
+export type CatalogKind = "provider" | "capability" | "adapter" | "service";
 export type CatalogAuthority = "platform_release" | "host" | "tenant_shared";
 
 export type CatalogTenantState = {
@@ -185,14 +184,9 @@ function translate(error: unknown): never {
 // ── tenants, by slug ────────────────────────────────────────────────────────
 
 export type PlatformTenant = {
-  id: string;
   slug: string;
   name: string;
   status: string;
-  tenantKind: "standard" | "blueprint";
-  relationId: string | null;
-  relationLabel: string | null;
-  keycloakOrganizationId: string | null;
   /** The Keycloak Organization alias — the tenant slug — or null before provisioning linked one. */
   organizationAlias: string | null;
   installedEntries: number;
@@ -206,39 +200,22 @@ type TenantRow = {
   name: string;
   status: string;
   keycloak_organization_id: string | null;
-  relation_id: string | null;
-  relation_label: string | null;
-  blueprint_tenant: boolean;
 };
 
 async function tenantRows(trx: Transaction<DB>): Promise<TenantRow[]> {
   const result = await sql<TenantRow>`
-    select tenant.id::text as id, tenant.slug, tenant.name, tenant.status,
-           tenant.keycloak_organization_id, tenant.relation_id::text as relation_id,
-           relation.display_name as relation_label,
-           exists (
-             select 1 from platform.blueprint_libraries source
-              where source.blueprint_tenant_id = tenant.id
-           ) as blueprint_tenant
-      from platform.tenants tenant
-      left join erp.relations relation
-        on relation.id = tenant.relation_id and relation.tenant_id = tenant.id
-     where ${hostTenantFilter("tenant.keycloak_realm")}
-     order by tenant.slug
+    select id::text as id, slug, name, status, keycloak_organization_id
+      from platform.tenants
+     order by slug
   `.execute(trx);
   return result.rows;
 }
 
 function toPlatformTenant(row: TenantRow, summary: TenantInstallationSummary | undefined): PlatformTenant {
   return {
-    id: row.id,
     slug: row.slug,
     name: row.name,
     status: row.status,
-    tenantKind: row.blueprint_tenant ? "blueprint" : "standard",
-    relationId: row.relation_id,
-    relationLabel: row.relation_label,
-    keycloakOrganizationId: row.keycloak_organization_id,
     organizationAlias: row.keycloak_organization_id ? row.slug : null,
     installedEntries: summary?.installed ?? 0,
     overriddenEntries: summary?.overridden ?? 0,
@@ -273,7 +250,7 @@ function elevated<T>(
 
 /** Every tenant with its catalog installation counts. Empty counts without a provider. */
 export async function listPlatformTenants(deps: PlatformCatalogDeps): Promise<PlatformTenant[]> {
-  return elevated(deps, "control.list-tenants", async (trx) => {
+  return elevated(deps, "list_tenants", async (trx) => {
     const rows = await tenantRows(trx);
     const summaries = deps.provider ? await deps.provider.installationSummary(trx) : [];
     const byTenant = new Map(summaries.map((summary) => [summary.tenantId, summary]));
@@ -283,7 +260,7 @@ export async function listPlatformTenants(deps: PlatformCatalogDeps): Promise<Pl
 
 export async function getPlatformTenant(deps: PlatformCatalogDeps, slug: string): Promise<PlatformTenant> {
   assertSlug(slug, "slug");
-  return elevated(deps, `control.get-tenant slug="${slug}"`, async (trx) => {
+  return elevated(deps, `get_tenant slug="${slug}"`, async (trx) => {
     const row = (await tenantRows(trx)).find((candidate) => candidate.slug === slug);
     if (!row) throw tenantNotFound(slug);
     const summary = deps.provider
@@ -322,7 +299,7 @@ export async function listCatalogEntries(
   options: { kind?: CatalogKind; key?: string; cursor?: string; limit?: number },
 ): Promise<{ entries: CatalogEntryView[]; nextCursor: string | null }> {
   const provider = requireProvider(deps);
-  return elevated(deps, "control.list-catalog-entries", async (trx) => {
+  return elevated(deps, "list_catalog_entries", async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const page = await provider.listEntries(trx, options).catch(translate);
     return {
@@ -338,7 +315,7 @@ export async function getCatalogEntry(
   key: string,
 ): Promise<CatalogEntryDetailView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `control.get-catalog-entry ${kind}/${key}`, async (trx) => {
+  return elevated(deps, `get_catalog_entry ${kind}/${key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const entry = await provider.getEntry(trx, kind, key).catch(translate);
     return { ...entry, tenants: viewOf(slugs, entry.tenants) };
@@ -355,7 +332,7 @@ export async function publishCatalogEntry(
   },
 ): Promise<PublishView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `control.publish-catalog-entry ${input.kind}/${input.key}`, async (trx) => {
+  return elevated(deps, `publish_catalog_entry ${input.kind}/${input.key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const result = await provider.publish(trx, input).catch(translate);
     return { ...result, tenants: viewOf(slugs, result.tenants) };
@@ -368,7 +345,7 @@ export async function retireCatalogEntry(
   key: string,
 ): Promise<PublishView> {
   const provider = requireProvider(deps);
-  return elevated(deps, `control.retire-catalog-entry ${kind}/${key}`, async (trx) => {
+  return elevated(deps, `retire_catalog_entry ${kind}/${key}`, async (trx) => {
     const slugs = slugsOf(await tenantRows(trx));
     const result = await provider.retire(trx, kind, key).catch(translate);
     return { ...result, tenants: viewOf(slugs, result.tenants) };
@@ -383,7 +360,7 @@ export async function applyCatalogUpdateForTenant(
 ): Promise<ApplyCatalogUpdateResult & { tenant: string }> {
   const provider = requireProvider(deps);
   assertSlug(slug, "slug");
-  return elevated(deps, `control.apply-catalog-update-for-tenant ${kind}/${key} tenant="${slug}"`, async (trx) => {
+  return elevated(deps, `apply_catalog_update_for_tenant ${kind}/${key} tenant="${slug}"`, async (trx) => {
     const row = (await tenantRows(trx)).find((candidate) => candidate.slug === slug);
     if (!row) throw tenantNotFound(slug);
     const result = await provider.applyUpdateForTenant(trx, row.id, kind, key).catch(translate);

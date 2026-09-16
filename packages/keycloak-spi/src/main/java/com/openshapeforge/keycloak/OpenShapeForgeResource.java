@@ -373,7 +373,7 @@ public class OpenShapeForgeResource {
         // public "admin-cli" client is deliberately excluded because any realm
         // user can obtain a token whose azp is admin-cli via the direct-access
         // grant, which would otherwise bypass the check below.
-        AccessToken token = auth.token();
+        AccessToken token = auth.getToken();
         String issuedFor = token == null ? null : token.getIssuedFor();
         if (!ALLOWED_ADMIN_CLIENTS.contains(issuedFor)) {
             throw new ForbiddenException("Client is not allowed to use the OpenShapeForge identity configuration SPI.");
@@ -391,7 +391,7 @@ public class OpenShapeForgeResource {
         // accepted too. A token whose subject lacks the capability is rejected
         // even when its azp is in ALLOWED_ADMIN_CLIENTS, so client identity alone
         // never grants access.
-        UserModel subject = auth.user();
+        UserModel subject = auth.getUser();
         if (subject == null) {
             throw new ForbiddenException("Token subject could not be resolved for authorization.");
         }

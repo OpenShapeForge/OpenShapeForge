@@ -20,8 +20,6 @@ import type {
 } from "../../../../packages/compiler/src/plugins.js";
 import type { PlatformSchemaManifest } from "../../../../packages/compiler/src/schema.js";
 import { resolveAuthoringLayers } from "../../../../packages/compiler/src/authoring/layers.js";
-import { loadFieldCompilationCatalogs } from "../../../../packages/compiler/src/authoring/loader.js";
-import { createFieldSchemaCompiler } from "../../../../packages/compiler/src/field-json-schema.js";
 import plugin from "../index.js";
 
 const repoRoot = resolve(import.meta.dir, "../../../..");
@@ -30,25 +28,18 @@ const ROUTE_PATH = "apps/web/src/app/(plugins)/workflow/page.tsx";
 const DEFINITION_ROUTE_PATH = "apps/web/src/app/(plugins)/workflow/[id]/page.tsx";
 
 /**
- * `generate` reads only `authoringDir` and `webPresent`; `manifest`,
- * `entities` and `settingsPolicy` are part of the context type and unused by
- * this plugin, so they are supplied empty rather than assembled. If that stops
- * being true this cast is the thing that breaks, which is the correct place
- * for it to break.
+ * `generate` reads only `authoringDir` and `webPresent`; `manifest` and
+ * `entities` are part of the context type and unused by this plugin, so they
+ * are supplied empty rather than assembled. If that stops being true this cast
+ * is the thing that breaks, which is the correct place for it to break.
  */
 function context(webPresent: boolean): PluginGenerateContext {
-  const authoringDir = resolveAuthoringLayers(repoRoot);
   return {
     repoRoot,
-    authoringDir,
+    authoringDir: resolveAuthoringLayers(repoRoot),
     webPresent,
     manifest: { tables: [] } as unknown as PlatformSchemaManifest,
     entities: [],
-    operationCatalog: { version: 1, operations: [] },
-    settingsPolicy: { version: 1, settings: {}, providers: {} },
-    fieldSchemas: createFieldSchemaCompiler(
-      loadFieldCompilationCatalogs(authoringDir),
-    ),
   };
 }
 

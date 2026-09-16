@@ -33,7 +33,6 @@
  * If row-level subjects are wanted later, `groups` is the generic hook and it
  * already maps onto `platform.org_unit_closure`.
  */
-import { WORKFLOW_WRITER_ROLES } from "../authorization.js";
 
 /** A session, narrowed to what an authorization decision actually reads. */
 export type AuthorizationSession = {
@@ -63,10 +62,11 @@ export type AuthorizationAction = keyof DefinitionAuthorization;
  * so it is gated by role, and the ACL then narrows within that set rather than
  * widening beyond it.
  *
- * The plugin exports its generic writer roles from one module. A deployment
- * grants one of them through its own audience-scoped authorization composition.
+ * `directie` is the tenant-wide read/write role in the shipped realm. A
+ * deployment that wants a narrower workflow-authoring role adds it here and to
+ * `packages/compiler/config/authoring/authorization.yaml` together.
  */
-const workflowWriterRoles = new Set<string>(WORKFLOW_WRITER_ROLES);
+const WORKFLOW_WRITER_ROLES = new Set(["directie"]);
 
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -117,7 +117,7 @@ function matchesSubject(
 
 /** True when this session holds a role permitted to author workflows at all. */
 export function hasWorkflowWriterRole(session: AuthorizationSession): boolean {
-  return session.roles.some((role) => workflowWriterRoles.has(role));
+  return session.roles.some((role) => WORKFLOW_WRITER_ROLES.has(role));
 }
 
 export function canViewDefinition(

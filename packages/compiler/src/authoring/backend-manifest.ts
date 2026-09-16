@@ -2,6 +2,7 @@
 import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
+import { isCollectionField } from "./compiler/helpers.js";
 import {
   discoverContextEntities,
   listEntityFiles,
@@ -25,16 +26,12 @@ import type {
   RetentionAction,
   RetentionDefinition,
   RowScopePolicy,
+  ScalarType,
   TableDefinition,
 } from "../schema.js";
 import { isGeneratedCrudEligible } from "../schema.js";
 import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 import { normalizeKeycloakRoleName } from "./role-names.js";
-import { resolveModelFields } from "./compiler/model.js";
-import { normalizeEntityFields } from "./entity-fields.js";
-import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
-import type { EntityValueRegistry } from "./entity-value-types.js";
-import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -137,7 +134,6 @@ type CompiledCandidate = {
   path: string;
   contract: ReturnType<typeof compile>;
   fieldsByKey: Map<string, Field>;
-  effectiveFields: CompiledField[];
 };
 
 function kebabCase(value: string): string {
@@ -181,6 +177,33 @@ function flattenFields(fields: Field[] | undefined, result = new Map<string, Fie
     }
   }
   return result;
+}
+
+function serviceScalarForField(field: Field): ScalarType {
+  if (isCollectionField(field)) {
+    return "jsonb";
+  }
+  if (field.valueType === "string" && field.validation?.format === "uuid") {
+    return "uuid";
+  }
+  switch (field.valueType) {
+    case "string":
+      return "text";
+    case "integer":
+      return "integer";
+    case "number":
+      return "numeric";
+    case "boolean":
+      return "boolean";
+    case "date":
+      return "date";
+    case "datetime":
+      return "timestamptz";
+    case "object":
+      return "jsonb";
+    default:
+      throw new Error(`Unsupported authoring field valueType "${field.valueType}".`);
+  }
 }
 
 function defaultSql(field: Field | undefined, column: ColumnDefinition): string | undefined {
@@ -277,9 +300,8 @@ function filterRelationshipRegisterForTables(
  * time. `empty: restricted` with no axis is guarded at the call site (§C.2),
  * not here.
  *
- * Returns undefined when there is no restriction axis (owner, group and
- * record permissions all absent) — today's `empty: public` entities without
- * any such axis are
+ * Returns undefined when there is no restriction axis (owner and group both
+ * absent) — today's `empty: public` + no-owner + no-group entities are
  * explicitly NOT a restriction and compile to plain tenant scoping (documented
  * no-op), so the 3 shipped entities stay byte-identical.
  */
@@ -293,7 +315,6 @@ export function deriveRowScope(
   const userColumns: string[] = [];
   const nullVisibleColumns: string[] = [];
   let group: RowScopePolicy["group"] | undefined;
-  let recordPermissions: RowScopePolicy["recordPermissions"] | undefined;
 
   const requireColumn = (col: string, axis: string) => {
     const c = columnsByName.get(col);
@@ -324,32 +345,13 @@ export function deriveRowScope(
     if (rowAccess.empty === "public") nullVisibleColumns.push(rowAccess.group.column);
   }
 
-  if (rowAccess.recordPermissions) {
-    const column = columnsByName.get(rowAccess.recordPermissions.column);
-    if (!column) {
-      throw new Error(
-        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" references column "${rowAccess.recordPermissions.column}", but that column was not emitted.`,
-      );
-    }
-    if (column.type !== "jsonb") {
-      throw new Error(
-        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" must persist as jsonb, found ${column.type}.`,
-      );
-    }
-    recordPermissions = {
-      column: rowAccess.recordPermissions.column,
-      empty: rowAccess.recordPermissions.empty,
-    };
-  }
-
   // No restriction axis declared → plain tenant scoping (documented no-op).
-  if (userColumns.length === 0 && !group && !recordPermissions) return undefined;
+  if (userColumns.length === 0 && !group) return undefined;
 
   return {
     ...(group ? { group } : {}),
     ...(userColumns.length > 0 ? { userColumns } : {}),
     ...(nullVisibleColumns.length > 0 ? { nullVisibleColumns } : {}),
-    ...(recordPermissions ? { recordPermissions } : {}),
     // bypassRoles wired in a later phase (see §E.3 note); omitted for now.
   };
 }
@@ -776,10 +778,6 @@ function compileCoreCandidate(
       resolveEntityFilePath(authoringDir, slug),
     )}`,
     contract,
-    effectiveFields: resolveModelFields(normalizeEntityFields({
-      ...artifacts.coreEntity,
-      fields: [...artifacts.coreEntity.fields, ...artifacts.profiles.flatMap((profile) => profile.fields ?? [])],
-    }, artifacts.semanticTypes).fields, artifacts.componentCatalog, artifacts.semanticTypes),
     fieldsByKey: flattenFields([
       ...(artifacts.coreEntity.fields ?? []),
       ...artifacts.profiles.flatMap((profile) => profile.fields ?? []),
@@ -799,7 +797,6 @@ function compileContextCandidate(
     origin: { kind: "contextFull", context: spec.context, name: spec.name },
     path: `${sourcePathPrefix}/contexts/${spec.context}/full/${spec.name}.yaml`,
     contract,
-    effectiveFields: contract.model.fields,
     fieldsByKey: flattenFields(artifacts.coreEntity.fields ?? []),
   };
 }
@@ -886,143 +883,6 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
   }
 }
 
-/** Resolve field relations only after all tables exist, including cyclic references. */
-function compileFieldRelationStorage(
-  candidates: CompiledCandidate[],
-  tables: TableDefinition[],
-  register: RelationshipRegisterEntry[],
-  valueCandidates: CompiledCandidate[],
-): EntityValueRegistry | undefined {
-  const byEntity = new Map(candidates.map((candidate, index) => [
-    candidate.contract.entity.name, { candidate, table: tables[index]! },
-  ]));
-  const addIndex = (table: TableDefinition, columns: string[], unique = false) => {
-    const indexes = table.indexes ??= [];
-    if (indexes.some((index) => !index.where &&
-      (!unique || index.unique) && index.columns.length === columns.length &&
-      index.columns.every((column, index) => column === columns[index]))) return;
-    const name = `${table.name}_${columns.join("_")}_${unique ? "key" : "idx"}`;
-    if (indexes.some((index) => index.name === name)) {
-      throw new Error(`Field relationship index collides with ${table.schema}.${name}.`);
-    }
-    indexes.push({
-      name,
-      columns,
-      ...(unique ? { unique: true } : {}),
-    });
-  };
-  const attachReference = (
-    source: TableDefinition,
-    column: ColumnDefinition,
-    target: TableDefinition,
-    unique = false,
-    onDelete?: ReferenceDefinition["onDelete"],
-  ) => {
-    const targetId = target.columns.find((candidate) => candidate.name === "id");
-    if (!targetId || targetId.type !== "uuid" || !targetId.primaryKey) {
-      throw new Error(`Field relationship target ${tableKey(target)} requires a UUID id primary key.`);
-    }
-    if (!source.tenantScoped && target.tenantScoped) {
-      throw new Error(`Global table ${tableKey(source)} cannot reference tenant-scoped ${tableKey(target)} without a tenant identity.`);
-    }
-    const previous = column.references;
-    if (previous && (previous.schema !== target.schema || previous.table !== target.name || previous.column !== "id")) {
-      throw new Error(`Conflicting field relationships for ${tableKey(source)}.${column.name}.`);
-    }
-    column.type = "uuid";
-    const composite = source.tenantScoped && target.tenantScoped;
-    const deleteAction = onDelete ?? previous?.onDelete;
-    column.references = {
-      schema: target.schema, table: target.name, column: "id",
-      ...(composite ? { localColumns: ["tenant_id", column.name], targetColumns: ["tenant_id", "id"] } : {}),
-      ...(deleteAction ? { onDelete: deleteAction } : {}),
-    };
-    if (composite) {
-      for (const table of [source, target]) {
-        const tenant = table.columns.find((candidate) => candidate.name === "tenant_id");
-        if (!tenant || tenant.type !== "uuid" || !tenant.required) {
-          throw new Error(`Field relationships require a non-null UUID tenant_id on ${tableKey(table)}.`);
-        }
-      }
-      addIndex(target, ["tenant_id", "id"], true);
-    }
-    addIndex(source, source.tenantScoped ? ["tenant_id", column.name] : [column.name], unique);
-    if (source.schema !== target.schema && !isRelationshipRegistered(register,
-      { schema: source.schema, table: source.name, column: column.name }, column.references)) {
-      register.push({
-        from: { schema: source.schema, table: source.name, column: column.name },
-        to: { schema: target.schema, table: target.name, column: "id" },
-      });
-    }
-    const emitted = source.source?.relationshipStatus?.emittedReferences;
-    const description = `${column.name}->${tableKey(target)}.id`;
-    if (emitted && !emitted.includes(description)) emitted.push(description);
-  };
-
-  for (const { candidate, table } of byEntity.values()) {
-    if (Number(candidate.contract.authoringVersion) !== 3) continue;
-    for (const relationship of candidate.contract.model.relationships) {
-      const target = byEntity.get(relationship.target);
-      if (!target) {
-        throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} targets missing entity ${relationship.target}. Include its storage in the backend manifest.`);
-      }
-      if (relationship.kind === "belongsTo") {
-        const column = table.columns.find((column) => column.name === relationship.foreignKey);
-        if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
-        attachReference(table, column, target.table, relationship.unique);
-      } else if (relationship.kind === "hasMany") {
-        const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
-        if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
-        attachReference(target.table, column, table, false, relationship.ownership === "owned" ? "CASCADE" : undefined);
-        if (relationship.sortable) {
-          const positionName = `${column.name}_position`;
-          if (Buffer.byteLength(positionName) > 63) throw new Error(`Sortable relationship column exceeds PostgreSQL's identifier limit: ${positionName}.`);
-          const existingPosition = target.table.columns.find((column) => column.name === positionName);
-          if (existingPosition) throw new Error(`Sortable relationship storage collides with ${tableKey(target.table)}.${positionName}.`);
-          target.table.columns.push({ name: positionName, type: "integer", required: true, default: "0" });
-          addIndex(target.table, [...(target.table.tenantScoped ? ["tenant_id"] : []), column.name, positionName]);
-        }
-      } else {
-        if (relationship.ownership === "owned") {
-          throw new Error(`Owned collection ${candidate.contract.entity.name}.${relationship.key} requires an inverse foreign key; junction storage supports references only.`);
-        }
-        const name = relationship.via ?? `${table.name}_${snakeCase(relationship.fieldKey ?? relationship.key)}`;
-        if (!/^[a-z][a-z0-9_]*$/.test(name) || Buffer.byteLength(name) > 63) {
-          throw new Error(`Field relationship junction requires a PostgreSQL identifier of at most 63 bytes: ${name}.`);
-        }
-        if (tables.some((candidate) => candidate.schema === table.schema && candidate.name === name)) {
-          throw new Error(`Field relationship junction collides with ${table.schema}.${name}.`);
-        }
-        const sourceColumn: ColumnDefinition = { name: "source_id", type: "uuid", required: true };
-        const targetColumn: ColumnDefinition = { name: "target_id", type: "uuid", required: true };
-        const junction: TableDefinition = {
-          schema: table.schema, name, tenantScoped: table.tenantScoped,
-          domainInternal: true, generatedCrudEligible: false, generatedCrud: false,
-          columns: [
-            { name: "id", type: "uuid", primaryKey: true, required: true, default: "gen_random_uuid()" },
-            ...(table.tenantScoped ? [{ name: "tenant_id", type: "uuid" as const, required: true }] : []),
-            sourceColumn, targetColumn,
-            ...(relationship.sortable ? [{ name: "position", type: "integer" as const, required: true, default: "0" }] : []),
-          ],
-          relationStorage: {
-            sourceEntity: candidate.contract.entity.name,
-            fieldKey: relationship.fieldKey ?? relationship.key,
-            targetEntity: relationship.target,
-            sourceColumn: sourceColumn.name, targetColumn: targetColumn.name,
-            ...(relationship.sortable ? { positionColumn: "position" } : {}),
-          },
-        };
-        attachReference(junction, sourceColumn, table, false, "CASCADE");
-        attachReference(junction, targetColumn, target.table, false, "CASCADE");
-        addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "target_id"], true);
-        if (relationship.sortable) addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "position"]);
-        tables.push(junction);
-      }
-    }
-  }
-  return compileEntityValueStorage(valueCandidates, tables, attachReference);
-}
-
 export function compileAuthoringBackendManifest(
   authoringDir: string,
   options: CompileAuthoringBackendManifestOptions,
@@ -1046,7 +906,7 @@ export function compileAuthoringBackendManifest(
     ),
   );
   const domainInternalEntities = new Set((options.domainInternalEntities ?? []).map(kebabCase));
-  const relationshipRegister = [...(options.relationshipRegister ?? [])];
+  const relationshipRegister = options.relationshipRegister ?? [];
   const schemaByModule = options.schemaByModule ?? { core: "erp" };
   const candidates: CompiledCandidate[] = [
     ...allowlist.map((slug) => compileCoreCandidate(authoringDir, slug, sourcePathPrefix)),
@@ -1068,26 +928,11 @@ export function compileAuthoringBackendManifest(
 
   detectCandidateCollisions(candidates, schemaByModule);
 
-  const definitionNames = entityValueDefinitionNames(candidates);
-  for (const name of definitionNames) {
-    const definition = candidates.find((candidate) => candidate.contract.entity.name === name);
-    if (!definition) throw new Error(`Allowed entity-value definition ${name} is absent from the compiled entity corpus.`);
-    assertEntityValueDefinition(definition);
-  }
-  const physicalCandidates = candidates.filter((candidate) => {
-    if (!candidate.contract.entity.valueDefinition) return true;
-    if (!definitionNames.has(candidate.contract.entity.name)) {
-      throw new Error(`${candidate.contract.entity.name}: identity-less entities must be used as entityValue definitions.`);
-    }
-    assertEntityValueDefinition(candidate);
-    return false;
-  });
-
   const byEntityName = new Map(
     candidates.map((candidate) => [candidate.contract.entity.name, candidate]),
   );
 
-  const tables: TableDefinition[] = physicalCandidates.map((candidate) => {
+  const tables: TableDefinition[] = candidates.map((candidate) => {
     const schema = schemaByModule[candidate.contract.entity.module] ?? snakeCase(candidate.contract.entity.module);
     const name = candidate.contract.storage.table;
     const candidateCrudKey =
@@ -1157,10 +1002,7 @@ export function compileAuthoringBackendManifest(
       const sensitivity = fieldSensitivities.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
-        // Storage compilation is the single field-to-SQL type authority. Do
-        // not reconstruct it here: doing so silently collapsed bounded wide
-        // integers back to int4 after the entity contract already chose int8.
-        type: storageColumn.type as ColumnDefinition["type"],
+        type: field ? serviceScalarForField(field) : storageColumn.type === "text" ? "text" : "uuid",
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
@@ -1206,7 +1048,6 @@ export function compileAuthoringBackendManifest(
 
     const columnsByName = new Map(columns.map((column) => [column.name, column]));
     for (const relationship of candidate.contract.model.relationships) {
-      if (Number(candidate.contract.authoringVersion) === 3) continue;
       if (relationship.kind !== "belongsTo" || !relationship.foreignKey) {
         continue;
       }
@@ -1249,48 +1090,24 @@ export function compileAuthoringBackendManifest(
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 
     const compiledIndexes = compileEntityIndexes(candidate, tenantScoped, columnsByField);
-    for (const binding of resolveDerivedOnCreateBindings({
-      entityName: candidate.contract.entity.name,
-      fields: candidate.contract.model.fields,
-      columns: candidate.contract.storage.columns,
-      ...(candidate.contract.entity.indexes
-        ? { indexes: candidate.contract.entity.indexes }
-        : {}),
-      tenantScoped,
-    })) {
-      const target = columnsByField.get(binding.targetField)!;
-      target.deriveOnCreate = {
-        sourceField: binding.sourceField,
-        sourceColumn: binding.sourceColumn,
-        transform: binding.transform,
-        onConflict: binding.onConflict,
-        conflictColumns: binding.conflictColumns,
-        ...(binding.maxLength === undefined ? {} : { maxLength: binding.maxLength }),
-      };
-    }
 
     // Row-level access → rowScope translation (§B.3) + fail-closed guards (§C).
     const rowAccess = candidate.contract.authorization?.rowAccess;
     // §C.2 fail-closed: `empty: restricted` only makes sense when there is an
-    // owner/group column that can be NULL or an action-specific record ACL.
-    // Without any axis, "restricted" would
+    // owner/group column that can be NULL. Without any axis, "restricted" would
     // hide every row or silently degrade to tenant scoping — a declared-but-
     // unemitted confidentiality. Convert to a hard build failure.
     if (
       rowAccess?.enabled &&
       rowAccess.empty === "restricted" &&
       !rowAccess.owner &&
-      !rowAccess.group &&
-      !rowAccess.recordPermissions
+      !rowAccess.group
     ) {
       throw new Error(
-        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner, group or record-permissions axis — ` +
-          `otherwise the entity has no confidentiality predicate and "restricted" would hide every row ` +
-          `or silently degrade to tenant scoping. Add a restriction axis or set empty: public.`,
+        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner or group axis — ` +
+          `otherwise the entity has no confidentiality column and "restricted" would hide every row ` +
+          `or silently degrade to tenant scoping. Add an owner/group axis or set empty: public.`,
       );
-    }
-    if (candidate.contract.blueprint && !tenantScoped) {
-      throw new Error(`[${candidate.contract.entity.name}] blueprint copying requires a tenant-scoped entity.`);
     }
     const rowScope = deriveRowScope(
       rowAccess,
@@ -1303,7 +1120,6 @@ export function compileAuthoringBackendManifest(
       name,
       tenantScoped,
       domainInternal,
-      ...(candidate.contract.workerAccess ? { workerAccess: candidate.contract.workerAccess } : {}),
       generatedCrudEligible,
       generatedCrud,
       columns,
@@ -1312,33 +1128,16 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
-        ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
-        ...([2, 3].includes(candidate.contract.authoringVersion)
-          ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
-          : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
-        ...(() => {
-          const secureInput = candidate.contract.entityOperations.create
-            ?.interaction.secureInput;
-          if (!secureInput) return {};
-          const { type: _type, ...secureInputOnCreate } = secureInput;
-          return { secureInputOnCreate };
-        })(),
         ...(candidate.contract.entity.labels
           ? { labels: candidate.contract.entity.labels }
           : {}),
         ...(candidate.contract.entity.displayTemplate
           ? { displayTemplate: candidate.contract.entity.displayTemplate }
           : {}),
-        ...(() => {
-          const computedFields = candidate.contract.model.fields
-            .filter((field) => field.semanticType === "labelSet")
-            .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
-          return computedFields.length > 0 ? { computedFields } : {};
-        })(),
         graphql: {
           typeName: candidate.contract.graphql.typeName,
           singleQueryName: candidate.contract.graphql.queries.single.name,
@@ -1346,31 +1145,16 @@ export function compileAuthoringBackendManifest(
           createMutationName: candidate.contract.graphql.mutations.create.name,
           updateMutationName: candidate.contract.graphql.mutations.update.name,
           deleteMutationName: candidate.contract.graphql.mutations.delete.name,
-          ...(candidate.contract.graphql.operations
-            ? { operations: candidate.contract.graphql.operations }
-            : {}),
           relationships: candidate.contract.graphql.relationships
-            .filter((relationship) => relationship.resolve !== "manyToMany" || candidate.contract.authoringVersion === 3)
+            .filter((relationship): relationship is typeof relationship & { resolve: "belongsTo" | "hasMany" } =>
+              relationship.resolve === "belongsTo" || relationship.resolve === "hasMany",
+            )
             .map((relationship) => ({
               name: relationship.name,
               target: relationship.target,
               type: relationship.type,
-              resolve: relationship.resolve === "belongsTo" ? "belongsTo" as const : "hasMany" as const,
+              resolve: relationship.resolve,
               ...(relationship.foreignKey ? { foreignKey: relationship.foreignKey } : {}),
-              ...(() => {
-                const normalized = candidate.contract.model.relationships.find((entry) => entry.key === relationship.name);
-                if (!normalized?.fieldKey) return {};
-                return {
-                  fieldKey: normalized.fieldKey, kind: normalized.kind,
-                  ...(normalized.inverse ? { inverse: normalized.inverse } : {}),
-                  ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
-                  ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
-                  ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),
-                  ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
-                  ...(normalized.constraints ? { constraints: structuredClone(normalized.constraints) } : {}),
-                  ...(normalized.kind !== "belongsTo" ? { mutationSupport: "unsupported" as const } : {}),
-                };
-              })(),
             })),
           ...(() => {
             const defaultSort = pickEmbeddedDefaultSort(candidate.contract.views);
@@ -1384,18 +1168,7 @@ export function compileAuthoringBackendManifest(
         // either way (bearer token or trusted context) matches by plain set
         // intersection.
         ...(candidate.contract.authorization
-          ? {
-              authorization: {
-                roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles),
-                ...(candidate.contract.authorization.rowAccess?.recordPermissions
-                  ? {
-                      recordPermissions: {
-                        ...candidate.contract.authorization.rowAccess.recordPermissions,
-                      },
-                    }
-                  : {}),
-              },
-            }
+          ? { authorization: { roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles) } }
           : {}),
         relationshipStatus: {
           emittedReferences,
@@ -1408,14 +1181,11 @@ export function compileAuthoringBackendManifest(
     };
   });
 
-  const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
-
   return {
     version: 1,
     description: "Candidate backend manifest compiled from restored authoring catalog.",
     relationshipRegister: filterRelationshipRegisterForTables(tables, relationshipRegister),
     tables: sortTablesByDependencies(tables),
-    ...(entityValues ? { entityValues } : {}),
   };
 }
 

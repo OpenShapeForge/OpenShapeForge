@@ -20,7 +20,7 @@
  * - A schema that composes inside a test can still fail to compose at boot,
  *   where the module's fields meet the generated entity surface and the module
  *   composition guard.
- * - A resolver handed a synthetic `roles: ["workflow-admin"]` is not the same
+ * - A resolver handed a synthetic `roles: ["directie"]` is not the same
  *   resolver handed whatever `resolveSessionContext` maps out of a JWT. The
  *   authorization answer is only as good as the roles that actually arrive.
  * - An error that carries `extensions.code` when `graphql()` executes it may
@@ -116,9 +116,8 @@ const bearerConfigured = Boolean(
 
 /**
  * The two identities this file needs, from the realm rather than from a
- * fixture. They differ in exactly one thing that matters — `tenant-a-admin`
- * receives the `Test.Admin` client composite and `tenant-a-no-access` receives
- * none — and they
+ * fixture. They differ in exactly one thing that matters — `acme-directie`
+ * holds the `directie` realm role and `acme-noaccess` holds none — and they
  * carry the SAME `tid`. Sharing the tenant is what makes the refusal in the
  * authorization test attributable to the role: a denial across two tenants
  * would be indistinguishable from tenant isolation doing the work.

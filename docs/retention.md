@@ -80,10 +80,12 @@ It is **not** enforced yet. Building the erasure primitive (and deciding
 `ON DELETE` semantics deliberately per PII relationship) is tracked as a
 follow-up issue.
 
-## Authored policy is not enforcement
+## No shipped entity declares retention
 
-`Document` and `CaseFile` currently reference `records-archive-7y`, so their
-compiled tables contain retention metadata. This does **not** remove the
-runtime limitations above: an authored policy, a storage binding, or a passing
-Document creation test does not prove retention enforcement or legal-hold
-handling. Those boundaries require separate runtime and behavior evidence.
+At present **no entity YAML** under `packages/compiler/config/authoring/entities`
+declares a `retention:` block, so the shipped `manifest.json` contains no
+`retention` metadata. `retention-policies.yaml` is authored but not yet
+referenced by any table. Wiring policies onto the PII-bearing entities
+(relations, contact details) is the authoring step that makes the metadata
+above actually appear in the manifest — do it alongside, or ahead of, the
+runtime-enforcement follow-up.

@@ -8,8 +8,7 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "db:migrate": "bun src/db/migrate.ts",
-    "db:reset": "bun src/db/reset.ts",
-    "db:provision-roles": "bun src/db/provision-roles.ts",
+    "db:migration:new": "bun src/db/migrations/new-migration.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:e2e": "bun test src/graphql/__tests__ src/rest/__tests__ src/mcp/__tests__",
     "test:migrations": "bun test src/db"
@@ -25,10 +24,7 @@
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openshapeforge/auth": "workspace:*",
-    "@openshapeforge/documents": "workspace:*",
     "@openshapeforge/observability": "workspace:*",
-    "@openshapeforge/operations": "workspace:*",
-    "@openshapeforge/plugin-runtime": "workspace:*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "fastify": "^5.8.2",
@@ -47,7 +43,6 @@
     "@openshapeforge/connector-example-object-store": "workspace:*",
     "@openshapeforge/connector-twinfield": "workspace:*",
     "@types/bun": "^1.3.5",
-    "jose": "^6.2.1",
     "typescript": "^5.9.0"
   }
 }

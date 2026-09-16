@@ -22,7 +22,6 @@
  *   1. `renameClient: { from, to }` rewrites every REFERENCE to a client id in
  *      the base document — `keycloak.entityRoleClient`, `keycloak.clients[].id`,
  *      the client keys of `realmRoles.*.composites`, `clientRoles`,
- *      `clientRoleComposites` (both owner and referenced client ids),
  *      `users[].clientRoles` and `serviceAccountClientRoles`. It moves the
  *      identity only; the client's `name`, `secret` and `devSecret` are
  *      ordinary fields the patch body sets under the NEW id.
@@ -30,7 +29,6 @@
  *      deep-merge, `null` deletes a property, `keycloak.clients[]` merges by
  *      `id` (`$delete: true` removes one), other arrays replace wholesale —
  *      except role-name lists (`clientRoles.<client>`,
- *      `clientRoleComposites.<client>.<role>.composites.<client>`,
  *      `realmRoles.<role>.composites.<client>`, `realmRoles.<role>.includes`),
  *      which UNION: base order first, patch additions appended. A grant list
  *      is a set, and "add one composite" restating fifteen others is how a
@@ -70,7 +68,6 @@ const PATCH_BODY_KEYS = new Set([
   "keycloak",
   "realmRoles",
   "clientRoles",
-  "clientRoleComposites",
   "groups",
   "users",
 ]);
@@ -143,30 +140,6 @@ function renameRealmRoles(roles: JsonValue | undefined, rename: ClientRename): J
   return result;
 }
 
-function renameClientRoleComposites(
-  rolesByOwnerClient: JsonValue | undefined,
-  rename: ClientRename,
-): JsonValue | undefined {
-  if (!isPlainObject(rolesByOwnerClient)) return rolesByOwnerClient;
-  const renamedOwners = renameKeys(rolesByOwnerClient, rename);
-  if (!isPlainObject(renamedOwners)) return renamedOwners;
-  return Object.fromEntries(
-    Object.entries(renamedOwners).map(([ownerClient, roleDefinitions]) => [
-      ownerClient,
-      isPlainObject(roleDefinitions)
-        ? Object.fromEntries(
-            Object.entries(roleDefinitions).map(([roleName, definition]) => [
-              roleName,
-              isPlainObject(definition) && definition.composites !== undefined
-                ? { ...definition, composites: renameKeys(definition.composites, rename)! }
-                : definition,
-            ]),
-          )
-        : roleDefinitions,
-    ]),
-  );
-}
-
 /**
  * Every place an authorizationConfig refers to a client by id, rewritten.
  * Explicit paths rather than a document-wide string replace: a role named
@@ -212,12 +185,6 @@ export function renameClientReferences(base: JsonObject, rename: ClientRename, o
   const result: JsonObject = { ...base, keycloak: renamedKeycloak };
   if (result.realmRoles !== undefined) result.realmRoles = renameRealmRoles(result.realmRoles, rename)!;
   if (result.clientRoles !== undefined) result.clientRoles = renameKeys(result.clientRoles, rename)!;
-  if (result.clientRoleComposites !== undefined) {
-    result.clientRoleComposites = renameClientRoleComposites(
-      result.clientRoleComposites,
-      rename,
-    )!;
-  }
   if (Array.isArray(result.users)) {
     result.users = result.users.map((user) =>
       isPlainObject(user) && user.clientRoles !== undefined
@@ -273,19 +240,12 @@ function mergeValue(
 }
 
 /**
- * `clientRoles.<client>`,
- * `clientRoleComposites.<client>.<role>.composites.<client>`,
- * `realmRoles.<role>.composites.<client>`,
+ * `clientRoles.<client>`, `realmRoles.<role>.composites.<client>`,
  * `realmRoles.<role>.includes` and the v1 `keycloak.realmRoles` equivalents.
  */
 function isRoleList(path: string[]): boolean {
   const segments = path[0] === "keycloak" ? path.slice(1) : path;
   if (segments.length === 2 && segments[0] === "clientRoles") return true;
-  if (
-    segments.length === 5 &&
-    segments[0] === "clientRoleComposites" &&
-    segments[3] === "composites"
-  ) return true;
   if (segments[0] !== "realmRoles") return false;
   if (segments.length === 3 && segments[2] === "includes") return true;
   return segments.length === 4 && segments[2] === "composites";

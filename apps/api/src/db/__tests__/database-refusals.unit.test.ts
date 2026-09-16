@@ -322,13 +322,7 @@ describe("errors that must stay redacted", () => {
   it("toHttpError answers a redacted 500 for those, and the refusal for a rule", () => {
     expect(toHttpError(postgresError('syntax error at or near "SELEC"', { sqlstate: "42601" }))).toEqual({
       status: 500,
-      body: {
-        error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Internal server error.",
-          retryable: false,
-        },
-      },
+      body: { error: { code: "INTERNAL_SERVER_ERROR", message: "Internal server error." } },
     });
     expect(
       toHttpError(
@@ -344,8 +338,7 @@ describe("errors that must stay redacted", () => {
         error: {
           code: "OPERATION_REFUSED",
           message: "Status cannot change once closed.",
-          retryable: false,
-          data: { hint: "Reopen via the assessment lead." },
+          hint: "Reopen via the assessment lead.",
         },
       },
     });

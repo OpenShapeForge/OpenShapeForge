@@ -5,7 +5,6 @@ import {
   type ReadTrustedContextOptions,
 } from "@openshapeforge/auth";
 import type { IdentityLinkState } from "./identity-link.js";
-import type { PlatformAdministrator } from "../control/platform-admin.js";
 
 export type SessionScope = "tenant" | "group" | "self";
 
@@ -19,29 +18,12 @@ export type SessionScope = "tenant" | "group" | "self";
  *
  * "none" is the unauthenticated empty session. It is spelled out rather than
  * left undefined so no consumer can read a missing value as a permissive one.
- *
- * "control-bearer" is a token of the platform's CONTROL realm
- * (control/control-session.ts): a platform operator acting across every
- * tenant and for none in particular. It never satisfies a tenant Operation,
- * and a tenant credential never satisfies a control one — the operations
- * runtime keys both refusals on this discriminant.
  */
-export type SessionCredential =
-  | "none"
-  | "bearer"
-  | "api-key"
-  | "trusted-context"
-  | "control-bearer";
+export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context";
 
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
-  /** Opaque core binding to the verified bearer login session, when available. */
-  loginSessionBinding?: string;
-  /** Verified tenant-local Relation label; display only, never authorization. */
-  userDisplayName?: string | null;
-  /** Display language from verified identity claims; never a permission or client input. */
-  locale?: string;
   roles: string[];
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
@@ -52,12 +34,6 @@ export type TrustedSessionContext = {
    */
   groups: string[];
   /**
-   * Active RelationGroup memberships derived by the server from the linked
-   * Relation. This is deliberately separate from Keycloak group paths and
-   * platform org-unit scopes; inbound claims never populate it.
-   */
-  relationGroupIds?: readonly string[];
-  /**
    * Effective access scope used by the DB session layer to set `app.scope`.
    * Defaults to "self" — the most restrictive option — until upstream
    * resolution determines otherwise.
@@ -65,14 +41,6 @@ export type TrustedSessionContext = {
   scope: SessionScope;
   /** Which credential authenticated this session. */
   credential: SessionCredential;
-  /**
-   * The verified platform operator behind a "control-bearer" session: the
-   * audit actor (`subject`/`issuer`/`username`) and the display facts whoami
-   * reports. Present exactly when `credential` is "control-bearer"; `userId`
-   * repeats `subject` so session-shaped code keeps working, and `tenantId`
-   * is null because no tenant context exists on the control realm.
-   */
-  administrator?: PlatformAdministrator;
   // ---- identity ↔ Relation link (auth/identity-link.ts) ----
   /**
    * The party this login acts as in the tenant: the link state resolved on
@@ -108,7 +76,6 @@ export function readTrustedSessionContext(
     userId: base.userId,
     roles: base.roles,
     groups: base.groups ?? [],
-    relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",
   };

@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import {
   assertPartialProfileHasNoCrud,
   validateEntityContentIdentifiers,
   loadEntity,
-  loadSemanticTypes,
   resolveEntityFilePath,
 } from "./loader.js";
 import type { CoreEntity } from "./types.js";
@@ -140,22 +137,6 @@ describe("loadEntity content validation (integration)", () => {
     // `relation` is a real authoring entity under entities/core/.
     expect(resolveEntityFilePath(authoringDir, "relation")).toContain("relation");
     expect(() => loadEntity(authoringDir, "relation")).not.toThrow();
-  });
-  it("does not share mutable parsed YAML or keep stale source bytes", () => {
-    const root = mkdtempSync(join(tmpdir(), "entity-catalog-cache-"));
-    try {
-      mkdirSync(join(root, "catalogs"));
-      const path = join(root, "catalogs/semantic-types.yaml");
-      const write = (valueType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, valueType } } }));
-      write("string");
-      const first = loadSemanticTypes(root);
-      first.example!.label.en = "Changed by caller";
-      expect(loadSemanticTypes(root).example!.label.en).toBe("Example");
-      write("number");
-      expect(loadSemanticTypes(root).example!.valueType).toBe("number");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 });
 

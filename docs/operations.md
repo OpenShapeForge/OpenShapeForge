@@ -50,9 +50,11 @@ choice visible in their values rather than hiding it in the shared package.
 ## Operational endpoints
 
 - `/api/health` is process liveness and does not contact dependencies.
-- `/api/ready` checks the database, the generated-schema checksum (was this
-  database built from the bundled manifest?), plus runtime module
-  initialization. A
+- `/api/ready` checks the database, generated-schema checksum, every immutable
+  versioned-migration ledger checksum and required migration presence, plus
+  runtime module initialization. Database-ahead rows are reported by the
+  verifier but do not fail readiness, so additive rolling deploys keep their
+  old pods serving. A
   one-second cache and single-flight execution bound probe bursts. It returns
   503 until every dependency is ready and exposes only fixed names/statuses.
 - `/api/metrics` requires a valid signed internal context and returns 401 to

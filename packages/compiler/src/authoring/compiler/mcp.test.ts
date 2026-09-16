@@ -18,45 +18,6 @@ const entityWithMcp = (mcp: CoreEntity["mcp"], entity = "ContactDetail"): CoreEn
     ...(mcp === undefined ? {} : { mcp }),
   }) as CoreEntity;
 
-const v2Relation = (tools?: "dedicated" | "generic"): CoreEntity => {
-  const actions = ["list", "get", "create", "update", "delete"] as const;
-  return {
-    schemaVersion: 2,
-    kind: "coreEntity",
-    module: "core",
-    entity: "Relation",
-    title: "Relation",
-    language: "en",
-    fields: [{ key: "displayName", valueType: "string" }],
-    operations: Object.fromEntries(
-      actions.map((action) => [
-        action,
-        {
-          name: action,
-          description: `${action} relations`,
-          implementation: { type: "entity", action },
-          effects: {
-            data:
-              action === "list" || action === "get"
-                ? "read"
-                : action === "delete"
-                  ? "delete"
-                  : "write",
-            external: "none",
-          },
-          reliability: { idempotency: { mode: "natural" } },
-          confirmation: { mode: "none" },
-        },
-      ]),
-    ),
-    interfaces: {
-      mcp: {
-        ...(tools ? { tools } : {}),
-      },
-    },
-  } as CoreEntity;
-};
-
 describe("deriveToolPrefix", () => {
   it("snake_cases the entity name and stays singular", () => {
     expect(deriveToolPrefix("ContactDetail")).toBe("contact_detail");
@@ -94,39 +55,6 @@ describe("buildMcp", () => {
   it("defaults to the dedicated tool style and honours generic", () => {
     expect(buildMcp(entityWithMcp(true))?.tools).toBe("dedicated");
     expect(buildMcp(entityWithMcp({ tools: "generic" }))?.tools).toBe("generic");
-  });
-
-  it("lowers strict v2 MCP tools while keeping an omitted Relation setting dedicated", () => {
-    expect(buildMcp(v2Relation())).toMatchObject({
-      toolPrefix: "relation",
-      tools: "dedicated",
-      operations: { list: true, get: true, create: true, update: true, delete: true },
-    });
-    expect(buildMcp(v2Relation("generic"))?.tools).toBe("generic");
-  });
-
-  it("temporarily lowers canonical secure input into the existing MCP handoff metadata", () => {
-    const entity = v2Relation();
-    entity.fields = [
-      { key: "adapterId", valueType: "string" },
-      { key: "configurationValues", valueType: "object" },
-    ];
-    entity.operations!.create!.interaction = {
-      type: "secureInput",
-      sourceField: "adapterId",
-      sourceEntity: "Adapter",
-      definitionsField: "configurationFields",
-      into: "configurationValues",
-      message: "Enter the values securely.",
-    };
-
-    expect(buildMcp(entity)?.elicitOnCreate).toEqual({
-      sourceField: "adapterId",
-      sourceEntity: "Adapter",
-      definitionsField: "configurationFields",
-      into: "configurationValues",
-      message: "Enter the values securely.",
-    });
   });
 
   it("per-operation flags default to true and can be disabled individually", () => {

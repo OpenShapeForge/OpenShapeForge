@@ -75,7 +75,7 @@ const TEST_TIMEOUT = 90_000;
  * per-definition ACL (`WORKFLOW_WRITER_ROLES` in `definition-authorization.ts`).
  * Without it every write below is FORBIDDEN, whatever the ACL says.
  */
-const WRITER_ROLE = "workflow-admin";
+const WRITER_ROLE = "directie";
 
 // ---------------------------------------------------------------------------
 // Scratch database, module registry, schema

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import {
-  defaultHandleLabel,
-  defaultOutputHandles,
   layoutWorkflowDefinition,
   layoutWorkflowGraph,
   type WorkflowLayoutDefinition,
@@ -22,19 +20,6 @@ function node(id: string, type = "task"): WorkflowLayoutNode {
 }
 
 describe("workflow layout", () => {
-  it("exports the shared default handle derivation from the package root", () => {
-    expect(defaultHandleLabel("yes")).toBe("Yes");
-    expect(
-      defaultOutputHandles({
-        node: { type: "task" },
-        outgoingEdges: [{ sourceHandle: "yes" }, { sourceHandle: "no" }],
-      }),
-    ).toEqual([
-      { id: "no", label: "No" },
-      { id: "yes", label: "Yes" },
-    ]);
-  });
-
   it("places a linear graph top-to-bottom", async () => {
     const result = await layoutWorkflowGraph(
       [node("start", "triggerManual"), node("step"), node("end", "end")],

@@ -129,7 +129,7 @@ const TEST_TIMEOUT = 90_000;
  * The realm role `WORKFLOW_WRITER_ROLES` admits. Without it every authoring
  * mutation below is FORBIDDEN and no graph would ever reach a run.
  */
-const WRITER_ROLE = "workflow-admin";
+const WRITER_ROLE = "directie";
 
 /**
  * A catalogued node type this deployment cannot execute.

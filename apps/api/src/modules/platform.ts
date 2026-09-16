@@ -2,27 +2,11 @@
 /** Core-owned services made available to reviewed runtime modules. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
-import { appendEntityEvent, appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
+import { appendEntityEvent } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import type { DB, Json } from "../generated/db/types.js";
-import type {
-  RuntimeOperationDefinition,
-  RuntimeDeclarativeServiceRequest,
-  RuntimeOperationExecutionResult,
-  RuntimeOperationExecutionOptions,
-  RuntimeOperationProvider,
-  RuntimeOperationRequest,
-  RuntimeHostOperationRequest,
-} from "@openshapeforge/plugin-runtime";
-import {
-  executeEntityOperation,
-  getEntityOperationContracts,
-  tableForEntityOperation,
-} from "../operations/entity/index.js";
-import { serializeEntityResult } from "../operations/entity/serialize-result.js";
+import type { Json } from "../generated/db/types.js";
 import type {
   McpInvocationContext,
   ModuleAuthorizationDecision,
@@ -33,56 +17,10 @@ import type {
   ModulePlatformServices,
   ModuleToolExecutionOptions,
   ModuleToolExecutionResult,
-  RuntimeModule,
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 import { resolveConnectionValues } from "./connection-secrets.js";
 import { connectSocket } from "./socket-egress.js";
-import { classifyDatabaseError } from "../db/database-refusals.js";
-import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
-import { generatedEntityValues } from "./entity-value-registry.js";
-import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
-import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
-import { executeKeyedOperation } from "../operations/execution-receipts.js";
-import { operationErrorOf } from "@openshapeforge/operations";
-import { ArtifactStorageRuntime } from "./artifact-storage.js";
-import { runtimeSettings } from "./settings.js";
-import { RecordAccessRuntime } from "./record-access.js";
-
-function contractPreconditionFailure(
-  definition: RuntimeOperationDefinition,
-  request: RuntimeOperationRequest,
-): RuntimeOperationExecutionResult | undefined {
-  if (request.expectedContractFingerprint === undefined ||
-    request.expectedContractFingerprint === operationContractFingerprint(definition)) {
-    return undefined;
-  }
-  return {
-    error: {
-      code: "OPERATION_CONTRACT_CHANGED",
-      message: "The Operation contract changed after it was authorized.",
-      retryable: false,
-    },
-  };
-}
-
-function storedRuntimeOperationResult(value: unknown): RuntimeOperationExecutionResult {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Stored runtime Operation receipt is not an object.");
-  }
-  const candidate = value as RuntimeOperationExecutionResult;
-  if ("error" in candidate) {
-    if (!candidate.error || typeof candidate.error.code !== "string" ||
-      typeof candidate.error.message !== "string" || typeof candidate.error.retryable !== "boolean") {
-      throw new Error("Stored runtime Operation receipt has an invalid error.");
-    }
-    return candidate;
-  }
-  if (!Object.hasOwn(candidate, "data") || !Array.isArray(candidate.operations)) {
-    throw new Error("Stored runtime Operation receipt has an invalid success envelope.");
-  }
-  return candidate;
-}
 
 /**
  * Narrow a module's selector to exactly one form before it reaches a query.
@@ -141,28 +79,6 @@ export type ModuleMcpServerBinding = {
     signal?: AbortSignal,
   ): Promise<ModuleToolExecutionResult>;
   endInvocation?(invocationToken: object): void;
-};
-
-export type ModuleDeclarativeServiceExecutor = (
-  session: TrustedSessionContext,
-  request: RuntimeDeclarativeServiceRequest,
-  options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult>;
-
-export type ModuleHostOperationExecutor = (
-  session: TrustedSessionContext,
-  request: RuntimeHostOperationRequest,
-  options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult>;
-
-export type ModuleStaticOperationRegistration = {
-  definition: RuntimeOperationDefinition;
-  available(session: TrustedSessionContext): boolean;
-  execute(
-    session: TrustedSessionContext,
-    request: RuntimeOperationRequest,
-    options?: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult>;
 };
 
 const SENSITIVE_EVENT_WORDS = new Set([
@@ -231,24 +147,14 @@ function assertSecretFree(value: unknown, path = "payload"): void {
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
 ): TrustedSessionContext {
-  const capability = {
+  return Object.freeze({
     ...session,
     roles: Object.freeze([...session.roles]),
     groups: Object.freeze([...session.groups]),
     ...(session.oauthScopes
       ? { oauthScopes: Object.freeze([...session.oauthScopes]) }
       : {}),
-  };
-  // A stateful MCP server lives across HTTP requests. Its bearer roles and
-  // login binding are pinned, while domain memberships are deliberately
-  // refreshed from storage for every request. A getter keeps the plugin-facing
-  // capability immutable while reading the latest core-owned membership set.
-  Object.defineProperty(capability, "relationGroupIds", {
-    enumerable: true,
-    configurable: false,
-    get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
-  });
-  return Object.freeze(capability) as unknown as TrustedSessionContext;
+  }) as unknown as TrustedSessionContext;
 }
 
 /**
@@ -263,7 +169,6 @@ export function createModuleSessionCapability(
 export class ModulePlatformRuntime {
   readonly services: ModulePlatformServices;
   readonly #db: OpenShapeForgeDatabase;
-  readonly #artifactStorage: ArtifactStorageRuntime<TrustedSessionContext, Transaction<DB>>;
   readonly #servers = new Map<Server, ModuleMcpServerBinding>();
   readonly #activeOperationSessions = new WeakSet<ActiveOperationSession>();
   readonly #activeInvocations = new WeakMap<McpInvocationContext, number>();
@@ -273,89 +178,17 @@ export class ModulePlatformRuntime {
     McpInvocationContext,
     Set<Promise<unknown>>
   >();
-  readonly #operationProviders = new Map<string, RuntimeOperationProvider>();
-  readonly #staticOperations = new Map<string, ModuleStaticOperationRegistration>();
-  readonly #operationCallStack = new AsyncLocalStorage<readonly string[]>();
-  readonly #operationTransactionStorage = new AsyncLocalStorage<{
-    session: TrustedSessionContext;
-    trx: Transaction<DB>;
-  }>();
-  readonly #recordAccessTransactionStorage = new AsyncLocalStorage<{
-    session: TrustedSessionContext;
-    trx: Transaction<DB>;
-  }>();
-  #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
-  #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
   constructor(db: OpenShapeForgeDatabase) {
     this.#db = db;
-    const records = new RecordAccessRuntime({
-      acceptsSession: (session) => this.#acceptsScopedSession(session),
-      currentTransaction: (session) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        return active?.session === session ? active.trx : undefined;
-      },
-      withSession: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Record authorization transaction belongs to another session.");
-          return work(active.trx);
-        }
-        return withDbSession(this.#db, session, work);
-      },
-    });
-    this.#artifactStorage = new ArtifactStorageRuntime({
-      acceptsSession: (session) => this.#acceptsScopedSession(session),
-      currentTransaction: (session) => {
-        const active = this.#operationTransactionStorage.getStore();
-        return active?.session === session ? active.trx : undefined;
-      },
-      withTransaction: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
-          return work(active.trx);
-        }
-        return withDbSession(this.#db, session, async (trx) =>
-          this.#recordAccessTransactionStorage.run({ session, trx }, () => work(trx))
-        );
-      },
-    });
     this.services = {
-      records: records.services,
-      settings: runtimeSettings,
-      artifacts: this.#artifactStorage.services,
-      durableOperations: {
-        organizationServiceIdentity: async (session) => {
-          if (!this.#acceptsScopedSession(session) || !session.tenantId || !session.userId) {
-            throw new Error("Service identity resolution requires a live verified organization session.");
-          }
-          const identity = organizationServiceIdentities().find((entry) => entry.tenantId === session.tenantId);
-          if (!identity) throw new Error("No automatic service identity is configured for this organization.");
-          return { serviceIdentityId: identity.clientId };
-        },
-      },
       db: {
         withSession: (session, fn) => {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module database work requires a live verified session.");
           }
-          const active = this.#operationTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) {
-              throw new Error("Module database transaction belongs to another session.");
-            }
-            return fn(active.trx);
-          }
           return withDbSession(this.#db, session, fn);
         },
-      },
-      schemas: {
-        fields: generatedRuntimeFieldSchemas,
-        json: runtimeJsonSchemas,
-        entityValues: generatedEntityValues,
       },
       events: {
         append: async (session, event) => {
@@ -363,39 +196,11 @@ export class ModulePlatformRuntime {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
-          const active = this.#operationTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) throw new Error("Module event belongs to another session.");
-            await appendScopedEntityEventInTransaction(active.trx, { ...event, payload: event.payload as Json });
-            return;
-          }
           await appendEntityEvent(this.#db, session, {
             ...event,
             payload: event.payload as Json,
           });
         },
-      },
-      errors: {
-        classifyDatabase: (cause) => {
-          const refusal = classifyDatabaseError(cause);
-          if (!refusal) return undefined;
-          const detail = [refusal.detail, refusal.hint]
-            .filter((part): part is string => typeof part === "string" && part.length > 0)
-            .join("\n\n");
-          return {
-            code: refusal.code,
-            message: refusal.message,
-            ...(detail ? { detail } : {}),
-            retryable: false,
-          };
-        },
-      },
-      operations: {
-        list: (session) => this.#listOperations(session),
-        get: (session, operationId) =>
-          this.#getOperation(session, operationId),
-        execute: (session, request, options) =>
-          this.#executeOperation(session, request, options),
       },
       secrets: {
         resolveConnectionValues: async (session, selector) => {
@@ -475,419 +280,6 @@ export class ModulePlatformRuntime {
       },
     };
     platformRuntimes.set(this.services, this);
-    Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
-    Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
-    Object.defineProperty(this.services, "records", { writable: false, configurable: false });
-  }
-
-  registerArtifactStorage(modules: readonly RuntimeModule[]): void {
-    this.#artifactStorage.configure(modules, runtimeSettings.selectedProviders("artifact-storage"));
-  }
-
-  async #listOperations(
-    session: TrustedSessionContext,
-  ): Promise<readonly RuntimeOperationDefinition[]> {
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error("Module Operation listing requires a live verified session.");
-    }
-    // A control-realm operator has no tenant: entity Operations and the
-    // record-derived ones a provider lists are tenant-scoped by construction,
-    // so only the static Operations — whose own authorization says whether a
-    // control session may use them — are on offer.
-    const controlSession = isControlRealmSession(session);
-    const heldRoles = new Set(session.roles);
-    const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role))
-    );
-    const staticOperations = [...this.#staticOperations.values()]
-      .filter((registration) => registration.available(session))
-      .map((registration) => registration.definition);
-    const provided = controlSession ? [] : await this.listRuntimeProviderOperations(session);
-    const byId = new Map<string, RuntimeOperationDefinition>();
-    for (const definition of [
-      ...entityOperations,
-      ...staticOperations,
-      ...provided,
-    ]) {
-      if (!definition.id || byId.has(definition.id)) {
-        throw new Error(
-          `Runtime Operation id ${JSON.stringify(definition.id)} is empty or duplicated.`,
-        );
-      }
-      byId.set(definition.id, definition);
-    }
-    return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
-  }
-
-  /**
-   * Core adapter seam for record-derived Operations only. Entity and authored
-   * static Operations already have their own adapter projections, so exposing
-   * them here would duplicate names and handlers in MCP.
-   */
-  async listRuntimeProviderOperations(
-    session: TrustedSessionContext,
-  ): Promise<readonly RuntimeOperationDefinition[]> {
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error(
-        "Runtime provider Operation listing requires a live verified session.",
-      );
-    }
-    const definitions = (await Promise.all(
-      [...this.#operationProviders.values()].map((provider) =>
-        provider.list(session)
-      ),
-    )).flat();
-    const reservedIds = new Set([
-      ...getEntityOperationContracts().map((operation) => operation.id),
-      ...this.#staticOperations.keys(),
-    ]);
-    const byId = new Map<string, RuntimeOperationDefinition>();
-    for (const definition of definitions) {
-      if (
-        !definition.id ||
-        reservedIds.has(definition.id) ||
-        byId.has(definition.id)
-      ) {
-        throw new Error(
-          `Runtime provider Operation id ${JSON.stringify(definition.id)} is empty or duplicated.`,
-        );
-      }
-      byId.set(definition.id, definition);
-    }
-    return [...byId.values()].sort((left, right) =>
-      left.id.localeCompare(right.id)
-    );
-  }
-
-  /** Activate only providers from modules that loaded and initialised cleanly. */
-  registerOperationProviders(modules: readonly RuntimeModule[]): void {
-    const providers = modules.flatMap((module) => module.operationProviders ?? []);
-    const next = new Map<string, RuntimeOperationProvider>();
-    for (const provider of providers) {
-      if (!provider.id || next.has(provider.id)) {
-        throw new Error(
-          `Runtime Operation provider id ${JSON.stringify(provider.id)} is empty or duplicated.`,
-        );
-      }
-      next.set(provider.id, provider);
-    }
-    this.#operationProviders.clear();
-    for (const [id, provider] of next) this.#operationProviders.set(id, provider);
-  }
-
-  registerStaticOperations(
-    registrations: readonly ModuleStaticOperationRegistration[],
-  ): void {
-    const next = new Map<string, ModuleStaticOperationRegistration>();
-    for (const registration of registrations) {
-      const id = registration.definition.id;
-      if (!id || next.has(id)) {
-        throw new Error(
-          `Static Operation id ${JSON.stringify(id)} is empty or duplicated.`,
-        );
-      }
-      next.set(id, registration);
-    }
-    this.#staticOperations.clear();
-    for (const [id, registration] of next) this.#staticOperations.set(id, registration);
-  }
-
-  /** Register the single core-owned declarative engine used by every adapter. */
-  registerDeclarativeServiceExecutor(
-    executor: ModuleDeclarativeServiceExecutor,
-  ): void {
-    if (this.#declarativeServiceExecutor) {
-      throw new Error("The declarative Service executor is already registered.");
-    }
-    this.#declarativeServiceExecutor = executor;
-  }
-
-  async #getOperation(
-    session: TrustedSessionContext,
-    operationId: string,
-  ): Promise<RuntimeOperationDefinition | undefined> {
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error("Module Operation lookup requires a live verified session.");
-    }
-    const controlSession = isControlRealmSession(session);
-    const entityOperation = getEntityOperationContracts().find(
-      (candidate) => candidate.id === operationId,
-    );
-    if (entityOperation) {
-      if (controlSession) return undefined;
-      const heldRoles = new Set(session.roles);
-      if (!entityOperation.authorization.roles.some((role) => heldRoles.has(role))) {
-        return undefined;
-      }
-      return entityOperation;
-    }
-    const staticOperation = this.#staticOperations.get(operationId);
-    if (staticOperation) {
-      return staticOperation.available(session)
-        ? staticOperation.definition
-        : undefined;
-    }
-    if (controlSession) return undefined;
-    const matches = (
-      await Promise.all(
-        [...this.#operationProviders.values()].map((provider) =>
-          provider.get(session, operationId),
-        ),
-      )
-    ).filter((definition): definition is RuntimeOperationDefinition =>
-      definition !== undefined
-    );
-    if (matches.length > 1) {
-      throw new Error(`Runtime Operation id ${JSON.stringify(operationId)} is ambiguous.`);
-    }
-    if (matches[0] && matches[0].id !== operationId) {
-      throw new Error(
-        `Runtime Operation provider returned ${JSON.stringify(matches[0].id)} for ` +
-          `${JSON.stringify(operationId)}.`,
-      );
-    }
-    return matches[0];
-  }
-
-  async #executeOperation(
-    session: TrustedSessionContext,
-    request: RuntimeOperationRequest,
-    options: RuntimeOperationExecutionOptions = {},
-  ): Promise<RuntimeOperationExecutionResult> {
-    options.signal?.throwIfAborted();
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error("Module Operation execution requires a live verified session.");
-    }
-    const controlSession = isControlRealmSession(session);
-    const entityOperation = getEntityOperationContracts().find(
-      (candidate) => candidate.id === request.operation.id,
-    );
-    if (entityOperation && !controlSession) {
-      if (entityOperation.intent !== request.operation.intent) {
-        return {
-          error: {
-            code: "BAD_USER_INPUT",
-            message: "The Operation intent does not match its canonical definition.",
-            retryable: false,
-          },
-        };
-      }
-      const contractFailure = contractPreconditionFailure(entityOperation, request);
-      if (contractFailure) return contractFailure;
-      const result = await executeEntityOperation(this.#db, session, {
-        operation: { id: entityOperation.id, intent: entityOperation.intent },
-        ...(request.input ? { input: request.input as never } : {}),
-      });
-      return serializeEntityResult(tableForEntityOperation(entityOperation), result);
-    }
-    const staticOperation = this.#staticOperations.get(request.operation.id);
-    if (staticOperation) {
-      if (
-        !staticOperation.available(session) ||
-        staticOperation.definition.intent !== request.operation.intent
-      ) {
-        return {
-          error: {
-            code: "OPERATION_NOT_FOUND",
-            message: "The requested Operation is not available.",
-            retryable: false,
-          },
-        };
-      }
-      const contractFailure = contractPreconditionFailure(
-        staticOperation.definition,
-        request,
-      );
-      if (contractFailure) return contractFailure;
-      const staticStack = this.#operationCallStack.getStore() ?? [];
-      if (staticStack.includes(request.operation.id)) {
-        return {
-          error: {
-            code: "OPERATION_CYCLE",
-            message: "Recursive canonical Operation execution is not allowed.",
-            retryable: false,
-          },
-        };
-      }
-      return this.#operationCallStack.run(
-        [...staticStack, request.operation.id],
-        () => staticOperation.execute(session, request, options),
-      );
-    }
-    if (controlSession) {
-      return {
-        error: {
-          code: "OPERATION_NOT_FOUND",
-          message: "The requested Operation is not available.",
-          retryable: false,
-        },
-      };
-    }
-    const matches: Array<{
-      provider: RuntimeOperationProvider;
-      definition: RuntimeOperationDefinition;
-    }> = [];
-    for (const provider of this.#operationProviders.values()) {
-      const definition = await provider.get(session, request.operation.id);
-      if (definition) matches.push({ provider, definition });
-    }
-    if (matches.length === 0) {
-      return {
-        error: {
-          code: "OPERATION_NOT_FOUND",
-          message: "The requested Operation is not available.",
-          retryable: false,
-        },
-      };
-    }
-    if (matches.length > 1) {
-      return {
-        error: {
-          code: "OPERATION_AMBIGUOUS",
-          message: "More than one runtime provider owns the requested Operation.",
-          retryable: false,
-        },
-      };
-    }
-    const match = matches[0]!;
-    if (
-      match.definition.id !== request.operation.id ||
-      match.definition.intent !== request.operation.intent
-    ) {
-      return {
-        error: {
-          code: "BAD_USER_INPUT",
-          message: "The Operation reference does not match its runtime definition.",
-          retryable: false,
-        },
-      };
-    }
-    const contractFailure = contractPreconditionFailure(match.definition, request);
-    if (contractFailure) return contractFailure;
-    const stack = this.#operationCallStack.getStore() ?? [];
-    if (stack.includes(request.operation.id)) {
-      return {
-        error: {
-          code: "OPERATION_CYCLE",
-          message: "Recursive canonical Operation execution is not allowed.",
-          retryable: false,
-        },
-      };
-    }
-    const execute = () => this.#operationCallStack.run(
-      [...stack, request.operation.id],
-      () => match.provider.execute({
-        session,
-        ...(options.signal ? { signal: options.signal } : {}),
-        execute: (nested, nestedOptions) => this.#executeOperation(
-          session,
-          nested,
-          nestedOptions?.signal ?? options.signal
-            ? { signal: (nestedOptions?.signal ?? options.signal)! }
-            : {},
-        ),
-        invokeDeclarativeService: (declarative, declarativeOptions) =>
-          this.invokeDeclarativeService(
-            session,
-            declarative,
-            declarativeOptions?.signal ?? options.signal
-              ? { signal: (declarativeOptions?.signal ?? options.signal)! }
-              : {},
-          ),
-        invokeHostOperation: (hostRequest, hostOptions) =>
-          this.invokeHostOperation(
-            session,
-            hostRequest,
-            hostOptions?.signal ?? options.signal
-              ? { signal: (hostOptions?.signal ?? options.signal)! }
-              : {},
-          ),
-      }, request),
-    );
-    if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
-    if (!request.idempotencyKey) {
-      return {
-        error: {
-          code: "IDEMPOTENCY_KEY_REQUIRED",
-          message: "This Operation requires an idempotency key.",
-          retryable: false,
-        },
-      };
-    }
-    try {
-      return await executeKeyedOperation(this.#db, session, {
-        operation: request.operation,
-        idempotencyKey: request.idempotencyKey,
-        input: request.input ?? {},
-        contractFingerprint: operationContractFingerprint(match.definition),
-        externalWrite: match.definition.effects.external === "write",
-        execute: async (markEffectsAdmitted) => {
-          markEffectsAdmitted();
-          return execute();
-        },
-        encode: (result) => result,
-        decode: storedRuntimeOperationResult,
-      });
-    } catch (error) {
-      const operationError = operationErrorOf(error);
-      if (operationError) return { error: operationError };
-      throw error;
-    }
-  }
-
-  registerHostOperationExecutor(executor: ModuleHostOperationExecutor): void {
-    if (this.#hostOperationExecutor) {
-      throw new Error("The host Operation executor is already registered.");
-    }
-    this.#hostOperationExecutor = executor;
-  }
-
-  async invokeHostOperation(
-    session: TrustedSessionContext,
-    request: RuntimeHostOperationRequest,
-    options: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult> {
-    options.signal?.throwIfAborted();
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error("Host Operation execution requires a live verified session.");
-    }
-    if (!this.#hostOperationExecutor) {
-      return {
-        error: {
-          code: "HOST_OPERATION_UNAVAILABLE",
-          message: "The host Operation implementation is unavailable.",
-          retryable: false,
-        },
-      };
-    }
-    return this.#hostOperationExecutor(session, request, options);
-  }
-
-  async invokeDeclarativeService(
-    session: TrustedSessionContext,
-    request: RuntimeDeclarativeServiceRequest,
-    options: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult> {
-    options.signal?.throwIfAborted();
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error(
-        "Declarative Service execution requires a live verified session.",
-      );
-    }
-    if (!this.#declarativeServiceExecutor) {
-      return {
-        error: {
-          code: "DECLARATIVE_SERVICE_UNAVAILABLE",
-          message: "The declarative Service engine is unavailable for this invocation.",
-          retryable: false,
-        },
-      };
-    }
-    return this.#declarativeServiceExecutor(
-      session,
-      request,
-      options,
-    );
   }
 
   registerServer(binding: ModuleMcpServerBinding): void {
@@ -931,30 +323,6 @@ export class ModulePlatformRuntime {
     } finally {
       this.#activeOperationSessions.delete(active);
     }
-  }
-
-  /**
-   * Keep canonical mutation guards and every plugin database write in one
-   * transaction. A handler's platform.db.withSession call reuses this exact
-   * transaction and cannot substitute another session.
-   */
-  async withOperationTransaction<T>(
-    session: TrustedSessionContext,
-    work: (trx: Transaction<DB>) => Promise<T>,
-  ): Promise<T> {
-    if (!this.#acceptsScopedSession(session)) {
-      throw new Error("Module Operation transaction requires a live verified session.");
-    }
-    const active = this.#operationTransactionStorage.getStore();
-    if (active) {
-      if (active.session !== session) {
-        throw new Error("Module Operation transaction belongs to another session.");
-      }
-      return work(active.trx);
-    }
-    return withDbSession(this.#db, session, async (trx) =>
-      this.#operationTransactionStorage.run({ session, trx }, () => work(trx))
-    );
   }
 
   /** Keep one exact invocation capability live only while core runs its hook chain. */
@@ -1089,20 +457,10 @@ export class ModulePlatformRuntime {
   }
 }
 
-/** A control-realm operator's session (control/control-session.ts): no tenant, ever. */
-function isControlRealmSession(session: TrustedSessionContext): boolean {
-  return session.credential === "control-bearer";
-}
-
 /**
  * Run a canonical operation with the runtime that owns its exact platform
  * capability. The ownership lookup is identity-based and is not exposed to
  * modules, so a platform-shaped object cannot activate a session.
- *
- * A control-realm session activates like any other and binds nothing: the
- * capability is tenant-agnostic, `platform.db.withSession` refuses a session
- * without a tenant, and the control handlers never ask for one — they
- * elevate themselves with `withSystemSession`, audited per Operation.
  */
 export async function withModuleOperationSession<T>(
   platform: ModulePlatformServices | undefined,
@@ -1119,78 +477,6 @@ export async function withModuleOperationSession<T>(
     throw new Error("Module operation platform is not core-owned.");
   }
   return runtime.withActiveOperationSession(verifiedSession, work);
-}
-
-/** Core-only transaction wrapper used by canonical custom write Operations. */
-export async function withModuleOperationTransaction<T>(
-  platform: ModulePlatformServices | undefined,
-  session: TrustedSessionContext | undefined,
-  work: (trx: Transaction<DB>) => Promise<T>,
-): Promise<T> {
-  const current = activeOperationSessionStorage.getStore();
-  if (!current || !platform || !session) {
-    throw new Error("Protected Operation requires a core-owned database session.");
-  }
-  const runtime = platformRuntimes.get(platform);
-  if (!runtime || runtime !== current.runtime || session !== current.session) {
-    throw new Error("Protected Operation requires the live verified session.");
-  }
-  return runtime.withOperationTransaction(session, work);
-}
-
-/**
- * Invoke a generated host compatibility handler only inside the exact live
- * Operation session that core established for a canonical module handler.
- */
-export async function invokeModuleHostOperation(
-  platform: ModulePlatformServices | undefined,
-  session: TrustedSessionContext | undefined,
-  request: RuntimeHostOperationRequest,
-  options: RuntimeOperationExecutionOptions = {},
-): Promise<RuntimeOperationExecutionResult> {
-  const current = activeOperationSessionStorage.getStore();
-  if (!current || !platform || !session) {
-    return {
-      error: {
-        code: "HOST_OPERATION_UNAVAILABLE",
-        message: "The host Operation implementation is unavailable.",
-        retryable: false,
-      },
-    };
-  }
-  const runtime = platformRuntimes.get(platform);
-  if (
-    !runtime ||
-    runtime !== current.runtime ||
-    session !== current.session
-  ) {
-    throw new Error("Host Operation execution requires the live verified session.");
-  }
-  return runtime.invokeHostOperation(session, request, options);
-}
-
-/** Live-session equivalent for canonical static Operation handlers. */
-export async function invokeModuleDeclarativeService(
-  platform: ModulePlatformServices | undefined,
-  session: TrustedSessionContext | undefined,
-  request: RuntimeDeclarativeServiceRequest,
-  options: RuntimeOperationExecutionOptions = {},
-): Promise<RuntimeOperationExecutionResult> {
-  const current = activeOperationSessionStorage.getStore();
-  if (!current || !platform || !session) {
-    return {
-      error: {
-        code: "DECLARATIVE_SERVICE_UNAVAILABLE",
-        message: "The declarative Service engine is unavailable for this invocation.",
-        retryable: false,
-      },
-    };
-  }
-  const runtime = platformRuntimes.get(platform);
-  if (!runtime || runtime !== current.runtime || session !== current.session) {
-    throw new Error("Declarative Service execution requires the live verified session.");
-  }
-  return runtime.invokeDeclarativeService(session, request, options);
 }
 
 export const __assertSecretFreeModuleEventForTests = assertSecretFree;

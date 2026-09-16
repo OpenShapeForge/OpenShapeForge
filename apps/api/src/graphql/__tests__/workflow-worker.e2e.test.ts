@@ -110,7 +110,7 @@ const ADMIN_URL =
 const TEST_TIMEOUT = 90_000;
 
 /** The realm role `WORKFLOW_WRITER_ROLES` admits; without it nothing publishes. */
-const WRITER_ROLE = "workflow-admin";
+const WRITER_ROLE = "directie";
 
 /**
  * Long enough that a claim taken during a test is never stale by accident, so

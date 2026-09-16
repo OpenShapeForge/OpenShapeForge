@@ -19,8 +19,6 @@ export type GeneratedPluginMigration = {
   version: string;
   checksum: string;
   sql: string;
-  /** Reconcile idempotent compiler DDL even when this identity was applied before. */
-  repeatable?: true;
 };
 
 export type GeneratedPluginMigrationRegistry = {
@@ -163,17 +161,6 @@ function renderConstraintSql(
   }
 
   const tableName = `${quoteIdent(table.schema)}.${quoteIdent(table.name)}`;
-  if (
-    constraint.replaceExisting &&
-    (!constraint.compilerOwned || constraint.kind !== "check")
-  ) {
-    throw new Error(
-      `Constraint ${table.schema}.${table.name}.${constraint.name} may only replace an existing compiler-owned CHECK.`,
-    );
-  }
-  const replacement = constraint.replaceExisting
-    ? `ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraint.name)};\n`
-    : "";
   const prefix =
     `ALTER TABLE ${tableName}\n` +
     `  ADD CONSTRAINT ${quoteIdent(constraint.name)} `;
@@ -193,7 +180,7 @@ function renderConstraintSql(
       constraint.expression,
       `Check constraint ${table.schema}.${table.name}.${constraint.name}`,
     );
-    return `${replacement}${prefix}CHECK (${constraint.expression});\n`;
+    return `${prefix}CHECK (${constraint.expression});\n`;
   }
 
   const columns = `(${constraint.columns.map(quoteIdent).join(", ")})`;
@@ -243,11 +230,8 @@ function assertConstraintRelations(manifest: PlatformSchemaManifest): void {
   }
   for (const table of manifest.tables) {
     const schema = relationNames.get(table.schema)!;
-    // Column-level primaryKey flags form ONE key however many columns carry
-    // them (a composite key, see generate.ts); a constraint-level key on top
-    // of that is the second key Postgres refuses.
     const tablePrimaryKeys =
-      (table.columns.some((column) => column.primaryKey === true) ? 1 : 0) +
+      table.columns.filter((column) => column.primaryKey === true).length +
       (table.constraints ?? []).filter(
         (constraint) => constraint.kind === "primaryKey",
       ).length;
@@ -292,15 +276,12 @@ function assertForeignKeyTargets(manifest: PlatformSchemaManifest): void {
           );
         }
       }
-      // The column-level key is unique only as a whole: one member of a
-      // composite key does not identify a row on its own.
       const immediatelyUnique =
-        sameColumns(
-          target.columns
-            .filter((column) => column.primaryKey === true)
-            .map((column) => column.name),
-          constraint.references.columns,
-        ) ||
+        (constraint.references.columns.length === 1 &&
+          target.columns.some(
+            (column) =>
+              column.name === constraint.references.columns[0] && column.primaryKey === true,
+          )) ||
         (target.indexes ?? []).some(
           (index) =>
             index.unique === true &&
@@ -341,12 +322,7 @@ function migrationEntry(
     migration.sql,
     `Plugin "${plugin}" schema migration "${migration.version}"`,
   );
-  return {
-    plugin,
-    version: migration.version,
-    checksum: checksum(sql),
-    sql,
-  };
+  return { plugin, version: migration.version, checksum: checksum(sql), sql };
 }
 
 /**
@@ -373,7 +349,7 @@ export function collectPluginMigrationRegistry(
         );
       }
       constraintNames.add(constraint.name);
-      const plugin = constraint.compilerOwned ? "osf-compiler" : table.pluginOwner;
+      const plugin = table.pluginOwner;
       if (!plugin) {
         throw new Error(
           `Table ${table.schema}.${table.name} declares versioned constraint ${constraint.name} but has no plugin owner. Table constraints are currently a compiler-plugin contract.`,
@@ -386,7 +362,6 @@ export function collectPluginMigrationRegistry(
         version: constraint.version,
         checksum: checksum(sql),
         sql,
-        ...(constraint.replaceExisting ? { repeatable: true as const } : {}),
       });
     }
   }

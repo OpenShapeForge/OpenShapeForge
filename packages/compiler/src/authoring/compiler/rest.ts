@@ -15,7 +15,6 @@ import type { CrudSection, RestConfig, RestOperationKey, RestSection } from "../
 import type { LoadedArtifacts } from "../loader.js";
 import { deriveTableName } from "./helpers.js";
 import { limitCrudOperations } from "./crud.js";
-import { isCoreEntityV2, v2RestConfig } from "../entity-v2.js";
 
 export const REST_OPERATION_KEYS: readonly RestOperationKey[] = [
   "list",
@@ -34,9 +33,7 @@ export function buildRest(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): RestSection | undefined {
-  const authored = isCoreEntityV2(coreEntity)
-    ? v2RestConfig(coreEntity)
-    : coreEntity.rest;
+  const authored = coreEntity.rest;
   if (authored === undefined || authored === false) return undefined;
 
   const config: RestConfig = authored === true ? {} : authored;

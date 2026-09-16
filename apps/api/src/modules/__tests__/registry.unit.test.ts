@@ -24,27 +24,24 @@ describe("runtime module registry", () => {
       // loaded entirely the wrong file.
       importModule: async (specifier) => {
         seen.push(specifier);
-        const dir = specifier === "@openshapeforge/documents/runtime"
-          ? "documents"
-          : specifier.replace(/\/runtime\.ts$/, "").split("/").pop();
+        const dir = specifier.replace(/\/runtime\.ts$/, "").split("/").pop();
         return { default: { name: dir } };
       },
     });
 
-    // Three plugins ship a runtime half. Order follows
-    // `authoring.config.yaml`, which the seed order depends on.
+    // Two plugins ship a runtime half: the workflow plugin and the domain node
+    // packs split out of it. Order follows `authoring.config.yaml`, which the
+    // seed order depends on.
     expect(result.failures).toEqual([]);
     expect(result.loaded.map((module) => module.name)).toEqual([
-      "documents",
       "workflow",
       "workflow-domain-nodes",
     ]);
     // Repo-root-relative specifiers are resolved to absolute paths, not left
     // for the process cwd to interpret.
-    expect(seen).toHaveLength(3);
-    expect(seen[0]).toBe("@openshapeforge/documents/runtime");
-    expect(seen[1]).toMatch(/^\/.*examples\/plugins\/workflow\/runtime\.ts$/);
-    expect(seen[2]).toMatch(
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatch(/^\/.*examples\/plugins\/workflow\/runtime\.ts$/);
+    expect(seen[1]).toMatch(
       /^\/.*examples\/plugins\/workflow-domain-nodes\/runtime\.ts$/,
     );
   });
@@ -56,10 +53,10 @@ describe("runtime module registry", () => {
       },
     });
 
-    // Fail-soft is per module: all registered runtime halves throw here, and
-    // all are recorded rather than the first one aborting the load.
+    // Fail-soft is per module: both registered runtime halves throw here, and
+    // both are recorded rather than the first one aborting the load.
     expect(result.loaded).toEqual([]);
-    expect(result.failures).toHaveLength(3);
+    expect(result.failures).toHaveLength(2);
     for (const failure of result.failures) {
       expect(failure.reason).toBe("module_missing");
       expect(failure.message).toContain("boom");

@@ -1,4 +1,4 @@
-schemaVersion: 2
+schemaVersion: 1
 kind: coreEntity
 module: core
 entity: AgreementMilestone
@@ -20,6 +20,13 @@ domains:
 # (apps/api/src/billing/rest-routes.ts) is the only creation path. Generic
 # `update`/`delete` stay enabled so the `immutable: true` fields below are
 # still refused on update by the ordinary generated transports.
+crud:
+  operations:
+    list: true
+    get: true
+    create: false
+    update: true
+    delete: true
 fields:
   - key: description
     valueType: string
@@ -36,7 +43,11 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
   - key: basisAmount
     valueType: number
     required: false
@@ -97,9 +108,11 @@ fields:
     persisted:
       column: status
       storageClass: core
-    options:
-      type: referentiedata
-      referentieGroep: AGREEMENTMILESTONESTATUS
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTMILESTONESTATUS
+        clearable: false
   - key: expectedAt
     valueType: date
     required: false
@@ -112,6 +125,9 @@ fields:
     persisted:
       column: expected_at
       storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: triggeredAt
     valueType: datetime
     required: false
@@ -124,6 +140,9 @@ fields:
     persisted:
       column: triggered_at
       storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
   - key: triggeredBy
     valueType: string
     required: false
@@ -153,6 +172,129 @@ relationships:
     label:
       en: Produced invoice
       nl: Geproduceerde factuur
+ui:
+  routes:
+    list:
+      en: /agreement-milestones
+      nl: /overeenkomstmijlpalen
+    detail:
+      en: /agreement-milestones/:id
+      nl: /overeenkomstmijlpalen/:id
+    create:
+      en: /agreement-milestones/create
+      nl: /overeenkomstmijlpalen/aanmaken
+    edit:
+      en: /agreement-milestones/:id/edit
+      nl: /overeenkomstmijlpalen/:id/bewerken
+    delete:
+      en: /agreement-milestones/:id/delete
+      nl: /overeenkomstmijlpalen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Agreement milestones
+        nl: Overeenkomstmijlpalen
+      columns:
+        - key: description
+          sortable: true
+        - key: status
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: expectedAt
+          sortable: true
+        - key: triggeredAt
+          sortable: true
+      defaultSort:
+        key: triggeredAt
+        direction: desc
+      rowLink:
+        en: /agreement-milestones/:id
+        nl: /overeenkomstmijlpalen/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Milestone details
+                nl: Mijlpaalgegevens
+              fields:
+                - description
+                - status
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - basisAmount
+                - percentOfBasis
+                - amount
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - expectedAt
+            - title:
+                en: Trigger
+                nl: Trigger
+              fields:
+                - triggeredAt
+                - triggeredBy
+    form:
+      variants:
+        create:
+          title:
+            en: Create agreement milestone
+            nl: Overeenkomstmijlpaal aanmaken
+          groups:
+            - title:
+                en: Milestone details
+                nl: Mijlpaalgegevens
+              fields:
+                - description
+                - status
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - basisAmount
+                - percentOfBasis
+                - amount
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - expectedAt
+            - title:
+                en: Trigger
+                nl: Trigger
+              fields:
+                - triggeredAt
+                - triggeredBy
+        edit:
+          extends: create
+          title:
+            en: Edit agreement milestone
+            nl: Overeenkomstmijlpaal bewerken
+workflow:
+  nodes:
+    actions:
+      getOne: true
+      list: true
+      update: true
 authorization:
   roles:
     read:
@@ -167,106 +309,3 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
-operations:
-  list:
-    name: { en: List agreement milestones, nl: Overeenkomstmijlpalen tonen }
-    description:
-      en: Returns a filtered and sorted page of agreement milestones.
-      nl: Geeft een gefilterde en gesorteerde pagina met overeenkomstmijlpalen terug.
-    implementation: { type: entity, action: list }
-    effects: { data: read, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    confirmation: { mode: none }
-  get:
-    name: { en: Get agreement milestone, nl: Overeenkomstmijlpaal ophalen }
-    description:
-      en: Returns one agreement milestone by its canonical id.
-      nl: Geeft één overeenkomstmijlpaal terug op basis van het canonieke id.
-    implementation: { type: entity, action: get }
-    effects: { data: read, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    confirmation: { mode: none }
-  update:
-    name: { en: Update agreement milestone, nl: Overeenkomstmijlpaal wijzigen }
-    description:
-      en: Updates one agreement milestone while holding its server-issued edit lease and current version.
-      nl: Wijzigt één overeenkomstmijlpaal met de server-uitgegeven bewerkingslease en actuele versie.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability:
-      idempotency: { mode: none }
-    concurrency:
-      version: { mode: required, field: updatedAt }
-      editLease: { mode: required, expiresAfterInactivity: PT15M }
-    confirmation: { mode: none }
-  delete:
-    name: { en: Delete agreement milestone, nl: Overeenkomstmijlpaal verwijderen }
-    description:
-      en: Permanently deletes one agreement milestone after a server-issued, version-bound confirmation challenge.
-      nl: Verwijdert één overeenkomstmijlpaal definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
-    implementation: { type: entity, action: delete }
-    effects: { data: delete, external: none }
-    reliability:
-      idempotency: { mode: natural }
-    concurrency:
-      version: { mode: required, field: updatedAt }
-      editLease: { mode: required, expiresAfterInactivity: PT15M }
-    confirmation:
-      mode: challenge
-      challenge:
-        kind: type-current-field
-        field: description
-        issuedBy: server
-        bindTo: [subject, tenant, operation, target.id, target.version]
-        expiresAfter: PT5M
-        singleUse: true
-
-interfaces:
-  rest: {}
-  graphql: {}
-  mcp:
-    tools: generic
-  web:
-    views:
-      collection:
-        route: { en: /agreement-milestones, nl: /overeenkomstmijlpalen }
-        title: { en: Agreement milestones, nl: Overeenkomstmijlpalen }
-        columns:
-          - { key: description, sortable: true }
-          - { key: status, sortable: true }
-          - { key: amount, sortable: true }
-          - { key: expectedAt, sortable: true }
-          - { key: triggeredAt, sortable: true }
-        defaultSort: { key: triggeredAt, direction: desc }
-      record:
-        routes:
-          read: { en: /agreement-milestones/:id, nl: /overeenkomstmijlpalen/:id }
-        title: "{{description}}"
-        subtitle: "{{amount}}"
-        actions: [update, delete]
-        layout:
-          context:
-            fields: [status, amount, expectedAt]
-            relationships: [agreement, producedInvoice]
-          tabs:
-            - id: overview
-              label: { en: Overview, nl: Overzicht }
-              groups:
-                - title: { en: Milestone details, nl: Mijlpaalgegevens }
-                  fields: [description, status]
-                - title: { en: Amounts, nl: Bedragen }
-                  fields: [basisAmount, percentOfBasis, amount]
-                - title: { en: Planning and execution, nl: Planning en uitvoering }
-                  fields: [expectedAt, triggeredAt, triggeredBy]
-        modes:
-          update:
-            title: { en: Update agreement milestone, nl: Overeenkomstmijlpaal wijzigen }
-            groups:
-              - title: { en: Milestone details, nl: Mijlpaalgegevens }
-                fields: [description, status]
-              - title: { en: Planning, nl: Planning }
-                fields: [expectedAt]
-              - title: { en: Trigger, nl: Trigger }
-                fields: [triggeredAt, triggeredBy]

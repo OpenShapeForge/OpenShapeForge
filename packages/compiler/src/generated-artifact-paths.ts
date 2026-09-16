@@ -31,10 +31,6 @@ export const compilerOwnedGeneratedRoots = [
   // Canonical plugin operations projected into REST, MCP, GraphQL, and
   // generated clients. Always emitted so runtime imports stay unconditional.
   "apps/api/src/generated/operations",
-  // Shared build-time authoring registries and canonical expression helpers.
-  // These are interface-neutral inputs consumed by host adapters rather than
-  // implementation code owned by a particular web application.
-  "apps/api/src/generated/compiler",
   // Optional immutable DDL contributed by compiler plugins. The registry is
   // absent when no plugin uses this contract and must not linger after the
   // final contribution is removed.

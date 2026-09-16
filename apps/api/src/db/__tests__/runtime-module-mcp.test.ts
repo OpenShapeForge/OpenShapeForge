@@ -6,6 +6,7 @@ import { sql, type Kysely } from "kysely";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { DB } from "../../generated/db/types.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import { createDatabaseRuntime } from "../connection.js";
@@ -29,6 +30,7 @@ import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 // The public plugin keeps its database generic unbound; the API runtime
 // specializes the same contract to the generated DB at its loader boundary.
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -857,7 +859,7 @@ describe("generated MCP runtime module security boundary", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [documentsRuntime, workflowModule, module],
+          modules: [documentsRuntime, versioningRuntime, workflowModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,
@@ -1492,7 +1494,7 @@ describe("generated MCP runtime module security boundary", () => {
             .not.toContain("public_read");
           const directExecutor = createRuntimeDeclarativeServiceExecutor({
             db,
-            modules: [documentsRuntime, workflowModule, module],
+            modules: [documentsRuntime, versioningRuntime, workflowModule, module],
             modulePlatform: platform,
             egressOwner: module.egress,
             tablesForTests: tables,

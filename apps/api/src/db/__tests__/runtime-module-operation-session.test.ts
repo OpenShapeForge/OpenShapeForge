@@ -2,6 +2,7 @@
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import { OperationFailure } from "@openshapeforge/operations";
+import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -41,6 +42,7 @@ import { APP_ROLE } from "../migrations/app-role.js";
 // The public plugin keeps its database generic unbound; the API runtime
 // specializes the same contract to the generated DB at its loader boundary.
 const documentsRuntime = documentsPluginRuntime as unknown as RuntimeModule;
+const versioningRuntime = versioningPluginRuntime as unknown as RuntimeModule;
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -471,7 +473,7 @@ describe("canonical operation database sessions", () => {
 
           const graphqlPlatform = new ModulePlatformRuntime(db);
           const schema = buildGraphqlSchema(
-            [documentsRuntime, module],
+            [documentsRuntime, versioningRuntime, module],
             { db, platform: graphqlPlatform.services },
           );
           const graphqlResult = await graphql({
@@ -493,7 +495,7 @@ describe("canonical operation database sessions", () => {
           const server = __buildGeneratedMcpServerForTests({
             db,
             session: verifiedSession,
-            modules: [documentsRuntime, module],
+            modules: [documentsRuntime, versioningRuntime, module],
             modulePlatform: mcpPlatform,
           });
           const client = new Client(

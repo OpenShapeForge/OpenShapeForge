@@ -170,10 +170,10 @@ export type WebCollectionView = {
   modes: readonly ["read"];
   route: string;
   operations: {
-    read: WebOperationRef | WebStandaloneOperationRef;
-    create?: WebOperationRef | WebStandaloneOperationRef;
+    read: WebOperationRef;
+    create?: WebOperationRef;
     /** Ordered server-authored collection actions shown by the browser. */
-    actions?: Array<WebCustomOperationRef | WebStandaloneOperationRef>;
+    actions?: WebCustomOperationRef[];
   };
   title: LocalizedText;
   searchPlaceholder: LocalizedText;
@@ -229,12 +229,12 @@ export type WebRecordView = {
     create?: string;
   };
   operations: {
-    read?: WebOperationRef | WebStandaloneOperationRef;
-    create?: WebOperationRef | WebStandaloneOperationRef;
-    update?: WebOperationRef | WebStandaloneOperationRef;
-    delete?: WebOperationRef | WebStandaloneOperationRef;
+    read?: WebOperationRef;
+    create?: WebOperationRef;
+    update?: WebOperationRef;
+    delete?: WebOperationRef;
     /** Ordered server-authored record actions shown by the browser. */
-    actions?: Array<WebCustomOperationRef | WebStandaloneOperationRef>;
+    actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
   /** Authored form layout retained even when standalone create is unavailable. */
@@ -263,7 +263,7 @@ export type WebEntityInterface = {
   entitySlug: string;
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
-  operations: Record<string, WebOperationRef | WebCustomOperationRef | WebStandaloneOperationRef>;
+  operations: Record<string, WebOperationRef | WebCustomOperationRef>;
   /**
    * A provider-backed entity read through canonical module Operations rather
    * than generated SQL CRUD. The normal entity/view model remains intact;

@@ -967,7 +967,7 @@ function projectStandalone(
           } } : {}),
         },
         relationships: {},
-      };
+      } as unknown as WebEntityInterface;
     }
   }
   if (catalogs.length === 0) return undefined;

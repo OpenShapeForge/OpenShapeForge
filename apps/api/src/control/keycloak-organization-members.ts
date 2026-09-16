@@ -117,6 +117,8 @@ export type KeycloakOrganizationInvitation = {
 };
 
 export type KeycloakOrganizationMembersClient = {
+  /** Whether this address already belongs to the organization, compared case-insensitively. */
+  hasMemberByEmail(organizationId: string, email: string): Promise<boolean>;
   /**
    * Invite `input.email` into the organization. Resolves on Keycloak's `204`;
    * throws {@link KeycloakAdminError} otherwise, including
@@ -417,6 +419,32 @@ export function createKeycloakOrganizationMembersClient(
   }
 
   return {
+    async hasMemberByEmail(organizationId, email) {
+      const wanted = normalizeEmail(email);
+      if (wanted.length === 0) return false;
+      for (let first = 0; first < 10000; first += 100) {
+        const { body } = await request(
+          `${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`,
+          { method: "GET" },
+          "checking organization membership",
+          "list_organization_members",
+        );
+        if (!Array.isArray(body)) {
+          throw new KeycloakAdminError(
+            "KEYCLOAK_ADMIN_UNAVAILABLE",
+            "Invalid organization member response.",
+          );
+        }
+        if (body.some((row) =>
+          typeof row?.email === "string" && normalizeEmail(row.email) === wanted
+        )) return true;
+        if (body.length < 100) return false;
+      }
+      throw new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_UNAVAILABLE",
+        "Organization member listing exceeds the supported bound.",
+      );
+    },
     async listMembers(organizationId, clientId) {
       const clientUuid = await roleClientUuid(clientId);
       const members: KeycloakOrganizationMember[] = [];

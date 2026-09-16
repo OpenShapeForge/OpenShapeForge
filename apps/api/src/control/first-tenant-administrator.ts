@@ -85,9 +85,19 @@ export async function inviteFirstTenantAdministrator(
       const admins = await clients.members.organizationAdministrators(organization.id, memberRoleClientId(), IDENTITY_LINK_ADMIN_ROLE);
       if (admins.some(a => a.email?.toLowerCase() !== email))
         throw new FirstAdministratorError("FIRST_ADMIN_ALREADY_ASSIGNED", "This organization already has an administrator.");
-      if (admins.length) return { tenant: input.slug, email, role: "org_admin", status: "already_admin" };
       const previous = prior.find(p => p.email.toLowerCase() === email);
       if (previous?.status === "accepted") return { tenant: input.slug, ...toInvitation(previous) };
+      if (admins.length) {
+        // Keycloak membership and its role do not create the OSF Relation or
+        // identity link required by tenant admission. Record the same local
+        // intent as an e-mailed invitation, without sending redundant mail;
+        // first sign-in will consume it and converge both identity stores.
+        if (previous) return { tenant: input.slug, ...toInvitation(previous) };
+        const invitation = await recordEmployeeInvitation(
+          trx, tenant.id, actor, { email, role: "org_admin" },
+        );
+        return { tenant: input.slug, ...invitation };
+      }
       const pending = await clients.members.findPendingInvitationByEmail(organization.id, email);
       if (pending && previous) return { tenant: input.slug, ...toInvitation(previous) };
       if (!pending) {

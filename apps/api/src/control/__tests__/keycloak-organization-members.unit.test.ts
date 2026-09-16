@@ -447,6 +447,25 @@ describe("cancelling an invitation", () => {
 });
 
 describe("tenant member and credential administration", () => {
+  it("finds an existing organization member by e-mail without reading roles", async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.includes("first=0")) {
+        return Response.json(Array.from({ length: 100 }, (_, index) => ({
+          id: `member-${index}`,
+          email: index === 99 ? "Hans@Example.com" : `person-${index}@example.com`,
+        })));
+      }
+      return Response.json([]);
+    });
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+
+    await expect(client.hasMemberByEmail("acme", " hans@example.COM ")).resolves.toBe(true);
+    await expect(client.hasMemberByEmail("acme", "absent@example.com")).resolves.toBe(false);
+    expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=100&max=100")))
+      .toBe(true);
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
+  });
+
   it("lists only members of the named organization with their effective client roles", async () => {
     const { fetch, calls } = stubFetch((url) => {
       if (url.includes("/clients?clientId=")) return Response.json([{ id: "client-uuid", clientId: "hubble-api" }]);

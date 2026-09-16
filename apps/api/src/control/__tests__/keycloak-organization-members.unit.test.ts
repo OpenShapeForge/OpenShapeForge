@@ -446,6 +446,52 @@ describe("cancelling an invitation", () => {
   });
 });
 
+describe("tenant member and credential administration", () => {
+  it("lists only members of the named organization with their effective client roles", async () => {
+    const { fetch, calls } = stubFetch((url) => {
+      if (url.includes("/clients?clientId=")) return Response.json([{ id: "client-uuid", clientId: "hubble-api" }]);
+      if (url.includes("/organizations/acme/members?")) return Response.json([{
+        id: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
+        enabled: true, emailVerified: true,
+      }]);
+      if (url.includes("/role-mappings/clients/client-uuid/composite")) return Response.json([{ name: "org_admin" }]);
+      return Response.json([]);
+    });
+    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme", "hubble-api");
+    expect(members).toEqual([{
+      memberId: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
+      enabled: true, emailVerified: true, roles: ["org_admin"],
+    }]);
+    expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=0&max=100"))).toBe(true);
+  });
+
+  it("returns safe credential metadata and never provider secrets", async () => {
+    const { fetch } = stubFetch((url) => url.endsWith("/users/member-1/credentials")
+      ? Response.json([{ id: "credential-1", type: "webauthn-passwordless", userLabel: "MacBook", createdDate: 123, secretData: "private" }])
+      : Response.json([]));
+    const credentials = await createKeycloakOrganizationMembersClient(config, { fetch }).listCredentials("member-1");
+    expect(credentials).toEqual([{ credentialId: "credential-1", type: "webauthn-passwordless", label: "MacBook", createdAt: 123 }]);
+    expect(JSON.stringify(credentials)).not.toContain("private");
+  });
+
+  it("sends only the fixed passwordless registration action with a short lifetime", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 204 }));
+    await createKeycloakOrganizationMembersClient(config, { fetch }).sendPasskeyRecovery("member/1");
+    expect(calls[1]!.url).toEndWith("/users/member%2F1/execute-actions-email?lifespan=900");
+    expect(calls[1]!.init.method).toBe("PUT");
+    expect(calls[1]!.init.body).toBe('["webauthn-register-passwordless"]');
+  });
+
+  it("removes only the organization membership and treats an absent credential as converged", async () => {
+    const { fetch, calls } = stubFetch(() => new Response(null, { status: 404 }));
+    const client = createKeycloakOrganizationMembersClient(config, { fetch });
+    await expect(client.removeMember("acme", "member-1")).resolves.toBe(false);
+    await expect(client.deleteCredential("member-1", "credential-1")).resolves.toBe(false);
+    expect(calls[1]!.url).toEndWith("/organizations/acme/members/member-1");
+    expect(calls[2]!.url).toEndWith("/users/member-1/credentials/credential-1");
+  });
+});
+
 describe("finding a pending invitation by e-mail", () => {
   it("matches case-insensitively, the way the realm treats the address", async () => {
     const { fetch } = stubFetch(() => Response.json([invitationRow]));

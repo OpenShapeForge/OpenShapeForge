@@ -34,12 +34,12 @@ function assertWebInterface(path: string, catalog: OperationCatalogDefinition): 
   if (!web) return;
   const landingByPage = new Map<string, string>();
   const populatedPages = new Set<string>();
-  for (const [key, placement] of Object.entries(web.operations)) {
+  for (const [key, placement] of Object.entries(web.operations ?? {})) {
     const operation = catalog.operations[key];
     if (!operation) {
       throw new Error(`${path} interfaces.web places unknown operation "${key}".`);
     }
-    if (!web.pages[placement.page]) {
+    if (!web.pages?.[placement.page]) {
       throw new Error(
         `${path} interfaces.web places operation "${key}" on unknown page "${placement.page}".`,
       );
@@ -62,9 +62,43 @@ function assertWebInterface(path: string, catalog: OperationCatalogDefinition): 
     }
     landingByPage.set(placement.page, key);
   }
-  for (const page of Object.keys(web.pages)) {
+  for (const page of Object.keys(web.pages ?? {})) {
     if (!populatedPages.has(page)) {
       throw new Error(`${path} interfaces.web page "${page}" has no operations.`);
+    }
+  }
+  const entityOperations = new Map<string, string>();
+  for (const [entityName, entity] of Object.entries(web.entities ?? {})) {
+    if (!entity.fields.includes(entity.idField) || !entity.fields.includes(entity.displayField)) {
+      throw new Error(`${path} interfaces.web entity "${entityName}" must include idField and displayField in fields.`);
+    }
+    for (const column of entity.columns) {
+      if (!entity.fields.includes(column)) {
+        throw new Error(`${path} interfaces.web entity "${entityName}" column "${column}" is not in fields.`);
+      }
+    }
+    const placements = [
+      entity.operations.list.operation,
+      ...(entity.operations.get ? [entity.operations.get.operation] : []),
+      ...(entity.operations.collectionActions ?? []),
+      ...(entity.operations.recordActions ?? []),
+    ];
+    for (const key of placements) {
+      if (!catalog.operations[key]) {
+        throw new Error(`${path} interfaces.web entity "${entityName}" references unknown operation "${key}".`);
+      }
+      const previous = entityOperations.get(key);
+      if (previous && previous !== entityName) {
+        throw new Error(`${path} interfaces.web operation "${key}" is placed on both entities "${previous}" and "${entityName}".`);
+      }
+      entityOperations.set(key, entityName);
+    }
+  }
+  for (const [entityName, entity] of Object.entries(web.entities ?? {})) {
+    for (const related of entity.related ?? []) {
+      if (!web.entities?.[related.entity]) {
+        throw new Error(`${path} interfaces.web entity "${entityName}" relates to unknown entity "${related.entity}".`);
+      }
     }
   }
 }

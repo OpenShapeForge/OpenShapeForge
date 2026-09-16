@@ -791,6 +791,7 @@ function pageOperationOrder(
 type ProjectedStandalone = {
   operations: Record<string, WebStandaloneOperationRef>;
   pages: Record<string, WebPage>;
+  entities: Record<string, WebEntityInterface>;
   /** Authored copy the strict-host translation check inspects. */
   metadata: { path: string; value: unknown }[];
 };
@@ -805,6 +806,7 @@ function projectStandalone(
 ): ProjectedStandalone | undefined {
   const operations: Record<string, WebStandaloneOperationRef> = {};
   const pages: Record<string, WebPage> = {};
+  const entities: Record<string, WebEntityInterface> = {};
   const metadata: ProjectedStandalone["metadata"] = [];
   const refsByPage = new Map<string, WebStandaloneOperationRef[]>();
   const pageOwner = new Map<string, string>();
@@ -814,7 +816,43 @@ function projectStandalone(
     .sort((left, right) => left.plugin.localeCompare(right.plugin));
   for (const catalog of catalogs) {
     const web = catalog.interfaces.web!;
-    for (const [pageId, page] of Object.entries(web.pages).sort(([left], [right]) => left.localeCompare(right))) {
+    const operationRef = (key: string): WebStandaloneOperationRef => {
+      const definition = catalog.operations[key]!;
+      const id = moduleOperationId(catalog, key, definition);
+      const compiled = compiledByKey.get(id);
+      if (!compiled || compiled.plugin !== catalog.plugin) {
+        throw new Error(
+          `Standalone Operation "${id}" has a web placement but no compiled contract; ` +
+            "pass the catalog's lowered operations alongside the catalog.",
+        );
+      }
+      const placement = web.operations?.[key];
+      return {
+        id,
+        intent: "invoke",
+        key,
+        name: localized(definition.name, key),
+        description: localized(definition.description, ""),
+        input: { kind: "json-schema", schema: definition.input!.schema },
+        output: { kind: "json-schema", schema: definition.output!.schema },
+        effects: definition.effects,
+        reliability: {
+          idempotency: {
+            mode: definition.reliability.idempotency.mode,
+            ...(definition.reliability.idempotency.inputField
+              ? { inputField: definition.reliability.idempotency.inputField }
+              : {}),
+          },
+        },
+        confirmation: definition.confirmation,
+        rest: compiled.transports.rest,
+        auth: standaloneAuth(compiled),
+        page: placement?.page ?? `entity:${key}`,
+        ...(placement?.landing ? { landing: true } : {}),
+        ...(placement?.order !== undefined ? { order: placement.order } : {}),
+      };
+    };
+    for (const [pageId, page] of Object.entries(web.pages ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
       // Page ids are routes, and routes are global: two catalogs cannot each
       // own `/tenants`.
       const owner = pageOwner.get(pageId);
@@ -835,43 +873,101 @@ function projectStandalone(
       };
       metadata.push({ path: `${catalog.plugin}.pages.${pageId}`, value: page });
     }
-    for (const [key, placement] of Object.entries(web.operations).sort(([left], [right]) => left.localeCompare(right))) {
+    for (const [key, placement] of Object.entries(web.operations ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+      const ref = operationRef(key);
+      const id = ref.id;
       const definition = catalog.operations[key]!;
-      const id = moduleOperationId(catalog, key, definition);
-      const compiled = compiledByKey.get(id);
-      if (!compiled || compiled.plugin !== catalog.plugin) {
-        throw new Error(
-          `Standalone Operation "${id}" has a web placement but no compiled contract; ` +
-            "pass the catalog's lowered operations alongside the catalog.",
-        );
-      }
-      const ref: WebStandaloneOperationRef = {
-        id,
-        intent: "invoke",
-        key,
-        name: localized(definition.name, key),
-        description: localized(definition.description, ""),
-        input: { kind: "json-schema", schema: definition.input!.schema },
-        output: { kind: "json-schema", schema: definition.output!.schema },
-        effects: definition.effects,
-        reliability: {
-          idempotency: {
-            mode: definition.reliability.idempotency.mode,
-            ...(definition.reliability.idempotency.inputField
-              ? { inputField: definition.reliability.idempotency.inputField }
-              : {}),
-          },
-        },
-        confirmation: definition.confirmation,
-        rest: compiled.transports.rest,
-        auth: standaloneAuth(compiled),
-        page: placement.page,
-        ...(placement.landing ? { landing: true } : {}),
-        ...(placement.order !== undefined ? { order: placement.order } : {}),
-      };
       operations[id] = ref;
       refsByPage.set(placement.page, [...(refsByPage.get(placement.page) ?? []), ref]);
       metadata.push({ path: id, value: { name: definition.name, description: definition.description } });
+    }
+
+    for (const [entityName, entity] of Object.entries(web.entities ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+      const operationKeys = [
+        entity.operations.list.operation,
+        ...(entity.operations.get ? [entity.operations.get.operation] : []),
+        ...(entity.operations.collectionActions ?? []),
+        ...(entity.operations.recordActions ?? []),
+      ];
+      const refs = Object.fromEntries(operationKeys.map((key) => {
+        const ref = operationRef(key);
+        operations[ref.id] = ref;
+        const definition = catalog.operations[key]!;
+        metadata.push({ path: ref.id, value: { name: definition.name, description: definition.description } });
+        return [key, ref];
+      })) as Record<string, WebStandaloneOperationRef>;
+      const listDefinition = catalog.operations[entity.operations.list.operation]!;
+      const listSchema = listDefinition.output!.schema as { properties?: Record<string, unknown> };
+      const resultSchema = listSchema.properties?.[entity.operations.list.resultField] as {
+        type?: string; items?: { properties?: Record<string, Record<string, unknown>> };
+      } | undefined;
+      const recordProperties = resultSchema?.type === "array" ? resultSchema.items?.properties : undefined;
+      if (!recordProperties) {
+        throw new Error(`Operation-backed entity "${entityName}" list result "${entity.operations.list.resultField}" must be an array of objects with properties.`);
+      }
+      const fields = Object.fromEntries(entity.fields.map((key) => {
+        const schema = recordProperties[key];
+        if (!schema) throw new Error(`Operation-backed entity "${entityName}" field "${key}" is absent from its list result schema.`);
+        const title = (schema["x-osf-i18n"] as { title?: CompiledLocalizedText } | undefined)?.title;
+        const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
+        return [key, {
+          id: `${entityName}.${key}`,
+          key,
+          label: localized(title, key),
+          description: localized(undefined, ""),
+          valueType: typeof rawType === "string" ? rawType : "string",
+          cardinality: "one" as const,
+          required: false,
+          supports: { read: true, create: false, update: false },
+        }];
+      }));
+      const listRef = refs[entity.operations.list.operation]!;
+      const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
+      const recordActions = (entity.operations.recordActions ?? []).map((key) => refs[key]!);
+      const collectionActions = (entity.operations.collectionActions ?? []).map((key) => refs[key]!);
+      const recordRoute = entity.recordRoute ?? `${entity.route}/:${entity.idField}`;
+      entities[entityName] = {
+        entityId: entityName,
+        entitySlug: entity.route.replace(/^\//, ""),
+        title: localized(entity.title, entityName),
+        displayTemplate: `{{${entity.displayField}}}`,
+        fields,
+        operations: Object.fromEntries(Object.values(refs).map((ref) => [ref.key, ref])),
+        operationSource: {
+          idField: entity.idField,
+          collection: {
+            resultField: entity.operations.list.resultField,
+            ...(entity.operations.list.bindings ? { bindings: entity.operations.list.bindings } : {}),
+          },
+          ...(entity.operations.get ? { record: {
+            ...(entity.operations.get.resultField ? { resultField: entity.operations.get.resultField } : {}),
+            ...(entity.operations.get.bindings ? { bindings: entity.operations.get.bindings } : {}),
+          } } : {}),
+          ...(entity.related?.length ? { related: entity.related.map((item) => ({
+            entityId: item.entity, label: localized(item.label, item.entity), route: item.route,
+          })) } : {}),
+        },
+        views: {
+          collection: {
+            id: `${entityName}.collection`, kind: "collection", renderer: "operation.entity.collection", modes: ["read"],
+            route: entity.route,
+            operations: { read: listRef, ...(collectionActions.length ? { actions: collectionActions } : {}) },
+            title: localized(entity.title, entityName),
+            searchPlaceholder: localized(undefined, `Search ${entityName}`),
+            displayField: entity.displayField,
+            columns: entity.columns.map((key) => ({ fieldId: `${entityName}.${key}`, key, label: fields[key]!.label })),
+          },
+          ...(getRef ? { record: {
+            id: `${entityName}.record`, kind: "record", renderer: "operation.entity.record", preset: "inbox-main-context",
+            modes: ["read"], routes: { read: recordRoute },
+            operations: { read: getRef, ...(recordActions.length ? { actions: recordActions } : {}) },
+            titleTemplate: `{{${entity.displayField}}}`,
+            layout: { tabs: [{ id: "overview", label: localized(undefined, "Overview"), groups: [{ id: "overview", title: localized(undefined, "Overview"), fields: entity.fields }] }], context: { groups: [], relationships: [] } },
+            labels: {},
+          } } : {}),
+        },
+        relationships: {},
+      };
     }
   }
   if (catalogs.length === 0) return undefined;
@@ -879,6 +975,7 @@ function projectStandalone(
   return {
     operations: Object.fromEntries(Object.entries(operations).sort(([left], [right]) => left.localeCompare(right))),
     pages,
+    entities,
     metadata,
   };
 }
@@ -915,6 +1012,9 @@ export function buildWebManifest(
   const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
   const projected = projectable.map((entity) => projectEntity(entity, byName));
   const pages = projectStandalone(standalone);
+  for (const entityId of Object.keys(pages?.entities ?? {})) {
+    if (projected.some((entity) => entity.entityId === entityId)) throw new Error(`Duplicate web entity id "${entityId}".`);
+  }
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {
@@ -925,6 +1025,7 @@ export function buildWebManifest(
   }
   const schemaOperations = [
     ...projected.flatMap((entity) => Object.values(entity.operations)),
+    ...Object.values(pages?.entities ?? {}).flatMap((entity) => Object.values(entity.operations)),
     ...Object.values(pages?.operations ?? {}),
   ];
   if (resolved.requireTranslations) for (const operation of schemaOperations) {
@@ -938,7 +1039,10 @@ export function buildWebManifest(
     contract: "openshapeforge.web-manifest",
     version: 1,
     locale: resolved.locale,
-    entities: Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
+    entities: {
+      ...Object.fromEntries(projected.map((entity) => [entity.entityId, entity])),
+      ...(pages?.entities ?? {}),
+    },
     ...(pages ? { operations: pages.operations, pages: pages.pages } : {}),
     ...(definitions.length ? { entityValueDefinitions } : {}),
   };

@@ -170,10 +170,10 @@ export type WebCollectionView = {
   modes: readonly ["read"];
   route: string;
   operations: {
-    read: WebOperationRef;
-    create?: WebOperationRef;
+    read: WebOperationRef | WebStandaloneOperationRef;
+    create?: WebOperationRef | WebStandaloneOperationRef;
     /** Ordered server-authored collection actions shown by the browser. */
-    actions?: WebCustomOperationRef[];
+    actions?: Array<WebCustomOperationRef | WebStandaloneOperationRef>;
   };
   title: LocalizedText;
   searchPlaceholder: LocalizedText;
@@ -229,12 +229,12 @@ export type WebRecordView = {
     create?: string;
   };
   operations: {
-    read?: WebOperationRef;
-    create?: WebOperationRef;
-    update?: WebOperationRef;
-    delete?: WebOperationRef;
+    read?: WebOperationRef | WebStandaloneOperationRef;
+    create?: WebOperationRef | WebStandaloneOperationRef;
+    update?: WebOperationRef | WebStandaloneOperationRef;
+    delete?: WebOperationRef | WebStandaloneOperationRef;
     /** Ordered server-authored record actions shown by the browser. */
-    actions?: WebCustomOperationRef[];
+    actions?: Array<WebCustomOperationRef | WebStandaloneOperationRef>;
   };
   titleTemplate: string;
   /** Authored form layout retained even when standalone create is unavailable. */
@@ -263,7 +263,30 @@ export type WebEntityInterface = {
   entitySlug: string;
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
-  operations: Record<string, WebOperationRef | WebCustomOperationRef>;
+  operations: Record<string, WebOperationRef | WebCustomOperationRef | WebStandaloneOperationRef>;
+  /**
+   * A provider-backed entity read through canonical module Operations rather
+   * than generated SQL CRUD. The normal entity/view model remains intact;
+   * this block only tells a generic renderer how to bind routes and unwrap the
+   * bounded provider response.
+   */
+  operationSource?: {
+    idField: string;
+    collection: {
+      resultField: string;
+      /** Operation input field -> route parameter. Equal names need no entry. */
+      bindings?: Record<string, string>;
+    };
+    record?: {
+      resultField?: string;
+      bindings?: Record<string, string>;
+    };
+    related?: Array<{
+      entityId: string;
+      label: LocalizedText;
+      route: string;
+    }>;
+  };
   /** Authored Operations that cannot be submitted through the generic interface yet. */
   unsupportedOperations?: Partial<Record<WebOperationIntent, { code: string; message: string }>>;
   views: {
@@ -285,6 +308,7 @@ export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "t
     | { mode: "public" }
     | { mode: "session"; roles?: readonly string[]; scopes?: readonly string[] }
     | { mode: "control"; roles: readonly string[] };
+  prerequisites?: readonly WebOperationPrerequisite[];
   page: string;
   landing?: boolean;
   order?: number;

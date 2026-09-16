@@ -185,9 +185,14 @@ function translate(error: unknown): never {
 // ── tenants, by slug ────────────────────────────────────────────────────────
 
 export type PlatformTenant = {
+  id: string;
   slug: string;
   name: string;
   status: string;
+  tenantKind: "standard" | "blueprint";
+  relationId: string | null;
+  relationLabel: string | null;
+  keycloakOrganizationId: string | null;
   /** The Keycloak Organization alias — the tenant slug — or null before provisioning linked one. */
   organizationAlias: string | null;
   installedEntries: number;
@@ -201,23 +206,39 @@ type TenantRow = {
   name: string;
   status: string;
   keycloak_organization_id: string | null;
+  relation_id: string | null;
+  relation_label: string | null;
+  blueprint_tenant: boolean;
 };
 
 async function tenantRows(trx: Transaction<DB>): Promise<TenantRow[]> {
   const result = await sql<TenantRow>`
-    select id::text as id, slug, name, status, keycloak_organization_id
-      from platform.tenants
-     where ${hostTenantFilter()}
-     order by slug
+    select tenant.id::text as id, tenant.slug, tenant.name, tenant.status,
+           tenant.keycloak_organization_id, tenant.relation_id::text as relation_id,
+           relation.display_name as relation_label,
+           exists (
+             select 1 from platform.blueprint_libraries source
+              where source.blueprint_tenant_id = tenant.id
+           ) as blueprint_tenant
+      from platform.tenants tenant
+      left join erp.relations relation
+        on relation.id = tenant.relation_id and relation.tenant_id = tenant.id
+     where ${hostTenantFilter("tenant.keycloak_realm")}
+     order by tenant.slug
   `.execute(trx);
   return result.rows;
 }
 
 function toPlatformTenant(row: TenantRow, summary: TenantInstallationSummary | undefined): PlatformTenant {
   return {
+    id: row.id,
     slug: row.slug,
     name: row.name,
     status: row.status,
+    tenantKind: row.blueprint_tenant ? "blueprint" : "standard",
+    relationId: row.relation_id,
+    relationLabel: row.relation_label,
+    keycloakOrganizationId: row.keycloak_organization_id,
     organizationAlias: row.keycloak_organization_id ? row.slug : null,
     installedEntries: summary?.installed ?? 0,
     overriddenEntries: summary?.overridden ?? 0,

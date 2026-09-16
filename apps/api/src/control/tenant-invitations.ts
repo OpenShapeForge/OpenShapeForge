@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
-import { toInvitation } from "../auth/employee-invitations.js";
+import { isEmployeeInvitationRole, normalisedEmail, recordEmployeeInvitation, toInvitation } from "../auth/employee-invitations.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
 import { FirstAdministratorError, invitationDeliveryUnconfirmed, type FirstAdministratorClients } from "./first-tenant-administrator.js";
@@ -15,10 +15,12 @@ type Dependencies = {
   correlationId?: string;
 };
 
-type InvitationAction = "list" | "revoke" | "resend";
-type Input = { slug: string; invitationId?: string };
+type InvitationAction = "list" | "get" | "create" | "revoke" | "resend";
+type Input = { slug: string; invitationId?: string; email?: string; role?: string; firstName?: string; lastName?: string };
 const AUDIT_ACTION: Readonly<Record<InvitationAction, string>> = {
   list: "control.list-tenant-invitations",
+  get: "control.get-tenant-invitation",
+  create: "control.create-tenant-invitation",
   revoke: "control.revoke-tenant-invitation",
   resend: "control.resend-tenant-invitation",
 };
@@ -32,7 +34,7 @@ export async function manageTenantInvitations(
   if (!/^[a-z][a-z0-9-]*$/.test(input.slug)) {
     throw new FirstAdministratorError("INVALID_INPUT", "A tenant slug is required.");
   }
-  if (action !== "list" && (!input.invitationId || !/^[a-zA-Z0-9_-]{1,128}$/.test(input.invitationId))) {
+  if (["get", "revoke", "resend"].includes(action) && (!input.invitationId || !/^[a-zA-Z0-9_-]{1,128}$/.test(input.invitationId))) {
     throw new FirstAdministratorError("INVALID_INPUT", "Use an invitationId from list_tenant_invitations.");
   }
   const clients = deps.firstAdministrator;
@@ -44,9 +46,12 @@ export async function manageTenantInvitations(
   }
 
   try {
+    const auditTarget = input.invitationId
+      ? `${input.slug} invitation="${input.invitationId}"`
+      : input.slug;
     return await withSystemSession(
       deps.db,
-      systemSessionForAdministrator(deps.administrator, `${AUDIT_ACTION[action]} ${input.slug}`),
+      systemSessionForAdministrator(deps.administrator, `${AUDIT_ACTION[action]} ${auditTarget}`),
       async (trx) => {
         const tenant = (await sql<{
           id: string;
@@ -99,6 +104,7 @@ export async function manageTenantInvitations(
             invitations: pending.map((invitation) => {
               const local = localFor(invitation.email);
               return {
+                tenantSlug: input.slug,
                 invitationId: invitation.id,
                 email: invitation.email,
                 firstName: invitation.firstName,
@@ -118,11 +124,35 @@ export async function manageTenantInvitations(
                 (row) => row.status === "pending" &&
                   !pending.some((invitation) => invitation.email.toLowerCase() === row.email.toLowerCase()),
               )
-              .map((row) => ({ ...toInvitation(row), status: "provider_missing" })),
+              .map((row) => ({ tenantSlug: input.slug, invitationId: row.id, ...toInvitation(row), status: "provider_missing" })),
           };
         }
 
+        if (action === "create") {
+          let email: string;
+          try { email = normalisedEmail(String(input.email ?? "")).toLowerCase(); }
+          catch { throw new FirstAdministratorError("INVALID_INPUT", "A valid email address is required."); }
+          if (!input.role || !isEmployeeInvitationRole(input.role)) throw new FirstAdministratorError("INVALID_INPUT", "role must be org_admin or org_employee.");
+          if (tenant.status !== "active" || !organization.enabled) throw new FirstAdministratorError("TENANT_NOT_READY", "Inviting requires an active tenant and organization.");
+          const existing = await clients.members.findPendingInvitationByEmail(organization.id, email);
+          if (!existing) {
+            if (!(await clients.members.hasInvitationMailConfiguration())) throw new FirstAdministratorError("SMTP_NOT_CONFIGURED", "Configure SMTP before sending invitations.");
+            await clients.members.inviteUser(organization.id, { email, ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) });
+          }
+          const invitation = await recordEmployeeInvitation(trx, tenant.id, `${deps.administrator.issuer}#${deps.administrator.subject}`,
+            { email, role: input.role, ...(input.firstName ? { firstName: input.firstName } : {}), ...(input.lastName ? { lastName: input.lastName } : {}) });
+          return { tenantSlug: input.slug, invitationId: existing?.id ?? invitation.id, ...invitation };
+        }
+
         const invitation = pending.find((row) => row.id === input.invitationId);
+        if (action === "get") {
+          if (!invitation) throw new FirstAdministratorError("INVITATION_NOT_FOUND", "This invitation is no longer outstanding in this organization.");
+          const local = localFor(invitation.email);
+          return { tenantSlug: input.slug, invitationId: invitation.id, email: invitation.email, firstName: invitation.firstName,
+            lastName: invitation.lastName, status: invitation.status, sentAt: invitation.sentDate, expiresAt: invitation.expiresAt,
+            role: local?.role ?? null, registrationStatus: local?.status ?? "untracked",
+            canResend: Boolean(local?.status === "pending" && tenant.status === "active" && organization.enabled) };
+        }
         if (!invitation && action === "revoke") {
           const unresolved = rows.find((row) => row.id === input.invitationId && row.status === "pending");
           if (

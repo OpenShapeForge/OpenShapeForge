@@ -905,6 +905,45 @@ const standalone = (catalog: OperationCatalogDefinition) => ({
 });
 
 describe("standalone Operation pages", () => {
+  test("projects provider-backed administration as normal list and detail entities", () => {
+    const operationEntities: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: {
+        ...controlCatalog.operations,
+        listTenants: {
+          ...controlCatalog.operations.listTenants!,
+          output: { schema: { type: "object", additionalProperties: false, properties: {
+            tenants: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+              slug: { type: "string", "x-osf-i18n": { title: text("Slug") } },
+              name: { type: "string", "x-osf-i18n": { title: text("Name", "Naam") } },
+            }, required: ["slug", "name"] }, "x-osf-i18n": { title: text("Tenants") } },
+          }, required: ["tenants"] } },
+        },
+      },
+      interfaces: { ...controlCatalog.interfaces, web: {
+        pages: {}, operations: {}, entities: {
+          Tenant: {
+            title: text("Tenants"), route: "/tenants", recordRoute: "/tenants/:slug",
+            idField: "slug", displayField: "name", fields: ["slug", "name"], columns: ["name", "slug"],
+            operations: { list: { operation: "listTenants", resultField: "tenants" }, get: { operation: "getTenant" }, recordActions: ["updateTenant"] },
+          },
+        },
+      } },
+    };
+    const manifest = buildWebManifest([], {}, standalone(operationEntities));
+    expect(manifest.entities.Tenant).toMatchObject({
+      entityId: "Tenant",
+      operationSource: { idField: "slug", collection: { resultField: "tenants" }, record: {} },
+      views: {
+        collection: { renderer: "operation.entity.collection", route: "/tenants", operations: { read: { id: "control.list-tenants" } } },
+        record: { renderer: "operation.entity.record", routes: { read: "/tenants/:slug" }, operations: {
+          read: { id: "control.get-tenant" }, actions: [{ id: "control.update-tenant" }],
+        } },
+      },
+    });
+    expect(manifest.entities.Tenant?.fields.name?.label).toEqual(text("Name", "Naam"));
+  });
+
   test("projects catalog pages and their Operations next to the entities", () => {
     const manifest = buildWebManifest([], {}, standalone(controlCatalog));
     expect(Object.keys(manifest.operations!)).toEqual([

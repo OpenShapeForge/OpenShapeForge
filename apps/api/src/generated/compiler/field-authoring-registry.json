@@ -9536,7 +9536,8 @@
           "key": "values",
           "semanticType": "entityValue",
           "entityValue": {
-            "definitionField": "definitionKey"
+            "definitionField": "definitionKey",
+            "parameterBindings": true
           },
           "required": true,
           "label": {

@@ -1174,7 +1174,52 @@ operations:
             x-osf-i18n:
               title: *id014
     output:
-      schema: *id004
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          entries:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+              properties:
+                kind:
+                  type: string
+                  enum: [service, adapter, capability]
+                  x-osf-i18n: { title: { en: Kind, nl: Soort } }
+                key:
+                  type: string
+                  x-osf-i18n: { title: { en: Key, nl: Sleutel } }
+                name:
+                  anyOf: [{ type: string }, { type: 'null' }]
+                  x-osf-i18n: { title: { en: Name, nl: Naam } }
+                latestVersion:
+                  type: integer
+                  x-osf-i18n: { title: { en: Latest version, nl: Nieuwste versie } }
+                authority:
+                  type: string
+                  enum: [platform_release, host, tenant_shared]
+                  x-osf-i18n: { title: { en: Authority, nl: Autoriteit } }
+                source:
+                  type: string
+                  x-osf-i18n: { title: { en: Source, nl: Bron } }
+                publishedAt:
+                  type: string
+                  format: date-time
+                  x-osf-i18n: { title: { en: Published at, nl: Gepubliceerd op } }
+                retired:
+                  type: boolean
+                  x-osf-i18n: { title: { en: Retired, nl: Ingetrokken } }
+                tenants:
+                  type: array
+                  items: { type: object, additionalProperties: true }
+                  x-osf-i18n: { title: { en: Tenant installations, nl: Tenantinstallaties } }
+              required: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+          nextCursor:
+            anyOf: [{ type: string }, { type: 'null' }]
+            x-osf-i18n: { title: { en: Next page, nl: Volgende pagina } }
+        required: [entries, nextCursor]
     auth:
       mode: control
       roles:
@@ -2067,12 +2112,6 @@ interfaces:
           nl: Organisaties
         icon: tree-structure
         order: 2
-      services:
-        title:
-          en: Services
-          nl: Services
-        icon: plugs-connected
-        order: 3
       notices:
         title:
           en: Update notices
@@ -2095,22 +2134,6 @@ interfaces:
       updateTenantOrganization:
         page: organizations
         order: 2
-      listCatalogEntries:
-        page: services
-        order: 0
-        landing: true
-      getCatalogEntry:
-        page: services
-        order: 1
-      publishCatalogEntry:
-        page: services
-        order: 2
-      retireCatalogEntry:
-        page: services
-        order: 3
-      applyCatalogUpdateForTenant:
-        page: services
-        order: 4
       listUpdateNotices:
         page: notices
         order: 0
@@ -2193,3 +2216,16 @@ interfaces:
           list: { operation: listTenantCredentials, resultField: credentials }
           get: { operation: getTenantCredential }
           recordActions: [revokeTenantCredential]
+      CatalogEntry:
+        title: { en: Services, nl: Services }
+        route: /services
+        recordRoute: /services/:kind/:key
+        idField: key
+        displayField: name
+        fields: [kind, key, name, latestVersion, authority, source, publishedAt, retired, tenants]
+        columns: [name, key, kind, latestVersion, authority, retired]
+        operations:
+          list: { operation: listCatalogEntries, resultField: entries }
+          get: { operation: getCatalogEntry }
+          collectionActions: [publishCatalogEntry]
+          recordActions: [publishCatalogEntry, retireCatalogEntry, applyCatalogUpdateForTenant]

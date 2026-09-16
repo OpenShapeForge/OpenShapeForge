@@ -33124,6 +33124,29 @@
           }
         },
         {
+          "key": "parameters",
+          "valueType": "object",
+          "semanticType": "fieldDefinition",
+          "cardinality": "collection",
+          "label": {
+            "en": "Local variables",
+            "nl": "Lokale variabelen"
+          },
+          "persisted": {
+            "column": "parameters",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "variants",
+          "semanticType": "TemplateVariant",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "template",
+            "ownership": "owned"
+          }
+        },
+        {
           "key": "versions",
           "label": {
             "en": "Versions",
@@ -33193,12 +33216,12 @@
       },
       "shape": [
         {
-          "key": "version",
+          "key": "template",
           "label": {
-            "en": "Template version",
-            "nl": "Templateversie"
+            "en": "Template",
+            "nl": "Template"
           },
-          "semanticType": "TemplateVersion",
+          "semanticType": "Template",
           "required": true,
           "immutable": true
         },
@@ -33323,15 +33346,16 @@
           "key": "status",
           "valueType": "string",
           "required": true,
-          "defaultValue": "draft",
+          "immutable": true,
+          "defaultValue": "published",
           "options": {
             "type": "static",
             "items": [
               {
-                "value": "draft",
+                "value": "published",
                 "label": {
-                  "en": "Draft",
-                  "nl": "Concept"
+                  "en": "Published",
+                  "nl": "Gepubliceerd"
                 }
               }
             ]
@@ -33342,26 +33366,65 @@
           }
         },
         {
-          "key": "parameters",
+          "key": "snapshot",
           "valueType": "object",
-          "semanticType": "fieldDefinition",
-          "cardinality": "collection",
+          "required": true,
+          "immutable": true,
           "label": {
-            "en": "Local parameters",
-            "nl": "Lokale parameters"
+            "en": "Frozen content",
+            "nl": "Vastgelegde inhoud"
           },
           "persisted": {
-            "column": "parameters",
+            "column": "snapshot",
             "storageClass": "core"
           }
         },
         {
-          "key": "variants",
-          "semanticType": "TemplateVariant",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "version",
-            "ownership": "owned"
+          "key": "contentHash",
+          "valueType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "label": {
+            "en": "Content checksum",
+            "nl": "Inhoudschecksum"
+          },
+          "persisted": {
+            "column": "content_hash",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedBy",
+          "valueType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Published by",
+            "nl": "Gepubliceerd door"
+          },
+          "persisted": {
+            "column": "published_by",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedAt",
+          "valueType": "datetime",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Published at",
+            "nl": "Gepubliceerd op"
+          },
+          "persisted": {
+            "column": "published_at",
+            "storageClass": "core"
           }
         }
       ],

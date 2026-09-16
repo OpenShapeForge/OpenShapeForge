@@ -29,10 +29,12 @@ describe("the authored template chain", () => {
     expect(web.entities.Template?.views.record?.routes.create).toBe("/templates/new");
     expect(web.entities.Template?.fields.key?.supports).toEqual({ read: true, create: false, update: false });
     expect(JSON.stringify(web.entities.Template?.views.record?.formGroups)).not.toContain('"key"');
-    for (const name of ["Block", "TemplateVariant", "TemplateVersion"]) {
+    for (const name of ["Block", "TemplateVariant"]) {
       expect(web.entities[name]?.unsupportedOperations?.create?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
       expect(web.entities[name]?.operations.create).toBeUndefined();
     }
+    expect(web.entities.TemplateVersion?.operations.create).toBeUndefined();
+    expect(web.entities.TemplateVersion?.views.record?.routes.create).toBeUndefined();
   });
   test("derives the internal template key once from its name", () => {
     const template = entries.find((entry) => entry.slug === "template")!.contract;

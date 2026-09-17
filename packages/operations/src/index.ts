@@ -24,6 +24,7 @@ export {
   operationFailure,
 } from "./contract.js";
 export type {
+  OperationFieldBaseType,
   OperationFieldDefinition,
   OperationFieldOptions,
   OperationFieldSchemaOptions,

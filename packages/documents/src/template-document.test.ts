@@ -12,7 +12,7 @@ const input = { templateVersionId: ids.template, channel: "document", locale: "e
 const snapshot = {
   schemaVersion: 1, tenantId: ids.tenant, templateVersionId: ids.template, channel: "document", locale: "en",
   compositionHashVersion: "osf-template-content-v1", compositionHash: "a".repeat(64),
-  definitions: { Text: { source: { definitionHash: "b".repeat(64), fields: [{ key: "text", valueType: "string" }] } } },
+  definitions: { Text: { source: { definitionHash: "b".repeat(64), fields: [{ key: "text", osfType: "string", baseType: "string" }] } } },
   templates: [{ version: { id: ids.template, versionNumber: 1 }, parameters: { name: "Reader" } }],
   blocks: [{ id: "example-block", values: { text: "Hello Reader" }, references: { source: { entity: "Example", id: ids.document, versionId: "v1", value: { name: "Original" } } } }],
   globals: { brand: { sourceId: "example-brand", sourceVersionId: "v1", value: "Original" } }, compositions: [],

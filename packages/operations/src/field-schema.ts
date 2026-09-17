@@ -9,101 +9,29 @@
  * registries with a private interpretation.
  */
 
-export type OperationJsonSchema = Record<string, unknown>;
-export type OperationLocalizedText = string | Readonly<{
-  en?: string;
-  nl?: string;
-  fr?: string;
-}>;
+import type {
+  OperationFieldBaseType,
+  OperationFieldDefinition,
+  OperationFieldOptions,
+  OperationFieldSchemaOptions,
+  OperationFieldSchemaRegistry,
+  OperationFieldSemanticType,
+  OperationJsonSchema,
+  OperationLocalizedText,
+  ResolvedOperationField,
+} from "./field-schema-types.js";
 
-export type OperationFieldValidation = {
-  minLength?: unknown;
-  maxLength?: unknown;
-  min?: unknown;
-  max?: unknown;
-  pattern?: unknown;
-  format?: string;
-  minItems?: unknown;
-};
-
-export type OperationFieldOptions = {
-  type: "static" | "referentiedata" | "remote" | "dynamic";
-  items?: readonly {
-    value: string;
-    label: OperationLocalizedText;
-  }[];
-  referentieGroep?: string;
-};
-
-export type OperationFieldDefinition = {
-  key: string;
-  valueType?: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
-  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
-  required?: boolean;
-  label?: OperationLocalizedText;
-  description?: OperationLocalizedText;
-  help?: OperationLocalizedText;
-  semanticType?: string;
-  unit?: string;
-  defaultValue?: unknown;
-  validation?: OperationFieldValidation;
-  options?: OperationFieldOptions;
-  reference?: { kind?: string; group?: string };
-  render?: { props?: Readonly<Record<string, unknown>> };
-  relationship?: { entity?: string };
-  computed?: { expression?: string };
-  shape?: readonly OperationFieldDefinition[];
-  children?: readonly OperationFieldDefinition[];
-  item?: OperationFieldDefinition;
-};
-
-export type OperationFieldSemanticType = {
-  kind?: string;
-  entity?: string;
-  valueType: OperationFieldDefinition["valueType"];
-  cardinality?: OperationFieldDefinition["cardinality"];
-  label?: OperationLocalizedText;
-  validation?: OperationFieldValidation;
-  shape?: readonly OperationFieldDefinition[];
-  children?: readonly OperationFieldDefinition[];
-  item?: OperationFieldDefinition;
-};
-
-export type OperationFieldSchemaRegistry = {
-  semanticTypes?: Readonly<Record<string, OperationFieldSemanticType>>;
-  referentiedata?: Readonly<Record<string, readonly {
-    value: string;
-    label: OperationLocalizedText;
-  }[]>>;
-  /** Self-contained definitions used by the recursive fieldDefinition type. */
-  fieldDefinitionDefinitions?: OperationJsonSchema;
-};
-
-export type OperationFieldSchemaOptions = {
-  includeDefault?: boolean;
-  requireNestedRequired?: boolean;
-  defaultsAreMaterialized?: boolean;
-};
-
-type ResolvedOperationField = {
-  key: string;
-  valueType: NonNullable<OperationFieldDefinition["valueType"]>;
-  cardinality: "single" | "collection";
-  cardinalityBounds?: { min?: number; max?: number | "unbounded" };
-  required: boolean;
-  label: OperationLocalizedText;
-  description?: OperationLocalizedText;
-  help?: OperationLocalizedText;
-  semanticType?: string;
-  unit?: string;
-  defaultValue?: unknown;
-  validation?: OperationFieldValidation;
-  options?: OperationFieldOptions;
-  relationship?: { entity?: string };
-  computed?: { expression?: string };
-  children?: ResolvedOperationField[];
-  item?: ResolvedOperationField;
-};
+export type {
+  OperationFieldBaseType,
+  OperationFieldDefinition,
+  OperationFieldOptions,
+  OperationFieldSchemaOptions,
+  OperationFieldSchemaRegistry,
+  OperationFieldSemanticType,
+  OperationFieldValidation,
+  OperationJsonSchema,
+  OperationLocalizedText,
+} from "./field-schema-types.js";
 
 function localizedText(value: OperationLocalizedText | undefined): string | undefined {
   if (value === undefined) return undefined;
@@ -155,14 +83,25 @@ function resolveOptions(field: OperationFieldDefinition): OperationFieldOptions 
   return group ? { type: "referentiedata", referentieGroep: group } : undefined;
 }
 
+const BASE_TYPES: readonly OperationFieldBaseType[] = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
+
+function isBaseType(value: string | undefined): value is OperationFieldBaseType {
+  return (BASE_TYPES as readonly string[]).includes(value ?? "");
+}
+
+/** A base osfType is its own base; a catalog key resolves through the registry. */
+function resolveBaseType(osfType: string, semantic: OperationFieldSemanticType | undefined): OperationFieldBaseType {
+  return isBaseType(osfType) ? osfType : semantic?.valueType ?? "string";
+}
+
 function resolveFields(
   fields: readonly OperationFieldDefinition[],
   registry: OperationFieldSchemaRegistry,
 ): ResolvedOperationField[] {
   return fields.map((field) => {
-    const semantic = field.semanticType
-      ? registry.semanticTypes?.[field.semanticType]
-      : undefined;
+    const semantic = isBaseType(field.osfType)
+      ? undefined
+      : registry.semanticTypes?.[field.osfType];
     const authoredCardinality = field.cardinality ?? semantic?.cardinality;
     // An identity reference does not inline the target record (which may refer back).
     const nested = field.shape ?? field.children ?? (semantic?.kind === "entity" && semantic.entity
@@ -171,7 +110,7 @@ function resolveFields(
     const options = resolveOptions(field);
     return {
       key: field.key,
-      valueType: field.valueType ?? semantic?.valueType ?? "string",
+      valueType: resolveBaseType(field.osfType, semantic),
       cardinality: cardinalityOf(authoredCardinality),
       ...(authoredCardinality && typeof authoredCardinality === "object"
         ? { cardinalityBounds: { ...authoredCardinality } }
@@ -180,7 +119,7 @@ function resolveFields(
       label: field.label ?? semantic?.label ?? { en: field.key, nl: field.key },
       ...(field.description !== undefined ? { description: field.description } : {}),
       ...(field.help !== undefined ? { help: field.help } : {}),
-      ...(field.semanticType !== undefined ? { semanticType: field.semanticType } : {}),
+      osfType: field.osfType,
       ...(field.unit !== undefined ? { unit: field.unit } : {}),
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       ...(field.validation ?? semantic?.validation
@@ -299,7 +238,7 @@ function fieldSchema(
   registry: OperationFieldSchemaRegistry,
   options: OperationFieldSchemaOptions,
 ): OperationJsonSchema {
-  let schema = field.semanticType === "fieldDefinition"
+  let schema = field.osfType === "fieldDefinition"
     ? { $ref: "#/$defs/fieldDefinition" }
     : field.valueType === "object" && field.children?.length
       ? objectSchema(field.children, registry, {

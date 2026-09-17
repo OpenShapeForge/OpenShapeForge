@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
-import { resolveBaseType, semanticTypeOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
+import { inverseCollectionsFor, resolveBaseType, semanticTypeOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
+import { withInverseCollections } from "../../../../../packages/compiler/src/authoring/inverse-collections.js";
 import { listEntityFiles, loadSemanticTypes } from "../../../../../packages/compiler/src/authoring/loader.js";
 import type { ComponentCatalog, CoreEntity, EntityProfile, Field, SemanticTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
 import { pluralize, uncapitalize } from "../../../../../packages/compiler/src/authoring/compiler/helpers.js";
 import type { WorkflowEntityGenerationOptions } from "./types.js";
-import { cloneField, normalizeSemanticTypeKey, toKebabCase } from "./utils.js";
+import { cloneField, isCollectionCardinality, normalizeSemanticTypeKey, toKebabCase } from "./utils.js";
 function loadYamlFile<T>(filePath: string): T {
   return parseYaml(readFileSync(filePath, "utf-8")) as T;
 }
@@ -72,8 +73,11 @@ function expandSemanticFieldShape(
         valueMode: "insertText",
       },
     };
-  } else if (!expanded.render) {
-    if (semanticType?.render) {
+  } else if (!expanded.render && !(semanticType?.kind === "entity" && isCollectionCardinality(expanded.cardinality))) {
+    // A single entity reference is a plain identifier input in a workflow
+    // form and a collection of them has no input at all; the derived entity
+    // catalog entry's render is for record screens.
+    if (semanticType?.render && semanticType.kind !== "entity") {
       expanded.render = {
         component: expanded.readOnly ? semanticType.render.display : semanticType.render.input,
         ...(semanticType.props ? { props: semanticType.props } : {}),
@@ -237,13 +241,16 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
       entity,
       profiles,
     );
+    // The inverse collections the compiler derives for this entity are
+    // readable fields for workflow nodes, exactly like the authored ones.
+    const withCollections = withInverseCollections(
+      contextCompleteEntity.entity,
+      contextCompleteEntity.fields,
+      inverseCollectionsFor(contextCompleteEntity.entity, semanticTypes),
+    );
     entities.push({
       ...contextCompleteEntity,
-      fields: expandEntityFieldShapes(
-        contextCompleteEntity.fields,
-        semanticTypes,
-        componentCatalog,
-      ),
+      fields: expandEntityFieldShapes(withCollections, semanticTypes, componentCatalog),
     });
   }
 

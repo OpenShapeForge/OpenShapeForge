@@ -12,11 +12,19 @@
  * points at the storage manifest the CURRENT compiler emitted, so a created
  * field's `required` follows that column's nullability rather than a guess.
  *
- * Idempotent: a migrated corpus produces no further changes.
+ *   bun scripts/migrate-one-type-axis/cli.ts --data < value.json > migrated.json
+ *
+ * `--data` rewrites one JSON value read from stdin (a stored fieldDefinition[]
+ * column value, or a whole document such as a workflow definition version)
+ * and writes the result to stdout; the report goes to stderr. See data.ts for
+ * which columns hold such values.
+ *
+ * Idempotent: a migrated corpus or value produces no further changes.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadCorpus, renderFile } from "./corpus.ts";
+import { rewriteFieldDefinitionJson } from "./data.ts";
 import { type MigrationOptions, migrateCorpus } from "./migrate.ts";
 
 function argumentValue(name: string): string | undefined {
@@ -37,7 +45,18 @@ export function columnRequiredFromManifest(path: string): MigrationOptions["colu
   return (entity, column) => byEntity.get(entity)?.get(column);
 }
 
+async function rewriteStdin(): Promise<void> {
+  const input = await new Response(process.stdin).text();
+  const { text, report } = rewriteFieldDefinitionJson(input);
+  process.stdout.write(text);
+  console.error(`osfType renamed: ${report.renamed}, derived from valueType: ${report.derivedFromValueType}, valueType dropped: ${report.valueTypesDropped}`);
+}
+
 function main(): void {
+  if (process.argv.includes("--data")) {
+    void rewriteStdin();
+    return;
+  }
   const root = resolve(argumentValue("--root") ?? join(import.meta.dir, "..", ".."));
   const write = process.argv.includes("--write");
   const manifestPath = argumentValue("--baseline-manifest");

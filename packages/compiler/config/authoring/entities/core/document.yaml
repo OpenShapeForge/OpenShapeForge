@@ -527,12 +527,24 @@ operations:
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     confirmation: { mode: none }
+  removeRevision:
+    name: { en: Remove revision, nl: Revisie verwijderen }
+    description:
+      en: Remove an unpublished revision and its blocks, authorized through the document.
+      nl: Verwijder een niet-gepubliceerde revisie met haar blokken, geautoriseerd via het document.
+    implementation: { type: collection, action: remove, field: revisions }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   update:
     name: { en: Update document, nl: Document wijzigen }
     description: Updates the document metadata without changing its version pointer.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
+    # Owner-scoped revision removal needs the owner's version; same contract as Template.update.
+    concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
   delete:
     name: { en: Delete document, nl: Document verwijderen }
@@ -563,6 +575,7 @@ interfaces:
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"
+        actions: [startRevision]
         layout:
           context:
             fields: [ documentType, confidentiality, author, registeredAt ]

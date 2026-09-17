@@ -8,10 +8,10 @@ labels: { en: Block, nl: Block }
 domains: [documents]
 authorization:
   roles:
-    read: [Templates.Read, CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
-    update: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
-    delete: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
 displayTemplate: "{{definitionKey}}"
 fields:
   # Exactly one owner is set; the compiler emits num_nonnulls(revision_id, variant_id) = 1.
@@ -51,6 +51,8 @@ fields:
       nl: Of een revisieblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal.
     valueType: string
     required: true
+    readOnly: true
+    writtenBy: [Document.startRevision, Template.publish]
     defaultValue: local
     options:
       type: static
@@ -66,6 +68,7 @@ fields:
     valueType: string
     required: false
     readOnly: true
+    writtenBy: [Document.startRevision, Template.publish]
     validation: { format: uuid }
     persisted: { column: template_block_id, storageClass: core }
   - key: diverged
@@ -77,6 +80,7 @@ fields:
     required: true
     defaultValue: false
     readOnly: true
+    writtenBy: [Template.publish]
     persisted: { column: diverged, storageClass: core }
 operations:
   list:
@@ -107,13 +111,6 @@ operations:
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
-  delete:
-    name: Delete block
-    description: Remove a block from its template variant or document revision.
-    implementation: { type: entity, action: delete }
-    effects: { data: delete, external: none }
-    reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
 interfaces:
   rest: {}

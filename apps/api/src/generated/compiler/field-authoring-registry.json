@@ -9594,6 +9594,11 @@
           },
           "valueType": "string",
           "required": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Document.startRevision",
+            "Template.publish"
+          ],
           "defaultValue": "local",
           "options": {
             "type": "static",
@@ -9632,6 +9637,10 @@
           "valueType": "string",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.startRevision",
+            "Template.publish"
+          ],
           "validation": {
             "format": "uuid"
           },
@@ -9654,6 +9663,9 @@
           "required": true,
           "defaultValue": false,
           "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
           "persisted": {
             "column": "diverged",
             "storageClass": "core"
@@ -16058,6 +16070,10 @@
           "semanticType": "TemplateVersion",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "Document.startRevision",
+            "Template.publish"
+          ],
           "persisted": {
             "column": "template_version_id",
             "storageClass": "core"
@@ -16212,6 +16228,9 @@
           "semanticType": "DocumentVersion",
           "required": false,
           "readOnly": true,
+          "writtenBy": [
+            "DocumentRevision.publish"
+          ],
           "validation": {
             "format": "uuid"
           },
@@ -16221,6 +16240,30 @@
           },
           "relationship": {
             "ownership": "reference"
+          }
+        },
+        {
+          "key": "followError",
+          "label": {
+            "en": "Follow problem",
+            "nl": "Volgprobleem"
+          },
+          "description": {
+            "en": "Why the last template republish could not be applied to this draft; cleared when a later republish succeeds.",
+            "nl": "Waarom de laatste herpublicatie van de template niet op dit concept kon worden toegepast; gewist zodra een latere herpublicatie slaagt."
+          },
+          "valueType": "string",
+          "required": false,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "validation": {
+            "maxLength": 2000
+          },
+          "persisted": {
+            "column": "follow_error",
+            "storageClass": "core"
           }
         },
         {
@@ -16236,6 +16279,7 @@
             "inverse": "revision",
             "ownership": "owned"
           },
+          "childAuthorization": "owner",
           "allowedDefinitions": [
             "TextBlock",
             "YouTubeEmbed",

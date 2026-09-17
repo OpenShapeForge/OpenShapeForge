@@ -10,10 +10,11 @@ labels: { en: Document revision, nl: Documentrevisie }
 domains: [documents]
 authorization:
   roles:
-    read: [CaseFile.All.Read, CaseFile.All.ReadWrite, Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
-    create: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
-    update: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
-    delete: [CaseFile.All.ReadWrite, Organization.All.ReadWrite]
+    # Same roles as Document: a revision is part of its document, not of the template.
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite]
+    create: [CaseFile.All.ReadWrite]
+    update: [CaseFile.All.ReadWrite]
+    delete: [CaseFile.All.ReadWrite]
 displayTemplate: "{{channel}} · {{locale}} · {{status}}"
 indexes:
   - { name: document_revisions_tenant_document_idx, fields: [tenantId, document] }
@@ -32,6 +33,7 @@ fields:
     semanticType: TemplateVersion
     required: false
     readOnly: true
+    writtenBy: [Document.startRevision, Template.publish]
     persisted: { column: template_version_id, storageClass: core }
     relationship: { ownership: reference }
   - key: channel
@@ -83,15 +85,30 @@ fields:
     semanticType: DocumentVersion
     required: false
     readOnly: true
+    writtenBy: [DocumentRevision.publish]
     validation: { format: uuid }
     persisted: { column: published_version_id, storageClass: core }
     relationship: { ownership: reference }
+  - key: followError
+    label: { en: Follow problem, nl: Volgprobleem }
+    description:
+      en: Why the last template republish could not be applied to this draft; cleared when a later republish succeeds.
+      nl: Waarom de laatste herpublicatie van de template niet op dit concept kon worden toegepast; gewist zodra een latere herpublicatie slaagt.
+    valueType: string
+    required: false
+    readOnly: true
+    writtenBy: [Template.publish]
+    validation: { maxLength: 2000 }
+    persisted: { column: follow_error, storageClass: core }
   - key: blocks
     label: { en: Blocks, nl: Blokken }
     semanticType: Block
     cardinality: collection
     sortable: true
     relationship: { inverse: revision, ownership: owned }
+    # A document editor holds no Block role; the revision's collection
+    # Operations carry the document editor's authority to its blocks.
+    childAuthorization: owner
     # Keep identical to TemplateVariant.blocks. A plugin entityPatch targets one
     # entity, so a plugin adding a definition patches both files.
     allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
@@ -108,6 +125,22 @@ operations:
     name: { en: Move block, nl: Blok verplaatsen }
     description: Move a block within this revision atomically.
     implementation: { type: collection, action: move, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  updateBlock:
+    name: { en: Edit block, nl: Blok bewerken }
+    description: Change the values of one block of this revision, authorized through the revision.
+    implementation: { type: collection, action: update, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  removeBlock:
+    name: { en: Remove block, nl: Blok verwijderen }
+    description: Remove one block from this revision, authorized through the revision.
+    implementation: { type: collection, action: remove, field: blocks }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
@@ -225,7 +258,7 @@ interfaces:
           tabs:
             - id: revision
               label: { en: Revision, nl: Revisie }
-              groups: [{ title: { en: Revision, nl: Revisie }, fields: [document, templateVersion, channel, locale, status, parameters] }]
+              groups: [{ title: { en: Revision, nl: Revisie }, fields: [document, templateVersion, channel, locale, status, parameters, followError] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks

@@ -1039,16 +1039,23 @@ function projectStandalone(
         entity.fields,
       );
       const getRef = entity.operations.get ? refs[entity.operations.get.operation]! : undefined;
+      // The same target every plugin action carries: the web places a
+      // collection action on the collection page and binds a record action to
+      // the record it is opened on, without knowing which catalog authored it.
       const recordActions = (entity.operations.recordActions ?? []).map((action) => {
         const key = typeof action === "string" ? action : action.operation;
         return {
           ...refs[key]!,
+          target: { entityId: entityName, entityName, scope: "record" as const, inputField: entity.idField },
           ...(typeof action === "string" || !action.visibleWhen
             ? {}
             : { visibleWhen: action.visibleWhen }),
         };
       });
-      const collectionActions = (entity.operations.collectionActions ?? []).map((key) => refs[key]!);
+      const collectionActions = (entity.operations.collectionActions ?? []).map((key) => ({
+        ...refs[key]!,
+        target: { entityId: entityName, entityName, scope: "collection" as const },
+      }));
       const recordRoute = entity.recordRoute ?? `${entity.route}/:${entity.idField}`;
       entities[entityName] = {
         entityId: entityName,

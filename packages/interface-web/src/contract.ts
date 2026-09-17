@@ -316,6 +316,17 @@ export type WebEntityInterface = {
  * landing operation — run as soon as its page opens.
  */
 export type WebStandaloneOperationRef = Omit<WebSchemaOperationRef<"invoke">, "target"> & {
+  /**
+   * Present when an operation-backed entity lists the Operation as one of its
+   * actions: a collection action needs no record, a record action binds the
+   * current record by `inputField`. Absent on page Operations.
+   */
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
   /** Who may invoke it; the web hides what the session cannot invoke. */
   auth:
     | { mode: "public" }

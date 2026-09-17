@@ -946,6 +946,9 @@ describe("standalone Operation pages", () => {
             operations: {
               list: { operation: "listTenants", resultField: "tenants" },
               get: { operation: "getTenant" },
+              // Projection only: the same Operation placed on both views proves
+              // each placement gets its own target, like a plugin action would.
+              collectionActions: ["updateTenant"],
               recordActions: [{
                 operation: "updateTenant",
                 visibleWhen: { conditions: [{ field: "canUpdate", operator: "eq", value: true }] },
@@ -965,10 +968,14 @@ describe("standalone Operation pages", () => {
       } }, record: {} },
       views: {
         collection: { renderer: "operation.entity.collection", route: "/tenants", defaultSort: { key: "slug", direction: "asc" },
-          operations: { read: { id: "control.list-tenants" } } },
+          operations: { read: { id: "control.list-tenants" }, actions: [{
+            id: "control.update-tenant",
+            target: { entityId: "Tenant", entityName: "Tenant", scope: "collection" },
+          }] } },
         record: { renderer: "operation.entity.record", routes: { read: "/tenants/:slug" }, operations: {
           read: { id: "control.get-tenant" }, actions: [{
             id: "control.update-tenant",
+            target: { entityId: "Tenant", entityName: "Tenant", scope: "record", inputField: "slug" },
             visibleWhen: { conditions: [{ field: "canUpdate", operator: "eq", value: true }] },
           }],
         } },

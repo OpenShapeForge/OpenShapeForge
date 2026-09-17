@@ -30,7 +30,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -42,7 +42,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -54,7 +54,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -64,9 +63,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: processType
-    valueType: string
     required: true
     label:
       en: Process type
@@ -77,9 +75,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROCESSTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -90,9 +87,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROCESSSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: phase
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Phase
@@ -103,7 +100,7 @@ fields:
       column: phase
       storageClass: core
   - key: currentStepKey
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Current step key
@@ -114,7 +111,7 @@ fields:
       column: current_step_key
       storageClass: core
   - key: currentStepLabel
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Current step label
@@ -125,7 +122,7 @@ fields:
       column: current_step_label
       storageClass: core
   - key: workflowTemplate
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Workflow template
@@ -136,7 +133,7 @@ fields:
       column: workflow_template
       storageClass: core
   - key: workflowInstanceRef
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Workflow instance reference
@@ -147,7 +144,6 @@ fields:
       column: workflow_instance_ref
       storageClass: core
   - key: priority
-    valueType: string
     required: false
     label:
       en: Priority
@@ -158,9 +154,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEPRIORITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -169,7 +165,7 @@ fields:
       column: started_at
       storageClass: core
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -178,7 +174,7 @@ fields:
       column: due_at
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -187,9 +183,8 @@ fields:
       column: completed_at
       storageClass: core
   - key: completedByAccountId
-    valueType: string
     required: false
-    semanticType: Account
+    osfType: Account
     label:
       en: Completed by
       nl: Afgerond door
@@ -204,8 +199,9 @@ fields:
     classification:
       sensitivity: internal
       category: workflow
+    relationship:
+      inverse: false
   - key: completionApprovalComment
-    valueType: string
     required: false
     label:
       en: Completion approval comment
@@ -215,9 +211,9 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: cancelledAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Cancelled at
@@ -226,7 +222,6 @@ fields:
       column: cancelled_at
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -236,7 +231,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: templateId
     label:
       en: Template
@@ -244,7 +239,7 @@ fields:
     persisted:
       column: case_template_id
       storageClass: core
-    semanticType: CaseTemplate
+    osfType: CaseTemplate
     relationship:
       ownership: reference
   - key: caseId
@@ -254,9 +249,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Steps
+          nl: Stappen
   - key: caseFileId
     label:
       en: Case file
@@ -264,9 +263,13 @@ fields:
     persisted:
       column: case_file_id
       storageClass: core
-    semanticType: CaseFile
+    osfType: CaseFile
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Processes
+          nl: Processen
   - key: ownerId
     label:
       en: Owner
@@ -274,9 +277,10 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
   - key: parentProcessId
     label:
       en: Parent process
@@ -284,27 +288,14 @@ fields:
     persisted:
       column: parent_process_id
       storageClass: core
-    semanticType: Process
+    osfType: Process
     relationship:
       ownership: reference
-  - key: childProcesses
-    label:
-      en: Child processes
-      nl: Deelprocessen
-    semanticType: Process
-    cardinality: collection
-    relationship:
-      inverse: parentProcessId
-      ownership: reference
-  - key: steps
-    label:
-      en: Process steps
-      nl: Processtappen
-    semanticType: ProcessStep
-    cardinality: collection
-    relationship:
-      inverse: processId
-      ownership: reference
+      inverse:
+        key: childProcesses
+        label:
+          en: Child processes
+          nl: Deelprocessen
 operations:
   list:
     name: List Case Step Container

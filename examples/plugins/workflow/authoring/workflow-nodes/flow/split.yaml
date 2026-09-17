@@ -12,7 +12,7 @@ description:
   en: Splits the workflow into multiple branches.
 configFields:
   - key: mode
-    valueType: string
+    osfType: string
     label:
       nl: Uitvoermodus
       en: Execution mode

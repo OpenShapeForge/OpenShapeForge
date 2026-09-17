@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: lineNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Line number
@@ -28,7 +28,6 @@ fields:
       column: line_number
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -41,9 +40,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -51,7 +49,7 @@ fields:
     description:
       en: Budgeted amount for this line.
       nl: Begroot bedrag voor deze regel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
@@ -62,7 +60,7 @@ fields:
     persisted:
       column: budget_id
       storageClass: core
-    semanticType: Budget
+    osfType: Budget
     relationship:
       ownership: reference
   - key: fiscalPeriodId
@@ -72,7 +70,7 @@ fields:
     persisted:
       column: fiscal_period_id
       storageClass: core
-    semanticType: FiscalPeriod
+    osfType: FiscalPeriod
     relationship:
       ownership: reference
   - key: ledgerAccountId
@@ -82,7 +80,7 @@ fields:
     persisted:
       column: ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: costDimensionId
@@ -92,7 +90,7 @@ fields:
     persisted:
       column: cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
 authorization:

@@ -35,7 +35,6 @@ retention:
     field: occurredAt
 fields:
   - key: channel
-    valueType: string
     required: true
     label:
       en: Channel
@@ -52,9 +51,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: COMMUNICATIONCHANNEL
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: type
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Type
@@ -68,7 +67,7 @@ fields:
       column: type
       storageClass: core
   - key: detailType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Detail type
@@ -82,7 +81,6 @@ fields:
       column: detail_type
       storageClass: core
   - key: direction
-    valueType: string
     required: false
     label:
       en: Direction
@@ -98,9 +96,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: COMMUNICATIONDIRECTION
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: subject
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Subject
@@ -114,7 +112,6 @@ fields:
       column: subject
       storageClass: core
   - key: content
-    valueType: string
     required: false
     label:
       en: Content
@@ -127,9 +124,9 @@ fields:
     persisted:
       column: content
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: occurredAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Occurred at
@@ -147,9 +144,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Contact moments
+          nl: Contactmomenten
   - key: relationRoleId
     label:
       en: Relation role
@@ -157,9 +158,13 @@ fields:
     persisted:
       column: relation_role_id
       storageClass: core
-    semanticType: RelationRole
+    osfType: RelationRole
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Contact moments
+          nl: Contactmomenten
   - key: caseId
     label:
       en: Case
@@ -167,18 +172,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
-  - key: tasks
-    label:
-      en: Tasks
-      nl: Taken
-    semanticType: Task
-    cardinality: collection
-    relationship:
-      inverse: contactMomentId
-      ownership: reference
+      inverse:
+        label:
+          en: Contact moments
+          nl: Contactmomenten
 operations:
   list:
     name: List Contact Moment

@@ -16,7 +16,7 @@ domains:
   - relations
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -31,7 +31,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -46,7 +46,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -59,9 +58,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -75,9 +73,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: APPOINTMENTREQUESTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: requestedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Requested at
@@ -89,7 +87,7 @@ fields:
       column: requested_at
       storageClass: core
   - key: respondedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Responded at
@@ -101,7 +99,7 @@ fields:
       column: responded_at
       storageClass: core
   - key: subjectType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Subject type
@@ -117,7 +115,7 @@ fields:
       column: subject_type
       storageClass: core
   - key: subjectId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Subject ID
@@ -131,7 +129,7 @@ fields:
     validation:
       format: uuid
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -151,7 +149,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: appointmentId
@@ -161,17 +159,8 @@ fields:
     persisted:
       column: appointment_id
       storageClass: core
-    semanticType: Appointment
+    osfType: Appointment
     relationship:
-      ownership: reference
-  - key: options
-    label:
-      en: Options
-      nl: Opties
-    semanticType: AppointmentOption
-    cardinality: collection
-    relationship:
-      inverse: appointmentRequestId
       ownership: reference
 authorization:
   roles:

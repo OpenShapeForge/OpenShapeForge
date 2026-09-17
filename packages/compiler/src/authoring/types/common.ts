@@ -246,7 +246,7 @@ export interface FormFieldDefinition {
   key: string;
   valueType: string;
   cardinality?: "single" | "collection";
-  semanticType?: string;
+  osfType?: string;
   label: LocalizedText;
   required?: boolean;
   description?: LocalizedText | null;

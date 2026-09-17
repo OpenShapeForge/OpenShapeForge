@@ -19,19 +19,19 @@ authorization:
     delete: [ Relations.All.ReadWrite ]
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     persisted:
       column: name
       storageClass: core
   - key: configurationDefinitions
-    valueType: object
+    osfType: object
     required: false
     persisted:
       column: configuration_definitions
       storageClass: core
   - key: configurationValues
-    valueType: object
+    osfType: object
     required: false
     persisted:
       column: configuration_values

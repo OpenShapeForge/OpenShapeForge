@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: submittedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Submitted at
@@ -26,7 +26,6 @@ fields:
       column: submitted_at
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -40,9 +39,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: VATRETURNSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: payableAmount
-    valueType: number
     required: false
     label:
       en: Payable amount
@@ -50,12 +48,11 @@ fields:
     description:
       en: Amount due to the tax authority for the period.
       nl: Aan de Belastingdienst verschuldigd bedrag voor de periode.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: payable_amount
       storageClass: core
   - key: receivableAmount
-    valueType: number
     required: false
     label:
       en: Receivable amount
@@ -63,12 +60,12 @@ fields:
     description:
       en: Amount to be received from the tax authority for the period.
       nl: Van de Belastingdienst te ontvangen bedrag voor de periode.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: receivable_amount
       storageClass: core
   - key: referenceNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Reference number
@@ -82,7 +79,7 @@ fields:
       column: reference_number
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -102,7 +99,7 @@ fields:
     persisted:
       column: fiscal_period_id
       storageClass: core
-    semanticType: FiscalPeriod
+    osfType: FiscalPeriod
     relationship:
       ownership: reference
 authorization:

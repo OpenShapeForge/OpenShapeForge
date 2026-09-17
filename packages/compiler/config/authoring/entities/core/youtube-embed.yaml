@@ -13,20 +13,21 @@ authorization:
     read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label: { en: Title, nl: Titel }
     validation: { minLength: 1, maxLength: 200 }
   - key: url
-    semanticType: url
+    osfType: url
     required: true
     label: { en: Video URL, nl: Video-URL }
     # An external URL is content, not a server-side instruction to fetch it.
     validation:
-      pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0-9_=&%-]*)?$"
+      pattern: "^https://(?:www\\.)?(?:youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}|youtu\\.be/[A-Za-z0-9_-]{11})(?:[?&][A-Za-z0\
+        -9_=&%-]*)?$"
       maxLength: 2000
   - key: showControls
-    valueType: boolean
+    osfType: boolean
     defaultValue: true
     label: { en: Show player controls, nl: Spelerbediening tonen }
 operations:

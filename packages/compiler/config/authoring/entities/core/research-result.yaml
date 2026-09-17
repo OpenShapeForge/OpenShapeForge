@@ -35,7 +35,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -49,7 +49,7 @@ fields:
       column: code
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -61,7 +61,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -81,17 +81,8 @@ fields:
     persisted:
       column: research_assignment_id
       storageClass: core
-    semanticType: ResearchAssignment
+    osfType: ResearchAssignment
     relationship:
-      ownership: reference
-  - key: answers
-    label:
-      en: Answers
-      nl: Antwoorden
-    semanticType: SurveyAnswer
-    cardinality: collection
-    relationship:
-      inverse: researchResultId
       ownership: reference
 operations:
   list:

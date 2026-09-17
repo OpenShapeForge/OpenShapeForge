@@ -102,19 +102,36 @@
         }
       }]
     },
+    "inverseCollection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How a single entity reference shapes the collection the compiler derives for it on the target entity. Every property is optional: the key defaults to the lower-camel plural of the referencing entity and the label to that entity's labels.",
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "label": { "$ref": "#/$defs/localizedText" },
+        "ownership": { "enum": ["owned", "reference"] },
+        "sortable": { "type": "boolean" },
+        "childAuthorization": { "type": "string", "enum": ["owner"] },
+        "allowedDefinitions": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+        }
+      }
+    },
     "relationship": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "inverse": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "inverse": {
+          "description": "On a single reference: the derived inverse collection, or false to decline one. On a via traversal collection: the key of the referencing field on the target entity.",
+          "oneOf": [
+            { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+            { "$ref": "#/$defs/inverseCollection" },
+            { "const": false }
+          ]
+        },
         "via": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "ownership": { "enum": ["owned", "reference"] },
-        "kind": { "type": "string", "enum": ["belongsTo", "hasMany"] },
-        "entity": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-        },
-        "foreignKey": { "type": "string", "minLength": 1 },
         "displayField": { "type": "string", "minLength": 1 },
         "constraints": { "$ref": "#/$defs/relationshipConstraints" }
       }
@@ -211,16 +228,13 @@
     "fieldDefinitionProperties": {
       "description": "The canonical FieldDefinition property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
       "type": "object",
-      "required": ["key"],
-      "anyOf": [
-        { "properties": { "valueType": {} }, "required": ["valueType"] },
-        { "properties": { "semanticType": {} }, "required": ["semanticType"] }
-      ],
+      "required": ["key", "osfType"],
       "properties": {
         "key": { "type": "string", "minLength": 1 },
-        "valueType": {
+        "osfType": {
           "type": "string",
-          "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"]
+          "minLength": 1,
+          "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase semantic-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
         },
         "cardinality": { "$ref": "#/$defs/cardinality" },
         "entityValue": {
@@ -296,7 +310,6 @@
         "description": { "$ref": "#/$defs/localizedText" },
         "placeholder": { "$ref": "#/$defs/localizedText" },
         "help": { "$ref": "#/$defs/localizedText" },
-        "semanticType": { "type": "string", "minLength": 1 },
         "unit": { "type": "string" },
         "currency": { "type": "string" },
         "value": {},
@@ -404,7 +417,7 @@
             "anyOf": [
               { "properties": { "item": {} }, "required": ["item"] },
               { "properties": { "shape": {} }, "required": ["shape"] },
-              { "properties": { "semanticType": {} }, "required": ["semanticType"] },
+              { "properties": { "osfType": { "not": { "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"] } } } },
               { "properties": { "relationship": {} }, "required": ["relationship"] }
             ]
           }
@@ -443,9 +456,9 @@
           "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
           "if": {
             "properties": {
-              "semanticType": { "const": "fieldDefinition" }
+              "osfType": { "const": "fieldDefinition" }
             },
-            "required": ["semanticType"]
+            "required": ["osfType"]
           },
           "then": {
             "not": {
@@ -459,10 +472,10 @@
         {
           "if": {
             "properties": {
-              "semanticType": { "const": "fieldDefinition" },
+              "osfType": { "const": "fieldDefinition" },
               "authoring": { "type": "object", "properties": { "profile": {} }, "required": ["profile"] }
             },
-            "required": ["semanticType", "authoring"]
+            "required": ["osfType", "authoring"]
           },
           "then": {
             "not": {

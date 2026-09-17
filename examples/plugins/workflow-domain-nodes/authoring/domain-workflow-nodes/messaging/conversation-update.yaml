@@ -12,8 +12,7 @@ description:
   nl: Werk velden van een bestaande conversatie bij.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -21,8 +20,8 @@ configFields:
       en: Existing conversation whose read model or status should be updated.
       nl: Bestaande conversatie waarvan read model of status wordt bijgewerkt.
     help:
-      en: Usually this comes from workflow context. The node updates only the addressed conversation in the current tenant
-        and fails when no conversation ID can be resolved.
+      en: Usually this comes from workflow context. The node updates only the addressed conversation in the current tenant and
+        fails when no conversation ID can be resolved.
       nl: Meestal komt dit uit de workflowcontext. De node werkt alleen de opgegeven conversatie binnen de huidige tenant bij
         en faalt wanneer geen conversatie-ID kan worden bepaald.
     render:
@@ -30,7 +29,7 @@ configFields:
       props:
         valueMode: insertText
   - key: values
-    valueType: object
+    osfType: object
     label:
       en: Values
       nl: Waarden
@@ -45,7 +44,7 @@ configFields:
     defaultValue: {}
     children:
       - key: lifecycleState
-        valueType: string
+        osfType: string
         label:
           en: Lifecycle state
           nl: Lifecycle-status
@@ -58,7 +57,7 @@ configFields:
           nl: Wanneer dit is ingevuld, wordt ook de statuskolom van de conversatie bijgewerkt. Gebruik waarden die de
             messaging-inbox al begrijpt.
       - key: automationMode
-        valueType: string
+        osfType: string
         label:
           en: Automation mode
           nl: Automation mode
@@ -70,7 +69,7 @@ configFields:
           nl: Gebruik dit om vast te leggen of AI autonoom werkt, gepauzeerd is of ondersteunt. Dit start of stopt zelf geen
             worker.
       - key: routingTargetType
-        valueType: string
+        osfType: string
         label:
           en: Routing target
           nl: Routingdoel
@@ -78,13 +77,12 @@ configFields:
           en: Routing target type recorded for inbox filtering.
           nl: Routingdoeltype dat voor inboxfiltering wordt vastgelegd.
         help:
-          en: Set this together with queue or assignment fields when a previous step has routed the conversation. This field
-            is read-model metadata only.
-          nl: Vul dit samen met queue- of toewijzingsvelden in wanneer een eerdere stap de conversatie heeft gerouteerd. Dit
-            veld is alleen read-modelmetadata.
+          en: Set this together with queue or assignment fields when a previous step has routed the conversation. This field is
+            read-model metadata only.
+          nl: Vul dit samen met queue- of toewijzingsvelden in wanneer een eerdere stap de conversatie heeft gerouteerd. Dit veld
+            is alleen read-modelmetadata.
       - key: relationId
-        valueType: string
-        semanticType: relationId
+        osfType: relationId
         label:
           en: Relation ID
           nl: Relatie-ID
@@ -97,8 +95,7 @@ configFields:
           nl: Sla de relatie-UUID op na identificatie of lookup. De node legt de ID vast in het read model; hij voert geen
             relatiematching uit.
       - key: caseId
-        valueType: string
-        semanticType: caseId
+        osfType: caseId
         label:
           en: Case ID
           nl: Zaak-ID
@@ -106,16 +103,16 @@ configFields:
           en: Case linked to the conversation context.
           nl: Zaak die aan de conversatiecontext is gekoppeld.
         help:
-          en: Use a case ID from an upstream case or workflow node. This patches read-model context and does not create a
-            separate conversation-case link by itself.
-          nl: Gebruik een zaak-ID uit een eerdere zaak- of workflownode. Dit werkt read-modelcontext bij en maakt zelf geen
-            aparte conversatie-zaaklink.
+          en: Use a case ID from an upstream case or workflow node. This patches read-model context and does not create a separate
+            conversation-case link by itself.
+          nl: Gebruik een zaak-ID uit een eerdere zaak- of workflownode. Dit werkt read-modelcontext bij en maakt zelf geen aparte
+            conversatie-zaaklink.
         render:
           component: OptionVariablePicker
           props:
             valueMode: insertText
       - key: contactmomentUri
-        valueType: string
+        osfType: string
         label:
           en: Contact moment URI
           nl: Contactmoment-URI
@@ -123,17 +120,16 @@ configFields:
           en: URI of the contact moment created for this conversation.
           nl: URI van het contactmoment dat voor deze conversatie is gemaakt.
         help:
-          en: Store the canonical contact moment reference from an upstream create step so later workflow nodes and inbox
-            views can reuse it.
-          nl: Sla de canonieke contactmomentreferentie uit een eerdere aanmaakstap op zodat latere workflownodes en
-            inboxweergaven die kunnen hergebruiken.
+          en: Store the canonical contact moment reference from an upstream create step so later workflow nodes and inbox views
+            can reuse it.
+          nl: Sla de canonieke contactmomentreferentie uit een eerdere aanmaakstap op zodat latere workflownodes en inboxweergaven
+            die kunnen hergebruiken.
         render:
           component: OptionVariablePicker
           props:
             valueMode: insertText
       - key: agreementId
-        valueType: string
-        semanticType: agreementId
+        osfType: agreementId
         label:
           en: Agreement ID
           nl: Overeenkomst-ID
@@ -141,17 +137,16 @@ configFields:
           en: Agreement associated with the conversation.
           nl: Overeenkomst die bij de conversatie hoort.
         help:
-          en: Use this after an agreement has been selected or inferred. The field is stored as context and does not validate
-            the agreement record.
-          nl: Gebruik dit nadat een overeenkomst is gekozen of afgeleid. Het veld wordt als context opgeslagen en valideert
-            het overeenkomstrecord niet.
+          en: Use this after an agreement has been selected or inferred. The field is stored as context and does not validate the
+            agreement record.
+          nl: Gebruik dit nadat een overeenkomst is gekozen of afgeleid. Het veld wordt als context opgeslagen en valideert het
+            overeenkomstrecord niet.
         render:
           component: OptionVariablePicker
           props:
             valueMode: insertText
       - key: agreementPartyId
-        valueType: string
-        semanticType: agreementPartyId
+        osfType: agreementPartyId
         label:
           en: Agreement party ID
           nl: Overeenkomstpartij-ID
@@ -160,15 +155,14 @@ configFields:
           nl: Overeenkomstpartij die bij de conversatie hoort.
         help:
           en: Set this when later workflow logic needs the specific party under an agreement, not just the agreement itself.
-          nl: Vul dit in wanneer latere workflowlogica de specifieke partij onder een overeenkomst nodig heeft, niet alleen
-            de overeenkomst zelf.
+          nl: Vul dit in wanneer latere workflowlogica de specifieke partij onder een overeenkomst nodig heeft, niet alleen de
+            overeenkomst zelf.
         render:
           component: OptionVariablePicker
           props:
             valueMode: insertText
       - key: eenheidId
-        valueType: string
-        semanticType: eenheidId
+        osfType: eenheidId
         label:
           en: Eenheid ID
           nl: Eenheid-ID
@@ -185,7 +179,7 @@ configFields:
           props:
             valueMode: insertText
       - key: repairObjectId
-        valueType: string
+        osfType: string
         label:
           en: Repair object ID
           nl: Reparatieobject-ID
@@ -193,8 +187,8 @@ configFields:
           en: Specific repair object selected for the conversation.
           nl: Specifiek reparatieobject dat voor de conversatie is gekozen.
         help:
-          en: Store the object ID returned by repair intake or classification. This is context for later repair handling, not
-            a repair order by itself.
+          en: Store the object ID returned by repair intake or classification. This is context for later repair handling, not a
+            repair order by itself.
           nl: Sla de object-ID op uit reparatie-intake of classificatie. Dit is context voor latere reparatieafhandeling, geen
             reparatieopdracht op zichzelf.
         render:
@@ -202,7 +196,7 @@ configFields:
           props:
             valueMode: insertText
       - key: repairObjectType
-        valueType: string
+        osfType: string
         label:
           en: Repair object type
           nl: Reparatieobjecttype
@@ -210,8 +204,8 @@ configFields:
           en: Type of the selected repair object.
           nl: Type van het gekozen reparatieobject.
         help:
-          en: Keep this aligned with the repair object source so downstream routing can distinguish objects such as unit,
-            building part, or installation.
+          en: Keep this aligned with the repair object source so downstream routing can distinguish objects such as unit, building
+            part, or installation.
           nl: Houd dit gelijk aan de bron van het reparatieobject zodat vervolgrouting objecten zoals eenheid, bouwdeel of
             installatie kan onderscheiden.
         render:
@@ -219,7 +213,7 @@ configFields:
           props:
             valueMode: insertText
       - key: repairObjectCode
-        valueType: string
+        osfType: string
         label:
           en: Repair object code
           nl: Reparatieobjectcode

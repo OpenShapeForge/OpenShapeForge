@@ -28,7 +28,7 @@ authorization:
     empty: public
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -43,7 +43,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -56,9 +55,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: type
-    valueType: string
     required: true
     label:
       en: Type
@@ -75,9 +73,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: TAAKTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -94,9 +91,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: TAAKSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: priority
-    valueType: string
     required: false
     label:
       en: Priority
@@ -112,10 +108,10 @@ fields:
     options:
       type: referentiedata
       referentieGroep: TAAKPRIORITEIT
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: workQueueId
     required: false
-    semanticType: WorkQueue
+    osfType: WorkQueue
     label:
       en: Work queue
       nl: Werkqueue
@@ -133,7 +129,7 @@ fields:
     relationship:
       ownership: reference
   - key: startDateTime
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Start date/time
@@ -145,7 +141,7 @@ fields:
       column: start_date_time
       storageClass: core
   - key: dueDateTime
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due date/time
@@ -157,7 +153,7 @@ fields:
       column: due_date_time
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -170,7 +166,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: estimatedMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Estimated minutes
@@ -182,7 +178,7 @@ fields:
       column: estimated_minutes
       storageClass: core
   - key: actualMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Actual minutes
@@ -194,7 +190,6 @@ fields:
       column: actual_minutes
       storageClass: core
   - key: outcome
-    valueType: string
     required: false
     label:
       en: Outcome
@@ -207,9 +202,9 @@ fields:
     persisted:
       column: outcome
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: openUrl
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Open URL
@@ -223,7 +218,7 @@ fields:
       column: open_url
       storageClass: core
   - key: metadata
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Metadata
@@ -236,31 +231,31 @@ fields:
       storageClass: core
     children:
       - key: source
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Source
           nl: Bron
       - key: label
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Label
           nl: Label
       - key: timeout
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Timeout
           nl: Time-out
       - key: assignmentTarget
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Assignment target
           nl: Toewijzingsdoel
       - key: allowedRoles
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Allowed roles
@@ -270,13 +265,13 @@ fields:
           max: unbounded
         item:
           key: role
-          valueType: string
+          osfType: string
           required: false
           label:
             en: Role
             nl: Rol
   - key: formDefinition
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Form definition
@@ -289,69 +284,68 @@ fields:
       storageClass: core
     children:
       - key: schemaVersion
-        valueType: integer
+        osfType: integer
         required: false
         label:
           en: Schema version
           nl: Schemaversie
       - key: id
-        valueType: string
+        osfType: string
         required: false
         label:
           en: ID
           nl: Id
       - key: kind
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Kind
           nl: Soort
       - key: mode
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Mode
           nl: Modus
       - key: title
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Title
           nl: Titel
       - key: description
-        valueType: string
         required: false
         label:
           en: Description
           nl: Beschrijving
-        semanticType: multilineText
+        osfType: multilineText
       - key: metadata
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Metadata
           nl: Metadata
       - key: presentation
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Presentation
           nl: Presentatie
         children:
           - key: surface
-            valueType: string
+            osfType: string
             required: false
             label:
               en: Surface
               nl: Oppervlak
           - key: density
-            valueType: string
+            osfType: string
             required: false
             label:
               en: Density
               nl: Dichtheid
           - key: groupInterpretation
-            valueType: string
+            osfType: string
             required: false
             label:
               en: Group interpretation
@@ -361,93 +355,92 @@ fields:
               max: unbounded
             item:
               key: interpretation
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Interpretation
                 nl: Interpretatie
           - key: layout
-            valueType: object
+            osfType: object
             required: false
             label:
               en: Layout
               nl: Layout
             children:
               - key: columns
-                valueType: integer
+                osfType: integer
                 required: false
                 label:
                   en: Columns
                   nl: Kolommen
           - key: chrome
-            valueType: object
+            osfType: object
             required: false
             label:
               en: Chrome
               nl: Chrome
             children:
               - key: showTitle
-                valueType: boolean
+                osfType: boolean
                 required: false
                 label:
                   en: Show title
                   nl: Toon titel
               - key: showDescription
-                valueType: boolean
+                osfType: boolean
                 required: false
                 label:
                   en: Show description
                   nl: Toon beschrijving
               - key: showGroupTitles
-                valueType: boolean
+                osfType: boolean
                 required: false
                 label:
                   en: Show group titles
                   nl: Toon groepstitels
               - key: showGroupDescriptions
-                valueType: boolean
+                osfType: boolean
                 required: false
                 label:
                   en: Show group descriptions
                   nl: Toon groepsbeschrijvingen
               - key: showActionBar
-                valueType: boolean
+                osfType: boolean
                 required: false
                 label:
                   en: Show action bar
                   nl: Toon actiebalk
       - key: submission
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Submission
           nl: Indiening
         children:
           - key: successRoute
-            valueType: string
+            osfType: string
             required: false
             label:
               en: Success route
               nl: Succesroute
           - key: successBehavior
-            valueType: string
+            osfType: string
             required: false
             label:
               en: Success behavior
               nl: Succesgedrag
       - key: fields
-        valueType: object
         label:
           en: Fields
           nl: Velden
         cardinality:
           min: 0
           max: unbounded
-        semanticType: fieldDefinition
+        osfType: fieldDefinition
         authoring:
           profile: formDefinitionField
       - key: groups
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Groups
@@ -457,15 +450,15 @@ fields:
           max: unbounded
         item:
           key: group
-          valueType: object
+          osfType: object
       - key: fieldConfig
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Field config
           nl: Veldconfiguratie
       - key: actions
-        valueType: object
+        osfType: object
         required: false
         label:
           en: Actions
@@ -475,36 +468,35 @@ fields:
           max: unbounded
         item:
           key: actionItem
-          valueType: object
+          osfType: object
           children:
             - key: key
-              valueType: string
+              osfType: string
               required: true
               label:
                 en: Key
                 nl: Sleutel
             - key: label
-              valueType: string
+              osfType: string
               required: true
               label:
                 en: Button label
                 nl: Knop-label
               localized: true
             - key: description
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Helper text
                 nl: Hulptekst
               localized: true
             - key: icon
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Icon
                 nl: Icoon
             - key: tone
-              valueType: string
               required: false
               label:
                 en: Tone
@@ -524,28 +516,28 @@ fields:
                     label:
                       en: Destructive
                       nl: Destructief
-              semanticType: referenceDataCode
+              osfType: referenceDataCode
             - key: visibleWhen
-              valueType: object
+              osfType: object
               required: false
               label:
                 en: Visible when
                 nl: Zichtbaar wanneer
             - key: disabledWhen
-              valueType: object
+              osfType: object
               required: false
               label:
                 en: Disabled when
                 nl: Uitgeschakeld wanneer
             - key: disabledMessage
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Disabled tooltip
                 nl: Bericht bij uitgeschakeld
               localized: true
   - key: output
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Output
@@ -559,7 +551,7 @@ fields:
       column: output
       storageClass: core
   - key: isBlocking
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Blocking
@@ -574,7 +566,7 @@ fields:
   - key: caseStepId
     required: false
     readOnly: true
-    semanticType: ProcessStep
+    osfType: ProcessStep
     label:
       en: Case step ID
       nl: Zaakstap-ID
@@ -593,8 +585,12 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Tasks
+          nl: Taken
   - key: caseStepActionId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -615,9 +611,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Tasks
+          nl: Taken
   - key: assigneeId
     label:
       en: Assignee
@@ -625,9 +625,10 @@ fields:
     persisted:
       column: assignee_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
   - key: ownerId
     label:
       en: Owner
@@ -635,9 +636,10 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
   - key: appointmentId
     label:
       en: Appointment
@@ -645,9 +647,13 @@ fields:
     persisted:
       column: appointment_id
       storageClass: core
-    semanticType: Appointment
+    osfType: Appointment
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Tasks
+          nl: Taken
   - key: contactMomentId
     label:
       en: Contact moment
@@ -655,9 +661,13 @@ fields:
     persisted:
       column: contact_moment_id
       storageClass: core
-    semanticType: ContactMoment
+    osfType: ContactMoment
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Tasks
+          nl: Taken
   - key: caseId
     label:
       en: Case
@@ -665,9 +675,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Tasks
+          nl: Taken
   - key: parentTaskId
     label:
       en: Parent task
@@ -675,18 +689,14 @@ fields:
     persisted:
       column: parent_task_id
       storageClass: core
-    semanticType: Task
+    osfType: Task
     relationship:
       ownership: reference
-  - key: subtasks
-    label:
-      en: Subtasks
-      nl: Subtaken
-    semanticType: Task
-    cardinality: collection
-    relationship:
-      inverse: parentTaskId
-      ownership: reference
+      inverse:
+        key: subtasks
+        label:
+          en: Subtasks
+          nl: Subtaken
 operations:
   list:
     name: List Task

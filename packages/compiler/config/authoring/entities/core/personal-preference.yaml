@@ -25,28 +25,28 @@ authorization:
     owner: { column: owner_user_id, session: app.current_user_id }
 fields:
   - key: ownerUserId
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     validation: { format: uuid }
     label: { en: Owner, nl: Eigenaar }
     persisted: { column: owner_user_id, storageClass: core }
   - key: namespace
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     validation: { minLength: 1, maxLength: 120 }
     label: { en: Namespace, nl: Naamruimte }
     persisted: { column: namespace, storageClass: core }
   - key: key
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     validation: { minLength: 1, maxLength: 120 }
     label: { en: Key, nl: Sleutel }
     persisted: { column: key, storageClass: core }
   - key: value
-    valueType: object
+    osfType: object
     required: false
     label: { en: Value, nl: Waarde }
     description:

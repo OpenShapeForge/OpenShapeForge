@@ -27,7 +27,7 @@ authorization:
       - Relaties.All.ReadWrite
 fields:
   - key: label
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Label
@@ -36,7 +36,7 @@ fields:
       column: label
       storageClass: core
   - key: provenanceKey
-    valueType: string
+    osfType: string
     required: false
     immutable: true
     label:
@@ -46,7 +46,7 @@ fields:
       column: provenance_key
       storageClass: core
   - key: displayOnly
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:

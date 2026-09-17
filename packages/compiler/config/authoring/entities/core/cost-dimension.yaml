@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +44,7 @@ fields:
       column: name
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -64,18 +64,14 @@ fields:
     persisted:
       column: parent_cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
-  - key: childCostDimensions
-    label:
-      en: Child cost dimensions
-      nl: Onderliggende kostendimensies
-    semanticType: CostDimension
-    cardinality: collection
-    relationship:
-      inverse: parentCostDimensionId
-      ownership: reference
+      inverse:
+        key: childCostDimensions
+        label:
+          en: Child cost dimensions
+          nl: Onderliggende kostendimensies
 authorization:
   roles:
     read:

@@ -12,7 +12,7 @@ description:
   en: Pauses the workflow until a duration or timestamp is reached.
 configFields:
   - key: mode
-    valueType: string
+    osfType: string
     label:
       nl: Wachttype
       en: Wait type
@@ -43,7 +43,7 @@ configFields:
             nl: Vast moment
             en: Fixed moment
   - key: durationAmount
-    valueType: integer
+    osfType: integer
     label:
       nl: Aantal
       en: Amount
@@ -73,7 +73,7 @@ configFields:
           operator: eq
           value: duration
   - key: durationUnit
-    valueType: string
+    osfType: string
     label:
       nl: Eenheid
       en: Unit
@@ -112,7 +112,7 @@ configFields:
           operator: eq
           value: duration
   - key: untilAt
-    valueType: datetime
+    osfType: datetime
     label:
       nl: Wachten tot
       en: Wait until
@@ -133,7 +133,7 @@ configFields:
           operator: eq
           value: until
   - key: skipWeekends
-    valueType: boolean
+    osfType: boolean
     label:
       nl: Weekend overslaan
       en: Skip weekends

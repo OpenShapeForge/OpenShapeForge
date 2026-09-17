@@ -43,7 +43,6 @@ authorization:
     empty: public
 fields:
   - key: ownerScope
-    valueType: string
     required: true
     label:
       en: Owner scope
@@ -58,9 +57,9 @@ fields:
     persisted:
       column: owner_scope
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: namespace
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Namespace
@@ -75,7 +74,7 @@ fields:
       column: namespace
       storageClass: core
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Key
@@ -90,7 +89,7 @@ fields:
       column: key
       storageClass: core
   - key: valueJson
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Value
@@ -102,7 +101,6 @@ fields:
       column: value_json
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -115,7 +113,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: accountId
     label:
       en: Account
@@ -123,7 +121,7 @@ fields:
     persisted:
       column: account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
   - key: relationId
@@ -133,7 +131,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
 operations:

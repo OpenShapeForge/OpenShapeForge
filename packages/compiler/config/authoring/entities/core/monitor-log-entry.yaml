@@ -14,7 +14,7 @@ domains:
   - energy
 fields:
   - key: loggedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Logged at
@@ -26,7 +26,7 @@ fields:
       column: logged_at
       storageClass: core
   - key: level
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Level
@@ -40,7 +40,6 @@ fields:
       column: level
       storageClass: core
   - key: message
-    valueType: string
     required: true
     label:
       en: Message
@@ -54,7 +53,7 @@ fields:
     persisted:
       column: message
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: monitorLogId
     label:
       en: Monitor log
@@ -62,7 +61,7 @@ fields:
     persisted:
       column: monitor_log_id
       storageClass: core
-    semanticType: MonitorLog
+    osfType: MonitorLog
     relationship:
       ownership: reference
 authorization:

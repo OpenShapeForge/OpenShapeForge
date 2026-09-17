@@ -28,7 +28,7 @@ authorization:
     empty: public
 fields:
   - key: fileName
-    valueType: string
+    osfType: string
     required: true
     readOnly: true
     label:
@@ -43,7 +43,7 @@ fields:
       column: file_name
       storageClass: core
   - key: mimeType
-    valueType: string
+    osfType: string
     required: true
     readOnly: true
     label:
@@ -58,7 +58,7 @@ fields:
       column: mime_type
       storageClass: core
   - key: sizeBytes
-    valueType: integer
+    osfType: integer
     required: false
     readOnly: true
     label:
@@ -71,7 +71,7 @@ fields:
       column: size_bytes
       storageClass: core
   - key: storageLocation
-    valueType: string
+    osfType: string
     required: true
     label:
       en: File
@@ -85,7 +85,7 @@ fields:
       column: storage_location
       storageClass: core
   - key: checksum
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -106,9 +106,13 @@ fields:
     persisted:
       column: support_issue_id
       storageClass: core
-    semanticType: SupportIssue
+    osfType: SupportIssue
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Attachments
+          nl: Bijlagen
 operations:
   list:
     name: List Attachment

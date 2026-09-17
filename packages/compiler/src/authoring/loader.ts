@@ -171,19 +171,31 @@ function validateFieldKeys(
 }
 
 /**
- * Validates the entity name, every field key, and relationship key/target of a
- * fully-merged core entity (after base-entity application) before it is returned
- * to the compilers. Fails closed on any identifier that could break out of a
+ * Relationships live on fields: a single reference is `osfType: <Entity>` and
+ * its inverse collection is derived. An entity-level `relationships:` block
+ * is refused by name so the author knows which entries to move.
+ */
+export function assertNoRelationshipsBlock(entity: { entity: string; relationships?: unknown }, origin: string): void {
+  if (entity.relationships === undefined) return;
+  const keys = Array.isArray(entity.relationships)
+    ? entity.relationships.map((entry) => (entry && typeof entry === "object" ? String((entry as { key?: unknown }).key ?? "?") : "?"))
+    : [];
+  throw new Error(
+    `${origin}: ${entity.entity} declares relationships${keys.length ? ` (${keys.join(", ")})` : ""}; ` +
+      `relationships are fields — set osfType: <Entity> on the referencing field and let the compiler derive the inverse collection.`,
+  );
+}
+
+/**
+ * Validates the entity name and every field key of a fully-merged core
+ * entity (after base-entity application) before it is returned to the
+ * compilers. Fails closed on any identifier that could break out of a
  * generated code position. Exported for unit testing.
  */
 export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin: string): void {
   validateContentIdentifier(coreEntity.entity, ENTITY_NAME_PATTERN, "entity name", origin);
   validateFieldKeys(coreEntity.fields, origin);
-  for (const rel of coreEntity.relationships ?? []) {
-    if (!rel || typeof rel !== "object") continue;
-    validateContentIdentifier((rel as { key?: unknown }).key, FIELD_KEY_PATTERN, "relationship key", origin);
-    validateContentIdentifier((rel as { target?: unknown }).target, ENTITY_NAME_PATTERN, "relationship target", origin);
-  }
+  assertNoRelationshipsBlock(coreEntity, origin);
   if (
     typeof coreEntity.rest === "object" &&
     coreEntity.rest !== null &&
@@ -310,8 +322,14 @@ export function loadEntity(
     kind: "core",
     path: corePath,
   });
-  assertV2Authoring(coreEntity, corePath);
   validateEntityContentIdentifiers(coreEntity, corePath);
+
+  // Semantic types (core + context catalogs merged). Normalization resolves
+  // every field's base type and derives the inverse collections, which the
+  // v2 authoring checks below read.
+  const semanticTypes = loadSemanticTypes(authoringDir);
+  coreEntity = normalizeEntityFields(coreEntity, semanticTypes);
+  assertV2Authoring(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];
@@ -348,9 +366,6 @@ export function loadEntity(
   const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
-  // Semantic types (core + context catalogs merged)
-  const semanticTypes = loadSemanticTypes(authoringDir);
-  coreEntity = normalizeEntityFields(coreEntity, semanticTypes);
   const retentionPolicies = loadRetentionPolicies(authoringDir);
 
   // View definition (optional)
@@ -403,7 +418,6 @@ export function loadContextEntity(
     filterField: contextEntity.filterField,
     indexes: (contextEntity as { indexes?: CoreEntity["indexes"] }).indexes,
     fields: contextEntity.fields ?? [],
-    relationships: contextEntity.relationships,
     workflow: contextEntity.workflow,
     crud: contextEntity.crud,
     rest: (contextEntity as { rest?: CoreEntity["rest"] }).rest,

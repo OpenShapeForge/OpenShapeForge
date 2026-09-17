@@ -15,7 +15,6 @@ domains:
   - finance
 fields:
   - key: kind
-    valueType: string
     required: true
     label:
       en: Kind
@@ -29,9 +28,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: INVOICEKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: fiscalYearCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Fiscal year code
@@ -48,7 +47,7 @@ fields:
       column: fiscal_year_code
       storageClass: core
   - key: lastNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Last number
@@ -63,7 +62,7 @@ fields:
       column: last_number
       storageClass: core
   - key: lastIssuedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Last issued at
@@ -75,7 +74,7 @@ fields:
       column: last_issued_at
       storageClass: core
   - key: format
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Format
@@ -92,7 +91,7 @@ fields:
       column: format
       storageClass: core
   - key: resetPolicy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Reset policy
@@ -106,7 +105,7 @@ fields:
       column: reset_policy
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code

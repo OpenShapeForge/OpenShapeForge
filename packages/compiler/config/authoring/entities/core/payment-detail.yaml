@@ -37,7 +37,7 @@ retention:
       - validFrom
 fields:
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -55,7 +55,6 @@ fields:
       type: referentiedata
       referentieGroep: PAYMENTDETAILTYPE
   - key: iban
-    valueType: string
     required: false
     label:
       en: IBAN
@@ -63,7 +62,7 @@ fields:
     description:
       en: International Bank Account Number.
       nl: Internationaal bankrekeningnummer (IBAN).
-    semanticType: iban
+    osfType: iban
     validation:
       maxLength: 34
     persisted:
@@ -81,7 +80,7 @@ fields:
       disposition:
         action: anonymize
   - key: bic
-    valueType: string
+    osfType: string
     required: false
     label:
       en: BIC
@@ -95,7 +94,7 @@ fields:
       column: bic
       storageClass: core
   - key: accountHolder
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Account holder
@@ -109,7 +108,7 @@ fields:
       column: account_holder
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -123,7 +122,7 @@ fields:
       column: status
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary
@@ -135,7 +134,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -147,7 +146,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -167,7 +166,7 @@ fields:
     description:
       en: Identifier of the related relation instance.
       nl: Identifier van de gerelateerde relatie-instantie.
-    semanticType: Relation
+    osfType: Relation
     persisted:
       column: relation_id
       storageClass: core
@@ -178,6 +177,10 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Payment details
+          nl: Betaalgegevens
 operations:
   list:
     name: { en: List payment details, nl: Betaalgegevens tonen }

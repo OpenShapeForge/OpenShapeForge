@@ -20,7 +20,7 @@ import type {
   CompiledViewGroup,
 } from "../types.js";
 import { resolveStorageColumns } from "./storage.js";
-import { normalizeEntityFields } from "../entity-fields.js";
+import { normalizeEntityFields, withBaseTypes } from "../entity-fields.js";
 import { resolveModelFields } from "./model.js";
 import { resolveRelationships } from "./relationships.js";
 import { buildGraphQL } from "./graphql.js";
@@ -48,11 +48,11 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
   const publishOperation = `${entity.entity}.publish`;
   const has = (key: string) => entity.fields.some((field) => field.key === key);
   const managedFields: import("../types.js").Field[] = [
-    { key: "latestVersion", valueType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Latest version", nl: "Laatste versie" }, persisted: { column: "latest_version", storageClass: "core" } },
-    { key: "latestVersionId", valueType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Latest version id", nl: "Id van laatste versie" }, persisted: { column: "latest_version_id", storageClass: "core" } },
-    { key: "publishedVersion", valueType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Published version", nl: "Gepubliceerde versie" }, persisted: { column: "published_version", storageClass: "core" } },
-    { key: "publishedVersionId", valueType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
-    { key: "lifecycleStatus", valueType: "string", required: true, readOnly: true, writtenBy: [publishOperation], defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
+    { key: "latestVersion", osfType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Latest version", nl: "Laatste versie" }, persisted: { column: "latest_version", storageClass: "core" } },
+    { key: "latestVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Latest version id", nl: "Id van laatste versie" }, persisted: { column: "latest_version_id", storageClass: "core" } },
+    { key: "publishedVersion", osfType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Published version", nl: "Gepubliceerde versie" }, persisted: { column: "published_version", storageClass: "core" } },
+    { key: "publishedVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
+    { key: "lifecycleStatus", osfType: "string", required: true, readOnly: true, writtenBy: [publishOperation], defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
   ];
   const publish = {
     id: publishOperation,
@@ -145,12 +145,16 @@ export function validateTimelineIncludes(
 }
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
-  artifacts = { ...artifacts, coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.semanticTypes) };
+  artifacts = {
+    ...artifacts,
+    coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.semanticTypes),
+    profiles: artifacts.profiles.map((profile) => (profile.fields ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.semanticTypes) } : profile)),
+  };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
   const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
 
   const relationships = resolveRelationships(artifacts);
-  const columns = resolveStorageColumns(coreEntity.fields, profiles, relationships);
+  const columns = resolveStorageColumns(coreEntity.fields, profiles);
   const modelFields = resolveModelFields(valueDefinition
     ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.semanticTypes).fields
     : coreEntity.fields, componentCatalog, artifacts.semanticTypes);

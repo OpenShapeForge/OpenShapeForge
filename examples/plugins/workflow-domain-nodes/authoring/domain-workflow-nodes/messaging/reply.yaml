@@ -12,8 +12,7 @@ description:
   nl: Stuur een antwoord in een bestaande conversatie zonder dat het workflowcanvas een kanaal kiest.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -23,15 +22,14 @@ configFields:
     help:
       en: Usually this is resolved from workflow context. The reply is queued on the same conversation and fails for missing,
         unknown, or closed conversations.
-      nl: Meestal wordt dit uit de workflowcontext gehaald. Het antwoord wordt op dezelfde conversatie klaargezet en faalt
-        bij ontbrekende, onbekende of gesloten conversaties.
+      nl: Meestal wordt dit uit de workflowcontext gehaald. Het antwoord wordt op dezelfde conversatie klaargezet en faalt bij
+        ontbrekende, onbekende of gesloten conversaties.
     render:
       component: OptionVariablePicker
       props:
         valueMode: insertText
   - key: body
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label:
       en: Message
       nl: Bericht
@@ -52,8 +50,7 @@ configFields:
         - messageBody
         - text
   - key: fieldDefinition
-    valueType: object
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     variables: whole
     label:
       en: Field definition
@@ -76,8 +73,7 @@ configFields:
       aliases:
         - followUpField
   - key: fieldDefinitions
-    valueType: object
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     cardinality:
       min: 0
       max: "unbounded"
@@ -89,8 +85,10 @@ configFields:
       en: Optional field definitions for multi-field renderers such as WhatsApp Flow.
       nl: Optionele velddefinities voor multi-field renderers zoals WhatsApp Flow.
     help:
-      en: Use this with WhatsApp Flow when a reply asks for multiple structured values. Existing single-field button/list behavior still uses `fieldDefinition`.
-      nl: Gebruik dit met WhatsApp Flow wanneer een antwoord om meerdere gestructureerde waarden vraagt. Bestaand knop-/lijstgedrag voor één veld blijft `fieldDefinition` gebruiken.
+      en: Use this with WhatsApp Flow when a reply asks for multiple structured values. Existing single-field button/list
+        behavior still uses `fieldDefinition`.
+      nl: Gebruik dit met WhatsApp Flow wanneer een antwoord om meerdere gestructureerde waarden vraagt. Bestaand
+        knop-/lijstgedrag voor één veld blijft `fieldDefinition` gebruiken.
     render:
       component: OptionVariablePicker
       props:
@@ -98,55 +96,59 @@ configFields:
         expectedSemanticType: fieldDefinition
         variableSectionLabel: Velddefinities
   - key: whatsappFlow
-    valueType: object
+    osfType: object
     variables: whole
     label:
       en: WhatsApp Flow
       nl: WhatsApp Flow
     description:
-      en: Optional WhatsApp Flow configuration used when this reply is sent on WhatsApp and multiple field definitions are present.
-      nl: Optionele WhatsApp Flow-configuratie die wordt gebruikt wanneer dit antwoord via WhatsApp wordt verstuurd en meerdere velddefinities aanwezig zijn.
+      en: Optional WhatsApp Flow configuration used when this reply is sent on WhatsApp and multiple field definitions are
+        present.
+      nl: Optionele WhatsApp Flow-configuratie die wordt gebruikt wanneer dit antwoord via WhatsApp wordt verstuurd en
+        meerdere velddefinities aanwezig zijn.
     help:
-      en: Leave `flowId` empty to keep current text/button/list behavior. A configured Flow is used only for WhatsApp replies with more than one field definition.
-      nl: Laat `flowId` leeg om het huidige tekst-/knop-/lijstgedrag te behouden. Een geconfigureerde Flow wordt alleen gebruikt voor WhatsApp-antwoorden met meer dan één velddefinitie.
+      en: Leave `flowId` empty to keep current text/button/list behavior. A configured Flow is used only for WhatsApp replies
+        with more than one field definition.
+      nl: Laat `flowId` leeg om het huidige tekst-/knop-/lijstgedrag te behouden. Een geconfigureerde Flow wordt alleen
+        gebruikt voor WhatsApp-antwoorden met meer dan één velddefinitie.
     children:
       - key: enabled
-        valueType: boolean
+        osfType: boolean
         defaultValue: true
         label:
           en: Enabled
           nl: Ingeschakeld
       - key: flowId
-        valueType: string
+        osfType: string
         label:
           en: Meta Flow ID
           nl: Meta Flow-ID
       - key: flowCta
-        valueType: string
+        osfType: string
         defaultValue: Invullen
         label:
           en: CTA label
           nl: CTA-label
       - key: mode
-        valueType: string
+        osfType: string
         defaultValue: published
         label:
           en: Mode
           nl: Modus
       - key: flowAction
-        valueType: string
+        osfType: string
         defaultValue: navigate
         label:
           en: Flow action
           nl: Flow-actie
       - key: startScreen
-        valueType: string
+        osfType: string
         defaultValue: REQUEST_INPUT
         label:
           en: Start screen
           nl: Startscherm
       - key: initialData
-        valueType: object
+        osfType: object
         variables: whole
         label:
           en: Initial data
@@ -154,7 +156,7 @@ configFields:
         render:
           component: JsonEditor
   - key: replyToMessageId
-    valueType: string
+    osfType: string
     label:
       en: Reply to message ID
       nl: Antwoord-op-bericht-ID
@@ -167,7 +169,7 @@ configFields:
       nl: Laat leeg om waar mogelijk het initiële inkomende bericht uit de workflowcontext te gebruiken. Dit wordt opgeslagen
         in verzendmetadata voor providers die threaded replies ondersteunen.
   - key: idempotencyKey
-    valueType: string
+    osfType: string
     label:
       en: Idempotency key
       nl: Idempotentiesleutel
@@ -180,7 +182,7 @@ configFields:
       nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Gebruik alleen een aangepaste sleutel wanneer
         herhaalde uitvoeringen bewust naar hetzelfde antwoordsegment moeten verwijzen.
   - key: flushImmediately
-    valueType: boolean
+    osfType: boolean
     label:
       en: Flush immediately
       nl: Direct verzenden

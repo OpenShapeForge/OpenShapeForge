@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/interface-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Transport-free web interface contracts and routing for OpenShapeForge hosts and plugins.",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"

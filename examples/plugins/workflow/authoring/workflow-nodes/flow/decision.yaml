@@ -12,7 +12,7 @@ description:
   nl: Vertak de workflow op basis van geconfigureerde condities.
 configFields:
   - key: branches
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -23,23 +23,26 @@ configFields:
       en: Ordered branches evaluated by the decision node.
       nl: Geordende paden die door de keuzenode worden geëvalueerd.
     help:
-      en: The runtime checks these branches from top to bottom and returns the first branch whose `when` condition evaluates to true. If none match, it falls back to `defaultEdgeId`.
-      nl: De runtime controleert deze paden van boven naar beneden en kiest het eerste pad waarvan de `when`-conditie waar is. Als niets matcht, valt hij terug op `defaultEdgeId`.
+      en: The runtime checks these branches from top to bottom and returns the first branch whose `when` condition evaluates
+        to true. If none match, it falls back to `defaultEdgeId`.
+      nl: De runtime controleert deze paden van boven naar beneden en kiest het eerste pad waarvan de `when`-conditie waar is.
+        Als niets matcht, valt hij terug op `defaultEdgeId`.
     defaultValue: []
     render:
       component: BranchConditionEditor
     item:
       key: branch
-      valueType: object
+      osfType: object
       description:
         en: One ordered decision branch.
         nl: Eén geordend beslispad.
       help:
-        en: This object groups the technical branch id, the visible label, and the condition that decides whether this path wins.
+        en: This object groups the technical branch id, the visible label, and the condition that decides whether this path
+          wins.
         nl: Dit object groepeert de technische pad-id, het zichtbare label en de conditie die bepaalt of dit pad wint.
       children:
         - key: id
-          valueType: string
+          osfType: string
           label:
             en: Branch ID
             nl: Pad-ID
@@ -47,10 +50,12 @@ configFields:
             en: Stable branch id used by the runtime and canvas routing.
             nl: Stabiele pad-id die door runtime en canvasroutering wordt gebruikt.
           help:
-            en: The decision bridge returns this id as `selectedBranchId`, and when no explicit handle is set it is also used as the output handle.
-            nl: De decision-bridge geeft deze id terug als `selectedBranchId`, en als er geen expliciete handle is ingesteld wordt dit ook de output handle.
+            en: The decision bridge returns this id as `selectedBranchId`, and when no explicit handle is set it is also used as the
+              output handle.
+            nl: De decision-bridge geeft deze id terug als `selectedBranchId`, en als er geen expliciete handle is ingesteld wordt
+              dit ook de output handle.
         - key: label
-          valueType: string
+          osfType: string
           label:
             en: Label
             nl: Label
@@ -58,11 +63,12 @@ configFields:
             en: Human-readable branch name.
             nl: Leesbare naam van het beslispad.
           help:
-            en: Returned by the runtime as `selectedBranchLabel` and shown in the designer, so make it clear enough to understand why this route was taken.
-            nl: Wordt door de runtime teruggegeven als `selectedBranchLabel` en in de designer getoond, dus maak hem duidelijk genoeg om te begrijpen waarom deze route is genomen.
+            en: Returned by the runtime as `selectedBranchLabel` and shown in the designer, so make it clear enough to understand
+              why this route was taken.
+            nl: Wordt door de runtime teruggegeven als `selectedBranchLabel` en in de designer getoond, dus maak hem duidelijk
+              genoeg om te begrijpen waarom deze route is genomen.
         - key: when
-          valueType: object
-          semanticType: condition
+          osfType: condition
           label:
             en: Condition
             nl: Conditie
@@ -70,13 +76,15 @@ configFields:
             en: Boolean condition evaluated for this branch.
             nl: Booleaanse conditie die voor dit pad wordt geëvalueerd.
           help:
-            en: The runtime evaluates `when` with the same rule/group structure as the control-flow bridge; if it returns true before earlier branches do, this branch is selected.
-            nl: De runtime evalueert `when` met dezelfde rule/group-structuur als de control-flow-bridge; als deze true wordt voordat eerdere paden dat doen, wordt dit pad gekozen.
+            en: The runtime evaluates `when` with the same rule/group structure as the control-flow bridge; if it returns true
+              before earlier branches do, this branch is selected.
+            nl: De runtime evalueert `when` met dezelfde rule/group-structuur als de control-flow-bridge; als deze true wordt
+              voordat eerdere paden dat doen, wordt dit pad gekozen.
     runtime:
       aliases:
         - conditions
   - key: defaultEdgeId
-    valueType: string
+    osfType: string
     label:
       en: Default branch
       nl: Standaardpad
@@ -84,8 +92,10 @@ configFields:
       en: Output handle used when none of the configured branches match.
       nl: Output handle die wordt gebruikt wanneer geen van de geconfigureerde paden matcht.
     help:
-      en: The decision bridge returns this as both `selectedBranchId` and `selectedOutputHandle` when every branch condition evaluates to false.
-      nl: De decision-bridge geeft dit terug als zowel `selectedBranchId` als `selectedOutputHandle` wanneer alle branch-condities false evalueren.
+      en: The decision bridge returns this as both `selectedBranchId` and `selectedOutputHandle` when every branch condition
+        evaluates to false.
+      nl: De decision-bridge geeft dit terug als zowel `selectedBranchId` als `selectedOutputHandle` wanneer alle
+        branch-condities false evalueren.
     defaultValue: default
     render:
       component: Input

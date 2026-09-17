@@ -24,6 +24,7 @@ import type {
   SemanticTypeDefinition,
 } from "../types.js";
 import { fieldCardinality } from "./helpers.js";
+import { resolveBaseType, semanticTypeOf } from "../entity-fields.js";
 
 export function resolveModelFields(
   coreFields: Field[],
@@ -31,13 +32,15 @@ export function resolveModelFields(
   semanticTypes?: Record<string, SemanticTypeDefinition>
 ): CompiledField[] {
   return coreFields.map((field) => {
-    const semType = field.semanticType ? semanticTypes?.[field.semanticType] : undefined;
+    const semType = semanticTypeOf(field.osfType, semanticTypes ?? {});
+    const baseType = field.baseType ?? resolveBaseType(field.osfType, semanticTypes ?? {});
+    if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
     const authoredCardinality = field.cardinality ?? semType?.cardinality;
     const cardinality = fieldCardinality({ cardinality: authoredCardinality });
 
     const compiled: CompiledField = {
       key: field.key,
-      valueType: field.valueType ?? semType?.valueType,
+      baseType,
       cardinality,
       ...(authoredCardinality && typeof authoredCardinality === "object" &&
         cardinality === "collection"
@@ -46,7 +49,7 @@ export function resolveModelFields(
       required: field.required ?? false,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
-      semanticType: field.semanticType,
+      osfType: field.osfType,
     };
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
@@ -119,8 +122,8 @@ export function resolveFieldOptions(field: Pick<Field, "options" | "reference">)
 /**
  * Resolution order:
  * 1. field.render (explicit override — highest priority)
- * 2. field.semanticType → semantic type registry render
- * 3. field.valueType/cardinality → component catalog defaults (lowest)
+ * 2. field.osfType → semantic type registry render
+ * 3. field.baseType/cardinality → component catalog defaults (lowest)
  */
 export function resolveRender(
   field: Field,
@@ -155,11 +158,11 @@ export function resolveRender(
 
   // 3. Default for field value shape
   const defaultKey = fieldCardinality(field) === "collection"
-    ? field.semanticType === "fieldDefinition"
+    ? field.osfType === "fieldDefinition"
       ? "fieldDefinitionCollection"
       : "collection"
-    : field.valueType;
-  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.valueType];
+    : field.baseType;
+  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   if (defaultEntry) {
     const componentName = defaultEntry.component;
     return {

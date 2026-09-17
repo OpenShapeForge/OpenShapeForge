@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: inspectedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Inspected at
@@ -41,7 +41,6 @@ fields:
       column: inspected_at
       storageClass: core
   - key: summary
-    valueType: string
     required: false
     label:
       en: Summary
@@ -54,9 +53,9 @@ fields:
     persisted:
       column: summary
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -76,7 +75,7 @@ fields:
     persisted:
       column: inspector_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: assetId
@@ -86,7 +85,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

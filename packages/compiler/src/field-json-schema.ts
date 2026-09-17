@@ -24,6 +24,7 @@ import type {
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { resolveModelFields } from "./authoring/compiler/model.js";
+import { isBaseType } from "./authoring/entity-fields.js";
 import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
@@ -92,7 +93,7 @@ export function renderRuntimeFieldSchemaRegistry(input: {
  */
 export type SchemaSourceField = {
   key: string;
-  valueType?: string;
+  baseType?: string;
   cardinality?: unknown;
   cardinalityBounds?: {
     min?: number;
@@ -100,7 +101,7 @@ export type SchemaSourceField = {
   };
   required?: boolean;
   defaultValue?: unknown;
-  semanticType?: string;
+  osfType?: string;
   children?: SchemaSourceField[];
   item?: SchemaSourceField;
   validation?: {
@@ -211,8 +212,17 @@ export function stringRule(rule: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * A compiled field carries its derived `baseType`; an authored FieldDefinition
+ * that never went through entity normalization (connector operation fields)
+ * carries a base osf type directly.
+ */
+export function sourceBaseType(field: Pick<SchemaSourceField, "baseType" | "osfType">): string {
+  return field.baseType ?? (isBaseType(field.osfType) ? field.osfType : "string");
+}
+
 export function baseTypeFor(field: SchemaSourceField): JsonObject {
-  switch (field.valueType) {
+  switch (sourceBaseType(field)) {
     case "boolean":
       return { type: "boolean" };
     case "integer":
@@ -447,11 +457,11 @@ function compiledValueSchema(
   referentiedata: CoreReferentiedataSnapshot,
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
-  if (field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE) {
+  if (field.osfType === FIELD_DEFINITION_SEMANTIC_TYPE) {
     return fieldDefinitionValueSchema();
   }
   if (
-    field.valueType === "object" &&
+    field.baseType === "object" &&
     field.children &&
     field.children.length > 0
   ) {

@@ -7,7 +7,7 @@
  * The only consumer was a `JSON.parse` in `check:authoring-local`, which proved
  * the files were syntactically valid JSON and nothing more. Drift was therefore
  * silent in both directions, and it had happened: `core-entity.schema.json`
- * still described the pre-`valueType` field shape, and `connector.schema.json`
+ * still described the pre-`osfType` field shape, and `connector.schema.json`
  * declared a `reliability.timeoutMs` the compiler never reads.
  *
  * Two properties this module is built around:

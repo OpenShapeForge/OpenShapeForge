@@ -12,7 +12,7 @@ description:
   en: Determines a follow-up question for missing intake information.
 configFields:
   - key: promptProfile
-    valueType: string
+    osfType: string
     label:
       nl: Prompt profile
       en: Prompt profile
@@ -28,7 +28,7 @@ configFields:
     render:
       component: Select
   - key: questionStrategy
-    valueType: string
+    osfType: string
     label:
       nl: Strategie
       en: Strategy
@@ -49,7 +49,7 @@ configFields:
     render:
       component: Select
   - key: maxQuestions
-    valueType: number
+    osfType: number
     label:
       nl: Max vragen
       en: Max questions
@@ -65,7 +65,7 @@ configFields:
     render:
       component: NumberInput
   - key: preferMissingRequiredFields
-    valueType: boolean
+    osfType: boolean
     label:
       nl: Geef verplichte ontbrekende velden voorrang
       en: Prefer missing required fields
@@ -79,7 +79,7 @@ configFields:
     render:
       component: Switch
   - key: allowUrgencyQuestionFirst
-    valueType: boolean
+    osfType: boolean
     label:
       nl: Laat urgentievragen voorrang krijgen
       en: Allow urgency questions first
@@ -93,7 +93,7 @@ configFields:
     render:
       component: Switch
   - key: outputParameters
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -129,7 +129,7 @@ configFields:
         required: false
     item:
       key: parameter
-      valueType: object
+      osfType: object
       description:
         nl: Eén outputparameter die door de clarifier beschikbaar wordt gemaakt.
         en: One output parameter exposed by the clarifier.
@@ -138,7 +138,7 @@ configFields:
         en: Change this list only when downstream nodes need different output fields.
       children:
         - key: id
-          valueType: string
+          osfType: string
           label:
             nl: Interne ID
             en: Internal ID
@@ -151,7 +151,7 @@ configFields:
           render:
             component: Input
         - key: key
-          valueType: string
+          osfType: string
           label:
             nl: Sleutel
             en: Key
@@ -164,7 +164,7 @@ configFields:
           render:
             component: Input
         - key: label
-          valueType: string
+          osfType: string
           label:
             nl: Label
             en: Label
@@ -177,7 +177,7 @@ configFields:
           render:
             component: Input
         - key: type
-          valueType: string
+          osfType: string
           label:
             nl: Type
             en: Type
@@ -222,7 +222,7 @@ configFields:
           render:
             component: Select
         - key: required
-          valueType: boolean
+          osfType: boolean
           label:
             nl: Verplicht
             en: Required
@@ -236,7 +236,7 @@ configFields:
           render:
             component: Switch
         - key: semanticTypeKey
-          valueType: string
+          osfType: string
           label:
             nl: Semantisch type
             en: Semantic type
@@ -249,7 +249,7 @@ configFields:
           render:
             component: Input
         - key: description
-          valueType: string
+          osfType: string
           label:
             nl: Beschrijving
             en: Description
@@ -264,7 +264,7 @@ configFields:
             props:
               rows: 2
         - key: placeholder
-          valueType: string
+          osfType: string
           label:
             nl: Placeholder
             en: Placeholder

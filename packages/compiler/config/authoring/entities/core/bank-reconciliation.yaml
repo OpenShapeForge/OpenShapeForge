@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: matchedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Matched at
@@ -26,7 +26,7 @@ fields:
       column: matched_at
       storageClass: core
   - key: matchedBy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Matched by
@@ -46,7 +46,7 @@ fields:
     persisted:
       column: bank_statement_line_id
       storageClass: core
-    semanticType: BankStatementLine
+    osfType: BankStatementLine
     relationship:
       ownership: reference
   - key: invoicePaymentId
@@ -56,7 +56,7 @@ fields:
     persisted:
       column: invoice_payment_id
       storageClass: core
-    semanticType: InvoicePayment
+    osfType: InvoicePayment
     relationship:
       ownership: reference
   - key: ledgerPostingLineId
@@ -66,7 +66,7 @@ fields:
     persisted:
       column: ledger_posting_line_id
       storageClass: core
-    semanticType: LedgerPostingLine
+    osfType: LedgerPostingLine
     relationship:
       ownership: reference
 authorization:

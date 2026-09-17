@@ -49,7 +49,7 @@ fields:
     persisted:
       column: process_id
       storageClass: core
-    semanticType: Process
+    osfType: Process
     relationship:
       ownership: reference
   - key: processStepId
@@ -66,11 +66,11 @@ fields:
     persisted:
       column: process_step_id
       storageClass: core
-    semanticType: ProcessStep
+    osfType: ProcessStep
     relationship:
       ownership: reference
   - key: actionKey
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Action key
@@ -82,7 +82,7 @@ fields:
       column: action_key
       storageClass: core
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Sequence number
@@ -91,7 +91,6 @@ fields:
       column: sequence_number
       storageClass: core
   - key: kind
-    valueType: string
     required: true
     label:
       en: Kind
@@ -102,9 +101,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTEPACTIONKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: required
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Required
@@ -114,7 +113,6 @@ fields:
       column: required
       storageClass: core
   - key: startMode
-    valueType: string
     required: true
     label:
       en: Start mode
@@ -126,9 +124,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTEPACTIONSTARTMODE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -140,11 +137,10 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTEPACTIONSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: workflowDefinitionId
-    valueType: string
     required: false
-    semanticType: workflowDefinitionId
+    osfType: workflowDefinitionId
     label:
       en: Workflow definition
       nl: Workflowdefinitie
@@ -154,7 +150,7 @@ fields:
       column: workflow_definition_id
       storageClass: core
   - key: workflowInstanceId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -166,7 +162,7 @@ fields:
       column: workflow_instance_id
       storageClass: core
   - key: taskTemplate
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Task template
@@ -175,7 +171,7 @@ fields:
       column: task_template
       storageClass: core
   - key: result
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Result
@@ -184,7 +180,7 @@ fields:
       column: result
       storageClass: core
   - key: failureDetails
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Failure details
@@ -193,7 +189,7 @@ fields:
       column: failure_details
       storageClass: core
   - key: activatedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Activated at
@@ -202,7 +198,7 @@ fields:
       column: activated_at
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -211,7 +207,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: cancelledAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Cancelled at
@@ -226,7 +222,7 @@ fields:
     persisted:
       column: case_step_template_id
       storageClass: core
-    semanticType: CaseStepTemplate
+    osfType: CaseStepTemplate
     relationship:
       ownership: reference
   - key: taskId
@@ -236,7 +232,7 @@ fields:
     persisted:
       column: task_id
       storageClass: core
-    semanticType: Task
+    osfType: Task
     relationship:
       ownership: reference
 operations: {}

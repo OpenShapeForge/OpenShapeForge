@@ -14,7 +14,7 @@ domains:
   - hr
 fields:
   - key: employeeNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Employee number
@@ -29,7 +29,6 @@ fields:
       column: employee_number
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -43,9 +42,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: EMPLOYMENTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: hireDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Hire date
@@ -57,7 +56,7 @@ fields:
       column: hire_date
       storageClass: core
   - key: terminationDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Termination date
@@ -69,7 +68,7 @@ fields:
       column: termination_date
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name
@@ -83,7 +82,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -96,9 +94,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -118,26 +116,8 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
-      ownership: reference
-  - key: roles
-    label:
-      en: Roles
-      nl: Rollen
-    semanticType: EmployeeRole
-    cardinality: collection
-    relationship:
-      inverse: employeeId
-      ownership: reference
-  - key: organizationPermissions
-    label:
-      en: Organization permissions
-      nl: Organisatierechten
-    semanticType: UserOrganizationPermission
-    cardinality: collection
-    relationship:
-      inverse: employeeId
       ownership: reference
 authorization:
   roles:

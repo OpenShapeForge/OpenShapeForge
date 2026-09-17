@@ -14,7 +14,6 @@ domains:
   - project
 fields:
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -27,9 +26,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: spentAt
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Spent at
@@ -41,7 +40,6 @@ fields:
       column: spent_at
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -49,7 +47,7 @@ fields:
     description:
       en: Actual amount spent on this line.
       nl: Werkelijk besteed bedrag voor deze regel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
@@ -60,7 +58,7 @@ fields:
     persisted:
       column: project_id
       storageClass: core
-    semanticType: Project
+    osfType: Project
     relationship:
       ownership: reference
   - key: projectTaskId
@@ -70,7 +68,7 @@ fields:
     persisted:
       column: project_task_id
       storageClass: core
-    semanticType: ProjectTask
+    osfType: ProjectTask
     relationship:
       ownership: reference
   - key: ledgerAccountId
@@ -80,7 +78,7 @@ fields:
     persisted:
       column: ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: costDimensionId
@@ -90,7 +88,7 @@ fields:
     persisted:
       column: cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
 authorization:

@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -41,7 +41,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +53,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,9 +62,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: defaultConfidentiality
-    valueType: string
     required: false
     label:
       en: Default confidentiality
@@ -76,9 +74,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEFILECONFIDENTIALITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: archiveProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Archive profile
@@ -89,7 +87,7 @@ fields:
       column: archive_profile
       storageClass: core
   - key: retentionYears
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Retention years

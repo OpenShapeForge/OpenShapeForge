@@ -17,45 +17,52 @@ indexes:
   - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
 fields:
   - key: template
-    semanticType: Template
+    osfType: Template
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label:
+          en: Versions
+          nl: Versies
+        ownership: owned
   - key: versionNumber
-    valueType: integer
+    osfType: integer
     required: true
     immutable: true
     validation: { min: 1 }
     label: { en: Version, nl: Versie }
     persisted: { column: version_number, storageClass: core }
   - key: status
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     defaultValue: published
     options: { type: static, items: [{ value: published, label: { en: Published, nl: Gepubliceerd } }] }
     persisted: { column: status, storageClass: core }
   - key: snapshot
-    valueType: object
+    osfType: object
     required: true
     immutable: true
     label: { en: Frozen content, nl: Vastgelegde inhoud }
     persisted: { column: snapshot, storageClass: core }
   - key: contentHash
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     validation: { pattern: "^[a-f0-9]{64}$" }
     label: { en: Content checksum, nl: Inhoudschecksum }
     persisted: { column: content_hash, storageClass: core }
   - key: publishedBy
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     validation: { format: uuid }
     label: { en: Published by, nl: Gepubliceerd door }
     persisted: { column: published_by, storageClass: core }
   - key: publishedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     immutable: true
     label: { en: Published at, nl: Gepubliceerd op }
@@ -64,8 +71,10 @@ operations:
   renderSnapshot:
     name: { en: Render frozen content, nl: Vastgelegde inhoud weergeven }
     description:
-      en: Render a supplied immutable content snapshot to plain text for its selected channel without reading templates or source records. A checksum proves consistency, not approval or permission to deliver.
-      nl: Geef een aangeleverde onveranderlijke inhoudssnapshot weer als tekst voor het gekozen kanaal, zonder templates of bronrecords te lezen. Een checksum bewijst consistentie, niet goedkeuring of toestemming voor verzending.
+      en: Render a supplied immutable content snapshot to plain text for its selected channel without reading templates or
+        source records. A checksum proves consistency, not approval or permission to deliver.
+      nl: Geef een aangeleverde onveranderlijke inhoudssnapshot weer als tekst voor het gekozen kanaal, zonder templates of
+        bronrecords te lezen. Een checksum bewijst consistentie, niet goedkeuring of toestemming voor verzending.
     implementation: { type: plugin, plugin: documents, handler: renderSnapshot }
     target: { scope: collection }
     input:
@@ -88,7 +97,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             x-osf-i18n: { title: { en: Language, nl: Taal } }
@@ -131,7 +145,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             pattern: "^[a-z]{2}(-[A-Z]{2})?$"
@@ -175,7 +194,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             pattern: "^[a-z]{2}(-[A-Z]{2})?$"
@@ -191,7 +215,24 @@ operations:
           document:
             x-osf-entityInput:
               entity: Document
-              fields: [code, title, description, documentType, status, confidentiality, source, author, isExternal, registeredAt, receivedAt, publishedAt, caseFileId, caseId, relationId]
+              fields:
+                [
+                  code,
+                  title,
+                  description,
+                  documentType,
+                  status,
+                  confidentiality,
+                  source,
+                  author,
+                  isExternal,
+                  registeredAt,
+                  receivedAt,
+                  publishedAt,
+                  caseFileId,
+                  caseId,
+                  relationId
+                ]
             x-osf-i18n: { title: { en: New document, nl: Nieuw document } }
           version:
             x-osf-entityInput:
@@ -207,7 +248,18 @@ operations:
       schema:
         type: object
         additionalProperties: false
-        required: [documentId, documentVersionId, artifactId, artifactVersion, fileName, mediaType, checksum, byteSize, compositionHash]
+        required:
+          [
+            documentId,
+            documentVersionId,
+            artifactId,
+            artifactVersion,
+            fileName,
+            mediaType,
+            checksum,
+            byteSize,
+            compositionHash
+          ]
         properties:
           documentId: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
           documentVersionId: { type: string, format: uuid, x-osf-i18n: { title: { en: Document version, nl: Documentversie } } }
@@ -217,7 +269,12 @@ operations:
           mediaType: { type: string, const: application/json, x-osf-i18n: { title: { en: Media type, nl: Bestandstype } } }
           checksum: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Checksum, nl: Controlesom } } }
           byteSize: { type: integer, minimum: 0, x-osf-i18n: { title: { en: File size, nl: Bestandsgrootte } } }
-          compositionHash: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } } }
+          compositionHash:
+            {
+              type: string,
+              pattern: "^[a-f0-9]{64}$",
+              x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } }
+            }
     errors:
       - { status: 400, code: VALIDATION, description: The document or template input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The source or destination is not accessible. }
@@ -247,7 +304,12 @@ interfaces:
   rest:
     operations:
       materialize: { method: POST, path: "/api/template-content/versions/:templateVersionId/materialize" }
-      createDocument: { method: POST, path: "/api/template-content/versions/:templateVersionId/create-document", response: { status: 201, kind: json } }
+      createDocument:
+        {
+          method: POST,
+          path: "/api/template-content/versions/:templateVersionId/create-document",
+          response: { status: 201, kind: json }
+        }
       renderSnapshot: { method: POST, path: /api/template-content/render-snapshot }
   graphql: {}
   mcp: { tools: generic }
@@ -267,4 +329,10 @@ interfaces:
           tabs:
             - id: version
               label: { en: Published version, nl: Gepubliceerde versie }
-              groups: [{ title: { en: Version, nl: Versie }, fields: [template, versionNumber, status, publishedAt, publishedBy, contentHash] }]
+              groups:
+                [
+                  {
+                      title: { en: Version, nl: Versie },
+                      fields: [template, versionNumber, status, publishedAt, publishedBy, contentHash]
+                    }
+                ]

@@ -23,7 +23,7 @@ authorization:
       - Relaties.All.ReadWrite
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -31,7 +31,7 @@ fields:
       column: name
       storageClass: core
   - key: configuration
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Configuration

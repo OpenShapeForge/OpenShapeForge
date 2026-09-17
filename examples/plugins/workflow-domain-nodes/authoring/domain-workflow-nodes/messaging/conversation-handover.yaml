@@ -12,8 +12,7 @@ description:
   nl: Pauzeer AI-afhandeling en maak overdrachtscontext voor een medewerker.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -21,8 +20,8 @@ configFields:
       en: Existing conversation that should be handed over.
       nl: Bestaande conversatie die moet worden overgedragen.
     help:
-      en: Usually this comes from the workflow context or an upstream conversation variable. The runtime does not create a
-        new conversation here; it updates the existing one and fails when the ID is missing or unknown.
+      en: Usually this comes from the workflow context or an upstream conversation variable. The runtime does not create a new
+        conversation here; it updates the existing one and fails when the ID is missing or unknown.
       nl: Meestal komt dit uit de workflowcontext of een eerdere conversatievariabele. De runtime maakt hier geen nieuwe
         conversatie aan; hij werkt de bestaande conversatie bij en faalt wanneer de ID ontbreekt of onbekend is.
     render:
@@ -30,8 +29,7 @@ configFields:
       props:
         valueMode: insertText
   - key: targetQueueId
-    valueType: string
-    semanticType: workQueueId
+    osfType: workQueueId
     label:
       en: Target queue
       nl: Doelqueue
@@ -54,7 +52,7 @@ configFields:
         optionSectionLabel: Queues
         variableSectionLabel: Dynamische variabelen
   - key: reasonCode
-    valueType: string
+    osfType: string
     label:
       en: Reason code
       nl: Reden (code)
@@ -71,8 +69,7 @@ configFields:
     render:
       component: Input
   - key: reasonMessage
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label:
       en: Reason message
       nl: Reden-bericht
@@ -80,8 +77,8 @@ configFields:
       en: Human-readable explanation shown in the handover summary.
       nl: Leesbare toelichting die in de overdrachtssamenvatting komt.
     help:
-      en: This can include workflow variables. The text helps the employee understand why AI stopped and what happened so
-        far; it is not sent as a customer reply.
+      en: This can include workflow variables. The text helps the employee understand why AI stopped and what happened so far;
+        it is not sent as a customer reply.
       nl: Dit veld mag workflowvariabelen bevatten. De tekst helpt de medewerker begrijpen waarom AI stopt en wat er al is
         gebeurd; hij wordt niet als klantantwoord verzonden.
     validation:
@@ -91,8 +88,7 @@ configFields:
       props:
         rows: 5
   - key: proposedReplyTemplateSlug
-    valueType: string
-    semanticType: templateSlug
+    osfType: templateSlug
     label:
       en: Proposed reply template
       nl: Template voor voorgesteld antwoord
@@ -100,10 +96,10 @@ configFields:
       en: Template slug used to create an internal proposed reply for the employee.
       nl: Template-slug waarmee een intern voorgesteld antwoord voor de medewerker wordt gemaakt.
     help:
-      en: The runtime stores a proposed-reply message when this template is set. It is review context for the employee, not
-        an automatically sent provider message.
-      nl: De runtime bewaart een voorgesteld-antwoordbericht wanneer deze template is ingesteld. Dit is reviewcontext voor
-        de medewerker, geen automatisch verzonden providerbericht.
+      en: The runtime stores a proposed-reply message when this template is set. It is review context for the employee, not an
+        automatically sent provider message.
+      nl: De runtime bewaart een voorgesteld-antwoordbericht wanneer deze template is ingesteld. Dit is reviewcontext voor de
+        medewerker, geen automatisch verzonden providerbericht.
     validation:
       required: true
     options:
@@ -117,7 +113,7 @@ configFields:
         optionSectionLabel: Templates
         variableSectionLabel: Dynamische variabelen
   - key: proposedReplyBindings
-    valueType: object
+    osfType: object
     variables: whole
     label:
       en: Parameter bindings
@@ -126,15 +122,15 @@ configFields:
       en: Values used to render the proposed reply template.
       nl: Waarden waarmee de voorgesteld-antwoordtemplate wordt gevuld.
     help:
-      en: Bind template parameters to fixed values or workflow variables. These bindings are stored with the proposed reply
-        so the employee can review the drafted content.
+      en: Bind template parameters to fixed values or workflow variables. These bindings are stored with the proposed reply so
+        the employee can review the drafted content.
       nl: Koppel templateparameters aan vaste waarden of workflowvariabelen. Deze bindings worden bij het voorgestelde
         antwoord opgeslagen zodat de medewerker de conceptinhoud kan beoordelen.
     defaultValue: {}
     render:
       component: NotificationTemplateVariablesEditor
   - key: suggestedWorkflows
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -159,7 +155,7 @@ configFields:
         placeholder: Kies router-output
     item:
       key: suggestedWorkflow
-      valueType: object
+      osfType: object
       description:
         en: One suggested follow-up workflow entry.
         nl: Een voorgestelde vervolgworkflow.
@@ -168,8 +164,7 @@ configFields:
         nl: Houd de objectstructuur gelijk aan de eerdere router- of suggestienode die deze waarde heeft gemaakt.
       children:
         - key: workflowDefinitionId
-          valueType: string
-          semanticType: workflowDefinitionId
+          osfType: workflowDefinitionId
           label:
             en: Workflow definition ID
             nl: Workflowdefinitie-ID
@@ -177,10 +172,12 @@ configFields:
             en: Definition ID of the suggested published workflow.
             nl: Definitie-ID van de voorgestelde gepubliceerde workflow.
           help:
-            en: Use the published workflow definition ID here when the handover suggestion should point to one concrete workflow without name-based lookup.
-            nl: Gebruik hier de definitie-ID van de gepubliceerde workflow wanneer het overdrachtsvoorstel naar een concrete workflow moet wijzen zonder naamgebaseerde lookup.
+            en: Use the published workflow definition ID here when the handover suggestion should point to one concrete workflow
+              without name-based lookup.
+            nl: Gebruik hier de definitie-ID van de gepubliceerde workflow wanneer het overdrachtsvoorstel naar een concrete
+              workflow moet wijzen zonder naamgebaseerde lookup.
         - key: workflowDefinitionName
-          valueType: string
+          osfType: string
           label:
             en: Workflow name
             nl: Workflownaam
@@ -191,7 +188,7 @@ configFields:
             en: This is display metadata for the employee handover and helps show which workflow is being suggested.
             nl: Dit is weergavemetadata voor de medewerkersoverdracht en helpt te tonen welke workflow wordt voorgesteld.
         - key: publishedVersion
-          valueType: integer
+          osfType: integer
           label:
             en: Published version
             nl: Gepubliceerde versie
@@ -199,10 +196,12 @@ configFields:
             en: Published version number of the suggested workflow.
             nl: Gepubliceerd versienummer van de voorgestelde workflow.
           help:
-            en: Keep this aligned with the referenced definition so employees or downstream tooling can see the exact published version behind the suggestion.
-            nl: Houd dit gelijk aan de verwezen definitie zodat medewerkers of downstream tooling de exacte gepubliceerde versie achter het voorstel kunnen zien.
+            en: Keep this aligned with the referenced definition so employees or downstream tooling can see the exact published
+              version behind the suggestion.
+            nl: Houd dit gelijk aan de verwezen definitie zodat medewerkers of downstream tooling de exacte gepubliceerde versie
+              achter het voorstel kunnen zien.
         - key: label
-          valueType: string
+          osfType: string
           label:
             en: Label
             nl: Label
@@ -213,7 +212,7 @@ configFields:
             en: Use a concise title that reads well in an employee handover list.
             nl: Gebruik een korte titel die prettig leest in een medewerkersoverdrachtslijst.
         - key: confidence
-          valueType: number
+          osfType: number
           label:
             en: Confidence
             nl: Zekerheid
@@ -221,10 +220,12 @@ configFields:
             en: Confidence score attached to this workflow suggestion.
             nl: Zekerheidsscore die aan dit workflowvoorstel hangt.
           help:
-            en: Upstream routing logic can use this to indicate how strongly it recommends the workflow. The handover node stores the score but does not interpret it.
-            nl: Eerdere routinglogica kan dit gebruiken om aan te geven hoe sterk de workflow wordt aanbevolen. De handover-node slaat de score op maar interpreteert hem niet.
+            en: Upstream routing logic can use this to indicate how strongly it recommends the workflow. The handover node stores
+              the score but does not interpret it.
+            nl: Eerdere routinglogica kan dit gebruiken om aan te geven hoe sterk de workflow wordt aanbevolen. De handover-node
+              slaat de score op maar interpreteert hem niet.
         - key: reason
-          valueType: string
+          osfType: string
           label:
             en: Reason
             nl: Reden
@@ -235,7 +236,7 @@ configFields:
             en: Use this to carry the short rationale from the router or suggestion logic into the employee handover.
             nl: Gebruik dit om de korte motivatie uit de router- of suggestielogica mee te geven in de medewerkersoverdracht.
         - key: rank
-          valueType: integer
+          osfType: integer
           label:
             en: Rank
             nl: Rang
@@ -243,10 +244,12 @@ configFields:
             en: Relative ordering of this workflow suggestion.
             nl: Relatieve volgorde van dit workflowvoorstel.
           help:
-            en: Upstream suggestion logic can use this to mark preference order. The handover node only stores and forwards the rank.
-            nl: Eerdere suggestielogica kan dit gebruiken om de voorkeursvolgorde aan te geven. De handover-node slaat de rang alleen op en geeft die door.
+            en: Upstream suggestion logic can use this to mark preference order. The handover node only stores and forwards the
+              rank.
+            nl: Eerdere suggestielogica kan dit gebruiken om de voorkeursvolgorde aan te geven. De handover-node slaat de rang
+              alleen op en geeft die door.
   - key: customerSenderType
-    valueType: string
+    osfType: string
     defaultValue: ai
     label:
       en: Customer sender type
@@ -260,7 +263,7 @@ configFields:
       nl: De huidige runtime behandelt system hier als systeemafzender; andere waarden vallen terug op AI. Laat de standaard
         staan tenzij bewust een systeemgeschreven overdrachtsbericht nodig is.
   - key: summaryMode
-    valueType: string
+    osfType: string
     defaultValue: ai
     label:
       en: Summary mode
@@ -274,7 +277,7 @@ configFields:
       nl: Met ai bewaart de runtime eerst een deterministische samenvatting en kan daarna een AI-verfijning enqueuen als het
         workercontract actief is. De deterministische samenvatting blijft staan als verfijning niet beschikbaar is.
   - key: summarySenderType
-    valueType: string
+    osfType: string
     defaultValue: ai
     label:
       en: Summary sender type
@@ -288,8 +291,7 @@ configFields:
       nl: Gebruik system alleen voor samenvattingen die duidelijk door het systeem geschreven moeten zijn. Anders registreert
         de runtime de samenvatting als AI-context.
   - key: relatedCaseEntityId
-    valueType: string
-    semanticType: caseId
+    osfType: caseId
     label:
       en: Related case ID
       nl: Gerelateerde zaak-ID
@@ -302,7 +304,7 @@ configFields:
       nl: Geef een geldige zaak-UUID op wanneer de overdracht bij een zaak hoort. Ongeldige of lege waarden worden genegeerd
         voor het maken van de zaaklink en niet omgezet.
   - key: collectedValues
-    valueType: object
+    osfType: object
     defaultValue: {}
     label:
       en: Collected values
@@ -316,7 +318,7 @@ configFields:
       nl: Deze waarden gaan mee in de overdrachtssamenvatting zodat de medewerker bekende antwoorden of geëxtraheerde velden
         ziet. Deze node valideert ze niet afzonderlijk.
   - key: sourceWorkflowInstanceId
-    valueType: string
+    osfType: string
     label:
       en: Source workflow instance ID
       nl: Bron-workflowinstance-ID

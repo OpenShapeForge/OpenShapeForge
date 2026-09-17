@@ -52,10 +52,7 @@
       "type": "array",
       "items": { "$ref": "core-entity.schema.json#/$defs/field" }
     },
-    "relationships": {
-      "type": "array",
-      "items": { "$ref": "core-entity.schema.json#/$defs/relationship" }
-    },
+    "relationships": false,
     "authorization": {
       "type": "object",
       "description": "Profile-level RBAC authorization. Defines the role required to access this profile's fields.",

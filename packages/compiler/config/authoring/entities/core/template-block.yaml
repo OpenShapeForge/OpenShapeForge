@@ -13,11 +13,11 @@ authorization:
     read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
   - key: version
-    semanticType: TemplateVersion
+    osfType: TemplateVersion
     required: true
     label: { en: Template version, nl: Templateversie }
   - key: parameters
-    valueType: object
+    osfType: object
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
 operations:

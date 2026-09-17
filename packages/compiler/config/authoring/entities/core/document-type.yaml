@@ -37,7 +37,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -49,7 +49,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -61,8 +61,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Description
@@ -73,8 +72,7 @@ fields:
       column: description
       storageClass: core
   - key: defaultConfidentiality
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: false
     label:
       en: Default confidentiality
@@ -84,7 +82,7 @@ fields:
       storageClass: core
     options: { type: referentiedata, referentieGroep: DOCUMENTCONFIDENTIALITY }
   - key: requiresRegistration
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Requires registration
@@ -94,7 +92,7 @@ fields:
       column: requires_registration
       storageClass: core
   - key: allowsExternalPublication
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Allows external publication

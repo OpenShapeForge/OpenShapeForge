@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: instalmentNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Instalment number
@@ -29,7 +29,7 @@ fields:
       column: instalment_number
       storageClass: core
   - key: dueDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Due date
@@ -41,7 +41,6 @@ fields:
       column: due_date
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -49,12 +48,12 @@ fields:
     description:
       en: Amount due for this instalment.
       nl: Verschuldigd bedrag voor deze termijn.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: paidAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Paid at
@@ -72,7 +71,7 @@ fields:
     persisted:
       column: payment_plan_id
       storageClass: core
-    semanticType: PaymentPlan
+    osfType: PaymentPlan
     relationship:
       ownership: reference
   - key: invoicePaymentId
@@ -82,7 +81,7 @@ fields:
     persisted:
       column: invoice_payment_id
       storageClass: core
-    semanticType: InvoicePayment
+    osfType: InvoicePayment
     relationship:
       ownership: reference
 authorization:

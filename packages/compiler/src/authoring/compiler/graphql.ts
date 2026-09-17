@@ -45,25 +45,11 @@ export function buildGraphQL(
       ...(f.graphqlType ? { computedResolver: "labels" as const } : {}),
     };
   });
-  const fieldNames = new Set(fields.map((field) => field.name));
-
-  for (const relationship of relationships) {
-    if (relationship.fieldKey) continue;
-    if (relationship.kind !== "belongsTo") continue;
-    const syntheticIdFieldName = `${relationship.key}Id`;
-    if (fieldNames.has(syntheticIdFieldName)) continue;
-    fields.push({
-      name: syntheticIdFieldName,
-      type: "ID",
-      source: "core",
-    });
-    fieldNames.add(syntheticIdFieldName);
-  }
 
   const gqlRels: GraphQLRelationship[] = relationships.map((r) => ({
     name: r.key,
     target: r.target,
-    type: r.kind === "hasMany" || r.kind === "manyToMany"
+    type: r.kind === "hasMany"
       ? `[${r.target}!]!`
       : `${r.target}`,
     resolve: r.kind,
@@ -80,7 +66,7 @@ export function buildGraphQL(
       fieldName: profile.profile,
       description: toGraphQLDescription(profile.description),
       fields: profile.fields.map((f) => {
-        const semType = f.semanticType ? semanticTypes?.[f.semanticType] : undefined;
+        const semType = f.osfType ? semanticTypes?.[f.osfType] : undefined;
         // Resolve display render (for lists/detail) separately from input render (for forms)
         const displayComponent = semType?.render?.display;
         const displayRender = displayComponent && componentCatalog
@@ -92,7 +78,7 @@ export function buildGraphQL(
           column: f.persisted?.column,
           label: f.label ?? semType?.label,
           description: toGraphQLDescription(f.description ?? semType?.description),
-          semanticType: f.semanticType,
+          osfType: f.osfType,
           render: componentCatalog ? resolveRender(f, componentCatalog, semType) : undefined,
           displayRender,
           validation: f.validation ?? semType?.validation,

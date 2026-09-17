@@ -19,24 +19,24 @@ authorization:
     delete: [ Records.All.Manage ]
 fields:
   - key: label
-    valueType: string
+    osfType: string
     required: true
     label: { en: Label }
     persisted: { column: label, storageClass: core }
   - key: ordinaryInteger
-    valueType: integer
+    osfType: integer
     required: true
     validation: { min: -2147483648, max: 2147483647 }
     label: { en: Ordinary integer }
     persisted: { column: ordinary_integer, storageClass: core }
   - key: directWideInteger
-    valueType: integer
+    osfType: integer
     required: true
     validation: { min: 0, max: 9007199254740991 }
     label: { en: Direct wide integer }
     persisted: { column: direct_wide_integer, storageClass: core }
   - key: ruledWideInteger
-    valueType: integer
+    osfType: integer
     required: false
     validation:
       min:
@@ -45,7 +45,7 @@ fields:
     label: { en: Ruled wide integer }
     persisted: { column: ruled_wide_integer, storageClass: core }
   - key: referenceId
-    valueType: string
+    osfType: string
     required: false
     validation: { format: uuid }
     label: { en: External identity }

@@ -9,10 +9,11 @@ label:
   nl: Haal klantcontext op
 description:
   en: Loads policy-filtered customer context for an identified relation without exposing broad database access to AI nodes.
-  nl: Haalt beleidsgefilterde klantcontext op voor een geidentificeerde relatie zonder brede databasetoegang aan AI-nodes te geven.
+  nl: Haalt beleidsgefilterde klantcontext op voor een geidentificeerde relatie zonder brede databasetoegang aan AI-nodes
+    te geven.
 configFields:
   - key: policyId
-    valueType: string
+    osfType: string
     label: { en: Context policy, nl: Contextbeleid }
     description:
       en: Customer-context policy to execute. v1 ships only `whatsapp-default`; per-tenant policies will follow.
@@ -26,11 +27,13 @@ configFields:
           label: { en: WhatsApp default, nl: WhatsApp standaard }
     render: { component: Select }
   - key: channel
-    valueType: string
+    osfType: string
     label: { en: Channel, nl: Kanaal }
     description:
-      en: Legacy fallback for workflow runs without a bound conversation. Normal customer-contact runs derive this from the actual conversation.
-      nl: Legacy fallback voor workflowruns zonder gekoppelde conversatie. Normale klantcontactruns leiden dit af uit de echte conversatie.
+      en: Legacy fallback for workflow runs without a bound conversation. Normal customer-contact runs derive this from the
+        actual conversation.
+      nl: Legacy fallback voor workflowruns zonder gekoppelde conversatie. Normale klantcontactruns leiden dit af uit de echte
+        conversatie.
     options:
       type: static
       items:
@@ -46,8 +49,7 @@ configFields:
     workflowInspector:
       displayMode: hidden
   - key: relationId
-    valueType: string
-    semanticType: relationId
+    osfType: relationId
     label: { en: Relation ID, nl: Relatie-ID }
     description:
       en: Identified customer relation that anchors all context paths.
@@ -57,7 +59,7 @@ configFields:
       component: OptionVariablePicker
       props: { valueMode: insertText }
   - key: assurance
-    valueType: object
+    osfType: object
     label: { en: Identity assurance, nl: Identificatiecontext }
     description:
       en: Full identity-assurance object from the conversation context.
@@ -66,7 +68,7 @@ configFields:
       component: OptionVariablePicker
       props: { valueMode: insertText }
   - key: assuranceLevel
-    valueType: string
+    osfType: string
     label: { en: Assurance level, nl: Identificatieniveau }
     description:
       en: Optional explicit assurance level when the full assurance object is not passed.
@@ -92,8 +94,7 @@ configFields:
         valueMode: insertText
         expectedValueType: string
   - key: question
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label: { en: Question, nl: Vraag }
     description:
       en: Optional customer question for future path narrowing. The current resolver still enforces the configured policy.
@@ -102,8 +103,7 @@ configFields:
       component: VariableTemplateInput
       props: { rows: 3, maxLength: 2000 }
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label: { en: Conversation ID, nl: Conversatie-ID }
     description:
       en: Optional conversation identifier for audit correlation. Falls back to workflow context.
@@ -112,7 +112,7 @@ configFields:
       component: OptionVariablePicker
       props: { valueMode: insertText }
   - key: includeSourceRefs
-    valueType: boolean
+    osfType: boolean
     label: { en: Include source refs, nl: Bronverwijzingen opnemen }
     description:
       en: Include source entity references in the node output.
@@ -120,7 +120,7 @@ configFields:
     defaultValue: true
     render: { component: Switch }
   - key: maxItemsPerPath
-    valueType: integer
+    osfType: integer
     label: { en: Max items per path, nl: Max items per pad }
     description:
       en: Bounded per-path item limit.
@@ -131,7 +131,7 @@ configFields:
       component: NumberInput
       props: { min: 1, max: 100, step: 1 }
   - key: maxTotalItems
-    valueType: integer
+    osfType: integer
     label: { en: Max total items, nl: Max totaal items }
     description:
       en: Bounded total item limit across enabled context paths.
@@ -143,36 +143,36 @@ configFields:
       props: { min: 1, max: 200, step: 1 }
 outputFields:
   - key: found
-    valueType: boolean
+    osfType: boolean
     readOnly: true
     label: { en: Found, nl: Gevonden }
     description:
       en: True when the relation profile was found for the tenant.
       nl: True wanneer het relatieprofiel binnen de tenant is gevonden.
   - key: context
-    valueType: object
+    osfType: object
     readOnly: true
     label: { en: Customer context, nl: Klantcontext }
     description:
       en: Compact allowlisted customer context for downstream AI or reply nodes.
       nl: Compacte allowlist-klantcontext voor vervolg-AI of antwoordnodes.
   - key: sourceRefs
-    valueType: object
+    osfType: object
     cardinality: { min: 0, max: "unbounded" }
     item:
       key: sourceRef
-      valueType: object
+      osfType: object
       children:
         - key: path
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Context path, nl: Contextpad }
         - key: entity
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Entity, nl: Entiteit }
         - key: id
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Source ID, nl: Bron-ID }
     readOnly: true
@@ -181,58 +181,62 @@ outputFields:
       en: Source entity references included for traceability.
       nl: Bronverwijzingen voor herleidbaarheid.
   - key: deniedPaths
-    valueType: object
+    osfType: object
     cardinality: { min: 0, max: "unbounded" }
     item:
       key: deniedPath
-      valueType: object
+      osfType: object
       children:
         - key: path
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Context path, nl: Contextpad }
         - key: reason
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Reason, nl: Reden }
         - key: minimumAssurance
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Minimum assurance, nl: Minimale identificatie }
     readOnly: true
     label: { en: Denied paths, nl: Geweigerde paden }
     description:
-      en: Audit-grade list of context paths omitted by policy or assurance gates. Contains internal path keys and reason codes; do not pass to customer-facing AI prompts.
-      nl: Auditlijst van contextpaden die door beleid of identificatieniveau zijn geweigerd. Bevat interne padnamen en redencodes; geef dit niet door aan klantgerichte AI-prompts.
+      en: Audit-grade list of context paths omitted by policy or assurance gates. Contains internal path keys and reason
+        codes; do not pass to customer-facing AI prompts.
+      nl: Auditlijst van contextpaden die door beleid of identificatieniveau zijn geweigerd. Bevat interne padnamen en
+        redencodes; geef dit niet door aan klantgerichte AI-prompts.
   - key: unavailableCategories
-    valueType: object
+    osfType: object
     cardinality: { min: 0, max: "unbounded" }
     item:
       key: unavailableCategory
-      valueType: object
+      osfType: object
       children:
         - key: category
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Category, nl: Onderwerp }
         - key: hint
-          valueType: string
+          osfType: string
           readOnly: true
           label: { en: Hint, nl: Hint }
     readOnly: true
     label: { en: Unavailable categories, nl: Niet beschikbare onderwerpen }
     description:
-      en: Sanitized `{ category, hint }` summary safe to expose to customer-facing AI prompts. Use this instead of `deniedPaths` for any output that reaches the customer.
-      nl: Geschoonde `{ category, hint }`-lijst die veilig is voor klantgerichte AI-prompts. Gebruik dit in plaats van `deniedPaths` voor output richting de klant.
+      en: Sanitized `{ category, hint }` summary safe to expose to customer-facing AI prompts. Use this instead of
+        `deniedPaths` for any output that reaches the customer.
+      nl: Geschoonde `{ category, hint }`-lijst die veilig is voor klantgerichte AI-prompts. Gebruik dit in plaats van
+        `deniedPaths` voor output richting de klant.
   - key: assuranceLevel
-    valueType: string
+    osfType: string
     readOnly: true
     label: { en: Assurance level, nl: Identificatieniveau }
     description:
       en: Assurance level used for policy decisions.
       nl: Identificatieniveau dat voor beleidsbesluiten is gebruikt.
   - key: itemCounts
-    valueType: object
+    osfType: object
     readOnly: true
     label: { en: Item counts, nl: Aantallen }
     description:

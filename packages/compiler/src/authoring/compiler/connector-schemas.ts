@@ -48,7 +48,7 @@ function staticEnum(field: FieldDefinition): string[] | undefined {
  */
 function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObject {
   const scalar =
-    field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE
+    field.osfType === FIELD_DEFINITION_SEMANTIC_TYPE
       ? fieldDefinitionValueSchema()
       : constraintsForField(field);
 

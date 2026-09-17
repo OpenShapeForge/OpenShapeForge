@@ -12,8 +12,7 @@ description:
   nl: Start een nieuw WhatsApp-bericht met een goedgekeurde template.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -26,8 +25,7 @@ configFields:
       nl: Meestal komt dit uit de workflowcontext. De runtime vereist een conversatie omdat templates als conversatieberichten
         en provider-verzendopdrachten worden klaargezet.
   - key: phoneNumber
-    valueType: string
-    semanticType: phone
+    osfType: phone
     label:
       en: Phone number
       nl: Telefoonnummer
@@ -47,7 +45,7 @@ configFields:
       aliases:
         - phone
   - key: templateId
-    valueType: string
+    osfType: string
     label:
       en: Template
       nl: Template
@@ -71,7 +69,7 @@ configFields:
         - templateName
         - name
   - key: parameters
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -82,14 +80,14 @@ configFields:
       en: Parameter values passed to the WhatsApp template.
       nl: Parameterwaarden die aan de WhatsApp-template worden meegegeven.
     help:
-      en: Add one entry per template placeholder. Values can include workflow variables and are stored in the delivery
-        command payload.
+      en: Add one entry per template placeholder. Values can include workflow variables and are stored in the delivery command
+        payload.
       nl: Voeg een regel toe per templateplaceholder. Waarden mogen workflowvariabelen bevatten en worden opgeslagen in de
         verzendopdrachtpayload.
     defaultValue: []
     item:
       key: parameter
-      valueType: object
+      osfType: object
       description:
         en: One WhatsApp template parameter binding.
         nl: Een WhatsApp-templateparameterbinding.
@@ -98,7 +96,7 @@ configFields:
         nl: Elke regel koppelt een templateparametersleutel aan de waarde die daarvoor verzonden moet worden.
       children:
         - key: key
-          valueType: string
+          osfType: string
           label:
             en: Parameter key
             nl: Parametersleutel
@@ -111,8 +109,7 @@ configFields:
           validation:
             required: true
         - key: value
-          valueType: string
-          semanticType: variableTemplate
+          osfType: variableTemplate
           label:
             en: Parameter value
             nl: Parameterwaarde
@@ -120,8 +117,7 @@ configFields:
             en: Value rendered into the template placeholder.
             nl: Waarde die in de templateplaceholder wordt geplaatst.
           help:
-            en: Enter fixed text or insert workflow variables. The resolved value is sent as part of the template delivery
-              payload.
+            en: Enter fixed text or insert workflow variables. The resolved value is sent as part of the template delivery payload.
             nl: Vul vaste tekst in of voeg workflowvariabelen toe. De opgeloste waarde wordt als onderdeel van de
               template-verzendpayload verstuurd.
           validation:
@@ -130,7 +126,7 @@ configFields:
       aliases:
         - templateParameters
   - key: language
-    valueType: string
+    osfType: string
     defaultValue: nl
     label:
       en: Language
@@ -142,8 +138,7 @@ configFields:
       en: Defaults to nl. Keep this aligned with the approved language variant of the selected template.
       nl: Standaard nl. Houd dit gelijk aan de goedgekeurde taalvariant van de gekozen template.
   - key: bodyPreview
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label:
       en: Body preview
       nl: Berichtvoorbeeld
@@ -159,7 +154,7 @@ configFields:
       aliases:
         - body
   - key: idempotencyKey
-    valueType: string
+    osfType: string
     label:
       en: Idempotency key
       nl: Idempotentiesleutel

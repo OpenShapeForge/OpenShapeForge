@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@openshapeforge/operations": "^0.1.0",
-    "@openshapeforge/interface-web": "^0.1.0",
+    "@openshapeforge/interface-web": "^0.2.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "ejs": "^5.0.1",

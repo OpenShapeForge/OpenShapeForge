@@ -14,7 +14,7 @@ domains:
   - hr
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -44,7 +44,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -57,9 +56,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -73,9 +71,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: VACANCYSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: openedAt
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Opened at
@@ -87,7 +85,7 @@ fields:
       column: opened_at
       storageClass: core
   - key: closedAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Closed at
@@ -99,7 +97,7 @@ fields:
       column: closed_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -119,7 +117,7 @@ fields:
     persisted:
       column: position_id
       storageClass: core
-    semanticType: Position
+    osfType: Position
     relationship:
       ownership: reference
   - key: orgUnitId
@@ -129,7 +127,7 @@ fields:
     persisted:
       column: org_unit_id
       storageClass: core
-    semanticType: OrgUnit
+    osfType: OrgUnit
     relationship:
       ownership: reference
 authorization:

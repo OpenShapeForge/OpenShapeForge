@@ -17,7 +17,6 @@ domains:
   - contracts
 fields:
   - key: period
-    valueType: string
     required: true
     label:
       en: Billing period
@@ -32,9 +31,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: BILLINGPERIOD
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: startDay
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Start day of month
@@ -49,7 +48,7 @@ fields:
       column: start_day
       storageClass: core
   - key: variableDays
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Variable period length (days)
@@ -64,7 +63,6 @@ fields:
       column: variable_days
       storageClass: core
   - key: invoiceMode
-    valueType: string
     required: true
     label:
       en: Invoice amount mode
@@ -79,9 +77,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: BILLINGAMOUNTTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: nextProlongationDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Next prolongation date
@@ -95,7 +93,7 @@ fields:
       column: next_prolongation_date
       storageClass: core
   - key: endProlongationDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End prolongation date
@@ -107,7 +105,7 @@ fields:
       column: end_prolongation_date
       storageClass: core
   - key: lastProlongationAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Last prolongation at
@@ -119,7 +117,7 @@ fields:
       column: last_prolongation_at
       storageClass: core
   - key: source
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source
@@ -139,7 +137,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
 authorization:

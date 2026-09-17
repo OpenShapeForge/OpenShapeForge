@@ -14,7 +14,7 @@ domains:
   - energy
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Valid from
@@ -41,7 +41,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid to
@@ -53,7 +53,7 @@ fields:
       column: valid_to
       storageClass: core
   - key: energyClass
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Energy class
@@ -67,7 +67,7 @@ fields:
       column: energy_class
       storageClass: core
   - key: energyIndex
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Energy index
@@ -79,7 +79,7 @@ fields:
       column: energy_index
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -99,7 +99,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

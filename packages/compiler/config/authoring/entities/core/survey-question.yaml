@@ -35,7 +35,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -49,7 +49,6 @@ fields:
       column: code
       storageClass: core
   - key: questionKind
-    valueType: string
     required: false
     label:
       en: Question type
@@ -63,9 +62,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SURVEYQUESTIONKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: description
-    valueType: string
     required: false
     label:
       en: Question text
@@ -78,9 +76,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: subject
-    valueType: string
     required: false
     label:
       en: Subject
@@ -94,9 +91,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SURVEYQUESTIONSUBJECT
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: origin
-    valueType: string
     required: false
     label:
       en: Origin
@@ -110,9 +106,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SURVEYQUESTIONORIGIN
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Sequence number
@@ -124,7 +120,7 @@ fields:
       column: sequence_number
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -145,7 +141,7 @@ fields:
     description:
       en: Identifier of the survey this question belongs to.
       nl: Identifier van de vragenlijst waar deze vraag bij hoort.
-    semanticType: Survey
+    osfType: Survey
     persisted:
       column: survey_id
       storageClass: core
@@ -156,6 +152,11 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        key: questions
+        label:
+          en: Questions
+          nl: Vragen
   - key: parentQuestionId
     required: false
     label:
@@ -164,7 +165,7 @@ fields:
     description:
       en: Identifier of the parent question for follow-up logic.
       nl: Identifier van de bovenliggende vraag voor vervolgvraag-logica.
-    semanticType: SurveyQuestion
+    osfType: SurveyQuestion
     persisted:
       column: parent_question_id
       storageClass: core
@@ -175,24 +176,11 @@ fields:
       category: workflow
     relationship:
       ownership: reference
-  - key: childQuestions
-    label:
-      en: Follow-up questions
-      nl: Vervolgvragen
-    semanticType: SurveyQuestion
-    cardinality: collection
-    relationship:
-      inverse: parentQuestionId
-      ownership: reference
-  - key: answers
-    label:
-      en: Answers
-      nl: Antwoorden
-    semanticType: SurveyAnswer
-    cardinality: collection
-    relationship:
-      inverse: questionId
-      ownership: reference
+      inverse:
+        key: childQuestions
+        label:
+          en: Follow-up questions
+          nl: Vervolgvragen
 operations:
   list:
     name: List Survey Question

@@ -12,7 +12,7 @@ description:
   en: Starts the workflow automatically on a schedule.
 configFields:
   - key: cron
-    valueType: string
+    osfType: string
     label:
       nl: Planning
       en: Schedule
@@ -27,7 +27,7 @@ configFields:
     render:
       component: ScheduleTriggerBuilder
   - key: timezone
-    valueType: string
+    osfType: string
     label:
       nl: Lokale tijd
       en: Local time
@@ -35,8 +35,10 @@ configFields:
       nl: Hiermee bepalen we wat bijvoorbeeld 09:00 precies betekent.
       en: This determines what a time like 09:00 means exactly.
     help:
-      en: The schedule worker stores and compares the cron together with this timezone, so changing it changes when the same cron expression actually fires.
-      nl: De schedule-worker slaat de cron samen met deze timezone op en vergelijkt die ook zo, dus een wijziging verandert wanneer dezelfde cron-expressie werkelijk afgaat.
+      en: The schedule worker stores and compares the cron together with this timezone, so changing it changes when the same
+        cron expression actually fires.
+      nl: De schedule-worker slaat de cron samen met deze timezone op en vergelijkt die ook zo, dus een wijziging verandert
+        wanneer dezelfde cron-expressie werkelijk afgaat.
     defaultValue: Europe/Amsterdam
     validation:
       required: true
@@ -48,11 +50,10 @@ configFields:
       props:
         clearable: false
   - key: mappingParameters
-    valueType: object
     cardinality:
       min: 0
       max: "unbounded"
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     label:
       nl: Startvariabelen
       en: Start variables

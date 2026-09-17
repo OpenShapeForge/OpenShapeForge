@@ -19,12 +19,13 @@ import type {
   AuthorizationConfig,
   ProfileAuthorizationConfig,
 } from "./common.js";
-import type { Relationship, UIDefinition } from "./views.js";
+import type { UIDefinition } from "./views.js";
 import type {
   FieldDefinition,
   FieldDefinitionAuthoringMetadata,
   FieldDefinitionCardinality,
   FieldDefinitionRelationship,
+  FieldDefinitionValueType,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSuggestions,
   FieldDefinitionWorkflowInspector,
@@ -36,6 +37,11 @@ import type {
  * hatches that have not yet moved into the enforced authoring schema.
  */
 export interface Field extends FieldDefinition {
+  /**
+   * Compiler-derived base of `osfType`: the type itself for a base type, the
+   * catalog entry's `valueType` otherwise. Never authored.
+   */
+  baseType?: FieldDefinitionValueType;
   /**
    * Escape hatch to override the emitted GraphQL type for a non-persisted
    * field. When set, the GraphQL codegen skips the default `FIELD_TO_GQL_TYPE`
@@ -123,7 +129,7 @@ export interface SemanticTypeDefinition {
    * For entity-ID semantic types (`kind: "entityId"`): the kebab-case slug
    * of the entity this type identifies. Lets downstream consumers
    * (variable pickers, workflow inspector, the core-entity-options route)
-   * resolve from a `semanticType` string back to the entity it represents.
+   * resolve from an `osfType` string back to the entity it represents.
    */
   entity?: string;
   /**
@@ -783,7 +789,6 @@ export interface CoreEntity {
     snapshot?: { ownedRelationships?: "recursive" };
   };
   fields: Field[];
-  relationships?: Relationship[];
   hooks?: EntityHooks;
   permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
@@ -910,7 +915,6 @@ export interface EntityProfile {
    */
   filterField?: string;
   fields?: Field[];
-  relationships?: Relationship[];
   authorization?: ProfileAuthorizationConfig;
   projection?: {
     thirdPartyApi?: {

@@ -24,7 +24,7 @@ authorization:
       - Organization.All.ReadWrite
 fields:
   - key: namespace
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Namespace
@@ -39,7 +39,7 @@ fields:
       column: namespace
       storageClass: core
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Key
@@ -54,7 +54,6 @@ fields:
       column: key
       storageClass: core
   - key: valueType
-    valueType: string
     required: true
     label:
       en: Value type
@@ -72,9 +71,9 @@ fields:
     persisted:
       column: value_type
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: valueText
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Text value
@@ -93,7 +92,7 @@ fields:
           operator: eq
           value: string
   - key: valueJson
-    valueType: object
+    osfType: object
     required: false
     label:
       en: JSON value
@@ -110,7 +109,7 @@ fields:
           operator: eq
           value: json
   - key: isSecret
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Secret
@@ -123,7 +122,6 @@ fields:
       column: is_secret
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -136,14 +134,14 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: tenantId
-    semanticType: Tenant
+    osfType: Tenant
     readOnly: true
     required: false
-    label: { en: Tenant, nl: Tenant }
-    persisted: { column: tenant_id, storageClass: core }
-    relationship: { ownership: reference }
+    label: {en: Tenant, nl: Tenant}
+    persisted: {column: tenant_id, storageClass: core}
+    relationship: {ownership: reference, inverse: {label: {en: Tenant settings, nl: Tenantinstellingen}}}
 operations: {}
 interfaces:
   graphql: {}

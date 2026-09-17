@@ -77,11 +77,11 @@ type GeneratedFieldSuggestions = {
 type GeneratedFormFieldConfig = {
   key: string;
   dataPath: string;
-  valueType: CompiledField["valueType"];
+  baseType: CompiledField["baseType"];
   cardinality?: CompiledField["cardinality"];
   variables?: CompiledField["variables"];
   sortable?: boolean;
-  semanticType?: string;
+  osfType?: string;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;
@@ -226,9 +226,9 @@ type GeneratedListConfig = {
 type GeneratedDetailFieldConfig = {
   key: string;
   label: LocalizedText;
-  valueType?: CompiledField["valueType"];
+  baseType?: CompiledField["baseType"];
   cardinality?: CompiledField["cardinality"];
-  semanticType?: string;
+  osfType?: string;
   /** Mirror of the authoring field's `layoutFraction`, consumed by the renderer's layout-policy helpers. */
   layoutFraction?: number;
   render: {
@@ -885,7 +885,7 @@ function buildRelationshipPresentationFields(
       fields.push({
         key: `${key}.${displayField}`,
         label,
-        valueType: "string",
+        baseType: "string",
         cardinality: "single",
         render: { component: "TextDisplay" },
       });
@@ -1621,8 +1621,8 @@ function waitConditionInputKind(
   options: RuntimeWaitConditionFieldData["options"],
 ): RuntimeWaitConditionFieldData["inputKind"] {
   if (options && options.length > 0) return "select";
-  if (field.valueType === "boolean") return "boolean";
-  if (field.valueType === "integer" || field.valueType === "number") return "number";
+  if (field.baseType === "boolean") return "boolean";
+  if (field.baseType === "integer" || field.baseType === "number") return "number";
   return "text";
 }
 
@@ -1633,7 +1633,7 @@ function buildWaitConditionFields(contract: CompiledEntityContract): RuntimeWait
       && typeof field.key === "string"
       && field.key.trim().length > 0
       && field.cardinality !== "collection"
-      && WAIT_CONDITION_VALUE_TYPES.has(field.valueType),
+      && WAIT_CONDITION_VALUE_TYPES.has(field.baseType),
     )
     .map((field) => {
       const options = waitConditionOptions(field);
@@ -1641,7 +1641,7 @@ function buildWaitConditionFields(contract: CompiledEntityContract): RuntimeWait
         key: field.key,
         label: normalizeText(field.label) ?? field.key,
         ...(field.description ? { description: normalizeText(field.description) } : {}),
-        fieldType: field.valueType,
+        fieldType: field.baseType,
         inputKind: waitConditionInputKind(field, options),
         ...(options ? { options } : {}),
       };
@@ -1729,7 +1729,7 @@ function buildFormFieldConfig(
     return {
       key,
       dataPath: key,
-      valueType: "string",
+      baseType: "string",
       cardinality: "single",
       label: { en: key, nl: key },
       required: false,
@@ -1763,9 +1763,9 @@ function buildDetailFieldConfigFromCompiledField(
   return {
     key: field.key,
     label: field.label,
-    valueType: field.valueType,
+    baseType: field.baseType,
     cardinality: field.cardinality,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     layoutFraction: field.layoutFraction,
     render: renderOverride ?? field.render,
     validation: field.validation as Record<string, unknown> | undefined,
@@ -1805,7 +1805,7 @@ function buildDetailFieldConfig(
     return attachDisplayMode({
       key: normalizedKey,
       label: profileField.label ?? { en: profileFieldKey, nl: profileFieldKey },
-      valueType: graphQlFieldTypeToFormValueType(profileField.type),
+      baseType: graphQlFieldTypeToFormValueType(profileField.type),
       cardinality: graphQlFieldTypeIsCollection(profileField.type) ? "collection" : "single",
       render: renderOverride ?? profileField.render ?? { component: "TextDisplay" },
       validation: profileField.validation as Record<string, unknown> | undefined,
@@ -1816,7 +1816,7 @@ function buildDetailFieldConfig(
   return attachDisplayMode({
     key: normalizedKey,
     label: { en: normalizedKey, nl: normalizedKey },
-    valueType: "string",
+    baseType: "string",
     cardinality: "single",
     render: renderOverride ?? { component: "TextDisplay" },
   });
@@ -1826,11 +1826,11 @@ function buildCoreFieldConfig(field: CompiledField): GeneratedFormFieldConfig {
   return {
     key: field.key,
     dataPath: field.key,
-    valueType: field.valueType,
+    baseType: field.baseType,
     cardinality: field.cardinality,
     variables: field.variables,
     sortable: field.sortable,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     label: field.label,
     description: field.description,
     help: field.help,
@@ -1855,7 +1855,7 @@ function buildProfileFieldConfig(
   return {
     key: field.name,
     dataPath: `${profileType?.fieldName ?? "profile"}.${field.name}`,
-    valueType: graphQlFieldTypeToFormValueType(field.type),
+    baseType: graphQlFieldTypeToFormValueType(field.type),
     cardinality: graphQlFieldTypeIsCollection(field.type) ? "collection" : "single",
     label: field.label ?? { en: field.name, nl: field.name },
     required: field.type.endsWith("!"),
@@ -1865,7 +1865,7 @@ function buildProfileFieldConfig(
   };
 }
 
-function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig["valueType"] {
+function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig["baseType"] {
   const normalizedType = type.replace(/!/g, "");
   const map: Record<string, string> = {
     ID: "string",
@@ -1876,7 +1876,7 @@ function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig
     JSON: "object",
   };
 
-  return (map[normalizedType.replace(/^\[|\]$/g, "")] ?? "string") as GeneratedFormFieldConfig["valueType"];
+  return (map[normalizedType.replace(/^\[|\]$/g, "")] ?? "string") as GeneratedFormFieldConfig["baseType"];
 }
 
 function graphQlFieldTypeIsCollection(type: string): boolean {
@@ -1894,14 +1894,11 @@ function normalizeFieldOverrides(overrides: Record<string, unknown>): Partial<Ge
   if ("defaultValue" in overrides) normalized.defaultValue = overrides.defaultValue;
   if ("validation" in overrides) normalized.validation = overrides.validation as Record<string, unknown>;
   if ("options" in overrides) normalized.options = overrides.options as Record<string, unknown>;
-  if ("valueType" in overrides && typeof overrides.valueType === "string") {
-    normalized.valueType = overrides.valueType as GeneratedFormFieldConfig["valueType"];
-  }
   if ("cardinality" in overrides && typeof overrides.cardinality === "string") {
     normalized.cardinality = overrides.cardinality as GeneratedFormFieldConfig["cardinality"];
   }
-  if ("semanticType" in overrides && typeof overrides.semanticType === "string") {
-    normalized.semanticType = overrides.semanticType;
+  if ("osfType" in overrides && typeof overrides.osfType === "string") {
+    normalized.osfType = overrides.osfType;
   }
   if ("dataPath" in overrides && typeof overrides.dataPath === "string") normalized.dataPath = overrides.dataPath;
   if ("visibility" in overrides && typeof overrides.visibility === "object") {

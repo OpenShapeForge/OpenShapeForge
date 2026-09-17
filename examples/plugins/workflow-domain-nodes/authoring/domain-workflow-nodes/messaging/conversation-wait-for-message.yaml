@@ -12,8 +12,7 @@ description:
   nl: Pauzeer de workflow tot de klant een nieuw bericht stuurt in dezelfde conversatie.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -30,7 +29,7 @@ configFields:
       props:
         valueMode: insertText
   - key: waitToken
-    valueType: string
+    osfType: string
     label:
       en: Wait token
       nl: Wachttoken
@@ -43,7 +42,7 @@ configFields:
       nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Vul dit alleen in wanneer herhaalde bezoeken een
         bewust aangepaste token nodig hebben.
   - key: timeoutMs
-    valueType: number
+    osfType: number
     label:
       en: Timeout (ms)
       nl: Timeout (ms)
@@ -62,7 +61,7 @@ configFields:
     render:
       component: NumberInput
   - key: bufferConfig
-    valueType: object
+    osfType: object
     label:
       en: Buffer configuration
       nl: Bufferconfiguratie
@@ -79,7 +78,7 @@ configFields:
       maxWaitMs: 0
     children:
       - key: maxMessages
-        valueType: number
+        osfType: number
         label:
           en: Max messages
           nl: Max berichten
@@ -95,7 +94,7 @@ configFields:
         render:
           component: NumberInput
       - key: maxWaitMs
-        valueType: number
+        osfType: number
         label:
           en: Wait buffer (ms)
           nl: Wachtbuffer (ms)
@@ -103,10 +102,10 @@ configFields:
           en: Extra buffer duration after the first matching message.
           nl: Extra buffertijd na het eerste passende bericht.
         help:
-          en: The default 0 means resume as soon as a matching inbound message is available. Increase only when a flow is
-            designed to collect a short burst of customer messages.
-          nl: De standaard 0 betekent hervatten zodra een passend inkomend bericht beschikbaar is. Verhoog dit alleen wanneer
-            een flow bewust een korte reeks klantberichten verzamelt.
+          en: The default 0 means resume as soon as a matching inbound message is available. Increase only when a flow is designed
+            to collect a short burst of customer messages.
+          nl: De standaard 0 betekent hervatten zodra een passend inkomend bericht beschikbaar is. Verhoog dit alleen wanneer een
+            flow bewust een korte reeks klantberichten verzamelt.
         defaultValue: 0
         validation:
           min: 0

@@ -10,6 +10,10 @@
     "kind": { "type": "string", "const": "semanticTypeCatalog" },
     "types": {
       "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]*$",
+        "description": "Catalog keys are camelCase; PascalCase names are entities, and the seven base types are not catalog entries."
+      },
       "additionalProperties": {
         "type": "object",
         "required": ["label", "valueType"],

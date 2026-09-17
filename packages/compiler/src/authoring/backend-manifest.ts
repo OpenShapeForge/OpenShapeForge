@@ -1356,7 +1356,7 @@ export function compileAuthoringBackendManifest(
           : {}),
         ...(() => {
           const computedFields = candidate.contract.model.fields
-            .filter((field) => field.semanticType === "labelSet")
+            .filter((field) => field.osfType === "labelSet")
             .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
           return computedFields.length > 0 ? { computedFields } : {};
         })(),
@@ -1371,7 +1371,6 @@ export function compileAuthoringBackendManifest(
             ? { operations: candidate.contract.graphql.operations }
             : {}),
           relationships: candidate.contract.graphql.relationships
-            .filter((relationship) => relationship.resolve !== "manyToMany" || candidate.contract.authoringVersion === 3)
             .map((relationship) => ({
               name: relationship.name,
               target: relationship.target,
@@ -1387,7 +1386,7 @@ export function compileAuthoringBackendManifest(
                   ...(normalized.through ? { through: normalized.through } : {}),
                   ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
-                  ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),
+                  ...(normalized.sortable ? { sortable: true, positionColumn: `${normalized.foreignKey}_position` } : {}),
                   ...(normalized.childAuthorization ? { childAuthorization: normalized.childAuthorization } : {}),
                   ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
                   ...(normalized.constraints ? { constraints: structuredClone(normalized.constraints) } : {}),

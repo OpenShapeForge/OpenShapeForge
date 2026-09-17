@@ -30,7 +30,7 @@ authorization:
       column: org_unit_id
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title

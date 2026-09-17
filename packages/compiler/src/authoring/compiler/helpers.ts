@@ -31,8 +31,8 @@ function numericValidationRule(rule: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
 
-function needsWideInteger(field: Pick<Field, "valueType" | "validation">): boolean {
-  if (field.valueType !== "integer") return false;
+function needsWideInteger(field: Pick<Field, "baseType" | "validation">): boolean {
+  if (field.baseType !== "integer") return false;
   const minimum = numericValidationRule(field.validation?.min);
   const maximum = numericValidationRule(field.validation?.max);
   return (
@@ -56,36 +56,36 @@ export function isCollectionField(field: Pick<Field, "cardinality">): boolean {
   return fieldCardinality(field) === "collection";
 }
 
-export function isUuidField(field: Pick<Field, "valueType" | "validation">): boolean {
-  return field.valueType === "string" && field.validation?.format === "uuid";
+export function isUuidField(field: Pick<Field, "baseType" | "validation">): boolean {
+  return field.baseType === "string" && field.validation?.format === "uuid";
 }
 
 export function fieldSqlType(
-  field: Pick<Field, "valueType" | "cardinality" | "validation">,
+  field: Pick<Field, "baseType" | "cardinality" | "validation">,
 ): string {
   if (isCollectionField(field)) return "jsonb";
   if (isUuidField(field)) return "uuid";
   if (needsWideInteger(field)) return "bigint";
-  return FIELD_VALUE_TYPE_TO_SQL[field.valueType] ?? "text";
+  return FIELD_VALUE_TYPE_TO_SQL[field.baseType] ?? "text";
 }
 
 export function fieldGraphqlBaseType(
-  field: Pick<Field, "valueType" | "cardinality" | "validation">,
+  field: Pick<Field, "baseType" | "cardinality" | "validation">,
 ): string {
   if (isCollectionField(field)) {
     const itemType =
-      field.valueType === "object"
+      field.baseType === "object"
         ? "JSON"
         : isUuidField(field)
           ? "ID"
           : needsWideInteger(field)
             ? "Float"
-            : (FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String");
+            : (FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String");
     return `[${itemType}]`;
   }
   if (isUuidField(field)) return "ID";
   if (needsWideInteger(field)) return "Float";
-  return FIELD_VALUE_TYPE_TO_GQL[field.valueType] ?? "String";
+  return FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String";
 }
 
 export function deriveTableName(entityName: string): string {

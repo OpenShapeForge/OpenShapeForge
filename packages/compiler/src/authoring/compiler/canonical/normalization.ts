@@ -60,7 +60,7 @@ export function normalizeCanonicalField(field: CanonicalFieldInput, idPrefix = "
 
   if (field.description) normalized.description = field.description;
   if (field.readOnly) normalized.readOnly = true;
-  if (field.semanticType) normalized.semanticType = field.semanticType;
+  if (field.osfType) normalized.osfType = field.osfType;
   if (field.defaultValue !== undefined) normalized.defaultValue = field.defaultValue;
   if (field.validation) normalized.validation = field.validation;
   if (field.render) normalized.render = field.render;

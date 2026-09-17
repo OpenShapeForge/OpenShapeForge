@@ -15,7 +15,7 @@ domains:
   - asset
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -30,7 +30,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -45,7 +45,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -58,9 +57,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: constructionYear
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Construction year
@@ -75,7 +74,7 @@ fields:
       column: construction_year
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -95,7 +94,7 @@ fields:
     persisted:
       column: address_id
       storageClass: core
-    semanticType: Address
+    osfType: Address
     relationship:
       ownership: reference
 authorization:

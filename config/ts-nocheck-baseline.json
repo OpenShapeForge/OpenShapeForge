@@ -36,7 +36,6 @@
     "packages/compiler/src/authoring/compiler/index.ts",
     "packages/compiler/src/authoring/compiler/model.ts",
     "packages/compiler/src/authoring/compiler/profiles.ts",
-    "packages/compiler/src/authoring/compiler/relationships.ts",
     "packages/compiler/src/authoring/compiler/storage.ts",
     "packages/compiler/src/authoring/compiler/views.ts",
     "packages/compiler/src/authoring/generate-keycloak-artifacts.ts",

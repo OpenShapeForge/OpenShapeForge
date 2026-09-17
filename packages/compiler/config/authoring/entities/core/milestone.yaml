@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -41,7 +41,6 @@ fields:
       column: name
       storageClass: core
   - key: milestoneType
-    valueType: string
     required: true
     label:
       en: Milestone type
@@ -52,9 +51,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MILESTONETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -65,9 +63,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MILESTONESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -76,7 +74,7 @@ fields:
       column: started_at
       storageClass: core
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -85,7 +83,7 @@ fields:
       column: due_at
       storageClass: core
   - key: pausedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Paused at
@@ -94,7 +92,7 @@ fields:
       column: paused_at
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -103,7 +101,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: breachedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Breached at
@@ -112,7 +110,7 @@ fields:
       column: breached_at
       storageClass: core
   - key: pauseReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Pause reason
@@ -123,7 +121,6 @@ fields:
       column: pause_reason
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -133,7 +130,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseId
     label:
       en: Case
@@ -141,9 +138,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Milestones
+          nl: Mijlpalen
   - key: slaPolicyId
     label:
       en: SLA policy
@@ -151,9 +152,13 @@ fields:
     persisted:
       column: sla_policy_id
       storageClass: core
-    semanticType: SlaPolicy
+    osfType: SlaPolicy
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Milestones
+          nl: Mijlpalen
   - key: ownerId
     label:
       en: Owner
@@ -161,7 +166,7 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
 operations:

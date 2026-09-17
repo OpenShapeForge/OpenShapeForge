@@ -30,7 +30,7 @@ authorization:
     empty: public
 fields:
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Key
@@ -42,7 +42,7 @@ fields:
       column: key
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -54,7 +54,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -64,9 +63,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: stepType
-    valueType: string
     required: true
     label:
       en: Step type
@@ -77,9 +75,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROCESSSTEPTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -90,9 +87,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROCESSSTEPSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Sequence number
@@ -101,7 +98,7 @@ fields:
       column: sequence_number
       storageClass: core
   - key: isMilestone
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is milestone
@@ -111,7 +108,7 @@ fields:
       column: is_milestone
       storageClass: core
   - key: isBlocking
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is blocking
@@ -121,7 +118,7 @@ fields:
       column: is_blocking
       storageClass: core
   - key: workflowNodeRef
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Workflow node reference
@@ -132,7 +129,7 @@ fields:
       column: workflow_node_ref
       storageClass: core
   - key: workflowRunRef
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Workflow run reference
@@ -143,7 +140,7 @@ fields:
       column: workflow_run_ref
       storageClass: core
   - key: workflowInstanceId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -158,7 +155,7 @@ fields:
       column: workflow_instance_id
       storageClass: core
   - key: workflowNodeInstanceId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -173,7 +170,7 @@ fields:
       column: workflow_node_instance_id
       storageClass: core
   - key: workflowWaitId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -188,7 +185,7 @@ fields:
       column: workflow_wait_id
       storageClass: core
   - key: requiredInput
-    valueType: object
+    osfType: object
     required: false
     readOnly: true
     label:
@@ -201,7 +198,7 @@ fields:
       column: required_input
       storageClass: core
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -210,7 +207,7 @@ fields:
       column: started_at
       storageClass: core
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -219,7 +216,7 @@ fields:
       column: due_at
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -228,9 +225,8 @@ fields:
       column: completed_at
       storageClass: core
   - key: completedByAccountId
-    valueType: string
     required: false
-    semanticType: Account
+    osfType: Account
     label:
       en: Completed by
       nl: Afgerond door
@@ -245,8 +241,9 @@ fields:
     classification:
       sensitivity: internal
       category: workflow
+    relationship:
+      inverse: false
   - key: completionApprovalComment
-    valueType: string
     required: false
     label:
       en: Completion approval comment
@@ -256,9 +253,9 @@ fields:
     persisted:
       column: completion_approval_comment
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: waitReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Wait reason
@@ -269,7 +266,7 @@ fields:
       column: wait_reason
       storageClass: core
   - key: resultCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Result code
@@ -280,7 +277,6 @@ fields:
       column: result_code
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -290,9 +286,9 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: isAdHoc
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Ad-hoc step
@@ -305,7 +301,7 @@ fields:
       column: is_ad_hoc
       storageClass: core
   - key: templateStepKey
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Process step template key
@@ -325,9 +321,14 @@ fields:
     persisted:
       column: process_id
       storageClass: core
-    semanticType: Process
+    osfType: Process
     relationship:
       ownership: reference
+      inverse:
+        key: steps
+        label:
+          en: Process steps
+          nl: Processtappen
   - key: ownerId
     label:
       en: Owner
@@ -335,9 +336,10 @@ fields:
     persisted:
       column: owner_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
   - key: assignedGroupId
     label:
       en: Assigned group
@@ -345,7 +347,7 @@ fields:
     persisted:
       column: assigned_group_id
       storageClass: core
-    semanticType: RelationGroup
+    osfType: RelationGroup
     relationship:
       ownership: reference
   - key: predecessorStepId
@@ -355,27 +357,14 @@ fields:
     persisted:
       column: predecessor_step_id
       storageClass: core
-    semanticType: ProcessStep
+    osfType: ProcessStep
     relationship:
       ownership: reference
-  - key: nextSteps
-    label:
-      en: Next steps
-      nl: Vervolgstappen
-    semanticType: ProcessStep
-    cardinality: collection
-    relationship:
-      inverse: predecessorStepId
-      ownership: reference
-  - key: tasks
-    label:
-      en: Tasks
-      nl: Taken
-    semanticType: Task
-    cardinality: collection
-    relationship:
-      inverse: caseStepId
-      ownership: reference
+      inverse:
+        key: nextSteps
+        label:
+          en: Next steps
+          nl: Vervolgstappen
 operations:
   list:
     name: List Process Step

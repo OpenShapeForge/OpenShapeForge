@@ -14,7 +14,7 @@ domains:
   - asset
 fields:
   - key: latitude
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Latitude
@@ -29,7 +29,7 @@ fields:
       column: latitude
       storageClass: core
   - key: longitude
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Longitude
@@ -44,7 +44,7 @@ fields:
       column: longitude
       storageClass: core
   - key: srid
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: SRID
@@ -56,7 +56,7 @@ fields:
       column: srid
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -76,7 +76,7 @@ fields:
     persisted:
       column: asset_id
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
   - key: buildingId
@@ -86,7 +86,7 @@ fields:
     persisted:
       column: building_id
       storageClass: core
-    semanticType: Building
+    osfType: Building
     relationship:
       ownership: reference
 authorization:

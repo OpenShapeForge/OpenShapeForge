@@ -25,7 +25,7 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
-import type { FieldDefinitionDeriveOnCreate } from "./field-definition.js";
+import type { FieldDefinitionDeriveOnCreate, FieldDefinitionValueType } from "./field-definition.js";
 import type {
   ListColumn,
   ListFilter,
@@ -76,14 +76,10 @@ export interface CompiledRender {
 
 export interface CompiledField {
   key: string;
-  valueType:
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "date"
-    | "datetime"
-    | "object";
+  /** The authored type axis: a base type, a semantic-type key or an entity name. */
+  osfType: string;
+  /** Derived from `osfType`: the base every transport maps to storage, GraphQL and JSON Schema. */
+  baseType: FieldDefinitionValueType;
   cardinality: "single" | "collection";
   /** Exact authored collection bounds retained after cardinality normalization. */
   cardinalityBounds?: {
@@ -116,7 +112,6 @@ export interface CompiledField {
   description?: LocalizedText;
   help?: LocalizedText;
   render: CompiledRender;
-  semanticType?: string;
   unit?: string;
   defaultValue?: unknown;
   validation?: FieldValidation;
@@ -150,7 +145,7 @@ export interface CompiledRelationship {
   /** Owner-scoped collection Operations authorize the children through the owner. */
   childAuthorization?: "owner";
   unique?: boolean;
-  kind: "belongsTo" | "hasMany" | "manyToMany";
+  kind: "belongsTo" | "hasMany";
   target: string;
   foreignKey?: string;
   via?: string;
@@ -190,7 +185,7 @@ export interface GraphQLProfileType {
     column?: string;
     label?: LocalizedText;
     description?: string;
-    semanticType?: string;
+    osfType?: string;
     render?: CompiledRender;
     displayRender?: CompiledRender;
     validation?: FieldValidation;

@@ -14,7 +14,7 @@ domains:
   - project
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +44,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -57,9 +56,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: false
     label:
       en: Status
@@ -73,9 +71,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROJECTPHASESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -87,7 +85,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -99,7 +97,7 @@ fields:
       column: end_date
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -115,7 +113,6 @@ fields:
       column: currency_code
       storageClass: core
   - key: budgetTotal
-    valueType: number
     required: false
     label:
       en: Budget total
@@ -123,12 +120,12 @@ fields:
     description:
       en: Total budgeted amount for the project.
       nl: Totaal begroot bedrag voor het project.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: budget_total
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -148,7 +145,7 @@ fields:
     persisted:
       column: parent_project_id
       storageClass: core
-    semanticType: Project
+    osfType: Project
     relationship:
       ownership: reference
   - key: costDimensionId
@@ -158,7 +155,7 @@ fields:
     persisted:
       column: cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
 authorization:

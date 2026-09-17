@@ -132,7 +132,6 @@ test("JSON validation neither fills defaults nor loads external refs or asynchro
 test("the host validates stored fields before using its active schema registry", () => {
   expect(compiler.object([{
     key: "code",
-    osfType: "string",
     osfType: "code",
     required: true,
   }])).toMatchObject({

@@ -9,6 +9,7 @@ const BASE_TYPES: ReadonlySet<string> = new Set(["string", "integer", "number", 
 export function isBaseType(osfType: string | undefined): osfType is FieldValueType {
   return osfType !== undefined && BASE_TYPES.has(osfType);
 }
+
 export type FieldCardinality = NonNullable<Field["cardinality"]>;
 
 export type FieldRuntimeKind =
@@ -22,12 +23,16 @@ export type FieldShapeKind =
   | "uuid"
   | "collection";
 
-/** Raw authoring fields may inherit valueType from their semantic type. */
-export function fieldValueType(field: Field): FieldValueType {
-  const semantic = field.osfType
-    ? COMPILER_SEMANTIC_TYPES[field.osfType as keyof typeof COMPILER_SEMANTIC_TYPES]
-    : undefined;
-  return (fieldValueType(field) ?? semantic?.valueType ?? "string") as FieldValueType;
+/**
+ * The base type behind a field's `osfType`: compiled fields carry it as
+ * `baseType`; an authored field resolves a base type to itself and a
+ * catalog key to the entry's `valueType`.
+ */
+export function fieldValueType(field: Pick<Field, "osfType" | "baseType">): FieldValueType {
+  if (field.baseType) return field.baseType;
+  if (isBaseType(field.osfType)) return field.osfType;
+  const semantic = COMPILER_SEMANTIC_TYPES[field.osfType as keyof typeof COMPILER_SEMANTIC_TYPES] as { valueType?: string } | undefined;
+  return (semantic?.valueType ?? "string") as FieldValueType;
 }
 
 export function fieldCardinality(field: Field): FieldCardinality {

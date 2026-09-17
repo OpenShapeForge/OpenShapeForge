@@ -16,6 +16,9 @@ type SnapshotNode = { table: string; row: Record<string, unknown>; children: Rec
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PARAMETER_NAME = /^[a-z][A-Za-z0-9]{0,127}$/;
+/** Owning foreign keys of the frozen tree (entities/core/template-variant.yaml and block.yaml). */
+const VARIANT_OWNER_COLUMN = "template_id";
+const BLOCK_OWNER_COLUMN = "variant_id";
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 function invalid(message: string): never {
   throw operationFailure({ code: "DEPENDENCY_INVALID", message, retryable: false });
@@ -74,11 +77,11 @@ function references(carrier: RuntimeEntityValueCarrier, definitionKey: string, r
   }));
 }
 
-function block(entry: SnapshotNode, selection: TemplateSnapshotSelection): ContentBlock {
+function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapshotSelection): ContentBlock {
   const { carrier } = selection;
   const row = entry.row;
   const id = uuid(row.id, "block");
-  if (row.tenant_id !== selection.tenantId) invalid("The frozen block belongs to another tenant.");
+  if (row.tenant_id !== selection.tenantId || row[BLOCK_OWNER_COLUMN] !== variantId) invalid("The frozen block belongs to another variant or tenant.");
   const definitionKey = row[carrier.definitionColumn];
   if (typeof definitionKey !== "string" || !definitionKey) invalid("The frozen block has no definition key.");
   const version = Number(row[selection.definitionVersionColumn]);
@@ -104,8 +107,8 @@ export function templateSnapshotContent(snapshot: unknown, selection: TemplateSn
   for (const candidate of childRows(root, "template_variants", "variant")) {
     if (candidate.row.channel !== selection.channel || candidate.row.locale !== selection.locale) continue;
     const variantId = uuid(candidate.row.id, "variant");
-    if (candidate.row.tenant_id !== selection.tenantId) invalid("The frozen variant belongs to another tenant.");
-    const blocks = childRows(candidate, selection.carrier.table, "block").map((entry) => block(entry, selection));
+    if (candidate.row.tenant_id !== selection.tenantId || candidate.row[VARIANT_OWNER_COLUMN] !== selection.templateId) invalid("The frozen variant belongs to another template or tenant.");
+    const blocks = childRows(candidate, selection.carrier.table, "block").map((entry) => block(entry, variantId, selection));
     variants.push({ id: variantId, channel: selection.channel, locale: selection.locale, blocks, allowedDefinitions: [...selection.allowedDefinitions] });
   }
   return { parameterFields: parameterFields as Record<string, unknown>[], variants };

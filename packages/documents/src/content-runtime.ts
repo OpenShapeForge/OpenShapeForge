@@ -172,7 +172,9 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
           tenantId, templateId, channel, locale, carrier, allowedDefinitions: collection!.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
         });
         parameterFields.set(id, frozen.parameterFields);
-        const parameterSchema = platform.schemas.fields.object(frozen.parameterFields);
+        let parameterSchema: Record<string, unknown>;
+        try { parameterSchema = platform.schemas.fields.object(frozen.parameterFields); }
+        catch { refuse("DEPENDENCY_INVALID", "The frozen template parameter definitions are not valid field definitions."); }
         const properties = object(parameterSchema.properties ?? {}, "parameter properties");
         const required = Array.isArray(parameterSchema.required) ? parameterSchema.required : [];
         const parameters = Object.fromEntries(Object.entries(properties).map(([name, schema]) => [name, parameterShape(object(schema, "parameter schema"), required.includes(name))]));

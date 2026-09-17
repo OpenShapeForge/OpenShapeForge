@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
-import type { ModuleOperationContext } from "@openshapeforge/plugin-runtime";
+import type { ModuleOperationContext, ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import documents from "@openshapeforge/documents/runtime";
 import versioning from "@openshapeforge/versioning/runtime";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
@@ -28,11 +28,16 @@ const scratchName = `template_snapshot_${randomUUID().replaceAll("-", "").slice(
 const tenantId = randomUUID();
 const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID(), late: randomUUID() };
 const session = { tenantId, userId: randomUUID(), roles: ["Organization.All.ReadWrite"], groups: [], relationGroupIds: [], scope: "tenant" as const, credential: "bearer" as const };
-const textOperation = {
-  id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" },
-  output: { kind: "json-schema", schema: { type: "object" } },
-  input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } },
+const nested = { template: randomUUID(), variant: randomUUID(), block: randomUUID(), outer: randomUUID(), outerVariant: randomUUID(), include: randomUUID(), outerText: randomUUID() };
+/** Input shapes as authored in entities/core/text-block.yaml and template-block.yaml. */
+const operations: Record<string, unknown> = {
+  "TextBlock.materialize": { id: "TextBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" }, output: { kind: "json-schema", schema: { type: "object" } },
+    input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } } } },
+  "TemplateBlock.materialize": { id: "TemplateBlock.materialize", intent: "invoke", effects: { data: "read", external: "none" }, output: { kind: "json-schema", schema: { type: "object" } },
+    input: { kind: "json-schema", schema: { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
+      definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } } } },
 };
+const handlers: Record<string, ModuleOperationHandler> = { "TextBlock.materialize": documents.operationHandlers.materializeFields, "TemplateBlock.materialize": documents.operationHandlers.composeTemplate };
 
 function databaseUrl(app = false): string {
   const url = new URL(ADMIN_URL);
@@ -55,10 +60,10 @@ function context(): ModuleOperationContext {
     db: { withSession: (actor: typeof session, work: (trx: unknown) => Promise<unknown>) => withDbSession(restricted.db, actor, (trx) => work(trx)) },
     operations: {
       list: async () => ["TemplateVersion", "Chip"].map((entityName) => ({ id: `${entityName}.get`, entityName, intent: "get", effects: { data: "read", external: "none" } })),
-      get: async (_actor: unknown, id: string) => id === textOperation.id ? textOperation : undefined,
-      async execute(actor: typeof session, request: { operation: { intent: string; entityName?: string }; input: Record<string, unknown> }) {
+      get: async (_actor: unknown, id: string) => operations[id],
+      async execute(actor: typeof session, request: { operation: { id: string; intent: string; entityName?: string }; input: Record<string, unknown> }) {
         if (request.operation.intent !== "get") {
-          const result = await documents.operationHandlers.materializeFields!(request.input, context());
+          const result = await handlers[request.operation.id]!(request.input, context());
           if (!("value" in result)) throw new Error(`Block materialization refused: ${result.code}`);
           return { data: result.value, operations: [] };
         }
@@ -76,16 +81,29 @@ function context(): ModuleOperationContext {
 async function materialize(templateVersionId: string, parameters?: Record<string, unknown>) {
   const result = await documents.operationHandlers.materializeTemplate!({ templateVersionId, channel: "document", locale: "en", ...(parameters ? { parameters } : {}) }, context());
   if (!("value" in result)) throw new Error(`Materialization failed: ${JSON.stringify(result)}`);
-  return result.value as { blocks: { id: string; values: { text: string } }[]; compositionHash: string; templates: { parameters: Record<string, unknown>; version: { variants: { id: string; blocks: { id: string }[] }[] } }[] };
+  return result.value as { blocks: { id: string; path: string[]; values: { text: string } }[]; compositionHash: string;
+    compositions: { path: string[]; definitionKey: string; templateReference: { entity: string; id: string } }[];
+    templates: { path: string[]; parameters: Record<string, unknown>; version: { id: string; variants: { id: string; blocks: { id: string }[] }[] } }[] };
 }
-async function publish(): Promise<string> {
-  const result = await versioning.operationHandlers.publishTemplateToTemplateVersion!({ id: ids.template }, context());
+async function publish(templateId = ids.template): Promise<string> {
+  const result = await versioning.operationHandlers.publishTemplateToTemplateVersion!({ id: templateId }, context());
   if (!("value" in result)) throw new Error(`Publish failed: ${JSON.stringify(result)}`);
   return String((result.value as { id: string }).id);
 }
-async function insertBlock(id: string, position: number, text: string) {
+async function insertBlock(id: string, position: number, text: string, variantId = ids.variant) {
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, definition_version, "values")
-    values (${id}::uuid, ${tenantId}::uuid, ${ids.variant}::uuid, ${position}, 'TextBlock', 1, ${jsonbLiteral({ text })})`.execute(privileged.db);
+    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TextBlock', 1, ${jsonbLiteral({ text })})`.execute(privileged.db);
+}
+/** The reference lives in its generated column, exactly as the compiled carrier names it. */
+async function insertTemplateBlock(id: string, variantId: string, position: number, versionId: string) {
+  const column = generatedEntityValues.get("Block", "values")!.definitions.TemplateBlock!.references.find((reference) => reference.fieldKey === "version")!.column;
+  await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, definition_version, "values", ${sql.ref(column)})
+    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TemplateBlock', 1, ${jsonbLiteral({ parameters: {} })}, ${versionId}::uuid)`.execute(privileged.db);
+}
+async function insertTemplate(templateId: string, variantId: string, key: string, defaultName: string) {
+  await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${templateId}::uuid, ${tenantId}::uuid, ${key}, ${key},
+    ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: defaultName }])})`.execute(privileged.db);
+  await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${variantId}::uuid, ${tenantId}::uuid, ${templateId}::uuid, 'document', 'en')`.execute(privileged.db);
 }
 
 describe("TemplateVersion.materialize reads the frozen snapshot, not the live tables", () => {
@@ -96,9 +114,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     await privileged.db.connection().execute((connection) => runMigrationChain(connection));
     restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
     await sql`insert into platform.tenants (id, slug, name, status, keycloak_realm) values (${tenantId}::uuid, 'snapshot-test', 'Snapshot test', 'active', 'openshapeforge')`.execute(privileged.db);
-    await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${tenantId}::uuid, 'offer', 'Offer',
-      ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: "Reader" }])})`.execute(privileged.db);
-    await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${tenantId}::uuid, ${ids.template}::uuid, 'document', 'en')`.execute(privileged.db);
+    await insertTemplate(ids.template, ids.variant, "offer", "Reader");
     await insertBlock(ids.first, 0, "Hello {{local.name}}");
     await insertBlock(ids.second, 1, "Second paragraph");
   }, 120_000);
@@ -147,6 +163,28 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     expect(next.templates[0]!.parameters).toEqual({ name: "MUTATED" });
     expect(next.compositionHash).not.toBe(pinned.compositionHash);
     expect((await materialize(versionId)).compositionHash).toBe(frozen.compositionHash);
+  }, 60_000);
+
+  test("a TemplateBlock inclusion resolves through its generated reference column and pins the nested version too", async () => {
+    await insertTemplate(nested.template, nested.variant, "nested", "Inner");
+    await insertBlock(nested.block, 0, "Nested {{local.name}}", nested.variant);
+    const nestedVersionId = await publish(nested.template);
+    await insertTemplate(nested.outer, nested.outerVariant, "outer", "Outer");
+    await insertTemplateBlock(nested.include, nested.outerVariant, 0, nestedVersionId);
+    await insertBlock(nested.outerText, 1, "After the inclusion", nested.outerVariant);
+    const outerVersionId = await publish(nested.outer);
+
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "MUTATED nested" })} where id = ${nested.block}::uuid`.execute(privileged.db);
+    await sql`delete from erp.blocks where id = ${nested.include}::uuid`.execute(privileged.db);
+    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: "MUTATED" }])} where id = ${nested.template}::uuid`.execute(privileged.db);
+
+    const result = await materialize(outerVersionId);
+    expect(result.compositions).toHaveLength(1);
+    expect(result.compositions[0]).toMatchObject({ path: [nested.include], definitionKey: "TemplateBlock", templateReference: { entity: "TemplateVersion", id: nestedVersionId } });
+    expect(result.templates.map((entry) => [entry.path, entry.version.id, entry.parameters])).toEqual([[[], outerVersionId, { name: "Outer" }], [[nested.include], nestedVersionId, { name: "Inner" }]]);
+    expect(result.blocks.map((block) => [block.path, block.values.text])).toEqual([[[nested.include, nested.block], "Nested Inner"], [[nested.outerText], "After the inclusion"]]);
+    expect(JSON.stringify(result)).not.toContain("MUTATED");
+    expect(authorizations.filter((entry) => /^(TemplateVariant|Block):/.test(entry))).toEqual([]);
   }, 60_000);
 
   test("a locale that was never published resolves nothing rather than falling back to live rows", async () => {

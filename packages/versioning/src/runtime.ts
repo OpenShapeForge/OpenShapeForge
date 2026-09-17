@@ -57,6 +57,20 @@ const CHILD_RELATIONS = `
   group by child_ns.nspname, child.relname
   order by child_ns.nspname, child.relname`;
 
+/**
+ * The frozen order is what a materialized version hashes, so it must be
+ * canonical: owned-collection position first, then id. Without the id
+ * tie-break, rows sharing a position would keep whatever order `select ...
+ * for share` happened to return.
+ */
+export function orderSnapshotChildren(found: readonly Row[]): Row[] {
+  const position = found.length ? Object.keys(found[0]!).find((key) => key.endsWith("_position")) : undefined;
+  return [...found].sort((left, right) => {
+    const byPosition = position ? Number(left[position] ?? 0) - Number(right[position] ?? 0) : 0;
+    return byPosition || String(left.id ?? "").localeCompare(String(right.id ?? ""));
+  });
+}
+
 async function snapshotNode(executor: unknown, schema: string, table: string, row: Row): Promise<SnapshotNode> {
   const relations = await rows<ChildRelation>(executor, CHILD_RELATIONS, [schema, table]);
   const children: Record<string, SnapshotNode[]> = {};
@@ -66,12 +80,8 @@ async function snapshotNode(executor: unknown, schema: string, table: string, ro
     const values = relation.parent_columns.map((column) => row[column]);
     const found = await rows<{ row: Row }>(executor,
       `select to_jsonb(child_row.*) as row from ${identifier(relation.schema_name)}.${identifier(relation.table_name)} child_row where ${predicates} for share`, values);
-    const ordered = [...found].sort((left, right) => {
-      const position = Object.keys(left.row).find((key) => key.endsWith("_position"));
-      if (position) return Number(left.row[position] ?? 0) - Number(right.row[position] ?? 0);
-      return String(left.row.id ?? "").localeCompare(String(right.row.id ?? ""));
-    });
-    children[relation.table_name] = await Promise.all(ordered.map((entry) => snapshotNode(executor, relation.schema_name, relation.table_name, entry.row)));
+    const ordered = orderSnapshotChildren(found.map((entry) => entry.row));
+    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row)));
   }
   return { table, row, children };
 }

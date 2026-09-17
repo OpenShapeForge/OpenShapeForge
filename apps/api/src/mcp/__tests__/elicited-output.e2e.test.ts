@@ -87,10 +87,10 @@ const keyring = keyringFromEnv(
   `test:${Buffer.alloc(32, 23).toString("base64")}`,
 )!;
 const definitions = [
-  { key: "endpoint", valueType: "string" },
+  { key: "endpoint", osfType: "string" },
   {
     key: "apiToken",
-    valueType: "string",
+    osfType: "string",
     classification: { sensitivity: "confidential" },
   },
 ];
@@ -737,12 +737,12 @@ test.skipIf(remoteUrl)(
     const tokenDefinitions = [
       {
         key: "accessToken",
-        valueType: "string",
+        osfType: "string",
         classification: { sensitivity: "confidential" },
       },
       {
         key: "refreshToken",
-        valueType: "string",
+        osfType: "string",
         classification: { sensitivity: "confidential" },
       },
     ];

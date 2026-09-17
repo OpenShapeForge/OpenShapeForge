@@ -16,6 +16,8 @@ import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from
 export type EntityValueIOContext = { registry?: RuntimeEntityValueRegistry; tables?: readonly GeneratedCrudTable[] };
 
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
+const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);
+
 export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
   semanticTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.semanticTypes,
@@ -24,9 +26,11 @@ export function assertEntityValueFieldPolicy(
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const invalid = (): never => { throw generatedCrudError("Guarded or malformed entity-value fields require a dedicated adapter.", "INVALID_DEFINITION"); };
   if (!record(field) || depth > 32) invalid();
-  if (field.semanticType !== undefined && typeof field.semanticType !== "string") invalid();
-  const semantic = typeof field.semanticType === "string" && Object.hasOwn(semanticTypes, field.semanticType) ? semanticTypes[field.semanticType] : undefined;
-  if (typeof field.semanticType === "string" && semantic === undefined) invalid();
+  if (typeof field.osfType !== "string") invalid();
+  const osfType = field.osfType as string;
+  const baseType = BASE_TYPES.has(osfType);
+  const semantic = !baseType && Object.hasOwn(semanticTypes, osfType) ? semanticTypes[osfType] : undefined;
+  if (!baseType && semantic === undefined) invalid();
   if (semantic !== undefined && !record(semantic)) invalid();
   if (depth > 0 && (field.relationship !== undefined || record(semantic) && semantic.kind === "entity")) invalid();
   for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {

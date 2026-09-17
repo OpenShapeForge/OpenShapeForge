@@ -9,7 +9,7 @@ const carrier: RuntimeEntityValueCarrier = {
   schema: "erp", table: "blocks", valuesColumn: "values",
   definitions: {
     Example: {
-      entityName: "Example", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "caption", valueType: "string", defaultValue: "Example" }],
+      entityName: "Example", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "caption", osfType: "string", defaultValue: "Example" }],
       valueSchema: { type: "object", properties: { caption: { type: "string", minLength: 1, "x-osf-i18n": { title: { en: "Caption", nl: "Bijschrift" } } } }, required: ["caption"], additionalProperties: false },
       references: [{ fieldKey: "document", targetEntity: "Document", schema: "erp", table: "documents", column: "example_document_id", required: true }],
     },

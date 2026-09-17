@@ -251,21 +251,21 @@ const PENDING: PendingConfiguration = {
   definitions: [
     {
       key: "clientId",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: { en: "Client ID" },
       description: { en: "From the provider's developer console." },
     },
     {
       key: "clientSecret",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: { en: "Client secret" },
       classification: { sensitivity: "confidential" },
     },
     {
       key: "region",
-      valueType: "string",
+      osfType: "string",
       required: false,
       label: { en: "Region" },
       options: {
@@ -275,8 +275,8 @@ const PENDING: PendingConfiguration = {
         ],
       },
     },
-    { key: "retries", valueType: "integer", required: false, label: "Retries" },
-    { key: "sandbox", valueType: "boolean", required: false, label: "Sandbox" },
+    { key: "retries", osfType: "integer", required: false, label: "Retries" },
+    { key: "sandbox", osfType: "boolean", required: false, label: "Sandbox" },
   ],
   displayName: "Google Workspace",
   messagePrefix: "Register https://kern.example/api/entity-oauth/callback first.",
@@ -361,7 +361,7 @@ describe("renderConfigurationForm", () => {
         definitions: [
           {
             key: `x" autofocus onfocus="alert(1)`,
-            valueType: "string",
+            osfType: "string",
             required: true,
             label: "<em>lbl</em>",
             description: "<i>desc</i>",

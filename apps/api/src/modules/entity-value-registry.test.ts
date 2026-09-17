@@ -7,7 +7,7 @@ const fixture = () => ({ version: 1, carriers: [{
   schema: "erp", table: "blocks", valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     Include: {
-      entityName: "Include", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "version", valueType: "string" }],
+      entityName: "Include", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "version", osfType: "string" }],
       valueSchema: { type: "object", properties: {} },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },

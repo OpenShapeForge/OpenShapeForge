@@ -149,7 +149,7 @@ export const collections = createCollectionMutationExecutor({
 });
 export const tableName = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity)!.name;
 
-export const parameters = [{ key: "name", valueType: "string", required: true, label: { en: "Name", nl: "Naam" } }];
+export const parameters = [{ key: "name", osfType: "string", required: true, label: { en: "Name", nl: "Naam" } }];
 export async function seedTemplate() {
   const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID() };
   await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${tenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());

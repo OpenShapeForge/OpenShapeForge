@@ -51,7 +51,7 @@ function valueFixture(allowed = ["Include", "Text"], parameterBindings = false) 
     entityName: "Block", fieldKey: "values", definitionField: "definitionKey", schema: "erp", table: "blocks", valuesColumn: "payload", definitionColumn: "definition_key",
     definitions: {
       Include: { entityName: "Include", schemaVersion: 1, definitionHash: "a".repeat(64),
-        fields: [{ key: "parameters", valueType: "object", defaultValue: {} }],
+        fields: [{ key: "parameters", osfType: "object", defaultValue: {} }],
         valueSchema: { type: "object", properties: { parameters: { type: "object", properties: { label: { type: "string" } }, additionalProperties: false } }, required: ["parameters"], additionalProperties: false },
         references: [
           { fieldKey: "version", targetEntity: "TemplateVariant", schema: "erp", table: "template_variants", column: "ev_values_include_version_id", required: true,
@@ -60,7 +60,7 @@ function valueFixture(allowed = ["Include", "Text"], parameterBindings = false) 
         ],
       },
       Text: { entityName: "Text", schemaVersion: 1, definitionHash: "b".repeat(64),
-        fields: [{ key: "caption", valueType: "string", defaultValue: "Untitled" }],
+        fields: [{ key: "caption", osfType: "string", defaultValue: "Untitled" }],
         valueSchema: { type: "object", properties: { caption: { type: "string", minLength: 1 } }, required: ["caption"], additionalProperties: false }, references: [],
       },
     },

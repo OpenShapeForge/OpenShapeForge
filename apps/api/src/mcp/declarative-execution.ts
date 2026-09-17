@@ -56,6 +56,7 @@ import {
   type SecretKeyring,
   type StoredSecret,
 } from "../connectors/secrets.js";
+import { storedFieldBaseType } from "./stored-field-base-type.js";
 
 export type ExecutionCatalogEntry = {
   bindingsField: string;
@@ -226,7 +227,7 @@ export const SECRET_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
 
 type FieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   cardinality?: unknown;
   classification?: { sensitivity?: unknown };
 };
@@ -399,16 +400,10 @@ export function requestHeaderMappings(
         `${position}.field ${JSON.stringify(entry.field)} is not a declared operation input.`,
       );
     }
+    const baseType = storedFieldBaseType(definition);
     if (
-      definition.valueType === "object" ||
-      ![
-        "string",
-        "integer",
-        "number",
-        "boolean",
-        "date",
-        "datetime",
-      ].includes(String(definition.valueType)) ||
+      baseType === "object" ||
+      !["string", "integer", "number", "boolean", "date", "datetime"].includes(baseType) ||
       (definition.cardinality !== undefined &&
         definition.cardinality !== "single")
     ) {

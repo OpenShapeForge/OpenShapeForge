@@ -623,7 +623,7 @@ function triggerNode(): GraphNode {
  */
 function endNode(
   id: string,
-  fields: { key: string; valueType: string; value: unknown }[],
+  fields: { key: string; osfType: string; value: unknown }[],
   x: number,
 ): GraphNode {
   return { id, type: "end", position: { x, y: 0 }, config: { fields } };
@@ -669,8 +669,8 @@ const PLACEHOLDER_GRAPH = graph(
     endNode(
       "finish",
       [
-        { key: "greeting", valueType: "string", value: "Hello {{input.someKey}}" },
-        { key: "count", valueType: "number", value: "{{input.count}}" },
+        { key: "greeting", osfType: "string", value: "Hello {{input.someKey}}" },
+        { key: "count", osfType: "number", value: "{{input.count}}" },
       ],
       240,
     ),
@@ -681,7 +681,7 @@ const PLACEHOLDER_GRAPH = graph(
 const UNRESOLVABLE_GRAPH = graph(
   [
     triggerNode(),
-    endNode("finish", [{ key: "echo", valueType: "string", value: "{{input.missing}}" }], 240),
+    endNode("finish", [{ key: "echo", osfType: "string", value: "{{input.missing}}" }], 240),
   ],
   [{ id: "start-finish", source: "start", target: "finish" }],
 );
@@ -690,8 +690,8 @@ const DECISION_GRAPH = graph(
   [
     triggerNode(),
     decisionNode(),
-    endNode("endApproved", [{ key: "route", valueType: "string", value: "approved" }], 480),
-    endNode("endRejected", [{ key: "route", valueType: "string", value: "rejected" }], 480),
+    endNode("endApproved", [{ key: "route", osfType: "string", value: "approved" }], 480),
+    endNode("endRejected", [{ key: "route", osfType: "string", value: "rejected" }], 480),
   ],
   [
     { id: "start-route", source: "start", target: "route" },
@@ -717,8 +717,8 @@ const AMBIGUOUS_GRAPH = graph(
   [
     triggerNode(),
     decisionNode(),
-    endNode("endA", [{ key: "route", valueType: "string", value: "a" }], 480),
-    endNode("endB", [{ key: "route", valueType: "string", value: "b" }], 480),
+    endNode("endA", [{ key: "route", osfType: "string", value: "a" }], 480),
+    endNode("endB", [{ key: "route", osfType: "string", value: "b" }], 480),
   ],
   [
     { id: "start-route", source: "start", target: "route" },

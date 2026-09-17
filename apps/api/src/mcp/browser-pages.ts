@@ -22,6 +22,7 @@ import {
   isSecretDefinition,
 } from "./elicitation.js";
 import type { PendingConfiguration } from "./configuration-handoff.js";
+import { storedFieldBaseType } from "./stored-field-base-type.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -325,7 +326,7 @@ export function renderNoticePage(message: string, hostName?: string): string {
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   required?: unknown;
   label?: unknown;
   description?: unknown;
@@ -378,10 +379,7 @@ export function renderConfigurationForm(
       const description = localized(definition.description);
       const required = definition.required === true;
       const error = errors[key];
-      const valueType =
-        typeof definition.valueType === "string"
-          ? definition.valueType
-          : "string";
+      const valueType = storedFieldBaseType(definition);
       const optionItems = definition.options?.items;
       const secret = isSecretDefinition(definition as never);
 

@@ -86,6 +86,7 @@ import {
   requireOperationAuthorization,
 } from "../operations/runtime.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { withConfirmationHint } from "./confirmation-hint.js";
 import {
   AUTHORIZATION_SERVER_METADATA_PREFIXES,
   PROTECTED_RESOURCE_METADATA_PATH,
@@ -291,11 +292,14 @@ function failedToolResult(error: unknown, log: (error: unknown) => void): CallTo
       isError: true,
     };
   }
-  const { status, body } = toHttpError(error);
+  const { status, body: mapped } = toHttpError(error);
   if (status >= 500) log(error);
+  const body = withConfirmationHint(mapped);
+  const hint = (body.error as { hint?: unknown }).hint;
   return {
     content: [
       { type: "text", text: `${body.error.code}: ${body.error.message}` },
+      ...(typeof hint === "string" ? [{ type: "text" as const, text: hint }] : []),
       { type: "text", text: JSON.stringify(body, null, 2) },
     ],
     structuredContent: body,

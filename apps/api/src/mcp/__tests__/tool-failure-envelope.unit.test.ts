@@ -279,3 +279,36 @@ describe("native composition of a canonical entity failure", () => {
     }
   });
 });
+
+describe("a confirmation refusal over MCP", () => {
+  const result = failed(new OperationFailure({
+    code: "CONFIRMATION_REQUIRED",
+    message: "Confirm Invite first tenant admin before continuing.",
+    detail: "Retry the Operation with confirmed set to true.",
+    retryable: true,
+    data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
+  }));
+
+  it("names a stale tool list as the reason a client may reject `confirmed`", () => {
+    const hint = (result.structuredContent as { error: { hint?: string } }).error.hint;
+    expect(hint).toContain("refresh the connector");
+    expect(hint).toContain("confirmed set to true");
+    expect(result.content.map((item) => (item as { text?: string }).text)).toContain(hint);
+  });
+
+  it("keeps the Operation's own detail and retry data", () => {
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "CONFIRMATION_REQUIRED",
+        detail: "Retry the Operation with confirmed set to true.",
+        retryable: true,
+        data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
+      },
+    });
+  });
+
+  it("leaves every other refusal without the hint", () => {
+    const other = failed(new OperationFailure({ code: "LOCKED", message: "Locked.", retryable: true }));
+    expect((other.structuredContent as { error: { hint?: string } }).error.hint).toBeUndefined();
+  });
+});

@@ -205,6 +205,7 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { withConfirmationHint } from "./confirmation-hint.js";
 // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
 import {
   callIdentityLinkTool,
@@ -2530,14 +2531,16 @@ function failed(error: unknown, canonical = true): ToolResult {
       isError: true,
     };
   }
-  const mapped = toHttpError(error).body;
+  const mapped = withConfirmationHint(toHttpError(error).body);
   const body = canonical
     ? mapped
     : legacyFailureBody(mapped as unknown as Record<string, unknown>);
   const failure = body.error as Parameters<typeof failureSummary>[0];
+  const hint = (body.error as { hint?: unknown }).hint;
   return {
     content: [
       { type: "text", text: failureSummary(failure) },
+      ...(typeof hint === "string" ? [{ type: "text" as const, text: hint }] : []),
       { type: "text", text: JSON.stringify(body, null, 2) },
     ],
     structuredContent: body,

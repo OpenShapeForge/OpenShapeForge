@@ -93,10 +93,11 @@ const EMPTY_SESSION: TrustedSessionContext = {
 let verifierInitialized = false;
 let cachedVerifier: BearerVerifier | null = null;
 let cachedResourceVerifier: BearerVerifier | null = null;
+let cachedOrganizationVerifier: BearerVerifier | null = null;
 let cachedTenantBypassRoles: ReadonlySet<string> | null = null;
 
-function getBearerVerifier(allowResourceClient = false): BearerVerifier | null {
-  if (verifierInitialized) return allowResourceClient ? cachedResourceVerifier : cachedVerifier;
+function getBearerVerifier(allowResourceClient = false, organizationBound = false): BearerVerifier | null {
+  if (verifierInitialized) return organizationBound ? cachedOrganizationVerifier : allowResourceClient ? cachedResourceVerifier : cachedVerifier;
   verifierInitialized = true;
 
   const jwksUri = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
@@ -142,7 +143,11 @@ function getBearerVerifier(allowResourceClient = false): BearerVerifier | null {
     issuer,
     ...(audience ? { audience } : {}),
   });
-  return allowResourceClient ? cachedResourceVerifier : cachedVerifier;
+  // Explicit organization resources validate their own exact audience and
+  // membership through bindOrganizationResource before producing a session.
+  // A web client's azp/API audience is not the authority for these resources.
+  cachedOrganizationVerifier = createBearerVerifier({ jwksUri, issuer });
+  return organizationBound ? cachedOrganizationVerifier : allowResourceClient ? cachedResourceVerifier : cachedVerifier;
 }
 
 /**
@@ -188,6 +193,7 @@ export function __resetSessionResolverForTests(): void {
   verifierInitialized = false;
   cachedVerifier = null;
   cachedResourceVerifier = null;
+  cachedOrganizationVerifier = null;
   cachedTenantBypassRoles = null;
   apiKeyKeyringInitialized = false;
   cachedApiKeyKeyring = null;
@@ -574,6 +580,7 @@ export async function resolveSessionContext(
 
     const verifier = getBearerVerifier(
       hostOrganizationContext() && options.requiredAudience !== undefined,
+      options.organization !== undefined,
     );
     if (!verifier) {
       // A bearer credential was presented but no verifier is configured. Fail
@@ -593,6 +600,8 @@ export async function resolveSessionContext(
     const token = match![1]!;
     try {
       const { identity, claims } = await verifier(token);
+      if (options.organization &&
+          (typeof claims.azp !== "string" || !claims.azp.trim())) return EMPTY_SESSION;
       if (hostOrganizationContext() && options.requiredAudience !== undefined &&
           (typeof claims.azp !== "string" || !claims.azp.trim())) return EMPTY_SESSION;
       if (options.requiredAudience !== undefined &&

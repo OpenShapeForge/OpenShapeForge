@@ -46,7 +46,7 @@ export type PluginBaseContext = {
 export type CompiledPluginOperation = PluginOperationContract & {
   /** Compiler-owned native dispatch; never accepted from plugin contributions. */
   implementation?:
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | {
         type: "constrained-reference-create";

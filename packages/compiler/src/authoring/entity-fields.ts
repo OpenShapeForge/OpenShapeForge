@@ -134,6 +134,7 @@ export function normalizeEntityFields(
       }
     }
     if (field.sortable && !collection) throw new Error(`${entity.entity}.${field.key}: sortable requires a collection.`);
+    if (field.childAuthorization && (!collection || field.relationship?.ownership !== "owned")) throw new Error(`${entity.entity}.${field.key}: childAuthorization requires an owned collection.`);
     if (semantic?.kind !== "entity") {
       if (field.relationship) {
         throw new Error(`${entity.entity}.${field.key}: relationship requires a loaded entity semanticType.`);

@@ -1388,6 +1388,7 @@ export function compileAuthoringBackendManifest(
                   ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
                   ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),
+                  ...(normalized.childAuthorization ? { childAuthorization: normalized.childAuthorization } : {}),
                   ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
                   ...(normalized.constraints ? { constraints: structuredClone(normalized.constraints) } : {}),
                   ...(normalized.kind !== "belongsTo" ? { mutationSupport: "unsupported" as const } : {}),

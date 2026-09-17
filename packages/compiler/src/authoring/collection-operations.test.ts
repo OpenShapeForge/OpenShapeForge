@@ -75,7 +75,7 @@ test("real authored template collection Operations compile the direct-edit varia
     expect(missingSchemaUiTranslations(operation.inputSchema, `${operation.id}.input`)).toEqual([]);
     expect(missingSchemaUiTranslations(operation.outputSchema, `${operation.id}.output`)).toEqual([]);
   }
-  expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock"]);
+  expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVariant.removeBlock", "TemplateVariant.updateBlock"]);
   const schema = operations.find((operation) => operation.id === "Template.insertVariant")!.inputSchema;
   const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control"]) ajv.addKeyword({ keyword, valid: true });

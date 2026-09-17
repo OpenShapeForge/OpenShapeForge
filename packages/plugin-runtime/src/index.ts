@@ -122,7 +122,7 @@ export type RuntimeOperationDefinition = OperationReference & {
   implementation?:
     | { type: "entity" }
     | { type: "plugin"; plugin: string; handler: string }
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" };
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
   entityId?: string;
   entityName?: string;
   name: string | Readonly<Record<string, string>>;

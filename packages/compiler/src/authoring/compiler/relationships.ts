@@ -32,6 +32,7 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
       ownership: rel.ownership,
       cardinality: field.cardinality,
       sortable: field.sortable,
+      ...(field.childAuthorization ? { childAuthorization: field.childAuthorization } : {}),
       unique: rel.unique,
       ...(rel.kind === "manyToMany" ? {
         via: `${deriveTableName(artifacts.coreEntity.entity)}_${field.key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()}`,

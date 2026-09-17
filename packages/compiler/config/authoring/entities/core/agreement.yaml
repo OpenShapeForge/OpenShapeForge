@@ -303,6 +303,19 @@ fields:
     semanticType: Agreement
     relationship:
       ownership: reference
+  - key: document
+    label:
+      en: Document
+      nl: Document
+    description:
+      en: The document that carries this record's content, when it has one.
+      nl: Het document dat de inhoud van dit record draagt, als dat er is.
+    persisted:
+      column: document_id
+      storageClass: core
+    semanticType: Document
+    relationship:
+      ownership: reference
   - key: childAgreements
     label:
       en: Child agreements
@@ -441,6 +454,7 @@ interfaces:
               - relationId
               - caseId
               - parentAgreementId
+              - document
           tabs:
             - id: overview
               label:

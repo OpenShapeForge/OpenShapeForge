@@ -22,7 +22,7 @@ const expected = {
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
     ],
-    relationships: ["relationId", "agreementId"],
+    relationships: ["relationId", "agreementId", "document"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "quote-line": {
@@ -48,7 +48,7 @@ const expected = {
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
       "externalCode",
     ],
-    relationships: ["relationId", "caseId", "parentAgreementId", "childAgreements", "parties"],
+    relationships: ["relationId", "caseId", "parentAgreementId", "document", "childAgreements", "parties"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "agreement-milestone": {

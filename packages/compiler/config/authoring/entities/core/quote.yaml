@@ -172,6 +172,19 @@ fields:
     semanticType: Agreement
     relationship:
       ownership: reference
+  - key: document
+    label:
+      en: Document
+      nl: Document
+    description:
+      en: The document that carries this record's content, when it has one.
+      nl: Het document dat de inhoud van dit record draagt, als dat er is.
+    persisted:
+      column: document_id
+      storageClass: core
+    semanticType: Document
+    relationship:
+      ownership: reference
 operations:
   list:
     name: { en: List quotes, nl: Offertes tonen }
@@ -276,7 +289,7 @@ interfaces:
         layout:
           context:
             fields: [ quoteStatus, amountTotal, currencyCode, expiresAt ]
-            relationships: [ relationId, agreementId ]
+            relationships: [ relationId, agreementId, document ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }

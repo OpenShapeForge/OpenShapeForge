@@ -20,7 +20,8 @@ describe("the authored template chain", () => {
       const entity = loadEntity(authoring, slug).coreEntity;
       expect(entity.schemaVersion).toBe(3);
       expect(entity.relationships).toBeUndefined();
-      expect(entity.authorization?.roles.create).toEqual(["Organization.All.ReadWrite"]);
+      // Block is also placed on DocumentRevision, so document editors may create one.
+      expect(entity.authorization?.roles.create).toEqual(slug === "block" ? ["CaseFile.All.ReadWrite", "Organization.All.ReadWrite"] : ["Organization.All.ReadWrite"]);
     }
   });
   test("projects four real routes without advertising unsupported child creation", () => {

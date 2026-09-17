@@ -3,9 +3,10 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
+import { templateSnapshotContent } from "./content-snapshot.js";
 import { immutableContent, type JsonObject, type JsonValue } from "./content/json.js";
 import { TemplateContentError } from "./content/errors.js";
-import type { ContentBlock, ContentBlockMaterialization, ContentField, ContentTemplateVersion, ContentValueShape, TemplateParameter } from "./content/types.js";
+import type { ContentBlockMaterialization, ContentField, ContentTemplateVersion, ContentValueShape, TemplateParameter } from "./content/types.js";
 
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 function refuse(code: string, message: string): never { throw operationFailure({ code, message, retryable: false }); }
@@ -22,10 +23,8 @@ function uuid(value: unknown, name: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) refuse("VALIDATION", `${name} must be a UUID.`);
   return id;
 }
-function identifier(value: string): string {
-  if (!/^[a-z_][a-z0-9_]*$/.test(value)) refuse("OPERATION_UNAVAILABLE", "The generated content storage mapping is invalid.");
-  return `"${value}"`;
-}
+/** Persisted column of the Block entity's `definitionVersion` field (entities/core/block.yaml). */
+const DEFINITION_VERSION_COLUMN = "definition_version";
 
 function contentCarrier(context: ModuleOperationContext): RuntimeEntityValueCarrier {
   const { platform } = contextServices(context);
@@ -158,6 +157,10 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
     }, registry, {
       async resolveTemplateVersion(id): Promise<ContentTemplateVersion | null> {
         uuid(id, "template version");
+        // The version row is the only live read: it is immutable, so sharing
+        // it pins nothing that can change. Variants and blocks come from the
+        // frozen snapshot on that row, never from their live tables, which may
+        // have been edited or deleted since publish.
         const locked = (await rows<{ id: string }>(trx,
           "select id from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
         if (!locked) return null;
@@ -165,45 +168,15 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
         if (!version) return null;
         const templateId = uuid(version.template, "template");
         await authorized("Template", templateId);
-        const fields = version.parameters ?? [];
-        if (!Array.isArray(fields) || !fields.every(isObject)) refuse("INVALID_DEFINITION", "Template parameters are not canonical field definitions.");
-        parameterFields.set(id, fields);
-        const parameterSchema = platform.schemas.fields.object(fields);
+        const frozen = templateSnapshotContent(version.snapshot, {
+          tenantId, templateId, channel, locale, carrier, allowedDefinitions: collection!.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
+        });
+        parameterFields.set(id, frozen.parameterFields);
+        const parameterSchema = platform.schemas.fields.object(frozen.parameterFields);
         const properties = object(parameterSchema.properties ?? {}, "parameter properties");
         const required = Array.isArray(parameterSchema.required) ? parameterSchema.required : [];
         const parameters = Object.fromEntries(Object.entries(properties).map(([name, schema]) => [name, parameterShape(object(schema, "parameter schema"), required.includes(name))]));
-        const variants = await rows<{ id: string }>(trx,
-          "select id from erp.template_variants where tenant_id = $1 and version_id = $2 and channel = $3 and locale = $4 for share", [tenantId, id, channel, locale]);
-        const contentVariants = [];
-        for (const candidate of variants) {
-          const variantId = uuid(candidate.id, "variant id");
-          const variant = await read("TemplateVariant", variantId);
-          if (!variant || variant.version !== id || variant.channel !== channel || variant.locale !== locale) refuse("DEPENDENCY_INVALID", "The selected variant is not available through its canonical read.");
-          const stored = await rows<{ id: string }>(trx,
-            `select id from ${identifier(carrier.schema)}.${identifier(carrier.table)} where tenant_id = $1 and variant_id = $2 order by variant_id_position, id for share`, [tenantId, variantId]);
-          const blocks: ContentBlock[] = [];
-          for (const candidate of stored) {
-            const blockId = uuid(candidate.id, "block id");
-            const row = await read("Block", blockId);
-            if (!row || row.variant !== variantId) refuse("DEPENDENCY_INVALID", "The selected block is not available through its canonical read.");
-            const name = text(row[carrier.definitionField], "definition key");
-            const entry = definition(carrier, name);
-            const logical = object(row[carrier.fieldKey], "readable block values");
-            const referenceKeys = new Set(entry.references.map((reference) => reference.fieldKey));
-            const values = Object.fromEntries(Object.entries(logical).filter(([key]) => !referenceKeys.has(key)));
-            const references = Object.fromEntries(entry.references.map((reference) => {
-              const value = logical[reference.fieldKey];
-              if (isObject(value)) {
-                if (!reference.parameterColumn || Object.keys(value).length !== 1 || typeof value.parameter !== "string" || !/^[a-z][A-Za-z0-9]{0,127}$/.test(value.parameter)) refuse("INVALID_DEFINITION", "The block parameter binding is invalid.");
-                return [reference.fieldKey, { parameter: value.parameter as string }];
-              }
-              return [reference.fieldKey, value == null ? null : { entity: reference.targetEntity, id: uuid(value, reference.fieldKey) }];
-            }));
-            blocks.push({ id: blockId, definitionKey: name, schemaVersion: Number(row.definitionVersion), values: immutableContent(values) as JsonObject, references });
-          }
-          contentVariants.push({ id: variantId, channel, locale, blocks, allowedDefinitions: [...collection!.allowedDefinitions] });
-        }
-        return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters, variants: contentVariants };
+        return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters, variants: frozen.variants };
       },
       async resolveGlobalVariable(key) {
         const found = (await rows<{ id: string }>(trx,

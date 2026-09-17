@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate } from "./content-runtime.js";
 
@@ -32,8 +31,8 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const executions: unknown[] = [];
   const reads: string[] = [];
   const queries: string[] = [];
-  const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, denyBlock: false, disallowText: false,
-    redactChip: false, redactBlock: false, omitBlockText: false, missingRead: "" };
+  const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
+    redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK" };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
     TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", valueType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
@@ -53,7 +52,6 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
     platform: {
       records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) {
         authorizations.push(`${request.entityName}:${request.id}`);
-        if (data.denyBlock && request.entityName === "Block") throw operationFailure({ code: "FORBIDDEN", message: "Not allowed." });
       } },
       schemas: {
         entityValues: { get: () => compiledCarrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: data.disallowText ? ["IncludeBlock"] : Object.keys(carrier.definitions) }) },
@@ -68,9 +66,10 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
         return work({ async executeQuery(query: { sql: string; parameters: unknown[] }) {
           queries.push(query.sql);
           expect(query.parameters[0]).toBe(ids.tenant);
-          if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: ids.version, tenant_id: data.tenant, template_id: ids.template, version_number: 1, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] }] };
-          if (query.sql.includes("from erp.template_variants")) return { rows: [{ id: ids.variant, channel: "document", locale: "en" }] };
-          if (query.sql.includes('from "erp"."blocks"')) return { rows: [{ id: ids.block, definition_key: "TextBlock", definition_version: 1, values: { text: data.text } }] };
+          if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: ids.version }] };
+          // Live variant and block rows exist but must never be consulted: the
+          // published snapshot is the only source of frozen content.
+          if (/template_variants|blocks/.test(query.sql)) throw new Error(`Live content table read: ${query.sql}`);
           if (query.sql.includes("from erp.chips")) return { rows: [{ id: ids.chip, tenant_id: ids.tenant, value: data.chip, version: "2026-01-01T00:00:00Z" }] };
           throw new Error(`Unexpected query: ${query.sql}`);
         } });
@@ -85,11 +84,19 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
             const entity = request.operation.entityName!;
             reads.push(entity);
             const base = { id: request.input.id, tenantId: data.tenant, updatedAt: "2026-01-01T00:00:00Z" };
+            const blockRow = { id: ids.block, tenant_id: data.tenant, variant_id: ids.variant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.text },
+              ...(withReference ? (withBinding ? { text_brand_parameter: "brand", text_brand_id: null } : { text_brand_id: ids.chip, text_brand_parameter: null }) : {}) };
+            const snapshot = { schemaVersion: 1, entity: "Template", head: { table: "templates",
+              row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] },
+              children: { template_variants: [
+                { table: "template_variants", row: { id: ids.variant, tenant_id: data.tenant, template_id: ids.template, channel: "document", locale: "en" }, children: { blocks: [{ table: "blocks", row: blockRow, children: {} }] } },
+                { table: "template_variants", row: { id: ids.chip, tenant_id: data.tenant, template_id: ids.template, channel: "email", locale: "en" }, children: { blocks: [] } },
+              ] } } };
             const records: Record<string, unknown> = {
-              TemplateVersion: { ...base, template: ids.template, versionNumber: 1, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] },
-              TemplateVariant: { ...base, version: ids.version, channel: "document", locale: "en" },
-              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1,
-                values: data.redactBlock ? null : { ...(data.omitBlockText ? {} : { text: data.text }), ...(withReference ? { brand: withBinding ? { parameter: "brand" } : ids.chip } : {}) } },
+              TemplateVersion: { ...base, template: ids.template, versionNumber: 1, snapshot },
+              // Live rows drifted after publish; a materialization that shows them is a bug.
+              TemplateVariant: { ...base, template: ids.template, channel: "document", locale: "en" },
+              Block: { ...base, variant: ids.variant, definitionKey: "TextBlock", definitionVersion: 1, values: { text: data.liveText } },
               Chip: { ...base, key: "brand", value: data.redactChip ? null : data.chip },
             };
             return { data: records[entity], operations: [] };
@@ -125,23 +132,30 @@ describe("template materialization runtime adapter", () => {
     const snapshot = (response as { value: { blocks: Array<{ values: { text: string }; materialization: unknown }> } }).value;
     expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
     expect(snapshot.blocks[0]!.materialization).toEqual({ operationId: "TextBlock.materialize", result: { kind: "block", value: { text: "Hello Reader from Example" } } });
-    expect(f.authorizations).toEqual([`TemplateVersion:${ids.version}`, `Template:${ids.template}`, `TemplateVariant:${ids.variant}`, `Block:${ids.block}`, `Chip:${ids.chip}`]);
+    expect(f.authorizations).toEqual([`TemplateVersion:${ids.version}`, `Template:${ids.template}`, `Chip:${ids.chip}`]);
     expect(f.calls[0]!.schema).toBe(f.carrier.definitions.TextBlock!.valueSchema);
-    expect(f.reads).toEqual(["TemplateVersion", "TemplateVariant", "Block", "Chip"]);
+    expect(f.reads).toEqual(["TemplateVersion", "Chip"]);
+    expect(JSON.stringify(snapshot)).not.toContain(f.data.liveText);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
     expect(f.executions).toHaveLength(1);
     expect((response as any).value.definitions.TextBlock.materializationSchema.properties.value.properties.text.title).toBe("Text");
     f.data.chip = "Changed";
     expect(snapshot.blocks[0]!.values.text).toBe("Hello Reader from Example");
   });
-  test("does not return data after a denied block read or missing materialization Operation", async () => {
+  test("does not return data when the block materialization Operation is missing", async () => {
     const f = fixture();
-    f.data.denyBlock = true;
-    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "FORBIDDEN" } });
-    expect(f.executions).toHaveLength(0);
-    f.data.denyBlock = false;
     f.data.unavailableOperation = true;
     await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "OPERATION_UNAVAILABLE" } });
+    expect(f.executions).toHaveLength(0);
+  });
+  test("rejects a snapshot frozen for another template and a locale that was never published", async () => {
+    const f = fixture();
+    f.data.snapshotTemplate = ids.chip;
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context)).rejects.toMatchObject({ operationError: { code: "DEPENDENCY_INVALID" } });
+    const g = fixture();
+    await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl" }, g.context)).rejects.toBeDefined();
+    expect(g.executions).toHaveLength(0);
+    expect(g.reads).toEqual(["TemplateVersion"]);
   });
   test("never exposes a confidential Chip value when canonical get redacts it", async () => {
     const f = fixture();
@@ -158,24 +172,8 @@ describe("template materialization runtime adapter", () => {
     expect(JSON.stringify(f.calls)).not.toContain(f.data.chip);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
   });
-  test("never reads Block.values around canonical redaction or restores omitted leaves", async () => {
-    for (const policy of ["redactBlock", "omitBlockText"] as const) {
-      // A default must not reintroduce a field omitted by the authorized read.
-      const f = fixture("confidential-block-fixture");
-      f.data.text = "confidential-block-fixture";
-      f.data[policy] = true;
-      let failure: unknown;
-      try {
-        await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context);
-      } catch (error) { failure = error; }
-      expect(failure).toBeDefined();
-      expect(f.reads).toContain("Block");
-      expect(f.executions).toHaveLength(0);
-      expect(JSON.stringify(failure)).not.toContain(f.data.text);
-    }
-  });
   test("fails closed without canonical source reads and rejects a mismatched tenant", async () => {
-    for (const entity of ["TemplateVersion", "TemplateVariant", "Block", "Chip"]) {
+    for (const entity of ["TemplateVersion", "Chip"]) {
       const f = fixture();
       f.data.missingRead = entity;
       await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "en" }, f.context))

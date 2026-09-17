@@ -14,19 +14,21 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
     ${constPrefix}RecordIdField,
     {
       key: "actions",
-      valueType: "object",
+      osfType: "fieldDefinition",
+      baseType: "object",
       cardinality: { min: 0, max: "unbounded" },
-      semanticType: "fieldDefinition",
       required: true,
       validation: { minItems: 1 },
       label: { nl: "Acties", en: "Actions" },
       item: {
         key: "actionItem",
-        valueType: "object",
+        osfType: "object",
+        baseType: "object",
         children: [
           {
             key: "key",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: true,
             validation: { pattern: "^[a-z][a-z0-9-]*$" },
             label: { nl: "Sleutel", en: "Key" },
@@ -34,7 +36,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
           },
           {
             key: "label",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: true,
             localized: true,
             label: { nl: "Knop-label", en: "Button label" },
@@ -42,7 +45,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
           },
           {
             key: "description",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             localized: true,
             label: { nl: "Hulptekst", en: "Helper text" },
@@ -50,14 +54,16 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
           },
           {
             key: "icon",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             label: { nl: "Icoon", en: "Icon" },
             render: { component: "IconPicker" },
           },
           {
             key: "tone",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             defaultValue: "default",
             label: { nl: "Uitstraling", en: "Tone" },
@@ -73,21 +79,24 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
           },
           {
             key: "visibleWhen",
-            valueType: "object",
+            osfType: "object",
+            baseType: "object",
             required: false,
             label: { nl: "Zichtbaar wanneer", en: "Visible when" },
             render: { component: "VisibilityConditionBuilder" },
           },
           {
             key: "disabledWhen",
-            valueType: "object",
+            osfType: "object",
+            baseType: "object",
             required: false,
             label: { nl: "Uitgeschakeld wanneer", en: "Disabled when" },
             render: { component: "VisibilityConditionBuilder" },
           },
           {
             key: "disabledMessage",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             localized: true,
             label: { nl: "Bericht bij uitgeschakeld", en: "Disabled tooltip" },
@@ -98,7 +107,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
     },
     {
       key: "timeout",
-      valueType: "string",
+      osfType: "string",
+      baseType: "string",
       required: false,
       label: { nl: "Time-out", en: "Timeout" },
       description: { nl: "Optionele time-out zoals 24h of 7d.", en: "Optional timeout such as 24h or 7d." },
@@ -125,7 +135,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
     ${constPrefix}RecordIdField,
     {
       key: "values",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: {
         en: "Values",
         nl: "Waarden",
@@ -141,7 +152,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
           ? `[
     {
       key: "values",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: {
         en: "Values",
         nl: "Waarden",
@@ -170,7 +182,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
               return `[
     {
       key: "limit",
-      valueType: "integer",
+      osfType: "integer",
+      baseType: "integer",
       label: {
         en: "Limit",
         nl: "Limiet",
@@ -183,7 +196,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
     },
     {
       key: "filterCondition",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: {
         en: "Filter condition",
         nl: "Filtervoorwaarde",
@@ -207,7 +221,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
     },
     {
       key: "sort",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: {
         en: "Sort order",
         nl: "Sortering",
@@ -219,7 +234,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
       children: [
         {
           key: "field",
-          valueType: "string",
+          osfType: "string",
+          baseType: "string",
           label: {
             en: "Field",
             nl: "Veld",
@@ -236,7 +252,8 @@ export function buildConfigFieldsWithErrorRoutesSource(input: {
         },
         {
           key: "direction",
-          valueType: "string",
+          osfType: "string",
+          baseType: "string",
           label: {
             en: "Direction",
             nl: "Richting",

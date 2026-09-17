@@ -66,29 +66,29 @@ const semanticTypes = new Map<string, SemanticTypeDefinition>(semanticTypeEntrie
  * non-entity field, nested `children`, and an array `item`.
  */
 const fields = [
-  { key: "relation", valueType: "string", semanticType: "relationId" },
+  { key: "relation", osfType: "relationId" },
   {
     key: "preAuthored",
-    valueType: "string",
-    semanticType: "relationId",
+    osfType: "relationId",
     options: { type: "static", items: [{ value: "a" }] },
     render: { component: "Input" },
   },
-  { key: "orphan", valueType: "string", semanticType: "orphanId" },
-  { key: "plain", valueType: "string", semanticType: "plainText" },
-  { key: "noSemanticType", valueType: "string" },
+  { key: "orphan", osfType: "orphanId" },
+  { key: "plain", osfType: "plainText" },
+  { key: "bareString", osfType: "string" },
   {
     key: "group",
-    valueType: "object",
+    osfType: "object",
     children: [
-      { key: "nestedRelation", valueType: "string", semanticType: "relationId" },
-      { key: "nestedPlain", valueType: "string", semanticType: "plainText" },
+      { key: "nestedRelation", osfType: "relationId" },
+      { key: "nestedPlain", osfType: "plainText" },
     ],
   },
   {
     key: "list",
-    valueType: "array",
-    item: { key: "itemRelation", valueType: "string", semanticType: "relationId" },
+    osfType: "object",
+    cardinality: "collection",
+    item: { key: "itemRelation", osfType: "relationId" },
   },
 ] as unknown as Field[];
 
@@ -126,6 +126,12 @@ describe("entity-ID enrichment", () => {
 
     expect(plain.render).toBeUndefined();
     expect(bare.render).toBeUndefined();
+
+    // Every field leaves with the base type its osfType resolves to.
+    expect(relation.baseType).toBe("string");
+    expect(bare.baseType).toBe("string");
+    expect(group.baseType).toBe("object");
+    expect(group.children[0].baseType).toBe("string");
 
     // Nesting: a picker three levels down is still a picker.
     expect(group.children[0].render.component).toBe("OptionVariablePicker");

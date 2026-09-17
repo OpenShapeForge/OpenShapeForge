@@ -88,7 +88,7 @@ configFields:
       props:
         rows: 5
   - key: proposedReplyTemplateSlug
-    osfType: templateSlug
+    osfType: string
     label:
       en: Proposed reply template
       nl: Template voor voorgesteld antwoord

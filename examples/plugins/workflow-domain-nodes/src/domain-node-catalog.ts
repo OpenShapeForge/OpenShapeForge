@@ -16,8 +16,8 @@
  * distinction once the trees have merged.
  *
  * Validation is the same shallow structural check the standard catalog applies:
- * `kind`, the required top-level shape, a unique `nodeType`, and a `key` plus a
- * known `valueType` on every field. It is deliberately not a full schema
+ * `kind`, the required top-level shape, a unique `nodeType`, and a `key` plus an
+ * `osfType` the catalog resolves on every field. It is deliberately not a full schema
  * validation — it exists so a malformed YAML fails here, naming the file, rather
  * than as an unreadable seed row or a runtime lookup that answers nonsense.
  *
@@ -43,6 +43,7 @@ import type {
   LocalizedText,
   SemanticTypeDefinition,
 } from "../../../../packages/compiler/src/authoring/types.js";
+import { resolveBaseType } from "../../../../packages/compiler/src/authoring/entity-fields.js";
 import { enrichFieldsWithEntityIdOptions, loadSemanticTypes } from "./semantic-type-options.js";
 
 /** The authoring subtree this plugin owns; see the note on the boundary above. */
@@ -68,16 +69,6 @@ type DomainWorkflowNodeConfig = {
   outputFields?: Field[];
 };
 
-const FIELD_VALUE_TYPES = new Set([
-  "string",
-  "integer",
-  "number",
-  "boolean",
-  "date",
-  "datetime",
-  "object",
-]);
-
 /**
  * Sorted on the flattened result rather than per directory, so the order is a
  * property of the path set and not of how the filesystem happens to return
@@ -100,12 +91,13 @@ function collectYamlFiles(dir: string): string[] {
   return results.sort();
 }
 
-/** Recursively assert every field carries a `key` and a known `valueType`. */
+/** Recursively assert every field carries a `key` and an `osfType` the catalog resolves to a base type. */
 function validateFields(
   fields: unknown[],
   filePath: string,
   nodeType: string,
   path: string,
+  semanticTypes: Map<string, SemanticTypeDefinition>,
 ): void {
   fields.forEach((field, index) => {
     const location = `${path}[${index}]`;
@@ -120,23 +112,27 @@ function validateFields(
         `Domain workflow-node authoring file ${filePath} (${nodeType}) has a field at ${location} missing a non-empty "key".`,
       );
     }
-    if (typeof record.valueType !== "string" || !FIELD_VALUE_TYPES.has(record.valueType)) {
+    if (typeof record.osfType !== "string" || !resolveBaseType(record.osfType, Object.fromEntries(semanticTypes))) {
       throw new Error(
-        `Domain workflow-node authoring file ${filePath} (${nodeType}) field "${record.key}" (${location}) has an invalid "valueType" (${
-          typeof record.valueType === "string" ? `"${record.valueType}"` : "<missing>"
-        }). Expected one of: ${[...FIELD_VALUE_TYPES].join(", ")}.`,
+        `Domain workflow-node authoring file ${filePath} (${nodeType}) field "${record.key}" (${location}) has an invalid "osfType" (${
+          typeof record.osfType === "string" ? `"${record.osfType}"` : "<missing>"
+        }). Expected a base type or a semantic-type catalog key.`,
       );
     }
     if (Array.isArray(record.children)) {
-      validateFields(record.children, filePath, nodeType, `${location}.children`);
+      validateFields(record.children, filePath, nodeType, `${location}.children`, semanticTypes);
     }
     if (record.item && typeof record.item === "object" && !Array.isArray(record.item)) {
-      validateFields([record.item], filePath, nodeType, `${location}.item`);
+      validateFields([record.item], filePath, nodeType, `${location}.item`, semanticTypes);
     }
   });
 }
 
-function validateNodeConfig(parsed: unknown, filePath: string): DomainWorkflowNodeConfig {
+function validateNodeConfig(
+  parsed: unknown,
+  filePath: string,
+  semanticTypes: Map<string, SemanticTypeDefinition>,
+): DomainWorkflowNodeConfig {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`Domain workflow-node authoring file ${filePath} is not a YAML mapping.`);
   }
@@ -170,9 +166,9 @@ function validateNodeConfig(parsed: unknown, filePath: string): DomainWorkflowNo
     );
   }
 
-  validateFields(node.configFields, filePath, node.nodeType, "configFields");
+  validateFields(node.configFields, filePath, node.nodeType, "configFields", semanticTypes);
   if (Array.isArray(node.outputFields)) {
-    validateFields(node.outputFields, filePath, node.nodeType, "outputFields");
+    validateFields(node.outputFields, filePath, node.nodeType, "outputFields", semanticTypes);
   }
 
   const config: DomainWorkflowNodeConfig = {
@@ -230,12 +226,15 @@ function isLocalizedText(value: unknown): value is LocalizedText {
  * A duplicate `nodeType` is refused rather than last-wins: the seed's rows are
  * keyed on it, so two files claiming one type would silently drop one of them.
  */
-function loadNodeConfigs(rootDir: string): DomainWorkflowNodeConfig[] {
+function loadNodeConfigs(
+  rootDir: string,
+  semanticTypes: Map<string, SemanticTypeDefinition>,
+): DomainWorkflowNodeConfig[] {
   const entries: DomainWorkflowNodeConfig[] = [];
   const seenNodeTypes = new Map<string, string>();
 
   for (const filePath of collectYamlFiles(rootDir)) {
-    const config = validateNodeConfig(parseYaml(readFileSync(filePath, "utf-8")), filePath);
+    const config = validateNodeConfig(parseYaml(readFileSync(filePath, "utf-8")), filePath, semanticTypes);
 
     const priorFile = seenNodeTypes.get(config.nodeType);
     if (priorFile) {
@@ -302,8 +301,8 @@ function buildSeedDocument(entries: DomainWorkflowNodeConfig[]): string {
  * the second one clears the rows a previous build left behind.
  */
 export function generateDomainNodeCatalogArtifacts(authoringDir: string): Map<string, string> {
-  const entries = loadNodeConfigs(join(authoringDir, AUTHORING_SUBDIR));
   const semanticTypes = loadSemanticTypes(authoringDir);
+  const entries = loadNodeConfigs(join(authoringDir, AUTHORING_SUBDIR), semanticTypes);
   const enriched = entries.map((entry) => enrichEntry(entry, semanticTypes));
 
   return new Map([[DOMAIN_NODE_CATALOG_SEED_FILE, buildSeedDocument(enriched)]]);

@@ -162,7 +162,7 @@ configFields:
           props:
             valueMode: insertText
       - key: eenheidId
-        osfType: eenheidId
+        osfType: string
         label:
           en: Eenheid ID
           nl: Eenheid-ID

@@ -20,10 +20,11 @@ import { describe, expect, test } from "bun:test";
 import { buildWorkflowNodeConfigForm } from "../config-form.js";
 
 const TIMER_FIELDS = [
-  { key: "mode", valueType: "string", defaultValue: "duration" },
+  { key: "mode", osfType: "string", baseType: "string", defaultValue: "duration" },
   {
     key: "durationAmount",
-    valueType: "integer",
+    osfType: "integer",
+    baseType: "integer",
     visibility: { logic: "and", conditions: [{ field: "mode", operator: "eq", value: "duration" }] },
   },
 ];
@@ -82,7 +83,8 @@ describe("buildWorkflowNodeConfigForm", () => {
         { key: "branches", workflowInspector: { displayMode: "readOnly" } },
         {
           key: "meta",
-          valueType: "object",
+          osfType: "object",
+          baseType: "object",
           children: [
             { key: "internalId", workflowInspector: { displayMode: "hidden" } },
             { key: "note" },

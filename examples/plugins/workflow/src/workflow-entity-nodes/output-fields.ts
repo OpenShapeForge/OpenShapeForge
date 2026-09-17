@@ -7,15 +7,15 @@ import { toKebabCase, toOutputField } from "./utils.js";
 export function buildRecordIdField(
   entityLabels: { en: string; nl: string },
   idField: Field | undefined,
-  semanticType: string,
+  osfType: string,
   entityName: string,
 ): Field {
   return {
     key: "recordId",
-    valueType: idField?.valueType ?? "string",
+    osfType,
+    baseType: idField?.baseType ?? "string",
     validation: idField?.validation ?? { format: "uuid" },
     required: true,
-    semanticType,
     label: {
       en: `${entityLabels.en} ID`,
       nl: `${entityLabels.nl} ID`,
@@ -49,10 +49,10 @@ export function buildListOutputFields(
   return [
     {
       key: "items",
-      valueType: "object",
+      osfType: `${entitySemanticType}[]`,
+      baseType: "object",
       cardinality: UNBOUNDED_CARDINALITY,
       readOnly: true,
-      semanticType: `${entitySemanticType}[]`,
       label: {
         en: "Items",
         nl: "Items",
@@ -63,15 +63,16 @@ export function buildListOutputFields(
       },
       item: {
         key: "item",
-        valueType: "object",
+        osfType: entitySemanticType,
+        baseType: "object",
         readOnly: true,
-        semanticType: entitySemanticType,
         children: readableFields.map(toOutputField),
       },
     },
     {
       key: "count",
-      valueType: "integer",
+      osfType: "integer",
+      baseType: "integer",
       readOnly: true,
       label: {
         en: "Count",
@@ -88,12 +89,13 @@ export function buildListOutputFields(
 export function buildDeleteOutputFields(
   entityLabels: { en: string; nl: string },
   idField?: Field,
-  semanticType?: string,
+  osfType?: string,
 ): Field[] {
   return [
     {
       key: "success",
-      valueType: "boolean",
+      osfType: "boolean",
+      baseType: "boolean",
       readOnly: true,
       label: {
         en: "Success",
@@ -106,10 +108,10 @@ export function buildDeleteOutputFields(
     },
     {
       key: "deletedId",
-      valueType: idField?.valueType ?? "string",
+      osfType: osfType ?? idField?.osfType ?? "string",
+      baseType: idField?.baseType ?? "string",
       validation: idField?.validation ?? { format: "uuid" },
       readOnly: true,
-      ...(semanticType ? { semanticType } : {}),
       label: {
         en: "Deleted ID",
         nl: "Verwijderd ID",
@@ -125,13 +127,14 @@ export function buildDeleteOutputFields(
 export function buildWaitOutputFields(
   entityLabels: { en: string; nl: string },
   idField?: Field,
-  semanticType?: string,
+  osfType?: string,
   readableFields?: Field[],
 ): Field[] {
   return [
     {
       key: "entityType",
-      valueType: "string",
+      osfType: "string",
+      baseType: "string",
       readOnly: true,
       label: {
         en: "Entity type",
@@ -144,10 +147,10 @@ export function buildWaitOutputFields(
     },
     {
       key: "entityId",
-      valueType: idField?.valueType ?? "string",
+      osfType: osfType ?? idField?.osfType ?? "string",
+      baseType: idField?.baseType ?? "string",
       validation: idField?.validation ?? { format: "uuid" },
       readOnly: true,
-      ...(semanticType ? { semanticType } : {}),
       label: {
         en: "Entity ID",
         nl: "Entiteit-ID",
@@ -159,7 +162,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "eventType",
-      valueType: "string",
+      osfType: "string",
+      baseType: "string",
       readOnly: true,
       label: {
         en: "Event type",
@@ -172,7 +176,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "changedFields",
-      valueType: "string",
+      osfType: "string",
+      baseType: "string",
       cardinality: UNBOUNDED_CARDINALITY,
       readOnly: true,
       label: {
@@ -185,7 +190,8 @@ export function buildWaitOutputFields(
       },
       item: {
         key: "changedField",
-        valueType: "string",
+        osfType: "string",
+        baseType: "string",
         readOnly: true,
         label: {
           en: "Field",
@@ -195,7 +201,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "before",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       readOnly: true,
       label: {
         en: "Before",
@@ -209,7 +216,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "after",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       readOnly: true,
       label: {
         en: "After",
@@ -223,7 +231,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "timedOut",
-      valueType: "boolean",
+      osfType: "boolean",
+      baseType: "boolean",
       readOnly: true,
       label: {
         en: "Timed out",
@@ -236,7 +245,8 @@ export function buildWaitOutputFields(
     },
     {
       key: "resumedAt",
-      valueType: "datetime",
+      osfType: "datetime",
+      baseType: "datetime",
       readOnly: true,
       label: {
         en: "Resumed at",
@@ -257,7 +267,8 @@ export function buildWaitOutputFields(
 export function buildWaitEventTypeField(): Field {
   return {
     key: "eventType",
-    valueType: "string",
+    osfType: "string",
+    baseType: "string",
     required: true,
     defaultValue: "updated",
     label: {
@@ -306,8 +317,8 @@ export function buildWaitEventTypeField(): Field {
 export function buildWaitConditionField(): Field {
   return {
     key: "resumeWhenCondition",
-    valueType: "object",
-    semanticType: "condition",
+    osfType: "condition",
+    baseType: "object",
     label: {
       en: "Resume when",
       nl: "Hervat wanneer",
@@ -332,7 +343,8 @@ export function buildWaitConditionField(): Field {
 export function buildWaitTimeoutField(): Field {
   return {
     key: "timeout",
-    valueType: "string",
+    osfType: "string",
+    baseType: "string",
     label: {
       en: "Timeout",
       nl: "Time-out",

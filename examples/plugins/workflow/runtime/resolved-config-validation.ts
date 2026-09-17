@@ -10,7 +10,7 @@ type JsonRecord = Record<string, unknown>;
 
 type RuntimeField = {
   key: string;
-  valueType: string;
+  baseType: string;
   cardinality?: RuntimeCardinality;
   required?: boolean;
   readOnly?: boolean;
@@ -190,7 +190,7 @@ function collectionSchema(field: RuntimeField): ZodType<unknown> {
 
 function singleValueSchema(field: RuntimeField): ZodType<unknown> {
   const validation = asRecord(field.validation);
-  switch (field.valueType) {
+  switch (field.baseType) {
     case "string":
     case "date":
     case "datetime":
@@ -303,7 +303,7 @@ function applyFieldDefaults(config: JsonRecord, fields: RuntimeField[] | null): 
     }
 
     const objectValue = next[field.key];
-    if (field.valueType === "object" && isRecord(objectValue)) {
+    if (field.baseType === "object" && isRecord(objectValue)) {
       next[field.key] = applyFieldDefaults(
         objectValue,
         nestedFields(field),
@@ -348,11 +348,11 @@ function normalizeFields(value: unknown): RuntimeField[] {
 function normalizeField(value: unknown): RuntimeField | null {
   if (!isRecord(value)) return null;
   const key = asString(value.key);
-  const valueType = asString(value.valueType);
-  if (!key || !valueType) return null;
+  const baseType = asString(value.baseType);
+  if (!key || !baseType) return null;
   const field: RuntimeField = {
     key,
-    valueType,
+    baseType,
     defaultValue: value.defaultValue,
     validation: asRecord(value.validation),
     shape: value.shape,

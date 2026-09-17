@@ -61,9 +61,14 @@ function paths(input: Parameters<typeof buildWorkflowVariableSuggestions>[0]): s
   return buildWorkflowVariableSuggestions(input).map((suggestion) => suggestion.path);
 }
 
-/** A field list as the authoring contract emits one. */
+/** A field definition as a workflow document stores one: the runtime vocabulary. */
 function field(key: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { key, valueType: "string", ...extra };
+}
+
+/** A field as the compiled catalog carries one: `osfType` plus its derived `baseType`. */
+function compiled(key: string, osfType = "string", extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { key, osfType, baseType: osfType === "quantity" ? "integer" : osfType, ...extra };
 }
 
 describe("process variables", () => {
@@ -174,7 +179,7 @@ describe("where a node's output fields come from", () => {
       paths({
         graph: withEverything({ outputParameters: [field("narrow")] }),
         nodeId: "b",
-        resolveOutputFields: () => [field("generic")],
+        resolveOutputFields: () => [compiled("generic")],
       }),
     ).toEqual(["nodes.a.output", "nodes.a.output.narrow"]);
   });
@@ -193,9 +198,36 @@ describe("where a node's output fields come from", () => {
       paths({
         graph: withEverything({}),
         nodeId: "b",
-        resolveOutputFields: (type) => (type === "action" ? [field("generic")] : []),
+        resolveOutputFields: (type) => (type === "action" ? [compiled("generic")] : []),
       }),
     ).toEqual(["nodes.a.output", "nodes.a.output.generic"]);
+  });
+
+  test("a catalog field's osfType and baseType are read as the runtime vocabulary", () => {
+    // The catalog is compiler output; the document's own fields are not. The
+    // suggestion reads the same whichever side a field came from.
+    const byPath = new Map(
+      buildWorkflowVariableSuggestions({
+        graph: withEverything({}),
+        nodeId: "b",
+        resolveOutputFields: () => [
+          compiled("plain"),
+          compiled("counts", "integer", { cardinality: "collection", item: compiled("count", "quantity") }),
+          compiled("customer", "object", { children: [compiled("name")] }),
+        ],
+      }).map((entry) => [entry.path, entry]),
+    );
+    expect(byPath.get("nodes.a.output.plain")).toMatchObject({ valueType: "string" });
+    expect(byPath.get("nodes.a.output.plain")?.semanticType).toBeUndefined();
+    expect(byPath.get("nodes.a.output.counts")).toMatchObject({
+      valueType: "array",
+      itemSemanticType: "quantity",
+    });
+    expect(byPath.get("nodes.a.output.counts[0]")).toMatchObject({
+      valueType: "number",
+      semanticType: "quantity",
+    });
+    expect(byPath.get("nodes.a.output.customer.name")).toMatchObject({ valueType: "string" });
   });
 
   test("a caller with no catalog still gets what the node declares", () => {

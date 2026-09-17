@@ -65,6 +65,7 @@
 import type { CanvasEdge, CanvasNode } from "../graph/canvas-graph";
 import { isEntryNodeType } from "../../runtime/definition-types";
 import { flattenFieldDefinitionSources } from "../../runtime/field-definitions";
+import { compiledFieldAsDefinition } from "./compiled-field-definition";
 
 /**
  * One entry in a field's variable picker.
@@ -425,7 +426,7 @@ function nodeOutputFields(
         ? config.mappingParameters
         : config.inputParameters
       : undefined,
-    resolveOutputFields?.(node.type),
+    asArray(resolveOutputFields?.(node.type)).map(compiledFieldAsDefinition),
   ];
 
   for (const candidate of candidates) {

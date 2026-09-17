@@ -242,6 +242,8 @@ interfaces:
     operations:
       update: false
   web:
+    operations:
+      update: false
     views:
       collection:
         route: /document-revisions

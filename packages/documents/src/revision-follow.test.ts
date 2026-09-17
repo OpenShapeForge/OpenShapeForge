@@ -40,6 +40,12 @@ describe("the follow-template plan", () => {
     expect(plan.diverge).toEqual(["a"]);
     expect(plan.order).toEqual([{ kind: "existing", id: "a" }]);
   });
+  test("a second row claiming the same template block is a local block; the first keeps the slot", () => {
+    const plan = planFollow([template("a", "t1", "one"), template("dup", "t1", "one")], previous, [{ templateBlockId: "t1", key: "one-v2" }]);
+    expect(plan.reseed).toEqual([{ id: "a", templateBlockId: "t1" }]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.order).toEqual([{ kind: "existing", id: "a" }, { kind: "existing", id: "dup" }]);
+  });
   test("an empty new variant removes every untouched template block and keeps local ones", () => {
     const plan = planFollow([template("a", "t1", "one"), local("l1")], previous, []);
     expect(plan.remove).toEqual(["a"]);

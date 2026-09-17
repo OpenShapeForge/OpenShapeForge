@@ -6,6 +6,7 @@
  * that adds a reference column needs no change here. Ownership, ordering and
  * provenance columns are the only ones this module writes itself.
  */
+import type { PluginPlatformServices, PluginSessionContext } from "@openshapeforge/plugin-runtime";
 import { findChild, orderedChildren, parseSnapshot, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
 
@@ -18,6 +19,7 @@ export type RevisionBlockRow = Readonly<Record<string, unknown>> & {
   readonly diverged: boolean;
 };
 export type TemplateVersionRow = Readonly<{ id: string; template_id: string; version_number: number; snapshot: PublishedSnapshot }>;
+export type RevisionCommand = "start" | "follow" | "publish";
 
 const RESERVED = new Set([
   "id", "tenant_id", "created_at", "updated_at", "external_id", "source_authority", "source_organization", "source_administration",
@@ -28,6 +30,7 @@ const CASTS: Readonly<Record<string, string>> = {
   jsonb: "jsonb", json: "jsonb", uuid: "uuid", integer: "integer", bigint: "bigint", smallint: "smallint", boolean: "boolean",
   numeric: "numeric", "double precision": "double precision", "timestamp with time zone": "timestamptz", date: "date", text: "text",
 };
+const TOUCH = "updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')";
 
 function ident(name: string): string {
   if (!IDENTIFIER.test(name)) throw new Error(`Block column ${name} is not a safe identifier.`);
@@ -50,6 +53,17 @@ function stable(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Marks the transaction as a documents command so the database guards
+ * (apps/api/src/db/migrations/document-revisions.ts) accept server-managed
+ * writes. Cleared again before the caller continues.
+ */
+export async function withRevisionCommand<T>(trx: unknown, command: RevisionCommand, work: () => Promise<T>): Promise<T> {
+  await rows(trx, "select set_config('app.document_revision_command', $1::text, true)", [command]);
+  try { return await work(); }
+  finally { await rows(trx, "select set_config('app.document_revision_command', '', true)", []); }
+}
+
 /** Live column names and types of erp.blocks, so copies follow the deployed schema. */
 export async function blockColumns(trx: unknown): Promise<BlockColumns> {
   const found = await rows<{ column_name: string; data_type: string }>(trx,
@@ -57,11 +71,16 @@ export async function blockColumns(trx: unknown): Promise<BlockColumns> {
   return new Map(found.map((column) => [column.column_name, column.data_type]));
 }
 
-/** The copyable part of a block row: everything the live table has except ownership and provenance. */
-export function blockContent(row: Readonly<Record<string, unknown>>, columns: BlockColumns): BlockContent {
+/**
+ * The copyable part of a block row: everything the live table has except
+ * ownership and provenance. `only` narrows to the columns another row knows,
+ * so a column added after a snapshot was frozen does not count as an edit.
+ */
+export function blockContent(row: Readonly<Record<string, unknown>>, columns: BlockColumns, only?: Iterable<string>): BlockContent {
+  const wanted = only ? new Set(only) : undefined;
   const content: Record<string, unknown> = {};
   for (const name of [...columns.keys()].sort()) {
-    if (!RESERVED.has(name) && Object.hasOwn(row, name)) content[name] = row[name] ?? null;
+    if (!RESERVED.has(name) && Object.hasOwn(row, name) && (!wanted || wanted.has(name))) content[name] = row[name] ?? null;
   }
   return content;
 }
@@ -91,8 +110,24 @@ export async function replaceRevisionBlockContent(trx: unknown, id: string, cont
   const names = Object.keys(content);
   const values: unknown[] = [id];
   const assignments = names.map((name, index) => { values.push(parameter(columns.get(name)!, content[name])); return `${ident(name)} = ${placeholder(index + 2, columns.get(name)!)}`; });
-  await rows(trx, `update erp.blocks set ${[...assignments, "diverged = false", "updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')"].join(", ")}
-    where tenant_id = app.current_tenant() and id = $1::uuid`, values);
+  await rows(trx, `update erp.blocks set ${[...assignments, "diverged = false", TOUCH].join(", ")} where tenant_id = app.current_tenant() and id = $1::uuid`, values);
+}
+
+/** Ids travel as one text parameter; not every driver maps a JS array to a Postgres array. */
+export async function markBlocksDiverged(trx: unknown, ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  await rows(trx, `update erp.blocks set diverged = true, ${TOUCH} where tenant_id = app.current_tenant() and id = any(string_to_array($1::text, ',')::uuid[])`, [ids.join(",")]);
+}
+export async function deleteRevisionBlocks(trx: unknown, revisionId: string, ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  await rows(trx, "delete from erp.blocks where tenant_id = app.current_tenant() and revision_id = $1::uuid and id = any(string_to_array($2::text, ',')::uuid[])", [revisionId, ids.join(",")]);
+}
+/** One statement re-numbers the collection; rows already in place are not touched. */
+export async function updateBlockPositions(trx: unknown, revisionId: string, order: readonly string[]): Promise<void> {
+  if (!order.length) return;
+  await rows(trx, `update erp.blocks b set revision_id_position = v.ordinality - 1
+    from unnest(string_to_array($2::text, ',')::uuid[]) with ordinality as v(id, ordinality)
+    where b.id = v.id and b.tenant_id = app.current_tenant() and b.revision_id = $1::uuid and b.revision_id_position <> v.ordinality - 1`, [revisionId, order.join(",")]);
 }
 
 /** All blocks of a revision in collection order, locked for the caller's transaction. */
@@ -119,4 +154,14 @@ export function templateVariantBlocks(snapshot: PublishedSnapshot, channel: stri
 export function templateParameterFields(snapshot: PublishedSnapshot): readonly Record<string, unknown>[] {
   const fields = snapshot.head.row.parameters;
   return Array.isArray(fields) ? fields.filter((field): field is Record<string, unknown> => Boolean(field && typeof field === "object")) : [];
+}
+
+/** The same event a generated CRUD write appends (apps/api operations/entity/catalog.ts appendGeneratedCrudEvent). */
+export async function appendRecordEvent(platform: PluginPlatformServices, session: PluginSessionContext, record: {
+  aggregateType: "documentRevision" | "document"; table: "document_revisions" | "documents"; id: string; operation: "created" | "updated";
+}): Promise<void> {
+  await platform.events.append(session, {
+    aggregateType: record.aggregateType, aggregateId: record.id, eventType: record.operation,
+    payload: { table: record.table, schema: "erp", operation: record.operation, visibility: { tenant_id: session.tenantId ?? null } },
+  });
 }

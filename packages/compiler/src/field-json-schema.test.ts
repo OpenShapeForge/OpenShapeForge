@@ -33,7 +33,7 @@ const componentCatalog: ComponentCatalog = {
 
 const packageRootFieldDefinition = {
   key: "definition",
-  valueType: "object",
+  osfType: "object",
 } satisfies FieldDefinition;
 const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
 const packageRootAdapterUrls = {
@@ -51,7 +51,8 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
   const { key, ...rest } = overrides;
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -77,7 +78,7 @@ describe("compiled field JSON Schema projection", () => {
       groupMemberships: { any: { relationGroupId: { eq: "10000000-0000-4000-8000-000000000099" } } },
     };
     expect(compiledFieldSchema(field({
-      key: "customer", semanticType: "Relation",
+      key: "customer", osfType: "Relation",
       relationship: { kind: "belongsTo", target: "Relation", constraints },
     }))["x-osf-reference"]).toEqual({ entity: "Relation", valueField: "id", constraints });
   });
@@ -142,7 +143,7 @@ describe("compiled field JSON Schema projection", () => {
   it("projects nested objects and collection item shapes recursively", () => {
     const action = field({
       key: "action",
-      valueType: "object",
+      baseType: "object", osfType: "object",
       children: [
         field({ key: "key", required: true, validation: { minLength: 1 } }),
         field({
@@ -161,7 +162,7 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "actions",
-        valueType: "object",
+        baseType: "object", osfType: "object",
         cardinality: "collection",
         description: { en: "Ordered actions." },
         validation: { minItems: 1 },
@@ -233,7 +234,7 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "metadata",
-        valueType: "object",
+        baseType: "object", osfType: "object",
         children: [field({ key: "source", required: true, defaultValue: "api" })],
       }),
       {},
@@ -258,8 +259,8 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchema(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
       }),
     );
 
@@ -270,17 +271,17 @@ describe("compiled field JSON Schema projection", () => {
     expect(
       validate({
         key: "address",
-        valueType: "object",
+        osfType: "object",
         children: [
-          { key: "street", valueType: "string" },
+          { key: "street", osfType: "string" },
           {
             key: "residents",
-            valueType: "object",
+            osfType: "object",
             cardinality: "collection",
             item: {
               key: "resident",
-              valueType: "object",
-              children: [{ key: "name", valueType: "string" }],
+              osfType: "object",
+              children: [{ key: "name", osfType: "string" }],
             },
           },
         ],
@@ -289,8 +290,8 @@ describe("compiled field JSON Schema projection", () => {
     expect(
       validate({
         key: "address",
-        valueType: "object",
-        children: [{ valueType: "string" }],
+        osfType: "object",
+        children: [{ osfType: "string" }],
       }),
     ).toBe(false);
   });
@@ -299,8 +300,8 @@ describe("compiled field JSON Schema projection", () => {
     const schema = compiledFieldSchemaWithoutDefinitions(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
         description: { en: "Definition" },
       }),
     );
@@ -317,14 +318,14 @@ describe("compiled field JSON Schema projection", () => {
       [
         field({
           key: "definition",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          baseType: "object",
+          osfType: "fieldDefinition",
         }),
         field({
           key: "definitions",
-          valueType: "object",
+          baseType: "object",
           cardinality: "collection",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
         }),
       ],
       {},
@@ -343,16 +344,16 @@ describe("compiled field JSON Schema projection", () => {
     const schema = fieldSchemas.object([
       {
         key: "actions",
-        valueType: "object",
+        osfType: "object",
         cardinality: { min: 2, max: 4 },
         required: true,
         item: {
           key: "action",
-          valueType: "object",
+          osfType: "object",
           children: [
             {
               key: "kind",
-              valueType: "string",
+              osfType: "string",
               required: true,
               validation: { maxLength: 12 },
               options: {
@@ -365,7 +366,7 @@ describe("compiled field JSON Schema projection", () => {
             },
             {
               key: "enabled",
-              valueType: "boolean",
+              osfType: "boolean",
               defaultValue: true,
             },
           ],

@@ -13,6 +13,7 @@ import { loadEntity } from "./loader.js";
 import { compile as compileEntity } from "./compiler/index.js";
 import { collectAuthoredEntityPluginOperations, collectPluginOperations, assertOperationRuntimeModules, buildStaticOperationCatalog } from "../generate-operations.js";
 import type { CoreEntity, Field } from "./types.js";
+import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
 import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js";
 
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: true };
@@ -28,8 +29,8 @@ function entity(name: string, fields: Field[]): CoreEntity {
     language: "en", domains: ["example"], baseEntity: false,
     authorization: { roles: { read: ["Example.Read"], create: ["Example.Create"], update: ["Example.Update"] } },
     fields: [
-      { key: "id", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "id", storageClass: "core" } },
-      { key: "updatedAt", valueType: "datetime", readOnly: true, required: true, persisted: { column: "updated_at", storageClass: "core" } },
+      { key: "id", osfType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "id", storageClass: "core" } },
+      { key: "updatedAt", osfType: "datetime", readOnly: true, required: true, persisted: { column: "updated_at", storageClass: "core" } },
       ...fields,
     ],
     operations: Object.fromEntries(["list", "get", "create", "update"].map((action) => [action, {
@@ -44,9 +45,9 @@ function entity(name: string, fields: Field[]): CoreEntity {
   } as CoreEntity;
 }
 function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => {}, extra: CoreEntity[] = []): CompiledEntityInfo[] {
-  const owner = entity("Owner", [{ key: "children", semanticType: "Child", cardinality: "collection", sortable: true, relationship: { ownership: "owned", inverse: "owner" } }]);
+  const owner = entity("Owner", []);
   Object.assign(owner.operations!, { insertChild: native("insert"), moveChild: native("move") });
-  const child = entity("Child", [{ key: "owner", semanticType: "Owner", required: true }, { key: "body", valueType: "string", required: true, validation: { maxLength: 12 }, persisted: { column: "body", storageClass: "core" } }]);
+  const child = entity("Child", [{ key: "owner", osfType: "Owner", required: true, relationship: { inverse: { key: "children", ownership: "owned", sortable: true } } }, { key: "body", osfType: "string", required: true, validation: { maxLength: 12 }, persisted: { column: "body", storageClass: "core" } }]);
   mutate(owner, child);
   const dir = mkdtempSync(join(tmpdir(), "native-collections-"));
   const entries: CompiledEntityInfo[] = [];
@@ -60,6 +61,8 @@ function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 const compile = (entries = fixture()) => collectAuthoredEntityPluginOperations(entries, context);
+/** The derived `Owner.children` collection is shaped on `Child.owner`. */
+const children = (child: CoreEntity) => child.fields.find((field) => field.key === "owner")!.relationship!.inverse as FieldDefinitionInverseCollection;
 
 test("real authored template collection Operations compile the direct-edit variant flow under strict AJV", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
@@ -118,19 +121,16 @@ test("binds Web relationship insert/move by field and advertises atomic only for
 
 test("materializes one atomic create Operation for a reference with a hasMany constraint", () => {
   const membership = entity("Membership", [
-    { key: "child", semanticType: "Child", required: true },
-    { key: "groupId", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
+    { key: "child", osfType: "Child", required: true },
+    { key: "groupId", osfType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
   ]);
   const groupId = "10000000-0000-4000-8000-000000000099";
   const entries = fixture((owner, child) => {
     owner.fields.push({
-      key: "primaryChild", semanticType: "Child", required: true,
+      key: "primaryChild", osfType: "Child", required: true,
       relationship: { constraints: { kind: { eq: "primary" }, memberships: { any: { groupId: { eq: groupId } } } } },
     });
-    child.fields.push(
-      { key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } },
-      { key: "memberships", semanticType: "Membership", cardinality: "collection", relationship: { inverse: "child" } },
-    );
+    child.fields.push({ key: "kind", osfType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
   }, [membership]);
   const operation = compile(entries).find(item => item.id === "core.Owner.primaryChild.create-constrained-reference")!;
   expect(operation).toMatchObject({
@@ -149,10 +149,10 @@ test("materializes one atomic create Operation for a reference with a hasMany co
 test("materializes direct-only constrained create with server-owned values", () => {
   const entries = fixture((owner, child) => {
     owner.fields.push({
-      key: "primaryChild", semanticType: "Child", required: true,
+      key: "primaryChild", osfType: "Child", required: true,
       relationship: { constraints: { kind: { eq: "primary" } } },
     });
-    child.fields.push({ key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
+    child.fields.push({ key: "kind", osfType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
   });
   const operation = compile(entries).find(item => item.id === "core.Owner.primaryChild.create-constrained-reference")!;
   expect(operation).toMatchObject({
@@ -176,28 +176,27 @@ test("constrained reference create refuses guarded target and child create Opera
       delete owner.operations!.insertChild;
       delete owner.operations!.moveChild;
       owner.fields.push({
-        key: "primaryChild", semanticType: "Child", required: true,
+        key: "primaryChild", osfType: "Child", required: true,
         relationship: { constraints: { kind: { eq: "primary" } } },
       });
-      child.fields.push({ key: "kind", valueType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
+      child.fields.push({ key: "kind", osfType: "string", required: true, persisted: { column: "kind", storageClass: "core" } });
       mutate(child.operations!.create!);
     });
   expect(() => compile(direct((create) => { create.confirmation = { mode: "acknowledgement" }; }))).toThrow("target create needs an unguarded native entity create Operation");
   expect(() => compile(direct((create) => { create.reliability.idempotency = { mode: "keyed", inputField: "requestId" }; }))).toThrow("keyed idempotency");
 
   const membership = entity("Membership", [
-    { key: "child", semanticType: "Child", required: true },
-    { key: "groupId", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
+    { key: "child", osfType: "Child", required: true },
+    { key: "groupId", osfType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "group_id", storageClass: "core" } },
   ]);
   membership.operations!.create!.confirmation = { mode: "acknowledgement" };
-  expect(() => compile(fixture((owner, child) => {
+  expect(() => compile(fixture((owner) => {
     delete owner.operations!.insertChild;
     delete owner.operations!.moveChild;
     owner.fields.push({
-      key: "primaryChild", semanticType: "Child", required: true,
+      key: "primaryChild", osfType: "Child", required: true,
       relationship: { constraints: { memberships: { any: { groupId: { eq: "10000000-0000-4000-8000-000000000099" } } } } },
     });
-    child.fields.push({ key: "memberships", semanticType: "Membership", cardinality: "collection", relationship: { inverse: "child" } });
   }, [membership]))).toThrow("child create needs an unguarded native entity create Operation");
 });
 
@@ -224,12 +223,12 @@ test("reference-data schemas are independent of Web-first versus catalog-first p
 
 test("entityValue insert derives logical own values and named UUID references from allowed definitions", () => {
   const definition = entity("Copy", []);
-  definition.fields = [{ key: "text", valueType: "string", required: true }, { key: "source", semanticType: "Owner", required: true }];
+  definition.fields = [{ key: "text", osfType: "string", required: true }, { key: "source", osfType: "Owner", required: true }];
   definition.operations = { materialize: { name: "Project", description: "Project", implementation: { type: "plugin", plugin: "example", handler: "project" }, target: { scope: "collection" }, input: { schema: { type: "object", properties: {} } }, output: { schema: { type: "object" } }, errors: [], auth: { mode: "session", roles: ["Example.Read"] }, tenancy: { mode: "required" }, effects: { data: "read", external: "none" }, reliability: { idempotency: { mode: "natural" } }, confirmation: { mode: "none" } } };
   definition.interfaces = { rest: {}, mcp: { tools: "generic" } };
-  const entries = fixture((owner, child) => {
-    owner.fields.find((field) => field.key === "children")!.allowedDefinitions = ["Copy"];
-    child.fields.push({ key: "definitionKey", valueType: "string", required: true, persisted: { column: "definition_key", storageClass: "core" } }, { key: "values", semanticType: "entityValue", entityValue: { definitionField: "definitionKey" }, required: true, persisted: { column: "values", storageClass: "core" } });
+  const entries = fixture((_owner, child) => {
+    children(child).allowedDefinitions = ["Copy"];
+    child.fields.push({ key: "definitionKey", osfType: "string", required: true, persisted: { column: "definition_key", storageClass: "core" } }, { key: "values", osfType: "entityValue", entityValue: { definitionField: "definitionKey" }, required: true, persisted: { column: "values", storageClass: "core" } });
   }, [definition]);
   const operation = compile(entries).find((operation) => operation.id === "Owner.insertChild")!;
   const ajv = new Ajv.default({ strict: false }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
@@ -244,8 +243,8 @@ test("entityValue insert derives logical own values and named UUID references fr
 });
 
 test("fails closed on unsupported ownership, sorting, actions and child guard combinations", () => {
-  expect(() => compile(fixture((owner) => { owner.fields.find((field) => field.key === "children")!.sortable = false; }))).toThrow("sortable");
-  expect(() => compile(fixture((owner) => { owner.fields.find((field) => field.key === "children")!.relationship!.ownership = "reference"; }))).toThrow("owned");
+  expect(() => compile(fixture((_owner, child) => { children(child).sortable = false; }))).toThrow("sortable");
+  expect(() => compile(fixture((_owner, child) => { children(child).ownership = "reference"; }))).toThrow("owned");
   expect(() => fixture((owner) => { Object.assign(owner.operations!.insertChild!.implementation, { action: "link" }); })).toThrow();
   expect(() => fixture((owner) => { owner.operations!.insertChild!.auth = { mode: "session", roles: ["Other"] }; })).toThrow();
   expect(() => compile(fixture((owner) => { owner.operations!.insertAgain = native("insert"); }))).toThrow("one collection Operation");
@@ -254,7 +253,7 @@ test("fails closed on unsupported ownership, sorting, actions and child guard co
 });
 
 test("authoring schema accepts identityless baseEntity false and object semantic catalog metadata", () => {
-  const document = entity("Example", [{ key: "label", valueType: "string" }]);
+  const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();
   expect(() => authoringValidator().validate({ kind: "semanticTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/semantic-types.yaml")).not.toThrow();
 });

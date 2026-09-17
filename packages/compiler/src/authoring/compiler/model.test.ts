@@ -26,12 +26,12 @@ describe("semantic renderer mapping", () => {
     };
 
     const [semantic, authored] = resolveModelFields([
-      { key: "tags", valueType: "string", semanticType: "boundedTags" },
+      { key: "tags", osfType: "boundedTags" },
       {
         key: "steps",
-        valueType: "object",
+        osfType: "object",
         cardinality: { min: 2, max: "unbounded" },
-        item: { key: "step", valueType: "object" },
+        item: { key: "step", osfType: "object" },
       },
     ], catalog, semanticTypes);
 
@@ -56,8 +56,7 @@ describe("semantic renderer mapping", () => {
     };
     const fields: Field[] = [{
       key: "status",
-      valueType: "string",
-      semanticType: "referenceDataCode",
+      osfType: "referenceDataCode",
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
     }];
 
@@ -84,8 +83,7 @@ describe("semantic renderer mapping", () => {
 
     expect(resolveModelFields([{
       key: "storageLocation",
-      valueType: "string",
-      semanticType: "fileStorageLocation",
+      osfType: "fileStorageLocation",
       readOnly: true,
     }], catalog, semanticTypes)[0]?.render).toEqual({
       component: "TextDisplay",
@@ -101,10 +99,10 @@ describe("semantic renderer mapping", () => {
 test("inherits semantic choices recursively while explicit options win", () => {
   const options = { type: "static" as const, items: [{ value: "first", label: { en: "First" } }] };
   const fields = resolveModelFields([
-    { key: "choice", semanticType: "choice", valueType: "string" },
-    { key: "override", semanticType: "choice", valueType: "string", options: { type: "static", items: [] } },
-    { key: "nested", valueType: "object", children: [{ key: "choice", semanticType: "choice", valueType: "string" }] },
-    { key: "items", valueType: "string", cardinality: "collection", item: { key: "choice", semanticType: "choice", valueType: "string" } },
+    { key: "choice", osfType: "choice" },
+    { key: "override", osfType: "choice", options: { type: "static", items: [] } },
+    { key: "nested", osfType: "object", children: [{ key: "choice", osfType: "choice" }] },
+    { key: "items", osfType: "string", cardinality: "collection", item: { key: "choice", osfType: "choice" } },
   ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
   expect(fields[0]!.options).toEqual(options);
   expect(fields[1]!.options?.items).toEqual([]);

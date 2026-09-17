@@ -101,8 +101,8 @@ describe("resolveAuthoringLayers", () => {
     entity: "Widget",
     title: "Widget",
     fields: [
-      { key: "name", valueType: "string", required: true },
-      { key: "notes", valueType: "string", required: false },
+      { key: "name", osfType: "string", required: true },
+      { key: "notes", osfType: "string", required: false },
     ],
     ui: {
       presentations: {
@@ -137,7 +137,7 @@ describe("resolveAuthoringLayers", () => {
       ...baseEntity.fields,
       {
         key: "authorization",
-        valueType: "object",
+        osfType: "object",
         required: true,
         immutable: true,
         writtenBy: ["widget.approve", "widget.publish"],
@@ -224,7 +224,7 @@ describe("resolveAuthoringLayers", () => {
       readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"),
     );
     expect(merged.kind).toBe("coreEntity");
-    expect(merged.fields).toEqual([{ key: "name", valueType: "string", required: true }]);
+    expect(merged.fields).toEqual([{ key: "name", osfType: "string", required: true }]);
     expect(merged.ui.presentations.list.columns).toEqual([
       { key: "name", sortable: false },
       { key: "notes", sortable: true },

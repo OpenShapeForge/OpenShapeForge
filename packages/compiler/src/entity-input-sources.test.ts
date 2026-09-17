@@ -4,10 +4,10 @@ import type { CompiledEntityContract, CompiledField } from "./authoring/types.js
 import { materializeEntityInputSources, resolveEntityInputSources } from "./entity-input-sources.js";
 
 const fields: CompiledField[] = [{
-  key: "title", valueType: "string", cardinality: "single", required: true,
+  key: "title", osfType: "string", baseType: "string", cardinality: "single", required: true,
   label: { en: "Title" }, render: { component: "Input" }, validation: { minLength: 1, maxLength: 80 },
 }, {
-  key: "serverValue", valueType: "string", cardinality: "single", required: false,
+  key: "serverValue", osfType: "string", baseType: "string", cardinality: "single", required: false,
   label: { en: "Server" }, render: { component: "Input" }, writtenBy: ["example.server"],
 }];
 const contract = { entity: { name: "Example" }, model: { fields, relationships: [] }, storage: { columns: [] } } as unknown as CompiledEntityContract;
@@ -67,6 +67,6 @@ test("managed choices fail closed for missing or incompatible canonical sources"
   expect(() => materializeEntityInputSources([source("Missing")], {})).toThrow("Invalid entity option source");
   expect(() => materializeEntityInputSources([source("Example", "missing")], {})).toThrow("Invalid entity option source");
   const incompatible = source("Example", "title");
-  incompatible.model.fields[0]!.valueType = "boolean";
+  incompatible.model.fields[0]!.baseType = "boolean";
   expect(() => materializeEntityInputSources([incompatible], {})).toThrow("Invalid entity option source");
 });

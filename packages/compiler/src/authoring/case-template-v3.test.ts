@@ -28,7 +28,7 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   expect(parent.model.relationships.find(relation => relation.fieldKey === "steps")).toMatchObject({ kind: "hasMany", target: "CaseStepTemplate", inverse: "templateId", foreignKey: "case_template_id" });
   const task = actions.item!.children!.find(field => field.key === "taskTemplate")!;
   const queue = task.children!.find(field => field.key === "defaultWorkQueueId")!;
-  expect(queue).toMatchObject({ semanticType: "workQueueId", valueType: "string", options: { type: "remote", remoteUrl: "/api/workflow/designer/core-entity-options?entity=work-queue" } });
+  expect(queue).toMatchObject({ osfType: "workQueueId", baseType: "string", options: { type: "remote", remoteUrl: "/api/workflow/designer/core-entity-options?entity=work-queue" } });
   expect(queue.relationship).toBeUndefined();
   expect(step.model.relationships.some(relation => relation.fieldKey === "actions")).toBe(false);
   expect(step.storage.columns.filter(column => /work_queue/.test(column.column))).toHaveLength(1);
@@ -59,6 +59,6 @@ test("a Web projection preserves nested identifier metadata without inventing a 
   const web = buildWebManifest([{ slug: "case-step-template", contract }]);
   const actions = web.entities.CaseStepTemplate!.fields.actions!;
   const queue = actions.item!.children!.find(field => field.key === "taskTemplate")!.children!.find(field => field.key === "defaultWorkQueueId")!;
-  expect(queue).toMatchObject({ semanticType: "workQueueId", optionSource: { type: "remote", source: "/api/workflow/designer/core-entity-options?entity=work-queue" }, presentation: { component: "OptionVariablePicker", props: { valueMode: "selectId", clearable: true } } });
+  expect(queue).toMatchObject({ osfType: "workQueueId", optionSource: { type: "remote", source: "/api/workflow/designer/core-entity-options?entity=work-queue" }, presentation: { component: "OptionVariablePicker", props: { valueMode: "selectId", clearable: true } } });
   expect(queue.relationship).toBeUndefined();
 });

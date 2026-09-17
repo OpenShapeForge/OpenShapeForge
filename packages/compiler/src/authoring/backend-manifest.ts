@@ -972,6 +972,15 @@ function compileFieldRelationStorage(
     for (const relationship of candidate.contract.model.relationships) {
       const target = byEntity.get(relationship.target);
       if (!target) {
+        // A derived inverse collection has no storage of its own: when the
+        // referencing entity is outside this manifest, the collection simply
+        // is not lowered. An authored single reference without its target is
+        // still a modelling error.
+        if (relationship.kind === "hasMany") {
+          const skipped = table.source?.relationshipStatus?.skippedReferences;
+          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity not allowlisted)`);
+          continue;
+        }
         throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} targets missing entity ${relationship.target}. Include its storage in the backend manifest.`);
       }
       if (relationship.kind === "belongsTo") {
@@ -1371,6 +1380,7 @@ export function compileAuthoringBackendManifest(
             ? { operations: candidate.contract.graphql.operations }
             : {}),
           relationships: candidate.contract.graphql.relationships
+            .filter((relationship) => relationship.resolve !== "hasMany" || byEntityName.has(relationship.target))
             .map((relationship) => ({
               name: relationship.name,
               target: relationship.target,

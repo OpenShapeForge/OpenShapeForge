@@ -12,8 +12,8 @@ const entityWithMcp = (mcp: CoreEntity["mcp"], entity = "ContactDetail"): CoreEn
     title: "Contact Detail",
     language: "en",
     fields: [
-      { key: "value", valueType: "string" },
-      { key: "version", valueType: "integer" },
+      { key: "value", osfType: "string", baseType: "string" },
+      { key: "version", osfType: "integer", baseType: "integer" },
     ],
     ...(mcp === undefined ? {} : { mcp }),
   }) as CoreEntity;
@@ -27,7 +27,7 @@ const v2Relation = (tools?: "dedicated" | "generic"): CoreEntity => {
     entity: "Relation",
     title: "Relation",
     language: "en",
-    fields: [{ key: "displayName", valueType: "string" }],
+    fields: [{ key: "displayName", osfType: "string", baseType: "string" }],
     operations: Object.fromEntries(
       actions.map((action) => [
         action,
@@ -108,8 +108,8 @@ describe("buildMcp", () => {
   it("temporarily lowers canonical secure input into the existing MCP handoff metadata", () => {
     const entity = v2Relation();
     entity.fields = [
-      { key: "adapterId", valueType: "string" },
-      { key: "configurationValues", valueType: "object" },
+      { key: "adapterId", osfType: "string", baseType: "string" },
+      { key: "configurationValues", osfType: "object", baseType: "object" },
     ];
     entity.operations!.create!.interaction = {
       type: "secureInput",

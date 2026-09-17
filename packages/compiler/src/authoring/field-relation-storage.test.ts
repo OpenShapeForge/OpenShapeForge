@@ -41,18 +41,11 @@ function target(manifest: PlatformSchemaManifest) {
 function sql(manifest: PlatformSchemaManifest) {
   return generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
 }
-function collection(contract: CompiledEntityContract, options: Record<string, unknown> = {}) {
-  if (contract.entity.name !== sourceName) return;
-  contract.storage.columns = contract.storage.columns.filter((column) => column.column !== "owner_id");
-  contract.model.relationships = [{
-    key: "members", kind: "manyToMany", target: targetName,
-    ...{ fieldKey: "members", ownership: "reference", ...options },
-  }];
-}
-
 describe("schema-3 field relationship storage", () => {
   it("retains a nullable authoritative tenant column as a single FK and refuses uniqueness", () => {
     const bindTenant = (contract: CompiledEntityContract) => {
+      // The derived inverse collection on the target follows the renamed key.
+      if (contract.entity.name === targetName) contract.model.relationships.find((relationship) => relationship.key === "rowAccessOwners")!.foreignKey = "tenant_id";
       if (contract.entity.name !== sourceName) return;
       const column = contract.storage.columns.find(column => column.column === "owner_id")!;
       Object.assign(column, { field: "scopeIdentity", column: "tenant_id", nullable: true });
@@ -111,6 +104,7 @@ describe("schema-3 field relationship storage", () => {
 
   it("does not duplicate an authored field-key column or require an Id field", () => {
     const manifest = compileRelations((contract) => {
+      if (contract.entity.name === targetName) contract.model.relationships.find((relationship) => relationship.key === "rowAccessOwners")!.foreignKey = "owner";
       if (contract.entity.name !== sourceName) return;
       const column = contract.storage.columns.find((column) => column.column === "owner_id")!;
       Object.assign(column, { column: "owner", field: "owner", type: "jsonb" });
@@ -148,28 +142,16 @@ describe("schema-3 field relationship storage", () => {
     })).toThrow("requires a UUID id primary key");
   });
 
-  it("stores reference collections in an internal, tenant-scoped junction with persisted position", () => {
-    const manifest = compileRelations((contract) => collection(contract, { sortable: true }));
-    const junction = manifest.tables.find((table) => table.relationStorage)!;
-    expect(junction.name).toBe(`${source(manifest).name}_members`);
-    expect(junction).toMatchObject({ domainInternal: true, generatedCrudEligible: false, tenantScoped: true });
-    expect(junction.relationStorage).toEqual({
-      sourceEntity: sourceName, fieldKey: "members", targetEntity: targetName,
-      sourceColumn: "source_id", targetColumn: "target_id", positionColumn: "position",
-    });
-    expect(junction.columns.find((column) => column.name === "position")).toMatchObject({ type: "integer", required: true });
-    expect(junction.indexes?.some((index) => index.unique && index.columns.join() === "tenant_id,source_id,target_id")).toBe(true);
-    expect(junction.columns.filter((column) => column.references)).toHaveLength(2);
-    expect(sql(manifest)).toContain('FOREIGN KEY ("tenant_id", "source_id")');
-    expect(sql(manifest)).toContain('FOREIGN KEY ("tenant_id", "target_id")');
-    const emitted = JSON.parse(generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents);
-    expect(emitted.tables.find((table: { table: string }) => table.table === junction.name).relationStorage).toEqual(junction.relationStorage);
-  });
-
-  it("rejects owned junctions and junction table collisions", () => {
-    expect(() => compileRelations((contract) => collection(contract, { ownership: "owned" }))).toThrow("requires an inverse foreign key");
-    expect(() => compileRelations((contract) => collection(contract, { via: "row_access_owner_targets" }))).toThrow("junction collides");
-  });
+  const ownedChildren = (contract: CompiledEntityContract) => {
+    if (contract.entity.name === sourceName) {
+      contract.model.relationships = [{
+        key: "children", kind: "hasMany", target: targetName, foreignKey: "parent",
+        ...{ fieldKey: "children", inverse: "parent", ownership: "owned", sortable: true },
+      }];
+    } else {
+      contract.storage.columns.push({ field: "parent", column: "parent", type: "uuid", nullable: false, storageClass: "core" });
+    }
+  };
 
   it("stores sortable owned inverse collections on the child with parent-delete cascading", () => {
     const manifest = compileRelations((contract) => {
@@ -207,7 +189,7 @@ describe("schema-3 field relationship storage", () => {
   });
 
   it("generates byte-identical outputs for the same canonical relations", () => {
-    const compile = () => compileRelations((contract) => collection(contract, { sortable: true }));
+    const compile = () => compileRelations(ownedChildren);
     expect(generateArtifacts(compile())).toEqual(generateArtifacts(compile()));
   });
 
@@ -221,10 +203,6 @@ describe("schema-3 field relationship storage", () => {
     expect(() => compileRelations((contract) => {
       if (contract.entity.name === targetName) contract.entity.indexes = [{ name: `${contract.storage.table}_tenant_id_id_key`, fields: ["name"] }];
     })).toThrow("index collides");
-  });
-
-  it("rejects junction identifiers that PostgreSQL would silently truncate", () => {
-    expect(() => compileRelations((contract) => collection(contract, { via: "a".repeat(64) }))).toThrow("at most 63 bytes");
   });
 
   it("emits cyclic composite references after both tables and target indexes", () => {

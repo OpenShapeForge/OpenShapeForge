@@ -18,7 +18,7 @@ const entity = (name: string, fields: Field[] = []): CoreEntity => ({
 });
 
 test("identity-bearing v3 storage entities have no implicit CRUD; v2 and identityless definitions still reject empty operations", () => {
-  const internal = entity("Internal", [{ key: "name", valueType: "string" }]);
+  const internal = entity("Internal", [{ key: "name", osfType: "string" }]);
   const validator = createAuthoringValidator();
   expect(() => validator.validate(internal, "internal.yaml")).not.toThrow();
   expect(() => assertV2Authoring(internal, "internal.yaml")).not.toThrow();
@@ -29,7 +29,7 @@ test("identity-bearing v3 storage entities have no implicit CRUD; v2 and identit
 });
 
 test("presentation-only Web fields do not expose standalone Web operations", () => {
-  const internal = entity("Internal", [{ key: "title", valueType: "string" }]);
+  const internal = entity("Internal", [{ key: "title", osfType: "string" }]);
   internal.interfaces = { web: { fields: { title: { render: { component: "Input" } } } } };
   expect(() => createAuthoringValidator().validate(internal, "internal.yaml")).not.toThrow();
   expect(() => assertV2Authoring(internal, "internal.yaml")).not.toThrow();
@@ -39,11 +39,11 @@ test("presentation-only Web fields do not expose standalone Web operations", () 
 });
 
 const source = () => entity("Route", [
-  { key: "customer", semanticType: "Customer" },
-  { key: "invoices", semanticType: "Bill", cardinality: "collection", relationship: { inverse: "customer", via: "customer", ownership: "reference" } },
+  { key: "customer", osfType: "Customer" },
+  { key: "invoices", osfType: "Bill", cardinality: "collection", relationship: { inverse: "customer", via: "customer", ownership: "reference" } },
 ]);
 const customer = entity("Customer");
-const bill = entity("Bill", [{ key: "customer", semanticType: "Customer" }]);
+const bill = entity("Bill", [{ key: "customer", osfType: "Customer" }]);
 
 test("indirect inverse collections are read-only traversals, never owned links", () => {
   const route = source();

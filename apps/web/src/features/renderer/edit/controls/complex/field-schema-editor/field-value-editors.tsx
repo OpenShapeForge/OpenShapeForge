@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
 
 import { Field as FieldFrame } from "@/features/renderer/components/field";
@@ -23,7 +24,7 @@ export function FieldSchemaValueEditor({
   onChange: (value: unknown) => void;
 }) {
   const staticOptions =
-    field.valueType === "string" &&
+    fieldValueType(field) === "string" &&
     !isFieldCardinalityCollection(field.cardinality) &&
     field.options?.type === "static" &&
     Array.isArray(field.options.items)
@@ -75,7 +76,7 @@ export function FieldSchemaValueEditor({
     );
   }
 
-  if (field.valueType === "object" || isFieldCardinalityCollection(field.cardinality)) {
+  if (fieldValueType(field) === "object" || isFieldCardinalityCollection(field.cardinality)) {
     return (
       <JsonFieldEditor
         label={lang === "nl" ? "Waarde (JSON)" : "Value (JSON)"}
@@ -92,7 +93,7 @@ export function FieldSchemaValueEditor({
     );
   }
 
-  if (field.valueType === "number" || field.valueType === "integer" || field.valueType === "boolean") {
+  if (fieldValueType(field) === "number" || fieldValueType(field) === "integer" || fieldValueType(field) === "boolean") {
     return (
       <JsonFieldEditor
         label={lang === "nl" ? "Waarde" : "Value"}

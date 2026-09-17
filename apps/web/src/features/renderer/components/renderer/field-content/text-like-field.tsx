@@ -11,7 +11,7 @@ import type { VariableSuggestion } from "@/features/renderer/runtime/variable-su
 import { fieldAllowsVariableTokenInput } from "@/features/renderer/runtime/variable-token-fields";
 import type { FieldControlProps } from "@/features/renderer/components/field";
 import type { Field } from "@/generated/compiler/field-contract";
-import { isFieldCollection } from "@/lib/field-contract/field-v2";
+import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
 import { resolveFieldInputRender } from "@/lib/field-rendering/compiler-field-rendering";
 import { InlineJsonField } from "./inline-json-field";
 import {
@@ -143,7 +143,7 @@ export function renderTextLikeField(
 
   if (
     component === "JsonFieldEditor" ||
-    field.valueType === "object" ||
+    fieldValueType(field) === "object" ||
     isFieldCollection(field)
   ) {
     return (

@@ -1011,41 +1011,6 @@ function compileFieldRelationStorage(
           target.table.columns.push({ name: positionName, type: "integer", required: true, default: "0" });
           addIndex(target.table, [...(target.table.tenantScoped ? ["tenant_id"] : []), column.name, positionName]);
         }
-      } else {
-        if (relationship.ownership === "owned") {
-          throw new Error(`Owned collection ${candidate.contract.entity.name}.${relationship.key} requires an inverse foreign key; junction storage supports references only.`);
-        }
-        const name = relationship.via ?? `${table.name}_${snakeCase(relationship.fieldKey ?? relationship.key)}`;
-        if (!/^[a-z][a-z0-9_]*$/.test(name) || Buffer.byteLength(name) > 63) {
-          throw new Error(`Field relationship junction requires a PostgreSQL identifier of at most 63 bytes: ${name}.`);
-        }
-        if (tables.some((candidate) => candidate.schema === table.schema && candidate.name === name)) {
-          throw new Error(`Field relationship junction collides with ${table.schema}.${name}.`);
-        }
-        const sourceColumn: ColumnDefinition = { name: "source_id", type: "uuid", required: true };
-        const targetColumn: ColumnDefinition = { name: "target_id", type: "uuid", required: true };
-        const junction: TableDefinition = {
-          schema: table.schema, name, tenantScoped: table.tenantScoped,
-          domainInternal: true, generatedCrudEligible: false, generatedCrud: false,
-          columns: [
-            { name: "id", type: "uuid", primaryKey: true, required: true, default: "gen_random_uuid()" },
-            ...(table.tenantScoped ? [{ name: "tenant_id", type: "uuid" as const, required: true }] : []),
-            sourceColumn, targetColumn,
-            ...(relationship.sortable ? [{ name: "position", type: "integer" as const, required: true, default: "0" }] : []),
-          ],
-          relationStorage: {
-            sourceEntity: candidate.contract.entity.name,
-            fieldKey: relationship.fieldKey ?? relationship.key,
-            targetEntity: relationship.target,
-            sourceColumn: sourceColumn.name, targetColumn: targetColumn.name,
-            ...(relationship.sortable ? { positionColumn: "position" } : {}),
-          },
-        };
-        attachReference(junction, sourceColumn, table, false, "CASCADE");
-        attachReference(junction, targetColumn, target.table, false, "CASCADE");
-        addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "target_id"], true);
-        if (relationship.sortable) addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "position"]);
-        tables.push(junction);
       }
     }
   }

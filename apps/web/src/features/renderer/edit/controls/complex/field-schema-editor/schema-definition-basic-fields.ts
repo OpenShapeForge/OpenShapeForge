@@ -23,7 +23,7 @@ export function buildBasicFieldSchemaFields(
   const fields: FieldSchemaDefinitionFieldDraft[] = [
     {
       key: "schemaType",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field",
       label: {
         nl: "Soort waarde",
@@ -34,7 +34,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaCardinality",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field",
       label: { nl: "Aantal", en: "Cardinality" },
       ...(rules?.lockRequired ? { readOnly: true } : {}),
@@ -42,7 +42,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaLabel",
-      valueType: "string",
+      osfType: "string",
       dataPath: `field.label.${lang}`,
       label: { nl: "Label", en: "Label", fr: "Libellé" },
       required: lang === "nl",
@@ -54,7 +54,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaLayoutFraction",
-      valueType: "number",
+      osfType: "number",
       dataPath: "field.layoutFraction",
       label: { nl: "Layout-fractie", en: "Layout fraction" },
       description: {
@@ -68,33 +68,33 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaReadOnly",
-      valueType: "boolean",
+      osfType: "boolean",
       dataPath: "field.readOnly",
       label: { nl: "Alleen-lezen", en: "Read only" },
       render: { component: "Switch" },
     },
     {
       key: "schemaAudit",
-      valueType: "boolean",
+      osfType: "boolean",
       dataPath: "field.audit",
       label: { nl: "Audit", en: "Audit" },
       render: { component: "Switch" },
     },
     {
       key: "schemaUnit",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.unit",
       label: { nl: "Eenheid", en: "Unit" },
     },
     {
       key: "schemaCurrency",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.currency",
       label: { nl: "Valuta", en: "Currency" },
     },
     {
       key: "schemaLocalized",
-      valueType: "boolean",
+      osfType: "boolean",
       dataPath: "field.localized",
       label: { nl: "Gelokaliseerd", en: "Localized" },
       description: {
@@ -105,7 +105,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaDescription",
-      valueType: "string",
+      osfType: "string",
       dataPath: `field.description.${lang}`,
       label: { nl: "Beschrijving", en: "Description", fr: "Description" },
       render: {
@@ -115,7 +115,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaPlaceholder",
-      valueType: "string",
+      osfType: "string",
       dataPath: `field.placeholder.${lang}`,
       label: { nl: "Placeholder", en: "Placeholder", fr: "Placeholder" },
       render: {
@@ -125,7 +125,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaHelp",
-      valueType: "string",
+      osfType: "string",
       dataPath: `field.help.${lang}`,
       label: { nl: "Helptekst", en: "Help text", fr: "Texte d'aide" },
       render: {
@@ -135,7 +135,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaValue",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field.value",
       label: profile.valueAuthoring?.label ?? { nl: "Waarde", en: "Value" },
       description: profile.valueAuthoring?.description,
@@ -143,7 +143,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaDefaultValue",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field.defaultValue",
       label: {
         nl: "Standaardwaarde (JSON)",
@@ -153,19 +153,19 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaValidation",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field.validation",
       render: { component: "FieldSchemaValidationEditor" },
     },
     {
       key: "schemaOptionsAnchor",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field.options",
       fieldMode: "hidden",
     },
     {
       key: "schemaOptionsType",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.type",
       label: { nl: "Optiebron", en: "Option source" },
       description: {
@@ -183,7 +183,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsStaticItems",
-      valueType: "object",
+      osfType: "object",
       dataPath: "field.options.items",
       label: { nl: "Statische opties", en: "Static options" },
       render: { component: "FieldSchemaStaticOptionsEditor" },
@@ -194,7 +194,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsReferenceGroup",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.referentieGroep",
       label: { nl: "Referentiegroep", en: "Reference group" },
       description: {
@@ -209,7 +209,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsRemoteUrl",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.remoteUrl",
       label: { nl: "Remote URL", en: "Remote URL" },
       visibility: {
@@ -219,7 +219,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsValueField",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.valueField",
       label: { nl: "Value field", en: "Value field" },
       visibility: {
@@ -229,7 +229,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsLabelField",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.labelField",
       label: { nl: "Label field", en: "Label field" },
       visibility: {
@@ -239,7 +239,7 @@ export function buildBasicFieldSchemaFields(
     },
     {
       key: "schemaOptionsSource",
-      valueType: "string",
+      osfType: "string",
       dataPath: "field.options.source",
       label: { nl: "Dynamische optiebron", en: "Dynamic option source" },
       description: {

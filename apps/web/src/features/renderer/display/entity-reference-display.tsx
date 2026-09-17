@@ -28,13 +28,13 @@ function displayValue(value: unknown) {
 }
 
 function entityReferenceField(field: Field): Field {
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldSemanticTypeDefinition(field);
   const remoteUrl =
     field.options?.type === "remote"
       ? field.options.remoteUrl
-      : semanticType?.options?.type === "remote"
-        ? semanticType.options.remoteUrl
-        : semanticType?.listUrl;
+      : osfType?.options?.type === "remote"
+        ? osfType.options.remoteUrl
+        : osfType?.listUrl;
 
   return remoteUrl
     ? {

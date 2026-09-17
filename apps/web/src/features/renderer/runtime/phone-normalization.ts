@@ -13,9 +13,9 @@ const phoneSemanticTypes = new Set([
   "whatsappphonenumber",
 ]);
 
-export function isPhoneSemanticField(field: Pick<Field, "semanticType">) {
-  const semanticType = field.semanticType?.trim().toLowerCase();
-  return Boolean(semanticType && phoneSemanticTypes.has(semanticType));
+export function isPhoneSemanticField(field: Pick<Field, "osfType">) {
+  const osfType = field.osfType?.trim().toLowerCase();
+  return Boolean(osfType && phoneSemanticTypes.has(osfType));
 }
 
 export function normalizePhoneInput(

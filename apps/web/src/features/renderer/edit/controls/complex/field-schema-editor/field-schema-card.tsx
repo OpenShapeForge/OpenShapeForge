@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
 
 import { ChevronDown, ChevronUp, Copy, Trash2 } from "lucide-react";
@@ -127,8 +128,8 @@ export function FieldSchemaCard({
           )}
       />
 
-      {field.valueType === "object" &&
-      field.semanticType !== "fieldDefinition" &&
+      {fieldValueType(field) === "object" &&
+      field.osfType !== "fieldDefinition" &&
       isProfileControlEnabled(profile, "shape") &&
       !rules?.locked ? (
         <details className="rounded-xl border border-border/70 bg-muted/10 p-4" open>

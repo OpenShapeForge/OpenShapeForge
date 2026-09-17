@@ -100,10 +100,10 @@ export function getRendererFieldLanguageHint(
       : undefined;
   if (explicit) return explicit;
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldSemanticTypeDefinition(field);
   return (
     translateRendererText(field.label, lang) ||
-    translateRendererText(semanticType?.label, lang) ||
+    translateRendererText(osfType?.label, lang) ||
     field.key
   );
 }

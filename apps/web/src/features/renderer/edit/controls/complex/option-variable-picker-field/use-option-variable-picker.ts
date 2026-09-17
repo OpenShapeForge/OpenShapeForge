@@ -97,14 +97,14 @@ export function useOptionVariablePicker({
     [onChange],
   );
 
-  const fieldSemanticType = field?.semanticType;
+  const fieldSemanticType = field?.osfType;
   useEffect(() => {
     if (autoSelectAttemptedRef.current) return;
     if (!fieldSemanticType) return;
     if (stringValue.trim().length > 0) return;
 
     const matches = suggestions.filter(
-      (suggestion) => suggestion.semanticType === fieldSemanticType,
+      (suggestion) => suggestion.osfType === fieldSemanticType,
     );
     if (matches.length !== 1) return;
 

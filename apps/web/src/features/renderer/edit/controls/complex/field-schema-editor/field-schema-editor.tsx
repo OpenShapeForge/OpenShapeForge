@@ -62,14 +62,14 @@ export function FieldSchemaEditor({
 
   const collectionField: Field = {
     key: "fieldDefinitions",
-    valueType: "object",
+    osfType: "object",
     cardinality: { min: 0, max: "unbounded" },
-    ...(variableSourceRows ? { semanticType: "fieldDefinition" } : {}),
+    ...(variableSourceRows ? { osfType: "fieldDefinition" } : {}),
     label: { nl: "Velden", en: "Fields" },
   };
   const variableSourceField: Field = {
     key: "source",
-    valueType: "string",
+    osfType: "string",
     label: { nl: "Veldbron", en: "Field source" },
     placeholder: { nl: "Kies veld...", en: "Choose field..." },
     render: {

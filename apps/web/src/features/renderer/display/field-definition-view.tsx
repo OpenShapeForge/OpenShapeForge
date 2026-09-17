@@ -13,7 +13,7 @@ type NormalizedFieldDefinition = {
   key: string;
   type: string;
   required: boolean | null;
-  semanticType: string;
+  osfType: string;
   description: string;
 };
 
@@ -60,7 +60,7 @@ function normalizeFieldDefinition(
       key: value.trim(),
       type: "fieldDefinition[]",
       required: null,
-      semanticType: "",
+      osfType: "",
       description: "",
     };
   }
@@ -75,7 +75,7 @@ function normalizeFieldDefinition(
       key: source,
       type: "fieldDefinition[]",
       required: null,
-      semanticType: "",
+      osfType: "",
       description: "",
     };
   }
@@ -92,7 +92,7 @@ function normalizeFieldDefinition(
     key: key || "-",
     type: readString(value, "valueType", "type", "fieldType") || "-",
     required: readRequired(value),
-    semanticType: readString(value, "semanticType", "semanticTypeKey"),
+    osfType: readString(value, "osfType", "semanticTypeKey"),
     description: readLocalizedString(value.description, lang) || readString(value, "description"),
   };
 }
@@ -154,7 +154,7 @@ export function FieldDefinitionView({ value, lang = "nl" }: FieldDefinitionViewP
                 {yesNo(row.required, lang)}
               </td>
               <td className="max-w-[220px] py-2 pr-4 align-top font-mono text-xs text-muted-foreground">
-                <span className="break-all">{row.semanticType || "-"}</span>
+                <span className="break-all">{row.osfType || "-"}</span>
               </td>
             </tr>
           ))}

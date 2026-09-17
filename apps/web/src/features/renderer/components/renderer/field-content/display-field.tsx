@@ -56,7 +56,7 @@ export function renderDisplayField(
     return <EntityReferenceDisplay field={field} value={value} lang={lang} />;
   }
 
-  if (field.semanticType === "workflowDefinitionId") {
+  if (field.osfType === "workflowDefinitionId") {
     return (
       <WorkflowDefinitionReferenceDisplay
         field={field}
@@ -66,7 +66,7 @@ export function renderDisplayField(
     );
   }
 
-  if (field.semanticType === "condition") {
+  if (field.osfType === "condition") {
     const sourceValue =
       getLegacySourceFieldStructuredValue(field, rootValues);
     const variableSuggestions = typeof sourceValue === "string" && sourceValue
@@ -105,7 +105,7 @@ export function renderDisplayField(
     );
   }
 
-  if (field.semanticType === "fieldDefinition") {
+  if (field.osfType === "fieldDefinition") {
     return <FieldDefinitionView value={value} lang={lang} />;
   }
 
@@ -151,7 +151,7 @@ export function renderDisplayField(
 
   if (
     typeof value === "string" &&
-    (field.semanticType === "variableTemplate" || value.includes("{{chips."))
+    (field.osfType === "variableTemplate" || value.includes("{{chips."))
   ) {
     return <ChipResolvedTextDisplay value={value} />;
   }

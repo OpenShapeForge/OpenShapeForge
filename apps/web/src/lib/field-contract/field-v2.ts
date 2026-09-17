@@ -2,7 +2,13 @@
 import type { Field } from "@/generated/compiler/field-contract";
 import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
 
-export type FieldValueType = NonNullable<Field["valueType"]>;
+export type FieldValueType = NonNullable<Field["baseType"]>;
+
+const BASE_TYPES: ReadonlySet<string> = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);
+
+export function isBaseType(osfType: string | undefined): osfType is FieldValueType {
+  return osfType !== undefined && BASE_TYPES.has(osfType);
+}
 export type FieldCardinality = NonNullable<Field["cardinality"]>;
 
 export type FieldRuntimeKind =
@@ -18,10 +24,10 @@ export type FieldShapeKind =
 
 /** Raw authoring fields may inherit valueType from their semantic type. */
 export function fieldValueType(field: Field): FieldValueType {
-  const semantic = field.semanticType
-    ? COMPILER_SEMANTIC_TYPES[field.semanticType as keyof typeof COMPILER_SEMANTIC_TYPES]
+  const semantic = field.osfType
+    ? COMPILER_SEMANTIC_TYPES[field.osfType as keyof typeof COMPILER_SEMANTIC_TYPES]
     : undefined;
-  return (field.valueType ?? semantic?.valueType ?? "string") as FieldValueType;
+  return (fieldValueType(field) ?? semantic?.valueType ?? "string") as FieldValueType;
 }
 
 export function fieldCardinality(field: Field): FieldCardinality {
@@ -49,15 +55,15 @@ export function isFieldObjectCollection(field: Field): boolean {
 }
 
 export function isFieldDefinitionCollection(field: Field): boolean {
-  return isFieldObjectCollection(field) && field.semanticType === "fieldDefinition";
+  return isFieldObjectCollection(field) && field.osfType === "fieldDefinition";
 }
 
 export function isActionDefinitionCollection(field: Field): boolean {
-  return isFieldObjectCollection(field) && field.semanticType === "actionDefinition";
+  return isFieldObjectCollection(field) && field.osfType === "actionDefinition";
 }
 
 export function isActionDefinitionItem(field: Field): boolean {
-  return fieldValueType(field) === "object" && field.semanticType === "actionDefinitionItem";
+  return fieldValueType(field) === "object" && field.osfType === "actionDefinitionItem";
 }
 
 export function fieldRuntimeKind(field: Field): FieldRuntimeKind {

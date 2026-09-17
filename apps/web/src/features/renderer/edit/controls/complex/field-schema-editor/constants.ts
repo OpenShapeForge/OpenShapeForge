@@ -10,6 +10,7 @@ import type {
   VisibilityCondition,
 } from "@/generated/compiler/field-contract";
 import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 export const EMPTY_SELECT_VALUE = "__empty__";
 
@@ -45,7 +46,7 @@ export function getSemanticTypeOptionsForFieldType(fieldType: string) {
 
 export function getSemanticTypeOptionsForFieldShape(field: Field) {
   if ((field.cardinality ?? "single") === "collection") return [];
-  return SEMANTIC_TYPE_OPTIONS.filter((opt) => opt.valueType === field.valueType);
+  return SEMANTIC_TYPE_OPTIONS.filter((opt) => opt.valueType === fieldValueType(field));
 }
 
 export const FIELD_OPTIONS_TYPE_OPTIONS: Array<{

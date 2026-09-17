@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
 
 import { Button } from "@openshapeforge/ui";
@@ -160,7 +161,7 @@ export function FieldSchemaDefaultValueEditor({
     );
   }
 
-  if (field.valueType === "object" || isFieldCardinalityCollection(field.cardinality)) {
+  if (fieldValueType(field) === "object" || isFieldCardinalityCollection(field.cardinality)) {
     return (
       <JsonFieldEditor
         label={lang === "nl" ? "Standaardwaarde (JSON)" : "Default value (JSON)"}
@@ -177,7 +178,7 @@ export function FieldSchemaDefaultValueEditor({
     );
   }
 
-  if (field.valueType === "number" || field.valueType === "integer") {
+  if (fieldValueType(field) === "number" || fieldValueType(field) === "integer") {
     return (
       <FieldFrame
         label={lang === "nl" ? "Standaardwaarde" : "Default value"}
@@ -191,7 +192,7 @@ export function FieldSchemaDefaultValueEditor({
           <div className="space-y-2">
             <NumberInput
               {...controlProps}
-              step={field.valueType === "integer" ? 1 : "any"}
+              step={fieldValueType(field) === "integer" ? 1 : "any"}
               value={typeof value === "number" ? String(value) : ""}
               onChange={(event) => {
                 const nextText = event.currentTarget.value.trim();
@@ -205,7 +206,7 @@ export function FieldSchemaDefaultValueEditor({
                   return;
                 }
                 onChange(
-                  field.valueType === "integer" && !Number.isInteger(parsed)
+                  fieldValueType(field) === "integer" && !Number.isInteger(parsed)
                     ? undefined
                     : parsed,
                 );
@@ -218,7 +219,7 @@ export function FieldSchemaDefaultValueEditor({
     );
   }
 
-  if (field.valueType === "boolean") {
+  if (fieldValueType(field) === "boolean") {
     const checked = value === true;
     return (
       <FieldFrame
@@ -260,8 +261,8 @@ export function FieldSchemaDefaultValueEditor({
     );
   }
 
-  if (field.valueType === "date" || field.valueType === "datetime") {
-    const Picker = field.valueType === "datetime" ? DateTimePicker : DatePicker;
+  if (fieldValueType(field) === "date" || fieldValueType(field) === "datetime") {
+    const Picker = fieldValueType(field) === "datetime" ? DateTimePicker : DatePicker;
     return (
       <FieldFrame
         label={lang === "nl" ? "Standaardwaarde" : "Default value"}

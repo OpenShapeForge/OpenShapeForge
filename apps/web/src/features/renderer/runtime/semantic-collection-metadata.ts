@@ -18,10 +18,10 @@ export type SemanticCollectionMeta = {
  * which every consumer below already treats as "no collection metadata".
  */
 export function resolveSemanticCollectionMeta(
-  field: Pick<Field, "semanticType">,
+  field: Pick<Field, "osfType">,
 ): SemanticCollectionMeta {
-  const def = field.semanticType
-    ? getCompilerSemanticTypeDefinition(field.semanticType)
+  const def = field.osfType
+    ? getCompilerSemanticTypeDefinition(field.osfType)
     : undefined;
   if (!isRecord(def)) return {};
 

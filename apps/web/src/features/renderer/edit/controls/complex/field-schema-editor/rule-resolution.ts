@@ -153,11 +153,11 @@ function resolveEntitySemanticCandidatesForIdSemanticType(value: unknown): strin
   if (typeof value !== "string" || value.trim().length === 0) {
     return [];
   }
-  const semanticType = value.trim();
-  const candidates = new Set<string>([semanticType]);
+  const osfType = value.trim();
+  const candidates = new Set<string>([osfType]);
   const definition =
     COMPILER_SEMANTIC_TYPES[
-      semanticType as keyof typeof COMPILER_SEMANTIC_TYPES
+      osfType as keyof typeof COMPILER_SEMANTIC_TYPES
     ];
   const entity =
     definition && "entity" in definition && typeof definition.entity === "string"
@@ -185,8 +185,8 @@ export function filterDynamicOptionSourceSuggestions(
       return true;
     }
     return (
-      (suggestion.semanticType && candidates.includes(suggestion.semanticType)) ||
-      (suggestion.itemSemanticType && candidates.includes(suggestion.itemSemanticType))
+      (suggestion.osfType && candidates.includes(suggestion.osfType)) ||
+      (suggestion.itemOsfType && candidates.includes(suggestion.itemOsfType))
     );
   });
 }

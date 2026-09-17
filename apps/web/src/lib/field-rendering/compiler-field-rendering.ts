@@ -11,7 +11,7 @@
  * (for read-only mode). Also resolves field-level validation rules from
  * semantic type definitions.
  *
- * @input  Field definition with valueType, semanticType, readOnly, and optional render override
+ * @input  Field definition with valueType, osfType, readOnly, and optional render override
  * @output ResolvedFieldRender: { component, props, source }
  */
 import type {
@@ -28,7 +28,7 @@ import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
 type RendererAwareField = {
   valueType?: string;
   cardinality?: string | { min?: number; max?: number | "unbounded" };
-  semanticType?: string;
+  osfType?: string;
   readOnly?: boolean;
   render?: Partial<FieldRender> | null;
   validation?: FieldValidation;
@@ -46,7 +46,7 @@ function isRendererCollectionField(field: RendererAwareField): boolean {
 export type ResolvedFieldRender = {
   component: string;
   props?: Record<string, unknown>;
-  source: "explicit" | "semanticType" | "fieldType" | "fallback";
+  source: "explicit" | "osfType" | "fieldType" | "fallback";
 };
 
 const COMPONENT_ALIASES: Record<string, string> = {
@@ -61,9 +61,9 @@ const COMPONENT_ALIASES: Record<string, string> = {
 };
 
 function getSemanticTypeKey(field: RendererAwareField) {
-  return typeof field.semanticType === "string" &&
-    field.semanticType.trim().length > 0
-    ? field.semanticType.trim()
+  return typeof field.osfType === "string" &&
+    field.osfType.trim().length > 0
+    ? field.osfType.trim()
     : undefined;
 }
 
@@ -77,14 +77,14 @@ export function normalizeFieldComponentName(component?: string) {
 }
 
 export function getCompilerSemanticTypeDefinition(
-  semanticType: string | undefined,
+  osfType: string | undefined,
 ): SemanticTypeDefinition | undefined {
-  if (!semanticType) {
+  if (!osfType) {
     return undefined;
   }
 
   return COMPILER_SEMANTIC_TYPES[
-    semanticType as keyof typeof COMPILER_SEMANTIC_TYPES
+    osfType as keyof typeof COMPILER_SEMANTIC_TYPES
   ];
 }
 
@@ -134,11 +134,11 @@ export function resolveFieldInputRender(field: RendererAwareField): ResolvedFiel
     return explicitRender;
   }
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldSemanticTypeDefinition(field);
   const semanticRender = buildResolvedRender(
-    semanticType?.render?.input,
-    semanticType?.props,
-    "semanticType",
+    osfType?.render?.input,
+    osfType?.props,
+    "osfType",
   );
   if (semanticRender) {
     return semanticRender;
@@ -166,11 +166,11 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     return explicitRender;
   }
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldSemanticTypeDefinition(field);
   const semanticRender = buildResolvedRender(
-    semanticType?.render?.display,
-    semanticType?.props,
-    "semanticType",
+    osfType?.render?.display,
+    osfType?.props,
+    "osfType",
   );
   if (semanticRender) {
     return semanticRender;

@@ -199,7 +199,7 @@ export function renderFieldSchemaCustomField(
       const optionSourceForSemanticType =
         props.field.render?.props?.optionSourceForSemanticType === true;
       const suggestions = optionSourceForSemanticType
-        ? filterDynamicOptionSourceSuggestions(variableSuggestions, editorField.semanticType)
+        ? filterDynamicOptionSourceSuggestions(variableSuggestions, editorField.osfType)
         : variableSuggestions ?? [];
 
       return wrapFieldSchemaWideContent(

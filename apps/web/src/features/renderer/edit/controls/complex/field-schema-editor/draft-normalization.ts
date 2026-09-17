@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field, LocalizedText } from "@/generated/compiler/field-contract";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import type { FieldAuthoringProfile, FieldWithAuthoringMetadata } from "@/lib/field-authoring/profiles";
 import { EMPTY_SELECT_VALUE } from "./constants";
 import {
@@ -167,7 +168,8 @@ export function normalizeFieldSchemaDraft(
     : createEmptyField();
 
   const fallback = createEmptyField();
-  const valueType = field.valueType ?? fallback.valueType;
+  const osfType = field.osfType ?? fallback.osfType;
+  const valueType = fieldValueType({ osfType: String(osfType) });
   const fieldWithShape = field as FieldWithAuthoringMetadata;
   const structuredCardinality = normalizeFieldCardinality(
     field.cardinality,
@@ -188,7 +190,7 @@ export function normalizeFieldSchemaDraft(
 
   return {
     key: typeof field.key === "string" ? field.key : "",
-    valueType,
+    osfType: normalizeSemanticTypeDraft(osfType) ?? valueType,
     cardinality: structuredCardinality,
     ...(field.variables ? { variables: field.variables } : {}),
     ...(field.sortable === true ? { sortable: true } : {}),
@@ -205,9 +207,6 @@ export function normalizeFieldSchemaDraft(
       : {}),
     ...(normalizeLocalizedTextDraft(field.help)
       ? { help: normalizeLocalizedTextDraft(field.help) }
-      : {}),
-    ...(normalizeSemanticTypeDraft(field.semanticType)
-      ? { semanticType: normalizeSemanticTypeDraft(field.semanticType) }
       : {}),
     ...(trimOptionalString(field.unit) ? { unit: trimOptionalString(field.unit) } : {}),
     ...(trimOptionalString(field.currency)

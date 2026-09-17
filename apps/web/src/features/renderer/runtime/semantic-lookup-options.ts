@@ -7,20 +7,20 @@ import {
 import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 function normalizeSemanticType(field: Field) {
-  const semanticType = field.semanticType?.trim();
-  return semanticType && semanticType.length > 0 ? semanticType : null;
+  const osfType = field.osfType?.trim();
+  return osfType && osfType.length > 0 ? osfType : null;
 }
 
 export function getSemanticTypeLookupDefinition(
   field: Field,
 ): CompilerSemanticTypeLookupDefinition | null {
-  const semanticType = normalizeSemanticType(field);
-  if (!semanticType) {
+  const osfType = normalizeSemanticType(field);
+  if (!osfType) {
     return null;
   }
   return (
     COMPILER_SEMANTIC_TYPE_LOOKUPS[
-      semanticType as keyof typeof COMPILER_SEMANTIC_TYPE_LOOKUPS
+      osfType as keyof typeof COMPILER_SEMANTIC_TYPE_LOOKUPS
     ] ?? null
   );
 }
@@ -92,17 +92,17 @@ export function buildSemanticLookupPickerField(field: Field): Field | null {
 }
 
 export function buildEntityReferencePickerField(field: Field): Field | null {
-  const semanticType = getFieldSemanticTypeDefinition(field);
-  if (semanticType?.kind !== "entityId") {
+  const osfType = getFieldSemanticTypeDefinition(field);
+  if (osfType?.kind !== "entityId") {
     return null;
   }
 
   const remoteUrl =
     field.options?.type === "remote"
       ? field.options.remoteUrl
-      : semanticType.options?.type === "remote"
-        ? semanticType.options.remoteUrl
-        : semanticType.listUrl;
+      : osfType.options?.type === "remote"
+        ? osfType.options.remoteUrl
+        : osfType.listUrl;
 
   if (!remoteUrl?.trim()) {
     return null;

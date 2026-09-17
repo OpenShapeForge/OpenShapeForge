@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field as CompilerField } from "../../../../../generated/compiler/field-contract";
 import type { FieldControlProps } from "../../field";
 import {
@@ -167,7 +168,7 @@ export function renderLeafFieldControl({
   if (
     component === "Switch" ||
     component === "Checkbox" ||
-    field.valueType === "boolean"
+    fieldValueType(field) === "boolean"
   ) {
     return renderBooleanField(
       field,

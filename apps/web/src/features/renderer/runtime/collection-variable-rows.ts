@@ -20,8 +20,8 @@ function isCollectionField(field: Field): boolean {
 function isFieldDefinitionCollectionSource(field: Field): boolean {
   return (
     isCollectionField(field) &&
-    (field.semanticType === "fieldDefinition" ||
-      field.item?.semanticType === "fieldDefinition")
+    (field.osfType === "fieldDefinition" ||
+      field.item?.osfType === "fieldDefinition")
   );
 }
 
@@ -44,15 +44,15 @@ export function getCollectionVariableRowMode(
 }
 
 function getObjectCollectionVariableFilter(field: Field): VariableFilter {
-  const itemSemanticType =
-    typeof field.item?.semanticType === "string" &&
-    field.item.semanticType.trim()
-      ? field.item.semanticType.trim()
+  const itemOsfType =
+    typeof field.item?.osfType === "string" &&
+    field.item.osfType.trim()
+      ? field.item.osfType.trim()
       : undefined;
 
   return {
     valueType: "array",
-    ...(itemSemanticType ? { itemSemanticType } : {}),
+    ...(itemOsfType ? { itemOsfType } : {}),
   };
 }
 
@@ -62,7 +62,7 @@ export function isFieldDefinitionCollectionSuggestion(
   return (
     suggestion.fieldType === "fieldArray" ||
     (suggestion.valueType === "array" &&
-      suggestion.itemSemanticType === "fieldDefinition")
+      suggestion.itemOsfType === "fieldDefinition")
   );
 }
 
@@ -138,14 +138,14 @@ export function materializeVariableSuggestionAsFieldDefinition(
 
   return {
     key: normalizeFieldKey(suggestion.fieldPath || suggestion.path),
-    valueType,
+    osfType: fieldType === "fieldArray" ? "fieldDefinition" : valueType,
+    baseType: valueType,
     ...(fieldType === "array" || fieldType === "fieldArray"
       ? { cardinality: { min: 0, max: "unbounded" as const } }
       : {}),
-    ...(fieldType === "fieldArray" ? { semanticType: "fieldDefinition" } : {}),
     ...(fieldType === "uuid" ? { validation: { format: "uuid" } } : {}),
     label: { nl: label, en: label },
-    ...(suggestion.semanticType ? { semanticType: suggestion.semanticType } : {}),
+    ...(suggestion.osfType ? { osfType: suggestion.osfType } : {}),
     ...(options ? { options } : {}),
     ...(suggestion.referentieGroep
       ? {
@@ -168,7 +168,7 @@ export function buildCollectionVariableRowPickerField(
   if (mode.kind === "fieldDefinition") {
     return {
       key: "source",
-      valueType: "string",
+      osfType: "string",
       label: {
         nl: context === "collection" ? "Collectiebron" : "Veldbron",
         en: context === "collection" ? "Collection source" : "Field source",
@@ -206,7 +206,7 @@ export function buildCollectionVariableRowPickerField(
 
   return {
     key: "source",
-    valueType: "string",
+    osfType: "string",
     label: { nl: "Collectiebron", en: "Collection source" },
     placeholder: {
       nl: "Kies variabele...",
@@ -221,8 +221,8 @@ export function buildCollectionVariableRowPickerField(
         clearable: true,
         valueMode: "insertText",
         expectedValueType: "array",
-        ...(filter.itemSemanticType
-          ? { expectedItemSemanticType: filter.itemSemanticType }
+        ...(filter.itemOsfType
+          ? { expectedItemSemanticType: filter.itemOsfType }
           : {}),
         variableSectionLabel: lang === "en" ? "Variables" : "Variabelen",
         emptyMessage:

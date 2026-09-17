@@ -5,8 +5,7 @@ import type { VariableSuggestion } from "@/features/renderer/runtime/variable-su
 import {
   fieldRuntimeKind,
   isFieldCollection,
-  type FieldRuntimeKind,
-} from "@/lib/field-contract/field-v2";
+  type FieldRuntimeKind, fieldValueType } from "@/lib/field-contract/field-v2";
 
 type VariableValueType =
   | "string"
@@ -20,11 +19,11 @@ export type VariableFilter = {
   /**
    * Runtime compatibility type used by workflow variable suggestions. This is
    * not a canonical field shape; field-definition collections are authored as
-   * `valueType: "object"` plus collection cardinality and semanticType.
+   * `osfType: "object"` plus collection cardinality, or a fieldDefinition osfType.
    */
   fieldType?: FieldRuntimeKind;
-  semanticType?: string;
-  itemSemanticType?: string;
+  osfType?: string;
+  itemOsfType?: string;
   fieldDefinitionSource?: boolean;
   anyOf?: VariableFilter[];
 };
@@ -55,7 +54,7 @@ function semanticTypesCompatible(
 
 function normalizeFieldValueType(field: Field): VariableValueType {
   if (isFieldCollection(field)) return "array";
-  switch (field.valueType) {
+  switch (fieldValueType(field)) {
     case "integer":
     case "number":
       return "number";
@@ -72,9 +71,9 @@ function normalizeFieldValueType(field: Field): VariableValueType {
 }
 
 export function getFieldValueType(field: Field): VariableValueType {
-  const semanticType = normalizeOptionalString(field.semanticType);
-  const semanticDefinition = semanticType
-    ? COMPILER_SEMANTIC_TYPES[semanticType as keyof typeof COMPILER_SEMANTIC_TYPES]
+  const osfType = normalizeOptionalString(field.osfType);
+  const semanticDefinition = osfType
+    ? COMPILER_SEMANTIC_TYPES[osfType as keyof typeof COMPILER_SEMANTIC_TYPES]
     : undefined;
   const semanticValueType = semanticDefinition?.valueType as string | undefined;
 
@@ -94,39 +93,39 @@ export function getFieldValueType(field: Field): VariableValueType {
 export function getVariableFilterForField(
   field: Field,
 ): VariableFilter | null {
-  const semanticType =
+  const osfType =
     normalizeOptionalString(field.render?.props?.expectedSemanticType) ??
-    normalizeOptionalString(field.semanticType);
-  if (semanticType) {
+    normalizeOptionalString(field.osfType);
+  if (osfType) {
     // `variableTemplate` classifies the *field* (a string containing `{{...}}` tokens), not
     // the semantic type of each referenced variable (iban, relationId, plain strings, …).
-    // Filtering the suggestion pool by `semanticType === "variableTemplate"` would drop every
+    // Filtering the suggestion pool by `osfType === "variableTemplate"` would drop every
     // real upstream output — none of those carry this tag — so pills show "Variabele bron niet gevonden."
-    if (semanticType === "variableTemplate") {
+    if (osfType === "variableTemplate") {
       return null;
     }
     if (
-      semanticType === "fieldDefinition" &&
+      osfType === "fieldDefinition" &&
       field.render?.props?.allowFieldDefinitionArrays === true
     ) {
       return {
         anyOf: [
-          { semanticType },
+          { osfType },
           { fieldType: "fieldArray" },
-          { valueType: "array", itemSemanticType: semanticType },
+          { valueType: "array", itemOsfType: osfType },
         ],
       };
     }
-    return { semanticType };
+    return { osfType };
   }
 
-  const itemSemanticType =
+  const itemOsfType =
     normalizeOptionalString(field.render?.props?.expectedItemSemanticType) ??
-    normalizeOptionalString(field.item?.semanticType);
-  if (itemSemanticType) {
+    normalizeOptionalString(field.item?.osfType);
+  if (itemOsfType) {
     return {
       valueType: "array",
-      itemSemanticType,
+      itemOsfType,
     };
   }
 
@@ -142,7 +141,7 @@ export function getVariableFilterForField(
       break;
   }
 
-  if (!isFieldCollection(field) && (field.valueType === "date" || field.valueType === "datetime")) {
+  if (!isFieldCollection(field) && (fieldValueType(field) === "date" || fieldValueType(field) === "datetime")) {
     return { fieldType: fieldRuntimeKind(field) };
   }
 
@@ -156,14 +155,14 @@ export function getVariableFilterForSuggestion(
     return null;
   }
 
-  if (suggestion.semanticType) {
-    return { semanticType: suggestion.semanticType };
+  if (suggestion.osfType) {
+    return { osfType: suggestion.osfType };
   }
 
-  if (suggestion.itemSemanticType) {
+  if (suggestion.itemOsfType) {
     return {
       valueType: "array",
-      itemSemanticType: suggestion.itemSemanticType,
+      itemOsfType: suggestion.itemOsfType,
     };
   }
 
@@ -188,22 +187,22 @@ export function isVariableSuggestionCompatible(
     );
   }
 
-  if (filter.semanticType) {
-    return semanticTypesCompatible(suggestion.semanticType, filter.semanticType);
+  if (filter.osfType) {
+    return semanticTypesCompatible(suggestion.osfType, filter.osfType);
   }
 
   if (filter.fieldDefinitionSource) {
     return (
       suggestion.fieldType === "fieldArray" ||
       (suggestion.valueType === "array" &&
-        suggestion.itemSemanticType === "fieldDefinition")
+        suggestion.itemOsfType === "fieldDefinition")
     );
   }
 
-  if (filter.itemSemanticType) {
+  if (filter.itemOsfType) {
     return (
       suggestion.valueType === "array" &&
-      suggestion.itemSemanticType === filter.itemSemanticType
+      suggestion.itemOsfType === filter.itemOsfType
     );
   }
 

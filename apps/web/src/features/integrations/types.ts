@@ -37,7 +37,7 @@ export type ConnectorConfigField = {
   key: string;
   valueType?: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   cardinality?: string | { min?: number; max?: number | "unbounded" };
-  semanticType?: string;
+  osfType?: string;
   required?: boolean;
   secret?: boolean;
   readOnly?: boolean;

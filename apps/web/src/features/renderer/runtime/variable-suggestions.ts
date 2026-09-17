@@ -60,9 +60,10 @@ export type VariableSuggestion = {
    */
   sourceNodeDistance?: number;
   fieldType?: FieldRuntimeKind;
+  /** JavaScript value kind of the variable, not a field type. */
   valueType: "string" | "number" | "boolean" | "object" | "array";
-  semanticType?: string;
-  itemSemanticType?: string;
+  osfType?: string;
+  itemOsfType?: string;
   options?: Array<{
     value: string;
     label: string;

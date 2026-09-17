@@ -69,7 +69,7 @@ export function getRendererFieldSpanClass(
 
 export function getRendererFullWidthSpanClass(columns: number | undefined) {
   return getRendererFieldSpanClass(
-    { key: "__layout__", valueType: "string", layoutFraction: 1 },
+    { key: "__layout__", osfType: "string", layoutFraction: 1 },
     columns,
   );
 }

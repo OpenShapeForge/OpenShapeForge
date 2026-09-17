@@ -4,7 +4,7 @@ import type { Field } from "@/generated/compiler/field-contract";
 export function createBaseField(): Field {
   return {
     key: "",
-    valueType: "string",
+    osfType: "string",
     cardinality: { min: 0, max: 1 },
     required: false,
     label: {

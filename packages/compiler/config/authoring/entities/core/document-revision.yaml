@@ -248,7 +248,15 @@ interfaces:
         title: { en: Document revisions, nl: Documentrevisies }
         columns: [{ key: channel }, { key: locale }, { key: status, sortable: true }]
       record:
-        routes: { read: "/document-revisions/:id", create: /document-revisions/new }
+        # No create/update route or modes: DocumentRevision is never created or
+        # edited through the generic record form. Document.startRevision creates
+        # it; updateBlock/insertBlock/removeBlock/moveBlock/publish and
+        # Document.removeRevision mutate and remove it. The `update` entity
+        # operation above stays authored (the compiler requires it to prove the
+        # child is mutable for Document.removeRevision's collection machinery)
+        # but is hidden from every transport, so it must never be reachable
+        # from this view either.
+        routes: { read: "/document-revisions/:id" }
         title: "{{channel}} · {{locale}}"
         subtitle: "{{status}}"
         actions: [publish]
@@ -260,10 +268,3 @@ interfaces:
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks
-        modes:
-          create:
-            title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Revision, nl: Revisie }, fields: [document, channel, locale] }]
-          update:
-            title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Revision, nl: Revisie }, fields: [status, parameters] }]

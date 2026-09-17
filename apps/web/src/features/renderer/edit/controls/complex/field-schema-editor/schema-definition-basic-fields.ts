@@ -249,7 +249,7 @@ export function buildBasicFieldSchemaFields(
       render: {
         component: "OptionVariablePicker",
         props: {
-          optionSourceForSemanticType: true,
+          optionSourceForOsfType: true,
           valueMode: "insertText",
         },
       },

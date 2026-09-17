@@ -44,12 +44,12 @@ export function buildRecordIdField(
 export function buildListOutputFields(
   entityLabels: { en: string; nl: string },
   readableFields: Field[],
-  entitySemanticType: string,
+  entityOsfType: string,
 ): Field[] {
   return [
     {
       key: "items",
-      osfType: `${entitySemanticType}[]`,
+      osfType: `${entityOsfType}[]`,
       baseType: "object",
       cardinality: UNBOUNDED_CARDINALITY,
       readOnly: true,
@@ -63,7 +63,7 @@ export function buildListOutputFields(
       },
       item: {
         key: "item",
-        osfType: entitySemanticType,
+        osfType: entityOsfType,
         baseType: "object",
         readOnly: true,
         children: readableFields.map(toOutputField),

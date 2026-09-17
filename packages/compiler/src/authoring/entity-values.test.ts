@@ -11,7 +11,7 @@ import type { FieldDefinitionInverseCollection } from "./types/field-definition.
 import type { PlatformSchemaManifest } from "../schema.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
-import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 
 const entityOperation = (action: string) => ({
   name: action, description: action, implementation: { type: "entity", action },
@@ -66,7 +66,7 @@ function compileFixture(
     mkdirSync(join(dir, "entities")); mkdirSync(join(dir, "catalogs"));
     write("catalogs/components.yaml", { defaults: {}, components: {} });
     write("catalogs/transforms.yaml", { transforms: {} });
-    write("catalogs/semantic-types.yaml", { types: {
+    write("catalogs/osf-types.yaml", { types: {
       entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } },
       shortText: { kind: "scalar", valueType: "string", validation: { maxLength: 80 }, label: { en: "Text" } },
     } });
@@ -147,13 +147,13 @@ describe("entityValue compiled storage and registry", () => {
     expect(() => compileFixture((entities) => named(entities, "Copy").fields[0]!.immutable = false)).not.toThrow();
     const definition = entity("FixedValue", [{ key: "nested", osfType: "object", children: [{ key: "fixed", osfType: "fixedText" }] }], true);
     const fixedText = { kind: "scalar" as const, valueType: "string" as const, label: { en: "Fixed" }, immutable: true };
-    expect(() => normalizeEntityFields(definition, deriveEntitySemanticTypes([definition], { fixedText }))).toThrow("field policy immutable");
+    expect(() => normalizeEntityFields(definition, deriveEntityOsfTypes([definition], { fixedText }))).toThrow("field policy immutable");
   });
 
   it("rejects guarded profile fields and semantic policies before model projection can erase them", () => {
     expect(() => compileFixture(undefined, [{ key: "profileSecret", osfType: "string", permissions: { read: ["Example.Read"] } }])).toThrow("field policy permissions");
     const definition = entity("SecureValue", [{ key: "nested", osfType: "object", children: [{ key: "sensitive", osfType: "privateText" }] }], true);
-    const catalog = deriveEntitySemanticTypes([definition], {
+    const catalog = deriveEntityOsfTypes([definition], {
       privateText: { kind: "scalar", valueType: "string", label: { en: "Private" }, classification: { sensitivity: "pii" } },
     });
     expect(() => normalizeEntityFields(definition, catalog)).toThrow("field policy classification");

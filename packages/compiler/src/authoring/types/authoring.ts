@@ -9,7 +9,7 @@ import type {
   LocalizedText,
   FieldValidation,
   FieldRender,
-  SemanticTypeLookupDefinition,
+  OsfTypeLookupDefinition,
   EntityPermissions,
   FieldOptions,
   DataClassification,
@@ -79,8 +79,8 @@ export interface ComponentCatalog {
   components: Record<string, ComponentDefinition>;
 }
 
-export interface SemanticTypeDefinition {
-  /** Derived from the entity corpus, never authored in the semantic-type catalog. */
+export interface OsfTypeDefinition {
+  /** Derived from the entity corpus, never authored in the osf-type catalog. */
   entityIdentity?: boolean;
   /**
    * Discriminator for entity-ID semantic types. When set to `"entityId"`,
@@ -103,7 +103,7 @@ export interface SemanticTypeDefinition {
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
-  lookup?: SemanticTypeLookupDefinition;
+  lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
     input: string;
@@ -150,10 +150,10 @@ export interface SemanticTypeDefinition {
   filterField?: string;
 }
 
-export interface SemanticTypeCatalog {
+export interface OsfTypeCatalog {
   schemaVersion: number;
-  kind: "semanticTypeCatalog";
-  types: Record<string, SemanticTypeDefinition>;
+  kind: "osfTypeCatalog";
+  types: Record<string, OsfTypeDefinition>;
 }
 
 export interface RetentionPolicyCatalog {

@@ -35,7 +35,7 @@ configFields:
       component: OptionVariablePicker
       props:
         clearable: true
-        expectedSemanticType: workflowDefinitionId
+        expectedOsfType: workflowDefinitionId
         selectionSync: publishedWorkflow
         optionSectionLabel: Gepubliceerde workflows
         variableSectionLabel: Dynamische variabelen

@@ -1,32 +1,32 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field, LocalizedText } from "@/generated/compiler/field-contract";
 import {
-  COMPILER_SEMANTIC_TYPE_LOOKUPS,
-  type CompilerSemanticTypeLookupDefinition,
-} from "@/generated/compiler/semantic-type-lookups";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+  COMPILER_OSF_TYPE_LOOKUPS,
+  type CompilerOsfTypeLookupDefinition,
+} from "@/generated/compiler/osf-type-lookups";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
-function normalizeSemanticType(field: Field) {
+function normalizeOsfType(field: Field) {
   const osfType = field.osfType?.trim();
   return osfType && osfType.length > 0 ? osfType : null;
 }
 
-export function getSemanticTypeLookupDefinition(
+export function getOsfTypeLookupDefinition(
   field: Field,
-): CompilerSemanticTypeLookupDefinition | null {
-  const osfType = normalizeSemanticType(field);
+): CompilerOsfTypeLookupDefinition | null {
+  const osfType = normalizeOsfType(field);
   if (!osfType) {
     return null;
   }
   return (
-    COMPILER_SEMANTIC_TYPE_LOOKUPS[
-      osfType as keyof typeof COMPILER_SEMANTIC_TYPE_LOOKUPS
+    COMPILER_OSF_TYPE_LOOKUPS[
+      osfType as keyof typeof COMPILER_OSF_TYPE_LOOKUPS
     ] ?? null
   );
 }
 
 function lookupSectionLabel(
-  lookup: CompilerSemanticTypeLookupDefinition,
+  lookup: CompilerOsfTypeLookupDefinition,
 ): string {
   if (lookup.provider === "messaging.conversations") {
     return "Conversaties";
@@ -39,7 +39,7 @@ function lookupSectionLabel(
 
 function lookupPlaceholder(
   field: Field,
-  lookup: CompilerSemanticTypeLookupDefinition,
+  lookup: CompilerOsfTypeLookupDefinition,
 ): LocalizedText {
   if (lookup.provider === "messaging.conversations") {
     return {
@@ -57,11 +57,11 @@ export function shouldRenderSemanticLookupField(field: Field, required: boolean)
   if (!required || field.readOnly || field.computed) {
     return false;
   }
-  return getSemanticTypeLookupDefinition(field) !== null;
+  return getOsfTypeLookupDefinition(field) !== null;
 }
 
 export function buildSemanticLookupPickerField(field: Field): Field | null {
-  const lookup = getSemanticTypeLookupDefinition(field);
+  const lookup = getOsfTypeLookupDefinition(field);
   if (!lookup) {
     return null;
   }
@@ -92,7 +92,7 @@ export function buildSemanticLookupPickerField(field: Field): Field | null {
 }
 
 export function buildEntityReferencePickerField(field: Field): Field | null {
-  const osfType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   if (osfType?.kind !== "entityId") {
     return null;
   }

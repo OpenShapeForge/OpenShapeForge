@@ -47,7 +47,7 @@ export const SCHEMAS_DIR = join(
  * Authoring `kind` -> the schema that describes it.
  *
  * Explicit rather than derived from each schema's `properties.kind.const`,
- * because two schemas claim `semanticTypeCatalog` (a v1 and a v2 shape) and
+ * because two schemas claim `osfTypeCatalog` (a v1 and a v2 shape) and
  * only one of them describes what this repo authors today. Deriving the map
  * would make that ambiguity silent again.
  */
@@ -57,7 +57,7 @@ export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   connector: "connector.schema.json",
   authorizationConfig: "authorization-config.schema.json",
   retentionPolicyCatalog: "retention-policy-catalog.schema.json",
-  semanticTypeCatalog: "semantic-type-catalog.schema.json",
+  osfTypeCatalog: "osf-type-catalog.schema.json",
   transformCatalog: "transform-catalog.schema.json",
   settingsDefinition: "settings-definition.schema.json",
   settingsProvider: "settings-provider.schema.json",

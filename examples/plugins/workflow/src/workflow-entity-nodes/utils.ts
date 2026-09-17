@@ -202,7 +202,7 @@ export function validateWorkflowReferentieGroepen(fields: Field[], entityKey: st
   }
 }
 
-export function normalizeSemanticTypeKey(value: unknown) {
+export function normalizeOsfTypeKey(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined;

@@ -7,7 +7,7 @@ import {
   assertPartialProfileHasNoCrud,
   validateEntityContentIdentifiers,
   loadEntity,
-  loadSemanticTypes,
+  loadOsfTypes,
   resolveEntityFilePath,
 } from "./loader.js";
 import type { CoreEntity } from "./types.js";
@@ -133,14 +133,14 @@ describe("loadEntity content validation (integration)", () => {
     const root = mkdtempSync(join(tmpdir(), "entity-catalog-cache-"));
     try {
       mkdirSync(join(root, "catalogs"));
-      const path = join(root, "catalogs/semantic-types.yaml");
+      const path = join(root, "catalogs/osf-types.yaml");
       const write = (valueType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, valueType } } }));
       write("string");
-      const first = loadSemanticTypes(root);
+      const first = loadOsfTypes(root);
       first.example!.label.en = "Changed by caller";
-      expect(loadSemanticTypes(root).example!.label.en).toBe("Example");
+      expect(loadOsfTypes(root).example!.label.en).toBe("Example");
       write("number");
-      expect(loadSemanticTypes(root).example!.valueType).toBe("number");
+      expect(loadOsfTypes(root).example!.valueType).toBe("number");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -234,7 +234,7 @@
         "osfType": {
           "type": "string",
           "minLength": 1,
-          "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase semantic-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
+          "description": "The one type axis: a base type (string, integer, number, boolean, date, datetime, object), a camelCase osf-type catalog key, or a PascalCase entity name. The compiler derives the base type from the catalog."
         },
         "cardinality": { "$ref": "#/$defs/cardinality" },
         "entityValue": {

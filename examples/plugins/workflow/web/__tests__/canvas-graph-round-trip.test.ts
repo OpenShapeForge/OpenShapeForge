@@ -766,7 +766,7 @@ describe("the designer writes the two variable keys and nothing else", () => {
     id: "def-1",
     name: "Onboarding",
     processVariables: [
-      { key: "total", valueType: "number", semanticType: "amount", authoring: { profile: "x" } },
+      { key: "total", valueType: "number", osfType: "amount", authoring: { profile: "x" } },
     ],
     processVariableInitializers: [{ targetKey: "total", value: "{{input.amount}}" }],
     canvasViewport: { x: -120, y: 40, zoom: 0.75 },
@@ -801,11 +801,11 @@ describe("the designer writes the two variable keys and nothing else", () => {
     expect(added.refused).toBeNull();
 
     const result = save(added.set);
-    // The stored entry comes back whole. `semanticType` and `authoring` are
+    // The stored entry comes back whole. `osfType` and `authoring` are
     // read by `runtime/field-definitions.ts` and by an authoring pass, and by
     // nothing in this editor — an add that rebuilt the list would drop them.
     expect(result.processVariables).toEqual([
-      { key: "total", valueType: "number", semanticType: "amount", authoring: { profile: "x" } },
+      { key: "total", valueType: "number", osfType: "amount", authoring: { profile: "x" } },
       { key: "channel", valueType: "string", label: { en: "Channel" } },
     ]);
     // Untouched, and still the same array: only the key that changed is

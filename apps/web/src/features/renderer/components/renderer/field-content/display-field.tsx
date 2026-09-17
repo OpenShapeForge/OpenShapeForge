@@ -24,7 +24,7 @@ import { getEntityFieldSuggestions } from "@/features/renderer/runtime/entity-fi
 import { getLegacySourceFieldStructuredValue } from "@/features/renderer/components/renderer/legacy-source-field";
 import type { Field } from "@/generated/compiler/field-contract";
 import {
-  getFieldSemanticTypeDefinition,
+  getFieldOsfTypeDefinition,
   resolveFieldDisplayRender,
 } from "@/lib/field-rendering/compiler-field-rendering";
 
@@ -52,7 +52,7 @@ export function renderDisplayField(
     return <TextDisplay>{text}</TextDisplay>;
   }
 
-  if (getFieldSemanticTypeDefinition(field)?.kind === "entityId") {
+  if (getFieldOsfTypeDefinition(field)?.kind === "entityId") {
     return <EntityReferenceDisplay field={field} value={value} lang={lang} />;
   }
 

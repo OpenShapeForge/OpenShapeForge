@@ -150,3 +150,16 @@ interfaces:
     expect(parsed["a/entities/assessment.yaml"].fields[1].key).toBe("relationId");
   });
 });
+
+describe("the type catalog", () => {
+  test("moves to osf-types.yaml with kind osfTypeCatalog and osfTypes document keys", () => {
+    const catalog = `schemaVersion: 1\nkind: semanticTypeCatalog\ntypes:\n  money:\n    label: { en: Money }\n    valueType: number\n`;
+    const profile = `kind: fieldAuthoringProfileCatalog\nprofiles:\n  base:\n    semanticTypes: [money]\n`;
+    const { parsed, changed, report } = migrated({ "a/catalogs/semantic-types.yaml": catalog, "a/catalogs/field-authoring-profiles.yaml": profile });
+    expect(parsed["a/catalogs/semantic-types.yaml"].kind).toBe("osfTypeCatalog");
+    expect(parsed["a/catalogs/semantic-types.yaml"].types.money.valueType).toBe("number");
+    expect(changed.find((file) => file.path === "a/catalogs/semantic-types.yaml")?.renameTo).toBe("a/catalogs/osf-types.yaml");
+    expect(parsed["a/catalogs/field-authoring-profiles.yaml"].profiles.base).toEqual({ osfTypes: ["money"] });
+    expect(report.rename.catalogs).toEqual(["a/catalogs/semantic-types.yaml", "a/catalogs/field-authoring-profiles.yaml"]);
+  });
+});

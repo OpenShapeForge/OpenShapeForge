@@ -33,13 +33,13 @@ function resolveLabel(label: LocalizedLabel | undefined | null, fallback: string
  */
 function mapToRendererField(formField: ActionFormField): Field {
   const valueType = normalizeFieldValueType(formField.valueType);
-  // The action form field keeps the workflow service's valueType/semanticType
+  // The action form field keeps the workflow service's valueType/osfType
   // pair; the renderer's Field names one osfType with the base resolved.
-  const { valueType: _valueType, semanticType, ...rest } = formField;
+  const { valueType: _valueType, osfType, ...rest } = formField;
   return {
     ...rest,
     key: formField.key,
-    osfType: semanticType ?? valueType,
+    osfType: osfType ?? valueType,
     baseType: valueType,
     cardinality: formField.cardinality ?? "single",
     required: formField.required ?? false,

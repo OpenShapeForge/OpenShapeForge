@@ -325,7 +325,7 @@ configFields:
                 help:
                   nl: Dit label helpt auteurs het veld te herkennen in de variabelezoeker.
                   en: This label helps authors recognize the field in the variable picker.
-              - key: semanticType
+              - key: osfType
                 osfType: string
                 label:
                   nl: Semantisch type

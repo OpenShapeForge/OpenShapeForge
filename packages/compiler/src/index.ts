@@ -77,8 +77,8 @@ export type {
   FieldDefinitionRelationship,
   FieldDefinitionRelationshipConstraints,
   FieldDefinitionRuntimeMetadata,
-  FieldDefinitionSemanticType,
-  FieldDefinitionSemanticTypeKind,
+  FieldDefinitionOsfType,
+  FieldDefinitionOsfTypeKind,
   FieldDefinitionSuggestions,
   FieldDefinitionValidation,
   FieldDefinitionValueType,
@@ -92,7 +92,7 @@ export type {
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "./authoring/types.js";
 export type {
   CompilerPlugin,
@@ -115,7 +115,7 @@ export type {
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
-export { BASE_TYPES, isBaseType, resolveBaseType, semanticTypeOf, withBaseTypes } from "./authoring/entity-fields.js";
+export { BASE_TYPES, isBaseType, resolveBaseType, osfTypeDefinitionOf, withBaseTypes } from "./authoring/entity-fields.js";
 export { defaultInverseKey, defaultInverseLabel, deriveInverseCollections } from "./authoring/inverse-collections.js";
 export {
   entityOperationControlSchema,
@@ -450,7 +450,7 @@ export async function collectAllArtifacts(
       {
         path: "apps/api/src/generated/operations/field-schema-registry.json",
         contents: renderRuntimeFieldSchemaRegistry({
-          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          osfTypes: fieldCompilationCatalogs.osfTypes,
           referentiedata,
         }),
       },
@@ -458,7 +458,7 @@ export async function collectAllArtifacts(
         path: FIELD_AUTHORING_REGISTRY_PATH,
         contents: renderFieldAuthoringRegistry(buildFieldAuthoringRegistry({
           fieldAuthoringProfiles,
-          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          osfTypes: fieldCompilationCatalogs.osfTypes,
           referentiedataCatalog,
         })),
       },

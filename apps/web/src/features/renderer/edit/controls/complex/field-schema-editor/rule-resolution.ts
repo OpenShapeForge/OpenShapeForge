@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { RendererFormDefinition, RendererFormGroup } from "@/features/renderer/form-definition";
 import type { Field } from "@/generated/compiler/field-contract";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 import type { FieldAuthoringFieldRules, FieldAuthoringProfile, FieldWithAuthoringMetadata } from "@/lib/field-authoring/profiles";
 import type { FieldSchemaEditorProps } from "./types";
 import { isRecord } from "./utils";
@@ -149,15 +149,15 @@ export function getEffectiveFieldRules(
   };
 }
 
-function resolveEntitySemanticCandidatesForIdSemanticType(value: unknown): string[] {
+function resolveEntitySemanticCandidatesForIdOsfType(value: unknown): string[] {
   if (typeof value !== "string" || value.trim().length === 0) {
     return [];
   }
   const osfType = value.trim();
   const candidates = new Set<string>([osfType]);
   const definition =
-    COMPILER_SEMANTIC_TYPES[
-      osfType as keyof typeof COMPILER_SEMANTIC_TYPES
+    COMPILER_OSF_TYPES[
+      osfType as keyof typeof COMPILER_OSF_TYPES
     ];
   const entity =
     definition && "entity" in definition && typeof definition.entity === "string"
@@ -174,9 +174,9 @@ function resolveEntitySemanticCandidatesForIdSemanticType(value: unknown): strin
 
 export function filterDynamicOptionSourceSuggestions(
   suggestions: FieldSchemaEditorProps["variableSuggestions"],
-  semanticTypeValue: unknown,
+  osfTypeValue: unknown,
 ) {
-  const candidates = resolveEntitySemanticCandidatesForIdSemanticType(semanticTypeValue);
+  const candidates = resolveEntitySemanticCandidatesForIdOsfType(osfTypeValue);
   return (suggestions ?? []).filter((suggestion) => {
     if (suggestion.valueType !== "array") {
       return false;

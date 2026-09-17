@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CoreEntity, Field, SemanticTypeDefinition } from "./types.js";
+import type { CoreEntity, Field, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
 import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
 import { type InverseCollectionSource, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
@@ -15,18 +15,18 @@ export function isBaseType(osfType: string | undefined): osfType is FieldDefinit
 }
 
 /** The catalog entry behind an osf type; base types have none. */
-export function semanticTypeOf(
+export function osfTypeDefinitionOf(
   osfType: string | undefined,
-  catalog: Record<string, SemanticTypeDefinition>,
-): SemanticTypeDefinition | undefined {
+  catalog: Record<string, OsfTypeDefinition>,
+): OsfTypeDefinition | undefined {
   return osfType && !isBaseType(osfType) && Object.hasOwn(catalog, osfType) ? catalog[osfType] : undefined;
 }
 
 export function resolveBaseType(
   osfType: string | undefined,
-  catalog: Record<string, SemanticTypeDefinition>,
+  catalog: Record<string, OsfTypeDefinition>,
 ): FieldDefinitionValueType | undefined {
-  return isBaseType(osfType) ? osfType : semanticTypeOf(osfType, catalog)?.valueType;
+  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.valueType;
 }
 
 /** Embedded values need a policy adapter before any protected leaf may be used. */
@@ -62,10 +62,10 @@ function assertNoAuthoredCollections(entity: Pick<CoreEntity, "entity" | "fields
 }
 
 /** Entity types are projections of the loaded entity corpus, never catalog copies. */
-export function deriveEntitySemanticTypes(
+export function deriveEntityOsfTypes(
   entities: readonly CoreEntity[],
-  catalog: Record<string, SemanticTypeDefinition>,
-): Record<string, SemanticTypeDefinition> {
+  catalog: Record<string, OsfTypeDefinition>,
+): Record<string, OsfTypeDefinition> {
   const result = { ...catalog };
   for (const key of Object.keys(catalog)) {
     if (isBaseType(key)) throw new Error(`Semantic type ${key} shadows a base type.`);
@@ -108,7 +108,7 @@ export function deriveEntitySemanticTypes(
 }
 
 /** The inverse collections `entity` receives, read from the entity projections in the catalog. */
-export function inverseCollectionsFor(entity: string, catalog: Record<string, SemanticTypeDefinition>): Field[] {
+export function inverseCollectionsFor(entity: string, catalog: Record<string, OsfTypeDefinition>): Field[] {
   const isEntityType = (osfType: string) => catalog[osfType]?.kind === "entity";
   const sources: InverseCollectionSource[] = Object.entries(catalog)
     .filter(([, definition]) => definition.kind === "entity" && definition.shape)
@@ -122,7 +122,7 @@ export function inverseCollectionsFor(entity: string, catalog: Record<string, Se
 }
 
 /** Profile fields are not normalized as an entity; they still need their base type. */
-export function withBaseTypes(fields: readonly Field[], catalog: Record<string, SemanticTypeDefinition>): Field[] {
+export function withBaseTypes(fields: readonly Field[], catalog: Record<string, OsfTypeDefinition>): Field[] {
   return fields.map((field) => {
     const baseType = field.baseType ?? resolveBaseType(field.osfType, catalog);
     if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
@@ -133,13 +133,13 @@ export function withBaseTypes(fields: readonly Field[], catalog: Record<string, 
 /** Normalize once, before storage, Operations and interface projections diverge. */
 export function normalizeEntityFields(
   entity: CoreEntity,
-  catalog: Record<string, SemanticTypeDefinition>,
+  catalog: Record<string, OsfTypeDefinition>,
 ): CoreEntity {
   const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
   const normalize = (field: Field, nested = false, ancestry: readonly string[] = []): Field => {
     const path = `${entity.entity}.${field.key}`;
     if (!field.osfType) throw new Error(`${path}: osfType is required.`);
-    const semantic = semanticTypeOf(field.osfType, catalog);
+    const semantic = osfTypeDefinitionOf(field.osfType, catalog);
     if (entity.baseEntity === false && !entity.fields.some((field) => field.key === "id")) {
       assertEntityValueFieldPolicies(field, path, semantic);
     }
@@ -185,7 +185,7 @@ export function normalizeEntityFields(
         throw new Error(`${path}: entityValue requires a single entityValue object without inline fields or a relationship.`);
       }
       const discriminator = entity.fields.find((candidate) => candidate.key === field.entityValue!.definitionField);
-      const discriminatorSemantic = semanticTypeOf(discriminator?.osfType, catalog);
+      const discriminatorSemantic = osfTypeDefinitionOf(discriminator?.osfType, catalog);
       if (!discriminator || discriminator === field || resolveBaseType(discriminator.osfType, catalog) !== "string" || !discriminator.required || !discriminator.persisted || fieldCardinality({ cardinality: discriminator.cardinality ?? discriminatorSemantic?.cardinality ?? "single" }) !== "single" || discriminator.relationship || ["entity", "entityId"].includes(discriminatorSemantic?.kind ?? "")) {
         throw new Error(`${path}: definitionField must name a required persisted scalar string field.`);
       }
@@ -221,8 +221,8 @@ function relationshipOf(
   entity: CoreEntity,
   field: Field,
   result: Field,
-  semantic: SemanticTypeDefinition,
-  catalog: Record<string, SemanticTypeDefinition>,
+  semantic: OsfTypeDefinition,
+  catalog: Record<string, OsfTypeDefinition>,
   collection: boolean,
 ): NonNullable<Field["relationship"]> {
   const path = `${entity.entity}.${field.key}`;
@@ -255,7 +255,7 @@ function relationshipOf(
   let through: { field: string; column: string; target: string } | undefined;
   if (metadata.via) {
     const via = entity.fields.find((candidate) => candidate.key === metadata.via);
-    const viaType = semanticTypeOf(via?.osfType, catalog);
+    const viaType = osfTypeDefinitionOf(via?.osfType, catalog);
     if (metadata.ownership === "owned" || field.sortable || !via || via === field || viaType?.kind !== "entity" ||
       viaType.entityIdentity === false || fieldCardinality(via) !== "single" || via.relationship?.via) {
       throw new Error(`${path}: via requires a read-only inverse collection through a direct, single entity reference.`);

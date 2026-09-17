@@ -20,7 +20,7 @@ const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "d
 
 export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
-  semanticTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.semanticTypes,
+  osfTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.osfTypes,
   depth = 0,
 ): void {
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -29,7 +29,7 @@ export function assertEntityValueFieldPolicy(
   if (typeof field.osfType !== "string") invalid();
   const osfType = field.osfType as string;
   const baseType = BASE_TYPES.has(osfType);
-  const semantic = !baseType && Object.hasOwn(semanticTypes, osfType) ? semanticTypes[osfType] : undefined;
+  const semantic = !baseType && Object.hasOwn(osfTypes, osfType) ? osfTypes[osfType] : undefined;
   if (!baseType && semantic === undefined) invalid();
   if (semantic !== undefined && !record(semantic)) invalid();
   if (depth > 0 && (field.relationship !== undefined || record(semantic) && semantic.kind === "entity")) invalid();
@@ -45,12 +45,12 @@ export function assertEntityValueFieldPolicy(
       if (!Array.isArray(node[key])) invalid();
       for (const child of node[key] as unknown[]) {
         if (!record(child)) invalid();
-        assertEntityValueFieldPolicy(child as Record<string, unknown>, semanticTypes, depth + 1);
+        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1);
       }
     }
     if (node.item !== undefined) {
       if (!record(node.item)) invalid();
-      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, semanticTypes, depth + 1);
+      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1);
     }
   }
 }

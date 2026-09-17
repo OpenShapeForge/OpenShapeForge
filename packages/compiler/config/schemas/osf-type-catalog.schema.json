@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openshapeforge.example/schema-phase0/semantic-type-catalog.schema.json",
+  "$id": "https://openshapeforge.example/schema-phase0/osf-type-catalog.schema.json",
   "title": "Semantic Type Catalog Schema",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "kind", "types"],
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
-    "kind": { "type": "string", "const": "semanticTypeCatalog" },
+    "kind": { "type": "string", "const": "osfTypeCatalog" },
     "types": {
       "type": "object",
       "propertyNames": {

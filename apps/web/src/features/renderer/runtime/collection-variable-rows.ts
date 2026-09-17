@@ -222,7 +222,7 @@ export function buildCollectionVariableRowPickerField(
         valueMode: "insertText",
         expectedValueType: "array",
         ...(filter.itemOsfType
-          ? { expectedItemSemanticType: filter.itemOsfType }
+          ? { expectedItemOsfType: filter.itemOsfType }
           : {}),
         variableSectionLabel: lang === "en" ? "Variables" : "Variabelen",
         emptyMessage:

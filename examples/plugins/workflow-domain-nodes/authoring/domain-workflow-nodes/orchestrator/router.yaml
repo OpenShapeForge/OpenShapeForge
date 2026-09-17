@@ -107,7 +107,7 @@ configFields:
             component: OptionVariablePicker
             props:
               clearable: true
-              expectedSemanticType: caseTemplateId
+              expectedOsfType: caseTemplateId
               valueMode: insertText
               syncIntentWorkflowDefaults: true
               optionSectionLabel: Start zaak met zaaksjabloon

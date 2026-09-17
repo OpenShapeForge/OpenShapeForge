@@ -12,7 +12,7 @@ import {
 import type {
   ComponentCatalog,
   FieldDefinition,
-  FieldDefinitionSemanticTypeKind,
+  FieldDefinitionOsfTypeKind,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestMapping,
@@ -35,7 +35,7 @@ const packageRootFieldDefinition = {
   key: "definition",
   osfType: "object",
 } satisfies FieldDefinition;
-const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
+const packageRootOsfTypeKind: FieldDefinitionOsfTypeKind = "object";
 const packageRootAdapterUrls = {
   baseUrlTemplate: "https://default.example.test",
   baseUrlTemplates: { secondary: "https://secondary.example.test" },
@@ -98,7 +98,7 @@ describe("compiled field JSON Schema projection", () => {
 
   it("exports the complete canonical contract from the package root", () => {
     expect(packageRootFieldDefinition.key).toBe("definition");
-    expect(packageRootSemanticTypeKind).toBe("object");
+    expect(packageRootOsfTypeKind).toBe("object");
     expect(packageRootAdapterUrls.baseUrlTemplates.secondary).toBe(
       "https://secondary.example.test",
     );

@@ -17,13 +17,13 @@
 import type {
   FieldRender,
   FieldValidation,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "@/generated/compiler/field-contract";
 import {
   COMPILER_FIELD_COMPONENT_DEFAULTS,
   type CompilerFieldTypeKey,
 } from "@/generated/compiler/component-defaults";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 
 type RendererAwareField = {
   valueType?: string;
@@ -60,7 +60,7 @@ const COMPONENT_ALIASES: Record<string, string> = {
   MoneyInput: "NumberInput",
 };
 
-function getSemanticTypeKey(field: RendererAwareField) {
+function getOsfTypeKey(field: RendererAwareField) {
   return typeof field.osfType === "string" &&
     field.osfType.trim().length > 0
     ? field.osfType.trim()
@@ -76,20 +76,20 @@ export function normalizeFieldComponentName(component?: string) {
   return COMPONENT_ALIASES[normalized] ?? normalized;
 }
 
-export function getCompilerSemanticTypeDefinition(
+export function getCompilerOsfTypeDefinition(
   osfType: string | undefined,
-): SemanticTypeDefinition | undefined {
+): OsfTypeDefinition | undefined {
   if (!osfType) {
     return undefined;
   }
 
-  return COMPILER_SEMANTIC_TYPES[
-    osfType as keyof typeof COMPILER_SEMANTIC_TYPES
+  return COMPILER_OSF_TYPES[
+    osfType as keyof typeof COMPILER_OSF_TYPES
   ];
 }
 
-export function getFieldSemanticTypeDefinition(field: RendererAwareField) {
-  return getCompilerSemanticTypeDefinition(getSemanticTypeKey(field));
+export function getFieldOsfTypeDefinition(field: RendererAwareField) {
+  return getCompilerOsfTypeDefinition(getOsfTypeKey(field));
 }
 
 function getDefaultFieldTypeRender(field: RendererAwareField) {
@@ -134,7 +134,7 @@ export function resolveFieldInputRender(field: RendererAwareField): ResolvedFiel
     return explicitRender;
   }
 
-  const osfType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   const semanticRender = buildResolvedRender(
     osfType?.render?.input,
     osfType?.props,
@@ -166,7 +166,7 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     return explicitRender;
   }
 
-  const osfType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   const semanticRender = buildResolvedRender(
     osfType?.render?.display,
     osfType?.props,
@@ -195,5 +195,5 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
 }
 
 export function resolveFieldValidation(field: RendererAwareField) {
-  return field.validation ?? getFieldSemanticTypeDefinition(field)?.validation;
+  return field.validation ?? getFieldOsfTypeDefinition(field)?.validation;
 }

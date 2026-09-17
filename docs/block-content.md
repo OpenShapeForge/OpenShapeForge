@@ -46,7 +46,7 @@ definitions:
 ```
 
 These fragments use the schemaVersion 3 field contract. Entity semantic types
-are derived from loaded entity YAMLs, not repeated in the semantic-type catalog.
+are derived from loaded entity YAMLs, not repeated in the osf-type catalog.
 
 ## Storage and logical fields
 

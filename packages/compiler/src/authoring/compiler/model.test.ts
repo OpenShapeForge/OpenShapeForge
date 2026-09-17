@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   ComponentCatalog,
   Field,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import { resolveModelFields } from "./model.js";
 
@@ -17,7 +17,7 @@ const catalog: ComponentCatalog = {
 
 describe("semantic renderer mapping", () => {
   test("retains authored and semantic collection bounds after normalization", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       boundedTags: {
         label: { en: "Tags" },
         valueType: "string",
@@ -33,7 +33,7 @@ describe("semantic renderer mapping", () => {
         cardinality: { min: 2, max: "unbounded" },
         item: { key: "step", osfType: "object" },
       },
-    ], catalog, semanticTypes);
+    ], catalog, osfTypes);
 
     expect(semantic).toMatchObject({
       cardinality: "collection",
@@ -46,7 +46,7 @@ describe("semantic renderer mapping", () => {
   });
 
   test("resolves input component and props centrally while preserving field options", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
         valueType: "string",
@@ -60,7 +60,7 @@ describe("semantic renderer mapping", () => {
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
     }];
 
-    expect(resolveModelFields(fields, catalog, semanticTypes)[0]).toMatchObject({
+    expect(resolveModelFields(fields, catalog, osfTypes)[0]).toMatchObject({
       key: "status",
       render: { component: "ReferenceSelect", props: { clearable: false } },
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
@@ -68,7 +68,7 @@ describe("semantic renderer mapping", () => {
   });
 
   test("uses the semantic display renderer for a read-only companion field", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
         valueType: "string",
@@ -85,7 +85,7 @@ describe("semantic renderer mapping", () => {
       key: "storageLocation",
       osfType: "fileStorageLocation",
       readOnly: true,
-    }], catalog, semanticTypes)[0]?.render).toEqual({
+    }], catalog, osfTypes)[0]?.render).toEqual({
       component: "TextDisplay",
       props: {
         fileNameField: "fileName",

@@ -7,7 +7,7 @@ description: |
   context-full entity at load time. Author-declared duplicates of these fields
   raise a compile error (strict-replace semantics).
 
-  The semanticType for `id` is auto-derived per entity (`<entityCamelCase>Id`),
+  The osfType for `id` is auto-derived per entity (`<entityCamelCase>Id`),
   so individual entities never need to redeclare `id` to attach their own
   semantic type catalog entry.
 

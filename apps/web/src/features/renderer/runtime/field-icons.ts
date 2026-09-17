@@ -5,8 +5,8 @@
  * Resolves a lucide-react icon name for a given canonical {@link Field}.
  * Resolution order:
  *
- *   1. `field.osfType` → `SemanticTypeDefinition.icon` (compiler-owned, set
- *      in `packages/compiler/config/authoring/**\/semantic-types.yaml`).
+ *   1. `field.osfType` → `OsfTypeDefinition.icon` (compiler-owned, set
+ *      in `packages/compiler/config/authoring/**\/osf-types.yaml`).
  *   2. `fieldValueType(field)` / `field.cardinality` → `FIELD_TYPE_ICONS` map below.
  *   3. `null` — caller renders no icon.
  *
@@ -14,7 +14,7 @@
  * the {@link FieldIcon} component to render it.
  */
 import type { Field } from "@/generated/compiler/field-contract";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 import { fieldRuntimeKind, type FieldRuntimeKind, fieldValueType } from "@/lib/field-contract/field-v2";
 
 const FIELD_TYPE_ICONS: Record<FieldRuntimeKind, string> = {
@@ -40,14 +40,14 @@ export function resolveFieldIcon(field: {
   cardinality?: Field["cardinality"];
   validation?: Field["validation"];
 }): string | null {
-  const semanticTypeKey =
+  const osfTypeKey =
     typeof field.osfType === "string" && field.osfType.trim().length > 0
       ? field.osfType.trim()
       : null;
 
-  if (semanticTypeKey) {
-    const def = (COMPILER_SEMANTIC_TYPES as Record<string, { icon?: string }>)[
-      semanticTypeKey
+  if (osfTypeKey) {
+    const def = (COMPILER_OSF_TYPES as Record<string, { icon?: string }>)[
+      osfTypeKey
     ];
     if (def?.icon) {
       return def.icon;

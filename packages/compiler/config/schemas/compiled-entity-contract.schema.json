@@ -419,7 +419,7 @@
         "key": { "type": "string" },
         "valueType": { "type": "string" },
         "cardinality": { "type": "string", "enum": ["single", "collection"] },
-        "semanticType": { "type": "string" },
+        "osfType": { "type": "string" },
         "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
         "required": { "type": "boolean" },
         "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },

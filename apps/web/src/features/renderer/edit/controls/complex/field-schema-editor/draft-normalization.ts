@@ -25,7 +25,7 @@ export function trimOptionalString(value: unknown) {
     : undefined;
 }
 
-function normalizeSemanticTypeDraft(value: unknown) {
+function normalizeOsfTypeDraft(value: unknown) {
   const normalized = trimOptionalString(value);
   return normalized === EMPTY_SELECT_VALUE ? undefined : normalized;
 }
@@ -190,7 +190,7 @@ export function normalizeFieldSchemaDraft(
 
   return {
     key: typeof field.key === "string" ? field.key : "",
-    osfType: normalizeSemanticTypeDraft(osfType) ?? valueType,
+    osfType: normalizeOsfTypeDraft(osfType) ?? valueType,
     cardinality: structuredCardinality,
     ...(field.variables ? { variables: field.variables } : {}),
     ...(field.sortable === true ? { sortable: true } : {}),

@@ -10,7 +10,7 @@ describe("kind-aware coreEntity cutover gate", () => {
     const report = checkCoreEntityV3([
       { path: "examples/entity.yaml", document: definition() },
       { path: "packages/x/__fixtures__/entity.yaml", document: definition("Fixture", { schemaVersion: 2 }) },
-      { path: "catalog.yaml", document: { kind: "semanticTypeCatalog", schemaVersion: 1 } },
+      { path: "catalog.yaml", document: { kind: "osfTypeCatalog", schemaVersion: 1 } },
       { path: "_base.yaml", document: { kind: "baseEntity", schemaVersion: 1 } },
     ]);
     expect(report.total).toBe(2); expect(report.old).toBe(2); expect(report.failures).toHaveLength(2);

@@ -17,11 +17,11 @@
  * it would run all of that to reuse forty lines, and would pin these packs to
  * another plugin's file layout on top of the table they already share.
  */
-import { resolveBaseType, semanticTypeOf } from "../../../../packages/compiler/src/authoring/entity-fields.js";
-import { loadSemanticTypes as loadCompilerSemanticTypes } from "../../../../packages/compiler/src/authoring/loader.js";
+import { resolveBaseType, osfTypeDefinitionOf } from "../../../../packages/compiler/src/authoring/entity-fields.js";
+import { loadOsfTypes as loadCompilerOsfTypes } from "../../../../packages/compiler/src/authoring/loader.js";
 import type {
   Field,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../../../../packages/compiler/src/authoring/types.js";
 
 /**
@@ -29,8 +29,8 @@ import type {
  * context in sorted name order, later keys winning) plus one entry per loaded
  * entity, so an `osfType` naming an entity resolves like any other.
  */
-export function loadSemanticTypes(authoringDir: string): Map<string, SemanticTypeDefinition> {
-  return new Map(Object.entries(loadCompilerSemanticTypes(authoringDir)));
+export function loadOsfTypes(authoringDir: string): Map<string, OsfTypeDefinition> {
+  return new Map(Object.entries(loadCompilerOsfTypes(authoringDir)));
 }
 
 /**
@@ -40,19 +40,19 @@ export function loadSemanticTypes(authoringDir: string): Map<string, SemanticTyp
  * that authored its own source keeps it. Every field leaves with its derived
  * `baseType`, the same way the compiler normalizes an entity field.
  */
-function enrichField(field: Field, semanticTypes: Map<string, SemanticTypeDefinition>): Field {
+function enrichField(field: Field, osfTypes: Map<string, OsfTypeDefinition>): Field {
   // Round-trip clone: the parsed YAML is shared with the caller's entry list,
   // and enrichment must not reach back into it.
   const enriched = JSON.parse(JSON.stringify(field)) as Field;
-  const catalog = Object.fromEntries(semanticTypes);
+  const catalog = Object.fromEntries(osfTypes);
   const baseType = resolveBaseType(enriched.osfType, catalog);
   if (!baseType) throw new Error(`Domain workflow-node field "${enriched.key}": unknown osfType ${enriched.osfType}.`);
   enriched.baseType = baseType;
-  const semanticType = semanticTypeOf(enriched.osfType, catalog);
+  const osfType = osfTypeDefinitionOf(enriched.osfType, catalog);
 
-  if (semanticType?.kind === "entityId" && semanticType.listUrl) {
+  if (osfType?.kind === "entityId" && osfType.listUrl) {
     if (!enriched.options) {
-      enriched.options = { type: "remote", remoteUrl: semanticType.listUrl };
+      enriched.options = { type: "remote", remoteUrl: osfType.listUrl };
     }
     enriched.render = {
       component: "OptionVariablePicker",
@@ -64,10 +64,10 @@ function enrichField(field: Field, semanticTypes: Map<string, SemanticTypeDefini
   // still a picker. `Array.isArray` rather than a truthiness check because the
   // input is parsed YAML: a scalar `children:` would otherwise reach `.map`.
   if (Array.isArray(enriched.children)) {
-    enriched.children = enriched.children.map((child) => enrichField(child, semanticTypes));
+    enriched.children = enriched.children.map((child) => enrichField(child, osfTypes));
   }
   if (enriched.item) {
-    enriched.item = enrichField(enriched.item, semanticTypes);
+    enriched.item = enrichField(enriched.item, osfTypes);
   }
 
   return enriched;
@@ -75,7 +75,7 @@ function enrichField(field: Field, semanticTypes: Map<string, SemanticTypeDefini
 
 export function enrichFieldsWithEntityIdOptions(
   fields: Field[],
-  semanticTypes: Map<string, SemanticTypeDefinition>,
+  osfTypes: Map<string, OsfTypeDefinition>,
 ): Field[] {
-  return fields.map((field) => enrichField(field, semanticTypes));
+  return fields.map((field) => enrichField(field, osfTypes));
 }

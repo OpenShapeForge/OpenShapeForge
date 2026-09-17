@@ -15,7 +15,7 @@ authoring/
       contact-detail.yaml
   catalogs/
     components.yaml       render-component catalog + per-type defaults
-    semantic-types.yaml   reusable field semantics (email, phone, iban, …)
+    osf-types.yaml   reusable field semantics (email, phone, iban, …)
     core-referentiedata.yaml   code tables ("groepen") -> JSON snapshot
     transforms.yaml       mapping transforms (enumMap/cast/fallbackChain)
     retention-policies.yaml    named retention policies
@@ -66,7 +66,7 @@ authorization:               # presence makes the entity TENANT-SCOPED:
 
 fields:
   - key: displayName         # camelCase field key
-    osfType: string          # the ONE type axis: a base type, a semantic-type
+    osfType: string          # the ONE type axis: a base type, a osf-type
     required: true           # catalog key, or an entity name (see below)
     label: { en: Display name, nl: Weergavenaam }
     description: { en: ..., nl: ... }
@@ -340,7 +340,7 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   `packages/compiler/config/referentiedata/core-by-groep.json` (and a copy
   under `apps/web/src/lib/` only when `apps/web` exists). Fields reference a
   group via `render.props.referentieGroep`.
-- **`semantic-types.yaml`** — reusable field semantics: validation pattern,
+- **`osf-types.yaml`** — reusable field semantics: validation pattern,
   render components, data classification (`pii`, `confidential`, …),
   retention, icon. Every entry declares the base `valueType` it resolves to.
   A field opts in with `osfType: email`; the compiler derives the field's
@@ -482,7 +482,7 @@ use (no `contexts/` directory exists in the base layer):
 - `contexts/<ctx>/full/<entity>.yaml` — standalone entities that exist only
   in one context; compiled into synthetic core entities (origin
   `contextFull`).
-- `contexts/<ctx>/semantic-types.yaml` — context-scoped semantic-type
+- `contexts/<ctx>/osf-types.yaml` — context-scoped osf-type
   catalogs merged over the core catalog.
 - `mappings/<ctx>/<entity>.mapping.yaml` — field mappings between source and
   target entities using the transform catalog.

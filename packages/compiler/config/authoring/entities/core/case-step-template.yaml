@@ -599,6 +599,6 @@ interfaces:
           component: OptionVariablePicker
           props:
             clearable: true
-            expectedSemanticType: workflowDefinitionId
+            expectedOsfType: workflowDefinitionId
             selectionSync: publishedWorkflow
             optionSectionLabel: Procesworkflows

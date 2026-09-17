@@ -159,7 +159,7 @@ export interface FieldOptions {
   labelField?: string;
 }
 
-export interface SemanticTypeLookupDefinition {
+export interface OsfTypeLookupDefinition {
   provider: string;
   remoteUrl?: string;
   searchParam?: string;

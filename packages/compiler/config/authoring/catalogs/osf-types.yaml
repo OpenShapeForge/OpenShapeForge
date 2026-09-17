@@ -1,5 +1,5 @@
 schemaVersion: 1
-kind: semanticTypeCatalog
+kind: osfTypeCatalog
 
 # Core semantic types — always available
 types:
@@ -244,7 +244,7 @@ types:
     icon: MessageSquare
     lookup:
       provider: messaging.conversations
-      remoteUrl: /api/runtime/lookups?semanticType=conversationId
+      remoteUrl: /api/runtime/lookups?osfType=conversationId
       searchParam: search
     render:
       display: TextDisplay
@@ -364,7 +364,7 @@ types:
   # Hand-authored. Each entry is the canonical pointer to one core
   # entity and drives the workflow designer's option-picker via
   # /api/workflow/designer/core-entity-options. To add a new entity:
-  # (1) drop a YAML in entities/ with `semanticType: <X>Id` on its
+  # (1) drop a YAML in entities/ with `osfType: <X>Id` on its
   # id field, (2) add a matching entry below.
   # ----------------------------------------------------------------
 

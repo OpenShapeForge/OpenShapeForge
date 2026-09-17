@@ -28,7 +28,7 @@
  *
  * Idempotent: a migrated corpus or value produces no further changes.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadCorpora, loadCorpus, renderFile } from "./corpus.ts";
 import { rewriteFieldDefinitionJson } from "./data.ts";
@@ -86,15 +86,20 @@ function main(): void {
   for (const line of report.fold.ambiguityDeclared) console.log(`inverse: false declared: ${line}`);
   console.log(`osfType renamed: ${report.rename.renamed}, derived from valueType: ${report.rename.derivedFromValueType}, valueType dropped: ${report.rename.valueTypesDropped}`);
   for (const path of report.rename.skipped) console.log(`skipped (data, not a definition; --include-seeds to rename): ${path}`);
+  for (const path of report.rename.catalogs) console.log(`type catalog: ${path}`);
   console.log(`files changed: ${result.changed.length}`);
   const errors = [...report.legacy.errors, ...report.fold.errors];
   for (const error of errors) console.error(`error: ${error}`);
   if (errors.length) process.exit(1);
   if (!write) {
-    for (const file of result.changed) console.log(`  ${file.path}`);
+    for (const file of result.changed) console.log(`  ${file.path}${file.renameTo ? ` -> ${file.renameTo}` : ""}`);
     return;
   }
-  for (const file of result.changed) writeFileSync(corpus.shared ? file.path : join(root, file.path), renderFile(file));
+  for (const file of result.changed) {
+    const at = (path: string) => (corpus.shared ? path : join(root, path));
+    writeFileSync(at(file.renameTo ?? file.path), renderFile(file));
+    if (file.renameTo) unlinkSync(at(file.path));
+  }
   console.log("written.");
 }
 

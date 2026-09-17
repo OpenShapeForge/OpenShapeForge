@@ -21,7 +21,7 @@ import type {
   GraphQLRelationship,
   GraphQLProfileType,
   ComponentCatalog,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { fieldGraphqlBaseType, capitalize, uncapitalize, pluralize } from "./helpers.js";
@@ -33,7 +33,7 @@ export function buildGraphQL(
   profiles: EntityProfile[],
   relationships: CompiledRelationship[],
   componentCatalog?: ComponentCatalog,
-  semanticTypes?: Record<string, SemanticTypeDefinition>
+  osfTypes?: Record<string, OsfTypeDefinition>
 ): GraphQLSection {
   const typeName = coreEntity.entity;
   const fields: GraphQLField[] = coreEntity.fields.filter((f) => !f.relationship?.target).map((f) => {
@@ -66,7 +66,7 @@ export function buildGraphQL(
       fieldName: profile.profile,
       description: toGraphQLDescription(profile.description),
       fields: profile.fields.map((f) => {
-        const semType = f.osfType ? semanticTypes?.[f.osfType] : undefined;
+        const semType = f.osfType ? osfTypes?.[f.osfType] : undefined;
         // Resolve display render (for lists/detail) separately from input render (for forms)
         const displayComponent = semType?.render?.display;
         const displayRender = displayComponent && componentCatalog

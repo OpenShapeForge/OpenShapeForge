@@ -49,7 +49,7 @@ type FieldTypeSelectProps = {
   }) => void;
 };
 
-const FIELD_DEFINITION_SEMANTIC_TYPE = "fieldDefinition";
+const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
 const FIELD_DEFINITION_COLLECTION_VALUE = "semantic:fieldDefinition:collection";
 const FIELD_DEFINITION_COLLECTION_LABELS: Record<"nl" | "en", string> = {
   nl: "Velddefinities",
@@ -87,7 +87,7 @@ function isFieldDefinitionCollectionSelection(
 ) {
   return (
     cardinality === "collection" &&
-    (osfType?.trim() === FIELD_DEFINITION_SEMANTIC_TYPE ||
+    (osfType?.trim() === FIELD_DEFINITION_OSF_TYPE ||
       (osfType?.trim() ? false : type === "object"))
   );
 }

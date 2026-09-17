@@ -147,8 +147,8 @@ export function validateTimelineIncludes(
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   artifacts = {
     ...artifacts,
-    coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.semanticTypes),
-    profiles: artifacts.profiles.map((profile) => (profile.fields ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.semanticTypes) } : profile)),
+    coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.osfTypes),
+    profiles: artifacts.profiles.map((profile) => (profile.fields ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.osfTypes) } : profile)),
   };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
   const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
@@ -156,9 +156,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const relationships = resolveRelationships(artifacts);
   const columns = resolveStorageColumns(coreEntity.fields, profiles);
   const modelFields = resolveModelFields(valueDefinition
-    ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.semanticTypes).fields
-    : coreEntity.fields, componentCatalog, artifacts.semanticTypes);
-  const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
+    ? normalizeEntityFields({ ...coreEntity, fields: [...coreEntity.fields, ...profiles.flatMap((profile) => profile.fields ?? [])] }, artifacts.osfTypes).fields
+    : coreEntity.fields, componentCatalog, artifacts.osfTypes);
+  const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.osfTypes);
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);

@@ -257,11 +257,11 @@ configFields:
           defaultValue: false
           render:
             component: Switch
-        - key: semanticTypeKey
+        - key: osfTypeKey
           osfType: string
           label:
-            nl: Semantisch type
-            en: Semantic type
+            nl: OSF-type
+            en: OSF type
           description:
             nl: Optioneel semantisch type voor variabele-compatibiliteit.
             en: Optional semantic type for variable compatibility.

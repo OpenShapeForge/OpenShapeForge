@@ -82,7 +82,7 @@ function fieldDefinitionFromProcessVariableSource(
     valueType: _valueType,
     label: _label,
     description: _description,
-    semanticType: _semanticType,
+    osfType: _osfType,
     hints: _hints,
     ...bindingOverrides
   } = sourceRow;

@@ -48,7 +48,7 @@ configFields:
       component: OptionVariablePicker
       props:
         clearable: true
-        expectedSemanticType: workQueueId
+        expectedOsfType: workQueueId
         optionSectionLabel: Queues
         variableSectionLabel: Dynamische variabelen
   - key: reasonCode
@@ -109,7 +109,7 @@ configFields:
       component: OptionVariablePicker
       props:
         hideVariables: true
-        expectedSemanticType: templateSlug
+        expectedOsfType: templateSlug
         optionSectionLabel: Templates
         variableSectionLabel: Dynamische variabelen
   - key: proposedReplyBindings

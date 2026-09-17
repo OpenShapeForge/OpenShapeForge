@@ -4,7 +4,7 @@ import { operationFieldObjectSchema } from "./field-schema.js";
 
 test("entity semantic types retain their inferred target in parameter schemas", () => {
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
-    semanticTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } } },
+    osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } } },
   });
   expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } } } });
 });
@@ -13,7 +13,7 @@ test("cardinality bounds with max one preserve a scalar value", () => {
   for (const cardinality of [{ min: 0, max: 1 }, { min: 1, max: 1 }, {}]) {
     const schema = operationFieldObjectSchema([{
       key: "email", osfType: "email", cardinality, required: true,
-    }], { semanticTypes: { email: { valueType: "string", validation: { format: "email" } } } });
+    }], { osfTypes: { email: { valueType: "string", validation: { format: "email" } } } });
     expect(schema).toMatchObject({
       properties: { email: { type: "string", format: "email" } }, required: ["email"],
     });
@@ -36,7 +36,7 @@ test("runtime fields use the host semantic and reference-data registries", () =>
     required: true,
     options: { type: "referentiedata", referentieGroep: "REASONS" },
   }], {
-    semanticTypes: {
+    osfTypes: {
       shortReason: {
         valueType: "string",
         label: { en: "Reason" },
@@ -75,7 +75,7 @@ test("entity semantic types project an identity reference without recursively in
     osfType: "ExampleRecord",
     required: true,
   }], {
-    semanticTypes: {
+    osfTypes: {
       ExampleRecord: {
         kind: "entity",
         entity: "ExampleRecord",
@@ -105,7 +105,7 @@ test("compiler-authored fields resolve their base from the single osfType axis",
     { key: "record", osfType: "ExampleRecord" },
     { key: "address", osfType: "postalAddress" },
   ], {
-    semanticTypes: {
+    osfTypes: {
       shortReason: { valueType: "string", validation: { maxLength: 80 } },
       ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } },
       postalAddress: { kind: "object", valueType: "object", shape: [{ key: "street", osfType: "string", required: true }] },

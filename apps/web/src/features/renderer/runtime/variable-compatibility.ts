@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
 import {
   fieldRuntimeKind,
@@ -28,7 +28,7 @@ export type VariableFilter = {
   anyOf?: VariableFilter[];
 };
 
-const COMPATIBLE_SEMANTIC_TYPES: Record<string, readonly string[]> = {
+const COMPATIBLE_OSF_TYPES: Record<string, readonly string[]> = {
   relationId: ["relatieId"],
   relatieId: ["relationId"],
 };
@@ -39,7 +39,7 @@ function normalizeOptionalString(value: unknown) {
     : undefined;
 }
 
-function semanticTypesCompatible(
+function osfTypesCompatible(
   actual: string | undefined,
   expected: string,
 ): boolean {
@@ -49,7 +49,7 @@ function semanticTypesCompatible(
   if (!actual) {
     return false;
   }
-  return COMPATIBLE_SEMANTIC_TYPES[expected]?.includes(actual) === true;
+  return COMPATIBLE_OSF_TYPES[expected]?.includes(actual) === true;
 }
 
 function normalizeFieldValueType(field: Field): VariableValueType {
@@ -73,7 +73,7 @@ function normalizeFieldValueType(field: Field): VariableValueType {
 export function getFieldValueType(field: Field): VariableValueType {
   const osfType = normalizeOptionalString(field.osfType);
   const semanticDefinition = osfType
-    ? COMPILER_SEMANTIC_TYPES[osfType as keyof typeof COMPILER_SEMANTIC_TYPES]
+    ? COMPILER_OSF_TYPES[osfType as keyof typeof COMPILER_OSF_TYPES]
     : undefined;
   const semanticValueType = semanticDefinition?.valueType as string | undefined;
 
@@ -94,7 +94,7 @@ export function getVariableFilterForField(
   field: Field,
 ): VariableFilter | null {
   const osfType =
-    normalizeOptionalString(field.render?.props?.expectedSemanticType) ??
+    normalizeOptionalString(field.render?.props?.expectedOsfType) ??
     normalizeOptionalString(field.osfType);
   if (osfType) {
     // `variableTemplate` classifies the *field* (a string containing `{{...}}` tokens), not
@@ -120,7 +120,7 @@ export function getVariableFilterForField(
   }
 
   const itemOsfType =
-    normalizeOptionalString(field.render?.props?.expectedItemSemanticType) ??
+    normalizeOptionalString(field.render?.props?.expectedItemOsfType) ??
     normalizeOptionalString(field.item?.osfType);
   if (itemOsfType) {
     return {
@@ -188,7 +188,7 @@ export function isVariableSuggestionCompatible(
   }
 
   if (filter.osfType) {
-    return semanticTypesCompatible(suggestion.osfType, filter.osfType);
+    return osfTypesCompatible(suggestion.osfType, filter.osfType);
   }
 
   if (filter.fieldDefinitionSource) {

@@ -56,7 +56,7 @@ describe("type axis rename", () => {
     const fields = parsed["a/entities/parent.yaml"].fields;
     expect(fields[0]).toEqual({ key: "name", osfType: "string", persisted: { column: "name", storageClass: "core" } });
     expect(parsed["a/entities/child.yaml"].fields[0].osfType).toBe("Parent");
-    expect(report.rename).toEqual({ renamed: 1, derivedFromValueType: 1, valueTypesDropped: 1, skipped: [] });
+    expect(report.rename).toEqual({ renamed: 1, derivedFromValueType: 1, valueTypesDropped: 1, skipped: [], catalogs: [] });
   });
 
   test("keeps a catalog entry's valueType and migrates its nested shape", () => {

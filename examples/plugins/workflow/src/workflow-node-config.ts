@@ -23,10 +23,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolveBaseType } from "../../../../packages/compiler/src/authoring/entity-fields.js";
-import type { Field, LocalizedText, SemanticTypeDefinition } from "../../../../packages/compiler/src/authoring/types.js";
+import type { Field, LocalizedText, OsfTypeDefinition } from "../../../../packages/compiler/src/authoring/types.js";
 import {
   enrichFieldsWithEntityIdRemoteOptions,
-  loadWorkflowNodeSemanticTypes,
+  loadWorkflowNodeOsfTypes,
 } from "./workflow-entity-nodes.js";
 
 type WorkflowNodeConfigAuthoring = {
@@ -58,7 +58,7 @@ function collectYamlFiles(dir: string): string[] {
   return results.sort();
 }
 
-type SemanticTypes = Record<string, SemanticTypeDefinition>;
+type OsfTypes = Record<string, OsfTypeDefinition>;
 
 /**
  * Light structural validation for a parsed workflow-node authoring file. This
@@ -66,7 +66,7 @@ type SemanticTypes = Record<string, SemanticTypeDefinition>;
  * the generator relies on so a malformed YAML fails here with a clear message
  * instead of producing a broken catalog seed / generated type.
  */
-function validateWorkflowNodeConfig(parsed: unknown, filePath: string, semanticTypes: SemanticTypes): WorkflowNodeConfigAuthoring {
+function validateWorkflowNodeConfig(parsed: unknown, filePath: string, osfTypes: OsfTypes): WorkflowNodeConfigAuthoring {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`Workflow-node authoring file ${filePath} is not a YAML mapping.`);
   }
@@ -98,9 +98,9 @@ function validateWorkflowNodeConfig(parsed: unknown, filePath: string, semanticT
     );
   }
 
-  validateFields(node.configFields as unknown[], filePath, node.nodeType, "configFields", semanticTypes);
+  validateFields(node.configFields as unknown[], filePath, node.nodeType, "configFields", osfTypes);
   if (Array.isArray(node.outputFields)) {
-    validateFields(node.outputFields as unknown[], filePath, node.nodeType, "outputFields", semanticTypes);
+    validateFields(node.outputFields as unknown[], filePath, node.nodeType, "outputFields", osfTypes);
   }
 
   return {
@@ -157,7 +157,7 @@ function validateFields(
   filePath: string,
   nodeType: string,
   path: string,
-  semanticTypes: SemanticTypes,
+  osfTypes: OsfTypes,
 ): void {
   fields.forEach((field, index) => {
     const location = `${path}[${index}]`;
@@ -172,23 +172,23 @@ function validateFields(
         `Workflow-node authoring file ${filePath} (${nodeType}) has a field at ${location} missing a non-empty "key".`,
       );
     }
-    if (typeof record.osfType !== "string" || !resolveBaseType(record.osfType, semanticTypes)) {
+    if (typeof record.osfType !== "string" || !resolveBaseType(record.osfType, osfTypes)) {
       throw new Error(
         `Workflow-node authoring file ${filePath} (${nodeType}) field "${record.key}" (${location}) has an invalid "osfType" (${
           typeof record.osfType === "string" ? `"${record.osfType}"` : "<missing>"
-        }). Expected a base type or a semantic-type catalog key.`,
+        }). Expected a base type or a osf-type catalog key.`,
       );
     }
     if (Array.isArray(record.children)) {
-      validateFields(record.children, filePath, nodeType, `${location}.children`, semanticTypes);
+      validateFields(record.children, filePath, nodeType, `${location}.children`, osfTypes);
     }
     if (record.item && typeof record.item === "object" && !Array.isArray(record.item)) {
-      validateFields([record.item], filePath, nodeType, `${location}.item`, semanticTypes);
+      validateFields([record.item], filePath, nodeType, `${location}.item`, osfTypes);
     }
   });
 }
 
-function loadWorkflowNodeConfigs(authoringDir: string, semanticTypes: SemanticTypes): WorkflowNodeConfigAuthoring[] {
+function loadWorkflowNodeConfigs(authoringDir: string, osfTypes: OsfTypes): WorkflowNodeConfigAuthoring[] {
   const rootDir = join(authoringDir, "workflow-nodes");
   const files = collectYamlFiles(rootDir);
   const entries: WorkflowNodeConfigAuthoring[] = [];
@@ -196,7 +196,7 @@ function loadWorkflowNodeConfigs(authoringDir: string, semanticTypes: SemanticTy
 
   for (const filePath of files) {
     const parsed = parseYaml(readFileSync(filePath, "utf-8")) as unknown;
-    const entry = validateWorkflowNodeConfig(parsed, filePath, semanticTypes);
+    const entry = validateWorkflowNodeConfig(parsed, filePath, osfTypes);
 
     const priorFile = seenNodeTypes.get(entry.nodeType);
     if (priorFile) {
@@ -419,11 +419,11 @@ export function generateWorkflowNodeConfigArtifacts(
 
   // Best-effort discovery: if the authoring dir doesn't exist yet, emit empty files
   // so downstream consumers always have an importable module.
-  const semanticTypes = loadWorkflowNodeSemanticTypes(authoringDir);
+  const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   let entries: WorkflowNodeConfigAuthoring[] = [];
   const rootDir = join(authoringDir, "workflow-nodes");
   if (existsSync(rootDir) && statSync(rootDir).isDirectory()) {
-    entries = loadWorkflowNodeConfigs(authoringDir, semanticTypes);
+    entries = loadWorkflowNodeConfigs(authoringDir, osfTypes);
   }
 
   // Derive every field's `baseType` and enrich every workflow-node config
@@ -434,9 +434,9 @@ export function generateWorkflowNodeConfigArtifacts(
   // is the source.
   entries = entries.map((entry) => ({
     ...entry,
-    configFields: enrichFieldsWithEntityIdRemoteOptions(semanticTypes, entry.configFields),
+    configFields: enrichFieldsWithEntityIdRemoteOptions(osfTypes, entry.configFields),
     outputFields: entry.outputFields
-      ? enrichFieldsWithEntityIdRemoteOptions(semanticTypes, entry.outputFields)
+      ? enrichFieldsWithEntityIdRemoteOptions(osfTypes, entry.outputFields)
       : undefined,
   }));
 

@@ -4,7 +4,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
-import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { assertV2Authoring, v2WebOperationActions } from "./entity-v2.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
@@ -47,7 +47,7 @@ const bill = entity("Bill", [{ key: "customer", osfType: "Customer" }]);
 
 test("indirect inverse collections are read-only traversals, never owned links", () => {
   const route = source();
-  const catalog = deriveEntitySemanticTypes([route, customer, bill], {});
+  const catalog = deriveEntityOsfTypes([route, customer, bill], {});
   expect(normalizeEntityFields(route, catalog).fields[1]).toMatchObject({ readOnly: true, relationship: {
     kind: "hasMany", target: "Bill", foreignKey: "customer_id", through: { field: "customer", column: "customer_id", target: "Customer" },
   } });

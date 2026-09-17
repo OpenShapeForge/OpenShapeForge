@@ -3,7 +3,7 @@
  * The one place a web field's option source comes from.
  *
  * `field.options` is already the resolution of the field's osf type: the
- * model compiler takes authored options first and the semantic-type catalog
+ * model compiler takes authored options first and the osf-type catalog
  * entry's options otherwise, so a referentiedata-backed type (`osfType:
  * countryCode`) and an entity-backed option list (`options.type: entity`)
  * arrive here through the same property and leave through the same

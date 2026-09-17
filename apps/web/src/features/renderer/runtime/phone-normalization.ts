@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 
-const phoneSemanticTypes = new Set([
+const phoneOsfTypes = new Set([
   "phone",
   "telephone",
   "telefoon",
@@ -15,7 +15,7 @@ const phoneSemanticTypes = new Set([
 
 export function isPhoneSemanticField(field: Pick<Field, "osfType">) {
   const osfType = field.osfType?.trim().toLowerCase();
-  return Boolean(osfType && phoneSemanticTypes.has(osfType));
+  return Boolean(osfType && phoneOsfTypes.has(osfType));
 }
 
 export function normalizePhoneInput(

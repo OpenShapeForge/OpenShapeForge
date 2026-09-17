@@ -15,7 +15,7 @@ import type {
   VisibilityConfig,
   ComputedField,
   FieldOptions,
-  SemanticTypeLookupDefinition,
+  OsfTypeLookupDefinition,
   DataClassification,
   RetentionPolicy,
   ContextHints,
@@ -76,7 +76,7 @@ export interface CompiledRender {
 
 export interface CompiledField {
   key: string;
-  /** The authored type axis: a base type, a semantic-type key or an entity name. */
+  /** The authored type axis: a base type, a osf-type key or an entity name. */
   osfType: string;
   /** Derived from `osfType`: the base every transport maps to storage, GraphQL and JSON Schema. */
   baseType: FieldDefinitionValueType;
@@ -119,7 +119,7 @@ export interface CompiledField {
   computed?: ComputedField;
   graphqlType?: string;
   options?: FieldOptions;
-  lookup?: SemanticTypeLookupDefinition;
+  lookup?: OsfTypeLookupDefinition;
   permissions?: FieldPermissions;
   authorization?: FieldAuthorizationConfig;
   classification?: DataClassification;

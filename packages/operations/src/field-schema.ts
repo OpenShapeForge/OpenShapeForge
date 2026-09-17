@@ -4,7 +4,7 @@
  * Transport-neutral FieldDefinition to JSON Schema projection.
  *
  * The compiler and runtime plugin host both call this implementation. The
- * host supplies the resolved semantic-type and reference-data registries; a
+ * host supplies the resolved osf-type and reference-data registries; a
  * plugin supplies only authored FieldDefinitions and can never replace those
  * registries with a private interpretation.
  */
@@ -15,7 +15,7 @@ import type {
   OperationFieldOptions,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldSemanticType,
+  OperationFieldOsfType,
   OperationJsonSchema,
   OperationLocalizedText,
   ResolvedOperationField,
@@ -27,7 +27,7 @@ export type {
   OperationFieldOptions,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldSemanticType,
+  OperationFieldOsfType,
   OperationFieldValidation,
   OperationJsonSchema,
   OperationLocalizedText,
@@ -90,7 +90,7 @@ function isBaseType(value: string | undefined): value is OperationFieldBaseType 
 }
 
 /** A base osfType is its own base; a catalog key resolves through the registry. */
-function resolveBaseType(osfType: string, semantic: OperationFieldSemanticType | undefined): OperationFieldBaseType {
+function resolveBaseType(osfType: string, semantic: OperationFieldOsfType | undefined): OperationFieldBaseType {
   return isBaseType(osfType) ? osfType : semantic?.valueType ?? "string";
 }
 
@@ -101,7 +101,7 @@ function resolveFields(
   return fields.map((field) => {
     const semantic = isBaseType(field.osfType)
       ? undefined
-      : registry.semanticTypes?.[field.osfType];
+      : registry.osfTypes?.[field.osfType];
     const authoredCardinality = field.cardinality ?? semantic?.cardinality;
     // An identity reference does not inline the target record (which may refer back).
     const nested = field.shape ?? field.children ?? (semantic?.kind === "entity" && semantic.entity

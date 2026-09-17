@@ -31,7 +31,7 @@ export type OperationFieldBaseType = "string" | "integer" | "number" | "boolean"
 
 export type OperationFieldDefinition = {
   key: string;
-  /** A base type, a semantic-type catalog key, or an entity name. */
+  /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   required?: boolean;
@@ -51,7 +51,7 @@ export type OperationFieldDefinition = {
   item?: OperationFieldDefinition;
 };
 
-export type OperationFieldSemanticType = {
+export type OperationFieldOsfType = {
   kind?: string;
   entity?: string;
   valueType: OperationFieldBaseType;
@@ -64,7 +64,7 @@ export type OperationFieldSemanticType = {
 };
 
 export type OperationFieldSchemaRegistry = {
-  semanticTypes?: Readonly<Record<string, OperationFieldSemanticType>>;
+  osfTypes?: Readonly<Record<string, OperationFieldOsfType>>;
   referentiedata?: Readonly<Record<string, readonly {
     value: string;
     label: OperationLocalizedText;

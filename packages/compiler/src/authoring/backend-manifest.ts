@@ -779,7 +779,7 @@ function compileCoreCandidate(
     effectiveFields: resolveModelFields(normalizeEntityFields({
       ...artifacts.coreEntity,
       fields: [...artifacts.coreEntity.fields, ...artifacts.profiles.flatMap((profile) => profile.fields ?? [])],
-    }, artifacts.semanticTypes).fields, artifacts.componentCatalog, artifacts.semanticTypes),
+    }, artifacts.osfTypes).fields, artifacts.componentCatalog, artifacts.osfTypes),
     // The compiled model also contains compiler-owned fields, such as the
     // lifecycle default added by published-snapshot versioning. SQL defaults
     // must follow that effective contract rather than only the authored YAML.

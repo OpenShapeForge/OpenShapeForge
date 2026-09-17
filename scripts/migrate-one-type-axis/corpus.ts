@@ -27,6 +27,8 @@ export interface CorpusFile {
   kind: string | undefined;
   /** Authoring root (the parent of `entities/`), when the file is an entity. */
   authoringRoot: string | undefined;
+  /** Set when the migration moves the file (the type catalog is `osf-types.yaml` now). */
+  renameTo?: string;
 }
 
 export interface EntityRef {
@@ -201,9 +203,9 @@ export function semanticText(doc: Document): string {
   return JSON.stringify(doc.toJS());
 }
 
-/** Rendering alone can re-wrap long scalars; only a semantic change counts. */
+/** Rendering alone can re-wrap long scalars; only a semantic change or a move counts. */
 export function fileChanged(file: CorpusFile): boolean {
-  return semanticText(file.doc) !== file.semantic;
+  return file.renameTo !== undefined || semanticText(file.doc) !== file.semantic;
 }
 
 /**

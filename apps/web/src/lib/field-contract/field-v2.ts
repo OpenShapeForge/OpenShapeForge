@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 
 export type FieldValueType = NonNullable<Field["baseType"]>;
 
@@ -31,7 +31,7 @@ export type FieldShapeKind =
 export function fieldValueType(field: Pick<Field, "osfType" | "baseType">): FieldValueType {
   if (field.baseType) return field.baseType;
   if (isBaseType(field.osfType)) return field.osfType;
-  const semantic = COMPILER_SEMANTIC_TYPES[field.osfType as keyof typeof COMPILER_SEMANTIC_TYPES] as { valueType?: string } | undefined;
+  const semantic = COMPILER_OSF_TYPES[field.osfType as keyof typeof COMPILER_OSF_TYPES] as { valueType?: string } | undefined;
   return (semantic?.valueType ?? "string") as FieldValueType;
 }
 

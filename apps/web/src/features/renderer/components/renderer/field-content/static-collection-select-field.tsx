@@ -6,7 +6,7 @@ import { resolveRendererReferenceItems } from "@/features/renderer/runtime/optio
 import type { FieldControlProps } from "@/features/renderer/components/field";
 import type { Field } from "@/generated/compiler/field-contract";
 import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 export function StaticCollectionSelectField({
   field,
@@ -52,6 +52,6 @@ export function shouldRenderStaticCollectionSelect(field: Field): boolean {
     fieldValueType(field) === "string" &&
     isFieldCollection(field) &&
     (field.options?.type === "static" ||
-      getFieldSemanticTypeDefinition(field)?.options?.type === "static")
+      getFieldOsfTypeDefinition(field)?.options?.type === "static")
   );
 }

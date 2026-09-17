@@ -256,7 +256,7 @@
       }
     }
   },
-  "semanticTypes": {
+  "osfTypes": {
     "entityValue": {
       "kind": "object",
       "label": {
@@ -623,7 +623,7 @@
       "icon": "MessageSquare",
       "lookup": {
         "provider": "messaging.conversations",
-        "remoteUrl": "/api/runtime/lookups?semanticType=conversationId",
+        "remoteUrl": "/api/runtime/lookups?osfType=conversationId",
         "searchParam": "search"
       },
       "render": {

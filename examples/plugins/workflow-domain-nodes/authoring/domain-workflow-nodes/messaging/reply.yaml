@@ -67,7 +67,7 @@ configFields:
       component: OptionVariablePicker
       props:
         valueMode: insertText
-        expectedSemanticType: fieldDefinition
+        expectedOsfType: fieldDefinition
         variableSectionLabel: Velddefinities
     runtime:
       aliases:
@@ -93,7 +93,7 @@ configFields:
       component: OptionVariablePicker
       props:
         valueMode: insertText
-        expectedSemanticType: fieldDefinition
+        expectedOsfType: fieldDefinition
         variableSectionLabel: Velddefinities
   - key: whatsappFlow
     osfType: object

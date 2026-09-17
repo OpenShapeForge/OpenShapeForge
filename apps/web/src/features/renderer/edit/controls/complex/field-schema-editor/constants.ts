@@ -6,17 +6,17 @@ import type {
   FieldPersisted,
   LocalizedText,
   RetentionPolicy,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
   VisibilityCondition,
 } from "@/generated/compiler/field-contract";
-import { COMPILER_SEMANTIC_TYPES } from "@/generated/compiler/semantic-types";
+import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
 import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 export const EMPTY_SELECT_VALUE = "__empty__";
 
-export const SEMANTIC_TYPE_OPTIONS = Object.entries(COMPILER_SEMANTIC_TYPES).map(
+export const OSF_TYPE_OPTIONS = Object.entries(COMPILER_OSF_TYPES).map(
   ([value, definition]) => {
-    const typedDefinition = definition as SemanticTypeDefinition;
+    const typedDefinition = definition as OsfTypeDefinition;
     return {
       value,
       label: typedDefinition.label,
@@ -38,15 +38,15 @@ const FIELD_TYPE_TO_SEMANTIC_VALUE_TYPES: Record<string, readonly string[]> = {
   fieldDefinition: [],
 };
 
-export function getSemanticTypeOptionsForFieldType(fieldType: string) {
+export function getOsfTypeOptionsForFieldType(fieldType: string) {
   const allowed = FIELD_TYPE_TO_SEMANTIC_VALUE_TYPES[fieldType];
   if (!allowed || allowed.length === 0) return [];
-  return SEMANTIC_TYPE_OPTIONS.filter((opt) => allowed.includes(opt.valueType));
+  return OSF_TYPE_OPTIONS.filter((opt) => allowed.includes(opt.valueType));
 }
 
-export function getSemanticTypeOptionsForFieldShape(field: Field) {
+export function getOsfTypeOptionsForFieldShape(field: Field) {
   if ((field.cardinality ?? "single") === "collection") return [];
-  return SEMANTIC_TYPE_OPTIONS.filter((opt) => opt.valueType === fieldValueType(field));
+  return OSF_TYPE_OPTIONS.filter((opt) => opt.valueType === fieldValueType(field));
 }
 
 export const FIELD_OPTIONS_TYPE_OPTIONS: Array<{

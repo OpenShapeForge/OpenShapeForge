@@ -30,7 +30,7 @@
  * imported. A module nobody imports is a second copy of the catalog that can
  * drift from the table without anything noticing.
  *
- * Determinism: the file walk sorts, the semantic-type merge sorts, key order is
+ * Determinism: the file walk sorts, the osf-type merge sorts, key order is
  * fixed by object literals, and nothing reads the clock or the environment.
  * `check:generated` runs generation twice and byte-compares.
  */
@@ -41,10 +41,10 @@ import { parse as parseYaml } from "yaml";
 import type {
   Field,
   LocalizedText,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../../../../packages/compiler/src/authoring/types.js";
 import { resolveBaseType } from "../../../../packages/compiler/src/authoring/entity-fields.js";
-import { enrichFieldsWithEntityIdOptions, loadSemanticTypes } from "./semantic-type-options.js";
+import { enrichFieldsWithEntityIdOptions, loadOsfTypes } from "./osf-type-options.js";
 
 /** The authoring subtree this plugin owns; see the note on the boundary above. */
 const AUTHORING_SUBDIR = "domain-workflow-nodes";
@@ -97,7 +97,7 @@ function validateFields(
   filePath: string,
   nodeType: string,
   path: string,
-  semanticTypes: Map<string, SemanticTypeDefinition>,
+  osfTypes: Map<string, OsfTypeDefinition>,
 ): void {
   fields.forEach((field, index) => {
     const location = `${path}[${index}]`;
@@ -112,18 +112,18 @@ function validateFields(
         `Domain workflow-node authoring file ${filePath} (${nodeType}) has a field at ${location} missing a non-empty "key".`,
       );
     }
-    if (typeof record.osfType !== "string" || !resolveBaseType(record.osfType, Object.fromEntries(semanticTypes))) {
+    if (typeof record.osfType !== "string" || !resolveBaseType(record.osfType, Object.fromEntries(osfTypes))) {
       throw new Error(
         `Domain workflow-node authoring file ${filePath} (${nodeType}) field "${record.key}" (${location}) has an invalid "osfType" (${
           typeof record.osfType === "string" ? `"${record.osfType}"` : "<missing>"
-        }). Expected a base type or a semantic-type catalog key.`,
+        }). Expected a base type or a osf-type catalog key.`,
       );
     }
     if (Array.isArray(record.children)) {
-      validateFields(record.children, filePath, nodeType, `${location}.children`, semanticTypes);
+      validateFields(record.children, filePath, nodeType, `${location}.children`, osfTypes);
     }
     if (record.item && typeof record.item === "object" && !Array.isArray(record.item)) {
-      validateFields([record.item], filePath, nodeType, `${location}.item`, semanticTypes);
+      validateFields([record.item], filePath, nodeType, `${location}.item`, osfTypes);
     }
   });
 }
@@ -131,7 +131,7 @@ function validateFields(
 function validateNodeConfig(
   parsed: unknown,
   filePath: string,
-  semanticTypes: Map<string, SemanticTypeDefinition>,
+  osfTypes: Map<string, OsfTypeDefinition>,
 ): DomainWorkflowNodeConfig {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`Domain workflow-node authoring file ${filePath} is not a YAML mapping.`);
@@ -166,9 +166,9 @@ function validateNodeConfig(
     );
   }
 
-  validateFields(node.configFields, filePath, node.nodeType, "configFields", semanticTypes);
+  validateFields(node.configFields, filePath, node.nodeType, "configFields", osfTypes);
   if (Array.isArray(node.outputFields)) {
-    validateFields(node.outputFields, filePath, node.nodeType, "outputFields", semanticTypes);
+    validateFields(node.outputFields, filePath, node.nodeType, "outputFields", osfTypes);
   }
 
   const config: DomainWorkflowNodeConfig = {
@@ -228,13 +228,13 @@ function isLocalizedText(value: unknown): value is LocalizedText {
  */
 function loadNodeConfigs(
   rootDir: string,
-  semanticTypes: Map<string, SemanticTypeDefinition>,
+  osfTypes: Map<string, OsfTypeDefinition>,
 ): DomainWorkflowNodeConfig[] {
   const entries: DomainWorkflowNodeConfig[] = [];
   const seenNodeTypes = new Map<string, string>();
 
   for (const filePath of collectYamlFiles(rootDir)) {
-    const config = validateNodeConfig(parseYaml(readFileSync(filePath, "utf-8")), filePath, semanticTypes);
+    const config = validateNodeConfig(parseYaml(readFileSync(filePath, "utf-8")), filePath, osfTypes);
 
     const priorFile = seenNodeTypes.get(config.nodeType);
     if (priorFile) {
@@ -252,14 +252,14 @@ function loadNodeConfigs(
 
 function enrichEntry(
   entry: DomainWorkflowNodeConfig,
-  semanticTypes: Map<string, SemanticTypeDefinition>,
+  osfTypes: Map<string, OsfTypeDefinition>,
 ): DomainWorkflowNodeConfig {
   const enriched: DomainWorkflowNodeConfig = {
     ...entry,
-    configFields: enrichFieldsWithEntityIdOptions(entry.configFields, semanticTypes),
+    configFields: enrichFieldsWithEntityIdOptions(entry.configFields, osfTypes),
   };
   if (entry.outputFields) {
-    enriched.outputFields = enrichFieldsWithEntityIdOptions(entry.outputFields, semanticTypes);
+    enriched.outputFields = enrichFieldsWithEntityIdOptions(entry.outputFields, osfTypes);
   }
   return enriched;
 }
@@ -301,9 +301,9 @@ function buildSeedDocument(entries: DomainWorkflowNodeConfig[]): string {
  * the second one clears the rows a previous build left behind.
  */
 export function generateDomainNodeCatalogArtifacts(authoringDir: string): Map<string, string> {
-  const semanticTypes = loadSemanticTypes(authoringDir);
-  const entries = loadNodeConfigs(join(authoringDir, AUTHORING_SUBDIR), semanticTypes);
-  const enriched = entries.map((entry) => enrichEntry(entry, semanticTypes));
+  const osfTypes = loadOsfTypes(authoringDir);
+  const entries = loadNodeConfigs(join(authoringDir, AUTHORING_SUBDIR), osfTypes);
+  const enriched = entries.map((entry) => enrichEntry(entry, osfTypes));
 
   return new Map([[DOMAIN_NODE_CATALOG_SEED_FILE, buildSeedDocument(enriched)]]);
 }

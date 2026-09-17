@@ -53,7 +53,7 @@ function fixture(mutate: (owner: CoreEntity, child: CoreEntity) => void = () => 
   const entries: CompiledEntityInfo[] = [];
   try {
     mkdirSync(join(dir, "entities")); mkdirSync(join(dir, "catalogs"));
-    for (const [file, value] of Object.entries({ "catalogs/components.yaml": { defaults: {}, components: {}, viewDefaults: {} }, "catalogs/transforms.yaml": { transforms: {} }, "catalogs/semantic-types.yaml": { types: { entityValue: { kind: "object", valueType: "object" } } }, "entities/owner.yaml": owner, "entities/child.yaml": child, ...Object.fromEntries(extra.map((entity) => [`entities/${entity.entity.toLowerCase()}.yaml`, entity])) })) {
+    for (const [file, value] of Object.entries({ "catalogs/components.yaml": { defaults: {}, components: {}, viewDefaults: {} }, "catalogs/transforms.yaml": { transforms: {} }, "catalogs/osf-types.yaml": { types: { entityValue: { kind: "object", valueType: "object" } } }, "entities/owner.yaml": owner, "entities/child.yaml": child, ...Object.fromEntries(extra.map((entity) => [`entities/${entity.entity.toLowerCase()}.yaml`, entity])) })) {
       writeFileSync(join(dir, file), JSON.stringify(value));
     }
     compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], generatedCrudAllowlist: ["owner", "child", ...extra.map((entity) => entity.entity.toLowerCase())], onCandidate: (candidate) => entries.push(candidate as CompiledEntityInfo) });
@@ -255,5 +255,5 @@ test("fails closed on unsupported ownership, sorting, actions and child guard co
 test("authoring schema accepts identityless baseEntity false and object semantic catalog metadata", () => {
   const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();
-  expect(() => authoringValidator().validate({ kind: "semanticTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/semantic-types.yaml")).not.toThrow();
+  expect(() => authoringValidator().validate({ kind: "osfTypeCatalog", schemaVersion: 1, types: { entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } } } }, "/authoring/catalogs/osf-types.yaml")).not.toThrow();
 });

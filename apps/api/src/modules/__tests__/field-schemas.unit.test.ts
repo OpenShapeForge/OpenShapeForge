@@ -16,7 +16,7 @@ const compiler = createRuntimeFieldSchemaCompiler({
       cardinality: { enum: ["single", "collection"] },
     },
   },
-  semanticTypes: {
+  osfTypes: {
     code: {
       valueType: "string",
       label: { en: "Code" },

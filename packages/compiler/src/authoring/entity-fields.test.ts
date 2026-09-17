@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { resolveStorageColumns } from "./compiler/storage.js";
 import { resolveRelationships } from "./compiler/relationships.js";
 import { resolveModelFields } from "./compiler/model.js";
@@ -12,7 +12,7 @@ const entity = (name: string, fields: Field[]): CoreEntity => ({
 } as CoreEntity);
 const page = entity("Page", []);
 const block = entity("Block", [{ key: "page", osfType: "Page", required: true, relationship: { inverse: { key: "blocks", ownership: "owned", sortable: true } } }]);
-const catalog = () => deriveEntitySemanticTypes([page, block], {
+const catalog = () => deriveEntityOsfTypes([page, block], {
   title: { label: { en: "Title" }, valueType: "string" },
 });
 
@@ -20,7 +20,7 @@ describe("one relational field contract", () => {
   test("derives an entity type and its presentation from the loaded entity", () => {
     expect(catalog().Block).toMatchObject({ kind: "entity", entity: "Block", valueType: "string", shape: block.fields });
     expect(catalog().Page).toMatchObject({ shape: [{ key: "blocks", osfType: "Block", cardinality: "collection", sortable: true, relationship: { inverse: "page", ownership: "owned" } }] });
-    expect(() => deriveEntitySemanticTypes([block], { Block: catalog().Block! })).toThrow("PascalCase names are entities");
+    expect(() => deriveEntityOsfTypes([block], { Block: catalog().Block! })).toThrow("PascalCase names are entities");
   });
   test("infers scalar types without duplicate authoring", () => {
     expect(normalizeEntityFields(entity("Article", [{ key: "heading", osfType: "title" }]), catalog()).fields[0]?.baseType).toBe("string");
@@ -55,7 +55,7 @@ describe("one relational field contract", () => {
   });
   test("refuses an authored collection: the inverse is derived from the referencing field", () => {
     const source = entity("Article", [{ key: "relatedPages", osfType: "Page", cardinality: "collection" }]);
-    expect(() => deriveEntitySemanticTypes([page, block, source], {})).toThrow("inverse collections are derived from the referencing field");
+    expect(() => deriveEntityOsfTypes([page, block, source], {})).toThrow("inverse collections are derived from the referencing field");
     expect(() => normalizeEntityFields(source, catalog())).toThrow("names the referencing field on Page as its inverse");
   });
   test("rejects an entity-level relationships block and an invalid inverse", () => {
@@ -119,7 +119,7 @@ describe("one relational field contract", () => {
     expect(() => normalizeEntityFields(entity("Block", [{ key: "page", osfType: "Page", relationship: { ownership: "owned" } }]), catalog())).toThrow("single owned");
     const left = entity("Left", [{ key: "right", osfType: "Right", relationship: { inverse: "left" } }]);
     const right = entity("Right", [{ key: "left", osfType: "Left", relationship: { inverse: {} } }]);
-    expect(() => deriveEntitySemanticTypes([left, right], {})).toThrow("a single reference names its inverse collection as an object");
-    expect(() => normalizeEntityFields(left, deriveEntitySemanticTypes([{ ...left, fields: [] }, { ...right, fields: [] }], {}))).toThrow("declares its inverse collection as an object");
+    expect(() => deriveEntityOsfTypes([left, right], {})).toThrow("a single reference names its inverse collection as an object");
+    expect(() => normalizeEntityFields(left, deriveEntityOsfTypes([{ ...left, fields: [] }, { ...right, fields: [] }], {}))).toThrow("declares its inverse collection as an object");
   });
 });

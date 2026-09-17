@@ -188,7 +188,7 @@ field eligibility and implicit relationship keys. A plugin should consume this
 catalog instead of parsing entity YAML or inferring actions from transport
 routes.
 
-`fieldSchemas` is bound to the resolved component, semantic-type and reference-
+`fieldSchemas` is bound to the resolved component, osf-type and reference-
 data catalogs for the current host. A generator that publishes configurable
 fields can call `fieldSchemas.field(definition)` for one value schema or
 `fieldSchemas.object(definitions)` for a strict object schema. Both paths use
@@ -200,14 +200,14 @@ for build-time tooling. Runtime modules that must turn stored, user-authored
 FieldDefinitions into an Operation interaction schema use
 `context.platform.schemas.fields.object(definitions)`. The host validates the
 definitions against the generated authoring schema and binds the same projector
-to its active semantic-type and reference-data registries; plugins neither
+to its active osf-type and reference-data registries; plugins neither
 import the compiler at runtime nor supply a fallback catalog.
 
 The compiler also emits
 `apps/api/src/generated/compiler/field-authoring-registry.json` for a host that
 mounts a shared FieldDefinition editor. Its stable envelope is
-`{ version: 1, fieldAuthoringProfiles, semanticTypes, referentiedata }`. These
-are the raw, layer-resolved catalog values: profile and semantic-type extension
+`{ version: 1, fieldAuthoringProfiles, osfTypes, referentiedata }`. These
+are the raw, layer-resolved catalog values: profile and osf-type extension
 properties, reference-group metadata, and multilingual item labels are kept
 intact. A host may inject this JSON into an interface-specific renderer; the
 renderer must not parse authoring YAML or maintain a second field-schema

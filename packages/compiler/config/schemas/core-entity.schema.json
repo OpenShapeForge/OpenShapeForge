@@ -1842,12 +1842,12 @@
             "filter": {
               "type": "object",
               "properties": {
-                "semanticType": { "type": "string" },
+                "osfType": { "type": "string" },
                 "valueType": {
                   "type": "string",
                   "enum": ["string", "number", "boolean", "object", "array"]
                 },
-                "itemSemanticType": { "type": "string" },
+                "itemOsfType": { "type": "string" },
                 "fieldType": { "type": "string" }
               }
             }

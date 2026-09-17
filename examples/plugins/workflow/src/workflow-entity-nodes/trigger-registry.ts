@@ -22,7 +22,7 @@ type EntityTriggerRegistryEntry = {
     description?: string;
     fieldType: string;
     inputKind: "text" | "number" | "boolean" | "select";
-    semanticType?: string;
+    osfType?: string;
     options?: Array<{ value: string; label: string }>;
   }>;
 };
@@ -97,7 +97,7 @@ export function buildEntityTriggerRegistryEntry(
         description: fieldDescription || undefined,
         fieldType: field.baseType,
         inputKind: resolveFilterInputKind(field, options.length > 0),
-        ...(field.osfType !== field.baseType ? { semanticType: field.osfType } : {}),
+        ...(field.osfType !== field.baseType ? { osfType: field.osfType } : {}),
         ...(options.length > 0 ? { options } : {}),
       };
     });

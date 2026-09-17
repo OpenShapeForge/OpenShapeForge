@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import type { Field } from "@/generated/compiler/field-contract";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 import { useRemoteOptionSourceData } from "@/features/renderer/hooks/use-remote-options";
 import { TextDisplay } from "@/features/renderer/display/text-display";
 
@@ -28,7 +28,7 @@ function displayValue(value: unknown) {
 }
 
 function entityReferenceField(field: Field): Field {
-  const osfType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   const remoteUrl =
     field.options?.type === "remote"
       ? field.options.remoteUrl

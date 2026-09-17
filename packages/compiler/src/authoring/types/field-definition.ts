@@ -33,7 +33,7 @@ export type FieldDefinitionCardinality =
 
 export type FieldDefinitionVariableMode = "none" | "whole" | "template" | "both";
 
-export type FieldDefinitionSemanticTypeKind =
+export type FieldDefinitionOsfTypeKind =
   | "scalar"
   | "entityId"
   | "entity"
@@ -148,7 +148,7 @@ export interface FieldDefinition {
   key: string;
   /**
    * The one type axis. A base type (`string`, `integer`, `number`, `boolean`,
-   * `date`, `datetime`, `object`), a semantic-type catalog key, or an entity
+   * `date`, `datetime`, `object`), a osf-type catalog key, or an entity
    * name; the compiler derives the base type from the catalog.
    */
   osfType: string;
@@ -235,8 +235,8 @@ export interface FieldDefinitionWorkflowInspector {
   displayMode?: "hidden" | "display" | "readOnly";
 }
 
-export interface FieldDefinitionSemanticType {
-  kind?: FieldDefinitionSemanticTypeKind;
+export interface FieldDefinitionOsfType {
+  kind?: FieldDefinitionOsfTypeKind;
   label: LocalizedText;
   pluralLabel?: LocalizedText;
   valueType: FieldDefinitionValueType;

@@ -12,7 +12,7 @@
  *   2. Semantic type registry render (input/display variants)
  *   3. Component catalog defaults by value type/cardinality (lowest)
  *
- * Input:  Core entity Field[], ComponentCatalog, SemanticTypeDefinition registry.
+ * Input:  Core entity Field[], ComponentCatalog, OsfTypeDefinition registry.
  * Output: CompiledField[] — enriched field objects with resolved render, validation, etc.
  */
 import type {
@@ -21,19 +21,19 @@ import type {
   ComponentCatalog,
   CompiledField,
   CompiledRender,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import { fieldCardinality } from "./helpers.js";
-import { resolveBaseType, semanticTypeOf } from "../entity-fields.js";
+import { resolveBaseType, osfTypeDefinitionOf } from "../entity-fields.js";
 
 export function resolveModelFields(
   coreFields: Field[],
   componentCatalog: ComponentCatalog,
-  semanticTypes?: Record<string, SemanticTypeDefinition>
+  osfTypes?: Record<string, OsfTypeDefinition>
 ): CompiledField[] {
   return coreFields.map((field) => {
-    const semType = semanticTypeOf(field.osfType, semanticTypes ?? {});
-    const baseType = field.baseType ?? resolveBaseType(field.osfType, semanticTypes ?? {});
+    const semType = osfTypeDefinitionOf(field.osfType, osfTypes ?? {});
+    const baseType = field.baseType ?? resolveBaseType(field.osfType, osfTypes ?? {});
     if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
     const authoredCardinality = field.cardinality ?? semType?.cardinality;
     const cardinality = fieldCardinality({ cardinality: authoredCardinality });
@@ -94,11 +94,11 @@ export function resolveModelFields(
       ? undefined
       : field.shape ?? field.children ?? semType?.shape ?? semType?.children;
     if (childFields) {
-      compiled.children = resolveModelFields(childFields, componentCatalog, semanticTypes);
+      compiled.children = resolveModelFields(childFields, componentCatalog, osfTypes);
     }
     const itemField = field.item ?? semType?.item;
     if (itemField) {
-      compiled.item = resolveModelFields([itemField], componentCatalog, semanticTypes)[0];
+      compiled.item = resolveModelFields([itemField], componentCatalog, osfTypes)[0];
     }
     return compiled;
   });
@@ -128,7 +128,7 @@ export function resolveFieldOptions(field: Pick<Field, "options" | "reference">)
 export function resolveRender(
   field: Field,
   catalog: ComponentCatalog,
-  semType?: SemanticTypeDefinition
+  semType?: OsfTypeDefinition
 ): CompiledRender {
   // 1. Explicit field render override
   if (field.render) {

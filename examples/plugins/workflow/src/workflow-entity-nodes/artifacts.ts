@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowEntityGenerationOptions, RuntimeRegistryEntry, DesignerLazyRegistryEntry, DesignerDetailRegistryEntry, RendererEntityFieldSuggestionEntry } from "./types.js";
-import { loadWorkflowNodeEntities, loadWorkflowNodeSemanticTypes, resolveEntityIdSemanticTypeKey } from "./catalog.js";
+import { loadWorkflowNodeEntities, loadWorkflowNodeOsfTypes, resolveEntityIdOsfTypeKey } from "./catalog.js";
 import { getActionDescription, getActionLabel } from "./labels.js";
 import { buildDesignerConfigFields, buildDesignerDefaultConfig } from "./designer-config-fields.js";
 import { buildEntityFieldSuggestionsSeedJson } from "./designer-registry-emitters.js";
@@ -46,7 +46,7 @@ export function generateWorkflowEntityNodeArtifacts(
 
   const entityMap = new Map<string, CoreEntity>();
   for (const entity of workflowEntities) entityMap.set(entity.entity, entity);
-  const semanticTypes = loadWorkflowNodeSemanticTypes(authoringDir);
+  const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   const runtimeEntries: RuntimeRegistryEntry[] = [];
   const designerLazyEntries: DesignerLazyRegistryEntry[] = [];
   const designerDetailEntries: DesignerDetailRegistryEntry[] = [];
@@ -60,7 +60,7 @@ export function generateWorkflowEntityNodeArtifacts(
     const readableFallback = entity.fields;
     const writableFallback = entity.fields.filter((field) => field.key !== "id" && !field.readOnly);
     const idField = entity.fields.find((field) => field.key === "id");
-    const entityIdSemanticType = resolveEntityIdSemanticTypeKey(entity.entity, idField);
+    const entityIdOsfType = resolveEntityIdOsfTypeKey(entity.entity, idField);
     const entityDir = toKebabCase(entity.entity);
     const moduleDir = toKebabCase(entity.module);
     const entityGraphqlName = entity.entity;
@@ -75,10 +75,10 @@ export function generateWorkflowEntityNodeArtifacts(
     validateWorkflowReferentieGroepen(readableFields, entityKey);
     validateWorkflowReferentieGroepen(writableFields, entityKey);
 
-    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdSemanticType, entity.entity);
+    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdOsfType, entity.entity);
     const listOutputFields = buildListOutputFields(entityLabels, readableFields, toKebabCase(entity.entity));
-    const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdSemanticType);
-    const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdSemanticType, readableFields);
+    const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdOsfType);
+    const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdOsfType, readableFields);
 
     const listActionConfig = enabledActions.find((item) => item.action === "list")?.config;
     const listDefaultSort = listActionConfig && "defaultSort" in listActionConfig ? listActionConfig.defaultSort : undefined;

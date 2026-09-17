@@ -218,14 +218,14 @@ describe("where a node's output fields come from", () => {
       }).map((entry) => [entry.path, entry]),
     );
     expect(byPath.get("nodes.a.output.plain")).toMatchObject({ valueType: "string" });
-    expect(byPath.get("nodes.a.output.plain")?.semanticType).toBeUndefined();
+    expect(byPath.get("nodes.a.output.plain")?.osfType).toBeUndefined();
     expect(byPath.get("nodes.a.output.counts")).toMatchObject({
       valueType: "array",
-      itemSemanticType: "quantity",
+      itemOsfType: "quantity",
     });
     expect(byPath.get("nodes.a.output.counts[0]")).toMatchObject({
       valueType: "number",
-      semanticType: "quantity",
+      osfType: "quantity",
     });
     expect(byPath.get("nodes.a.output.customer.name")).toMatchObject({ valueType: "string" });
   });
@@ -452,7 +452,7 @@ describe("flattening an authored field", () => {
           field("counts", {
             valueType: "integer",
             cardinality: "collection",
-            item: { valueType: "integer", semanticType: "quantity" },
+            item: { valueType: "integer", osfType: "quantity" },
           }),
         ]),
         nodeId: "b",
@@ -461,7 +461,7 @@ describe("flattening an authored field", () => {
     expect(byPath.get("nodes.a.output.counts")).toMatchObject({ valueType: "array" });
     expect(byPath.get("nodes.a.output.counts[0]")).toMatchObject({
       valueType: "number",
-      semanticType: "quantity",
+      osfType: "quantity",
     });
   });
 

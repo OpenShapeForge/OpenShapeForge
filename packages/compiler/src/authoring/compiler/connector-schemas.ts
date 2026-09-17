@@ -19,7 +19,7 @@ import {
   applyCollectionShape,
   bundleFieldDefinitionSchema,
   constraintsForField,
-  FIELD_DEFINITION_SEMANTIC_TYPE,
+  FIELD_DEFINITION_OSF_TYPE,
   fieldDefinitionValueSchema,
   isCollection,
   localizedText,
@@ -48,7 +48,7 @@ function staticEnum(field: FieldDefinition): string[] | undefined {
  */
 function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObject {
   const scalar =
-    field.osfType === FIELD_DEFINITION_SEMANTIC_TYPE
+    field.osfType === FIELD_DEFINITION_OSF_TYPE
       ? fieldDefinitionValueSchema()
       : constraintsForField(field);
 

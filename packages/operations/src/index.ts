@@ -29,7 +29,7 @@ export type {
   OperationFieldOptions,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldSemanticType,
+  OperationFieldOsfType,
   OperationFieldValidation,
   OperationJsonSchema,
   OperationLocalizedText,

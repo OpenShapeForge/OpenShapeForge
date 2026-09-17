@@ -10,7 +10,7 @@
  * fields — because they all share the FieldDefinition contract. A map counts
  * as a field when it has a `key` and one of the type properties.
  */
-import type { Pair, Scalar, YAMLMap } from "yaml";
+import type { Document, Pair, Scalar, YAMLMap } from "yaml";
 import { findPair, yaml } from "./corpus.ts";
 
 export interface RenameReport {
@@ -19,11 +19,44 @@ export interface RenameReport {
   valueTypesDropped: number;
   /** Files left alone because they are data, not compiler definitions. */
   skipped: string[];
+  /** Type catalogs moved to `osf-types.yaml` / `kind: osfTypeCatalog`. */
+  catalogs: string[];
+}
+
+/**
+ * The catalog that defines the types is the OSF type catalog: its file is
+ * `osf-types.yaml`, its kind `osfTypeCatalog`, and a document key
+ * `semanticTypes:` (a registry or profile that groups them) is `osfTypes:`.
+ */
+export function renameTypeCatalog(file: { path: string; kind: string | undefined; doc: Document; renameTo?: string }, report: RenameReport): void {
+  const root = file.doc.contents;
+  if (!yaml.isMap(root)) return;
+  const kind = findPair(root as YAMLMap, "kind");
+  let touched = false;
+  if (kind && yaml.isScalar(kind.value) && kind.value.value === "semanticTypeCatalog") {
+    kind.value.value = "osfTypeCatalog";
+    file.kind = "osfTypeCatalog";
+    touched = true;
+  }
+  if (/(^|\/)semantic-types\.ya?ml$/.test(file.path)) {
+    file.renameTo = file.path.replace(/semantic-types(\.ya?ml)$/, "osf-types$1");
+    touched = true;
+  }
+  const renameKeys = (node: unknown): void => {
+    if (yaml.isSeq(node)) { for (const item of node.items) renameKeys(item); return; }
+    if (!yaml.isMap(node)) return;
+    for (const pair of (node as YAMLMap).items as Pair[]) {
+      if (yaml.isScalar(pair.key) && pair.key.value === "semanticTypes") { pair.key.value = "osfTypes"; touched = true; }
+      renameKeys(pair.value);
+    }
+  };
+  renameKeys(root);
+  if (touched) report.catalogs.push(file.path);
 }
 
 /** Document kinds whose fields are compiler FieldDefinitions. */
 export const DEFINITION_KINDS: ReadonlySet<string> = new Set([
-  "coreEntity", "baseEntity", "entityPatch", "entityProfile", "semanticTypeCatalog", "workflowNode",
+  "coreEntity", "baseEntity", "entityPatch", "entityProfile", "semanticTypeCatalog", "osfTypeCatalog", "workflowNode",
   "connector", "view", "operationCatalog", "settingsDefinition", "settingsProvider", "fieldAuthoringProfileCatalog",
   "preferenceDefinitions",
 ]);

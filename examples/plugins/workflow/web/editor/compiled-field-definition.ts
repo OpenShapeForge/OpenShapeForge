@@ -7,7 +7,7 @@
  * `osfType` plus its derived `baseType`. Everything else the designer reads as
  * a field — a node's own `outputParameters` and `inputParameters`, process
  * variables — is a field definition an author stored in the document, and that
- * runtime vocabulary is `valueType` plus an optional `semanticType`. A compiled
+ * runtime vocabulary is `valueType` plus an optional `osfType`. A compiled
  * field is translated here, once, so a reader downstream sees one vocabulary.
  */
 
@@ -20,7 +20,7 @@ export function compiledFieldAsDefinition(value: unknown): Record<string, unknow
   return {
     ...rest,
     ...(baseType ? { valueType: baseType } : {}),
-    ...(osfType && osfType !== baseType ? { semanticType: osfType } : {}),
+    ...(osfType && osfType !== baseType ? { osfType: osfType } : {}),
     ...(Array.isArray(field.children)
       ? { children: field.children.map(compiledFieldAsDefinition) }
       : {}),

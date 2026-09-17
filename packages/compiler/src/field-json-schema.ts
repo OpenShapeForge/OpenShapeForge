@@ -19,7 +19,7 @@ import type {
   ComponentCatalog,
   Field,
   FieldDefinition,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
@@ -40,7 +40,7 @@ import {
 
 export type JsonObject = Record<string, unknown>;
 
-export const FIELD_DEFINITION_SEMANTIC_TYPE = "fieldDefinition";
+export const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
 export const FIELD_DEFINITION_SCHEMA_REF = "#/$defs/fieldDefinition";
 
 const WORKFLOW_INSPECTOR_SCHEMA_ID =
@@ -63,13 +63,13 @@ const fieldDefinitionDefinitions = {
 
 /** Registries emitted for the host-bound runtime FieldDefinition compiler. */
 export function runtimeFieldSchemaRegistry(input: {
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  osfTypes?: Record<string, OsfTypeDefinition>;
   referentiedata?: CoreReferentiedataSnapshot;
 }): OperationFieldSchemaRegistry & {
   fieldDefinitionSchema: JsonObject;
 } {
   return {
-    semanticTypes: (input.semanticTypes ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["semanticTypes"]>,
+    osfTypes: (input.osfTypes ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["osfTypes"]>,
     referentiedata: (input.referentiedata ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["referentiedata"]>,
     fieldDefinitionDefinitions: structuredClone(fieldDefinitionDefinitions),
     fieldDefinitionSchema: {
@@ -80,7 +80,7 @@ export function runtimeFieldSchemaRegistry(input: {
 }
 
 export function renderRuntimeFieldSchemaRegistry(input: {
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  osfTypes?: Record<string, OsfTypeDefinition>;
   referentiedata?: CoreReferentiedataSnapshot;
 }): string {
   return `${JSON.stringify({ version: 1, ...runtimeFieldSchemaRegistry(input) }, null, 2)}\n`;
@@ -457,7 +457,7 @@ function compiledValueSchema(
   referentiedata: CoreReferentiedataSnapshot,
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
-  if (field.osfType === FIELD_DEFINITION_SEMANTIC_TYPE) {
+  if (field.osfType === FIELD_DEFINITION_OSF_TYPE) {
     return fieldDefinitionValueSchema();
   }
   if (
@@ -637,7 +637,7 @@ export type FieldSchemaCompiler = {
  */
 export function createFieldSchemaCompiler(input: {
   componentCatalog: ComponentCatalog;
-  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  osfTypes?: Record<string, OsfTypeDefinition>;
   referentiedata?: CoreReferentiedataSnapshot;
 }): FieldSchemaCompiler {
   const registry = runtimeFieldSchemaRegistry(input);
@@ -645,7 +645,7 @@ export function createFieldSchemaCompiler(input: {
     resolveModelFields(
       fields.map((field) => field as Field),
       input.componentCatalog,
-      input.semanticTypes,
+      input.osfTypes,
     );
   return {
     compile,

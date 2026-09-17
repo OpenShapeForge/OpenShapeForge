@@ -136,7 +136,7 @@ export type WebFieldProjection = {
   label: LocalizedText;
   description: LocalizedText;
   /**
-   * The one type axis: a base type, a semantic-type key or an entity name.
+   * The one type axis: a base type, a osf-type key or an entity name.
    * The renderer registry keys on it; `baseType` is its structural base.
    */
   osfType: string;

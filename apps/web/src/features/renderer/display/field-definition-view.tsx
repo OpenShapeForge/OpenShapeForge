@@ -90,9 +90,9 @@ function normalizeFieldDefinition(
   return {
     label,
     key: key || "-",
-    type: readString(value, "valueType", "type", "fieldType") || "-",
+    type: readString(value, "osfType", "type", "fieldType") || "-",
     required: readRequired(value),
-    osfType: readString(value, "osfType", "semanticTypeKey"),
+    osfType: readString(value, "osfType", "osfTypeKey"),
     description: readLocalizedString(value.description, lang) || readString(value, "description"),
   };
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
-import { getFieldSemanticTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 export type RemoteOptionRequestParam =
   | string
@@ -14,7 +14,7 @@ export type RemoteOptionRequestParams = Record<string, RemoteOptionRequestParam>
 function trimRemoteUrl(field: Field | null | undefined) {
   const options =
     field?.options ??
-    getFieldSemanticTypeDefinition(field ?? {})?.options;
+    getFieldOsfTypeDefinition(field ?? {})?.options;
 
   if (options?.type !== "remote") {
     return null;

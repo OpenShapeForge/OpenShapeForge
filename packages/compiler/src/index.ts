@@ -115,6 +115,8 @@ export type {
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
+export { BASE_TYPES, isBaseType, resolveBaseType, semanticTypeOf, withBaseTypes } from "./authoring/entity-fields.js";
+export { defaultInverseKey, defaultInverseLabel, deriveInverseCollections } from "./authoring/inverse-collections.js";
 export {
   entityOperationControlSchema,
   entityOperationJsonSchemas,

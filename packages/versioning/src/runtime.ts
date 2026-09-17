@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule } from "@openshapeforge/plugin-runtime";
+import { publishFollowers, type PublishedVersionRow } from "./followers.js";
 
 type RawQuery = { sql: string; parameters: readonly unknown[]; query: { kind: "RawNode"; sqlFragments: readonly string[]; parameters: readonly unknown[] }; queryId: { queryId: string } };
 type Executor = { executeQuery<T>(query: RawQuery): Promise<{ rows: readonly T[] }> };
@@ -116,6 +117,14 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
         published_version = $2, published_version_id = $3::uuid,
         lifecycle_status = 'published', updated_at = now()
         where tenant_id = app.current_tenant() and id = $1::uuid returning id`, [id, inserted.version_number, inserted.id]);
+      // Followers run inside this transaction: a follower failure rolls the publish back.
+      const previous = source.published_version_id;
+      for (const follow of publishFollowers(sourceEntity)) {
+        await follow({
+          transaction, session, platform: context.platform!, sourceEntity, versionEntity, sourceId: id,
+          version: inserted as PublishedVersionRow, previousVersionId: typeof previous === "string" ? previous : null,
+        });
+      }
       return { value: inserted };
     });
   };

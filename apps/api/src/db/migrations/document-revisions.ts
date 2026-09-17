@@ -19,6 +19,40 @@
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { ensureCheckConstraint } from "./sql-invariants.js";
+
+/**
+ * Name and expression of the compiler-owned owner check on erp.blocks, as
+ * emitted in apps/api/src/generated/db/manifest.json ("compilerOwned" check
+ * with replaceExisting). The plugin-migration step later re-applies it under
+ * the same name as a repeatable DROP/ADD, so installing it here first is
+ * semantically a no-op for that step.
+ */
+const BLOCK_OWNER_CHECK = {
+  table: "erp.blocks",
+  name: "erp_blocks_values_owner_check_7e02a4f3b503",
+  expression: 'num_nonnulls("revision_id", "variant_id") = 1',
+};
+
+/**
+ * Pre-step for a database built before revisions existed: there
+ * erp.blocks.variant_id is NOT NULL, and the generated roll-forward
+ * classifies a nullability change as non-additive drift and refuses. This
+ * runs BEFORE the roll-forward and relaxes the constraint itself, but only
+ * once no row can end up ownerless: revision_id is added if missing and the
+ * owner check is in place (every existing row has a variant, so it
+ * validates). A fresh database, or one already migrated, is a no-op.
+ */
+export async function prepareRevisionOwnedBlocks(db: OpenShapeForgeDatabase): Promise<void> {
+  const column = await sql<{ is_nullable: string }>`
+    select is_nullable from information_schema.columns
+    where table_schema = 'erp' and table_name = 'blocks' and column_name = 'variant_id'
+  `.execute(db);
+  if (column.rows[0]?.is_nullable !== "NO") return;
+  await sql`alter table erp.blocks add column if not exists revision_id uuid`.execute(db);
+  await ensureCheckConstraint(db, BLOCK_OWNER_CHECK);
+  await sql`alter table erp.blocks alter column variant_id drop not null`.execute(db);
+}
 
 export async function applyDocumentRevisionGuards(db: OpenShapeForgeDatabase): Promise<void> {
   await sql`

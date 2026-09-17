@@ -13,6 +13,7 @@
  * Input:  ViewDefinition + CompiledEntityContract.
  * Output: Map<string, string> — file path to generated TypeScript/TSX source code.
  */
+import { surfacedRelationshipKeys } from "./surfaced-relationships.js";
 import path from "node:path";
 import type {
   CompiledEntityContract,
@@ -2294,9 +2295,11 @@ function buildSelectionSet(
     }
   }
 
-  // Include aggregate counts for collection relationships (hasMany / manyToMany)
+  // Aggregate counts only for the collections a view surfaces; a derived
+  // collection nothing displays is not queried (see surfaced-relationships.ts).
+  const surfaced = surfacedRelationshipKeys(contract);
   for (const rel of contract.graphql.relationships) {
-    if (rel.type.startsWith("[")) {
+    if (rel.type.startsWith("[") && surfaced.has(rel.name)) {
       const aggName = `${rel.name}Aggregate`;
       if (!tree.has(aggName)) {
         const countMap = new Map<string, Map<any, any>>();

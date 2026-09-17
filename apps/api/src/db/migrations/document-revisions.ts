@@ -113,9 +113,15 @@ export async function applyDocumentRevisionGuards(db: OpenShapeForgeDatabase): P
       for each row execute function app.guard_revision_block_write();
 
     drop policy if exists blocks_owner_read on erp.blocks;
+    -- Policies are created after the functions above; the setting itself is
+    -- transaction-local and never set by generated CRUD.
     create policy blocks_owner_read on erp.blocks as restrictive for select
       using (
         app.bypass_rls()
+        -- A documents command (start | follow | publish) runs on the caller's
+        -- session; a template publisher need not hold a document role to
+        -- re-seed the drafts that track the template.
+        or app.document_revision_command() in ('start', 'follow', 'publish')
         or (revision_id is not null and app.has_any_role(array['CaseFile.All.Read', 'CaseFile.All.ReadWrite']))
         or (variant_id is not null and app.has_any_role(array['Templates.Read', 'Organization.All.ReadWrite', 'General.All.Read', 'General.All.ReadWrite']))
       );

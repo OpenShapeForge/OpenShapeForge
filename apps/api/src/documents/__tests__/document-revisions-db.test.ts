@@ -16,7 +16,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
-  closeScratch, collections, createDocument, dbInput, editor, fails, openScratch, platformFor, privileged, publishTemplate, restricted, revision, revisionBlocks,
+  closeScratch, collections, createDocument, dbInput, editor, fails, openScratch, platformFor, privileged, publisher, publishTemplate, restricted, revision, revisionBlocks,
   seedTemplate, startedRevision, tenant,
 } from "./document-revisions-fixture.js";
 
@@ -127,6 +127,18 @@ describe("document revisions against PostgreSQL", () => {
     expect((await revisionBlocks(failed.id))[0]!.text).toBe("Hello {{local.name}}");
     expect(await revision(followed.id)).toMatchObject({ template_version_id: secondVersion, follow_error: null });
     expect((await revisionBlocks(followed.id))[0]!.text).toBe("Changed");
+  }, 60_000);
+
+  test("a publisher without any document role still moves the tracking drafts", async () => {
+    const { context, handlers } = platformFor(editor);
+    const ids = await seedTemplate();
+    const firstVersion = await publishTemplate(context, ids.template);
+    const documentId = await createDocument();
+    const draft = await startedRevision(handlers, context, { documentId, templateVersionId: firstVersion, channel: "document", locale: "nl", parameters: { name: "Reader" } });
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Republished" })} where id = ${ids.first}::uuid`.execute(privileged());
+    const secondVersion = await publishTemplate(platformFor(publisher).context, ids.template);
+    expect(await revision(draft.id)).toMatchObject({ template_version_id: secondVersion, follow_error: null });
+    expect((await revisionBlocks(draft.id)).map((block) => block.text)).toEqual(["Republished", "Second"]);
   }, 60_000);
 
   test("a revision without a template starts empty and needs no follow", async () => {

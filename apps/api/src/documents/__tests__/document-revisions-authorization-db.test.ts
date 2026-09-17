@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { createGeneratedEntity, deleteGeneratedEntity, updateGeneratedEntity } from "../../operations/entity/mutations.js";
+import { getGeneratedEntity, listGeneratedEntities } from "../../operations/entity/queries.js";
 import {
   asUser, caseUser, closeScratch, collections, createDocument, dbInput, documentReader, documentVersion, editor, fails, openScratch, platformFor, privileged, publishTemplate,
   restricted, revision, revisionBlocks, seedTemplate, startedRevision, tableName, templateUser,
@@ -37,10 +38,11 @@ describe("document revision authorization against PostgreSQL", () => {
     const ids = await seedTemplate();
     const templateVersion = await publishTemplate(setup.context, ids.template);
     const documentId = await createDocument();
-    const { context, handlers } = platformFor(caseUser);
-    // Real record access: the document editor may start a revision, a template reader may not.
+    // Real record access: a template reader may not start a revision; seeding from a template needs Templates.Read,
+    // so the full editor starts this draft and the template-less document editor takes over from there.
     await fails(platformFor(templateUser).handlers.startRevision!({ documentId, channel: "document", locale: "nl" }, platformFor(templateUser).context), "FORBIDDEN");
-    const draft = await startedRevision(handlers, context, { documentId, templateVersionId: templateVersion, channel: "document", locale: "nl", parameters: { name: "Reader" } });
+    await fails(platformFor(caseUser).handlers.startRevision!({ documentId, templateVersionId: templateVersion, channel: "document", locale: "nl" }, platformFor(caseUser).context), "FORBIDDEN");
+    const draft = await startedRevision(setup.handlers, setup.context, { documentId, templateVersionId: templateVersion, channel: "document", locale: "nl", parameters: { name: "Reader" } });
     const [first] = await revisionBlocks(draft.id);
     const session = dbInput(caseUser);
 
@@ -66,14 +68,21 @@ describe("document revision authorization against PostgreSQL", () => {
     await fails(collections(restricted(), session, revisionBinding("update"), { id: draft.id, expectedVersion: await version(draft.id), childId: first!.id, values: { diverged: true } }), "BAD_USER_INPUT");
     await fails(collections(restricted(), session, revisionBinding("update"), { id: draft.id, expectedVersion: await version(draft.id), childId: ids.first, values: { values: { text: "x" } } }), "BAD_USER_INPUT");
 
-    // Reads: a template reader never sees revision blocks; a document reader never sees template blocks.
+    // Reads through the generated Block Operations: a template reader never sees revision blocks; a document
+    // editor or reader without any template role lists and gets revision blocks but never template blocks.
     const count = async (who: typeof caseUser, column: "revision_id" | "variant_id", owner: string) =>
       asUser(who, async (trx) => Number((await sql<{ n: number }>`select count(*)::int as n from erp.blocks where ${sql.id(column)} = ${owner}::uuid`.execute(trx)).rows[0]!.n));
     expect(await count(templateUser, "revision_id", draft.id)).toBe(0);
     expect(await count(templateUser, "variant_id", ids.variant)).toBe(2);
-    expect(await count(documentReader, "revision_id", draft.id)).toBe(2);
-    expect(await count(documentReader, "variant_id", ids.variant)).toBe(0);
-    expect(await count(caseUser, "revision_id", draft.id)).toBe(2);
+    for (const who of [caseUser, documentReader]) {
+      const listed = await listGeneratedEntities(restricted(), dbInput(who), { table: blocks(), limit: 50 });
+      const listedIds = listed.rows.map((row) => String(row.id));
+      expect(listedIds).toContain(first!.id);
+      expect(listedIds).not.toContain(ids.first);
+      expect((await getGeneratedEntity(restricted(), dbInput(who), { table: blocks(), id: first!.id }))?.id).toBe(first!.id);
+      expect(await getGeneratedEntity(restricted(), dbInput(who), { table: blocks(), id: ids.first })).toBeNull();
+      expect(await count(who, "variant_id", ids.variant)).toBe(0);
+    }
   }, 60_000);
 
   test("the database enforces the revision state machine and its server-managed columns", async () => {

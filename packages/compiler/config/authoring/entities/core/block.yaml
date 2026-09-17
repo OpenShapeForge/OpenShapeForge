@@ -8,7 +8,9 @@ labels: { en: Block, nl: Block }
 domains: [documents]
 authorization:
   roles:
-    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
+    # Document roles read revision-owned blocks only; the restrictive database
+    # policy blocks_owner_read separates the owners. Writes stay template-only.
+    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]

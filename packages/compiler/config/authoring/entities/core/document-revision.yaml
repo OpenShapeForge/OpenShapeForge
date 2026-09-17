@@ -215,34 +215,32 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
-  create:
-    name: Create document revision
-    description: Create an empty document revision record; prefer Document.startRevision to seed it from a template.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
+  # Kept only as the unguarded native Operation Document.removeRevision's
+  # collection "remove" action requires to prove the child is mutable
+  # (collection-operations.ts). Never exposed generically: excluded below
+  # from every transport, so the only way to write a revision is
+  # Document.startRevision / updateBlock / insertBlock / removeBlock /
+  # moveBlock / publish / Document.removeRevision.
   update:
     name: Update document revision
-    description: Update a document revision draft (status, local values).
+    description: Internal-only; not exposed. Use updateBlock, publish, or Document.removeRevision instead.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
-  delete:
-    name: Delete document revision
-    description: Delete an unpublished document revision and its blocks.
-    implementation: { type: entity, action: delete }
-    effects: { data: delete, external: none }
-    reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
 interfaces:
   rest:
     operations:
+      update: false
       publish: { method: POST, path: "/api/document-content/revisions/:id/publish", response: { status: 201, kind: json } }
-  graphql: {}
-  mcp: { tools: generic }
+  graphql:
+    operations:
+      update: false
+  mcp:
+    tools: generic
+    operations:
+      update: false
   web:
     views:
       collection:

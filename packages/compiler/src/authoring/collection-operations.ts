@@ -23,7 +23,7 @@ export function materializeCollectionOperations(
       const fail: (message: string) => never = (message) => { throw new Error(`${authored.id}: ${message}`); };
       if (actions.has(`${key}.${action}`)) fail("one collection Operation per field/action is supported.");
       actions.add(`${key}.${action}`);
-      if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move.");
+      if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move", "update", "remove"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move|update|remove.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
       if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");
@@ -40,7 +40,9 @@ export function materializeCollectionOperations(
       };
       const update = requireEntityOperation(owner.entityOperations.update, "owner update");
       requireEntityOperation(child.entityOperations.list, "child list");
-      if (relation.sortable) requireEntityOperation(child.entityOperations.update, "child update");
+      // update and remove edit an owned child through its owner; the child's own
+      // update Operation proves it is mutable, its roles are not required.
+      if (relation.sortable || action === "update" || action === "remove") requireEntityOperation(child.entityOperations.update, "child update");
       if (update.concurrency?.version?.mode !== "required" || update.concurrency.version.field !== "updatedAt" ||
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
       if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" || definition.concurrency?.editLease) fail("unsupported collection guard/effect combination.");
@@ -96,7 +98,19 @@ export function materializeCollectionOperations(
         }
         if (branches.length) values.allOf = [...(Array.isArray(values.allOf) ? values.allOf : []), ...branches];
         properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
+      } else if (action === "update") {
+        const childUpdate = requireEntityOperation(child.entityOperations.update, "child update");
+        const input = entityOperationJsonSchemas(child, childUpdate, contracts, referentiedata).inputSchema;
+        const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
+        if (!values || values.type !== "object" || !values.properties) fail("child update must expose a concrete values object.");
+        delete (values.properties as Record<string, unknown>)[relation.inverse];
+        if (Array.isArray(values.required)) values.required = values.required.filter((key) => key !== relation.inverse);
+        definitions = input.$defs;
+        delete properties.beforeId;
+        properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
+        properties.values = { ...values, ...title("Values", "Waarden") }; required.push("values");
       } else {
+        if (action === "remove") delete properties.beforeId;
         properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");
       }
       const normalized: EntityOperationDefinition = {

@@ -213,6 +213,8 @@ export type WebRelationshipProjection = {
     create?: WebOperationRef;
     insert?: WebCustomOperationRef;
     move?: WebCustomOperationRef;
+    update?: WebCustomOperationRef;
+    remove?: WebCustomOperationRef;
   };
   collection?: WebCollectionView;
 };

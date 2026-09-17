@@ -63,6 +63,22 @@ operations:
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
+  updateBlock:
+    name: { en: Edit block, nl: Blok bewerken }
+    description: Change the values of one block of this variant, authorized through the variant.
+    implementation: { type: collection, action: update, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  removeBlock:
+    name: { en: Remove block, nl: Blok verwijderen }
+    description: Remove one block from this variant, authorized through the variant.
+    implementation: { type: collection, action: remove, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   list:
     name: List template variant
     description: Read accessible template variant records.

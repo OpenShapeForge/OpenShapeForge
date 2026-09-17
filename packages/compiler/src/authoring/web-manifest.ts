@@ -578,7 +578,7 @@ function projectEntity(
     const get = target.operations.get;
     const create = target.operations.create;
     const definitions = contract.model.fields.find((field) => field.key === (relationship.fieldKey ?? relationship.key))?.allowedDefinitions;
-    const nativeOperations: Pick<WebRelationshipProjection["operations"], "insert" | "move"> = {};
+    const nativeOperations: Pick<WebRelationshipProjection["operations"], "insert" | "move" | "update" | "remove"> = {};
     for (const operation of contract.pluginOperations ?? []) {
       const binding = operation.definition.implementation;
       const projectedOperation = customOperations[operation.key];

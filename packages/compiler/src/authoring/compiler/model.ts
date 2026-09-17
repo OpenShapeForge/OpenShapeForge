@@ -74,6 +74,7 @@ export function resolveModelFields(
     if (field.sortable) compiled.sortable = field.sortable;
     if (field.entityValue) compiled.entityValue = { ...field.entityValue };
     if (field.allowedDefinitions) compiled.allowedDefinitions = [...field.allowedDefinitions].sort();
+    if (field.childAuthorization) compiled.childAuthorization = field.childAuthorization;
     if (field.relationship) compiled.relationship = field.relationship;
     if (field.visibility) compiled.visibility = field.visibility;
     if (field.computed) compiled.computed = field.computed;

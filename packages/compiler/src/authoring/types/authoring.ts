@@ -530,7 +530,7 @@ export interface EntityOperationDefinition {
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: OperationPrerequisite[];
   implementation:
-    | { type: "collection"; action: "insert" | "move"; field: string }
+    | { type: "collection"; action: "insert" | "move" | "update" | "remove"; field: string }
     | {
         type: "entity";
         action: EntityOperationAction;

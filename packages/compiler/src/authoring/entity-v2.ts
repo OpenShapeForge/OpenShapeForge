@@ -264,9 +264,9 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
     }
     if (operation.implementation.type === "collection") {
       const implementation = operation.implementation;
-      if (entity.schemaVersion !== 3 || !["insert", "move"].includes(implementation.action) ||
+      if (entity.schemaVersion !== 3 || !["insert", "move", "update", "remove"].includes(implementation.action) ||
         !/^[a-z][A-Za-z0-9]*$/.test(implementation.field) || Object.keys(implementation).some((key) => !["type", "action", "field"].includes(key))) {
-        throw new Error(`${origin} ${operationKey}: collection implementation requires schemaVersion 3, field and action insert|move.`);
+        throw new Error(`${origin} ${operationKey}: collection implementation requires schemaVersion 3, field and action insert|move|update|remove.`);
       }
       if (["input", "output", "target", "auth", "tenancy", "errors", "interaction", "prerequisites"].some((key) => Reflect.get(operation, key) !== undefined)) {
         throw new Error(`${origin} ${operationKey}: collection schemas, target, auth and tenancy are compiler-derived; custom controls are unsupported.`);

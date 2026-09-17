@@ -198,6 +198,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
+        "@openshapeforge/versioning": "workspace:*",
         "yaml": "^2.8.3",
       },
       "devDependencies": {

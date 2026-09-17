@@ -130,6 +130,12 @@ export interface FieldDefinition {
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
+  /**
+   * `owner`: the owner's collection Operations on this field authorize its
+   * owned children through the owner's update roles instead of requiring the
+   * child entity's own roles. Explicit per collection; never implied.
+   */
+  childAuthorization?: "owner";
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;

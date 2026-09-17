@@ -269,6 +269,23 @@ fields:
     semanticType: DocumentVersion
     relationship:
       ownership: reference
+  - key: currentRevisionId
+    required: false
+    readOnly: true
+    label:
+      en: Current revision ID
+      nl: Huidige revisie-ID
+    description:
+      en: Server-managed pointer to the revision that was published last.
+      nl: Door de server beheerde verwijzing naar de laatst gepubliceerde revisie.
+    validation:
+      format: uuid
+    persisted:
+      column: current_revision_id
+      storageClass: core
+    semanticType: DocumentRevision
+    relationship:
+      ownership: reference
   - key: caseFileId
     label:
       en: Case file
@@ -308,6 +325,15 @@ fields:
     relationship:
       inverse: documentId
       ownership: reference
+  - key: revisions
+    label:
+      en: Revisions
+      nl: Revisies
+    semanticType: DocumentRevision
+    cardinality: collection
+    relationship:
+      inverse: document
+      ownership: owned
 operations:
   list:
     name: { en: List documents, nl: Documenten tonen }
@@ -446,12 +472,79 @@ operations:
       - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
       - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
+  startRevision:
+    name: { en: Start revision, nl: Revisie starten }
+    description:
+      en: Start an editable draft revision of this document, seeded from a published template version.
+      nl: Start een bewerkbare conceptrevisie van dit document, overgenomen uit een gepubliceerde templateversie.
+    implementation: { type: plugin, plugin: documents, handler: startRevision }
+    target: { scope: record, inputField: documentId }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [documentId, channel, locale]
+        properties:
+          documentId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Document }
+            x-osf-i18n: { title: { en: Document, nl: Document } }
+          templateVersionId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: TemplateVersion }
+            x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+          locale:
+            type: string
+            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+          parameters:
+            type: object
+            x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        required: [id, document, status]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Revision, nl: Revisie } } }
+          document: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The revision input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The document or template version is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The document or template version does not exist. }
+      - { status: 404, code: DEPENDENCY_UNRESOLVED, description: The template version has no variant for this channel and locale. }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  removeRevision:
+    name: { en: Remove revision, nl: Revisie verwijderen }
+    description:
+      en: Remove an unpublished revision and its blocks, authorized through the document.
+      nl: Verwijder een niet-gepubliceerde revisie met haar blokken, geautoriseerd via het document.
+    implementation: { type: collection, action: remove, field: revisions }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
   update:
     name: { en: Update document, nl: Document wijzigen }
     description: Updates the document metadata without changing its version pointer.
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
+    # Owner-scoped revision removal needs the owner's version; same contract as Template.update.
+    concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
   delete:
     name: { en: Delete document, nl: Document verwijderen }
@@ -461,7 +554,9 @@ operations:
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      startRevision: { method: POST, path: "/api/document-content/:documentId/revisions", response: { status: 201, kind: json } }
   graphql: {}
   mcp: {}
   web:
@@ -480,10 +575,11 @@ interfaces:
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"
+        actions: [startRevision]
         layout:
           context:
             fields: [ documentType, confidentiality, author, registeredAt ]
-            relationships: [ relationId, caseFileId, caseId, currentVersionId ]
+            relationships: [ relationId, caseFileId, caseId, currentVersionId, currentRevisionId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
@@ -494,6 +590,9 @@ interfaces:
                   fields: [ author, source, isExternal, confidentiality ]
                 - title: { en: Registration and publication, nl: Registratie en publicatie }
                   fields: [ receivedAt, registeredAt, publishedAt ]
+            - id: revisions
+              label: { en: Revisions, nl: Revisies }
+              relationship: revisions
             - id: versions
               label: { en: Versions, nl: Versies }
               relationship: versions

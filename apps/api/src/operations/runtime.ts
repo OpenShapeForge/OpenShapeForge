@@ -81,7 +81,7 @@ export type OperationContract = {
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:
-    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" }
+    | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */

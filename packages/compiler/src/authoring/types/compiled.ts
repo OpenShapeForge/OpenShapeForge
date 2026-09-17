@@ -94,6 +94,7 @@ export interface CompiledField {
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
+  childAuthorization?: "owner";
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
@@ -146,6 +147,8 @@ export interface CompiledRelationship {
   ownership?: "owned" | "reference";
   cardinality?: import("./field-definition.js").FieldDefinitionCardinality;
   sortable?: boolean;
+  /** Owner-scoped collection Operations authorize the children through the owner. */
+  childAuthorization?: "owner";
   unique?: boolean;
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;

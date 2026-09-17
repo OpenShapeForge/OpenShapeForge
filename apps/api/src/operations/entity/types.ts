@@ -61,6 +61,8 @@ export type GeneratedCrudRelationship = {
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   sortable?: boolean;
   positionColumn?: string;
+  /** Owner-scoped collection Operations authorize the children through the owner (authored per field). */
+  childAuthorization?: "owner";
   via?: string;
   viaSchema?: string;
   mutationSupport?: "unsupported";

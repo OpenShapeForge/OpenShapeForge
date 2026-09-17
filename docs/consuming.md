@@ -38,7 +38,7 @@ download`) and install the dependency tarballs together:
 npm install \
   ./openshapeforge-operations-0.1.0.tgz \
   ./openshapeforge-interface-web-0.1.0.tgz \
-  ./openshapeforge-compiler-0.1.7.tgz
+  ./openshapeforge-compiler-0.2.0.tgz
 ```
 
 Either way the content is proven before it ships: CI installs the tarball into

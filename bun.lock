@@ -173,7 +173,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.1.7",
+      "version": "0.2.0",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -195,7 +195,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",
@@ -206,7 +206,7 @@
         "typescript": "^5.9.0",
       },
       "peerDependencies": {
-        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
         "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },
@@ -250,7 +250,7 @@
     },
     "packages/operations": {
       "name": "@openshapeforge/operations",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
@@ -281,7 +281,7 @@
         "typescript": "^5.9.0",
       },
       "peerDependencies": {
-        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
         "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },
@@ -319,7 +319,7 @@
         "typescript": "^5.9.0",
       },
       "peerDependencies": {
-        "@openshapeforge/compiler": ">=0.1.7 <0.2.0",
+        "@openshapeforge/compiler": ">=0.2.0 <0.3.0",
         "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
       },
     },

@@ -24,7 +24,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@openshapeforge/operations": "^0.1.0"
+    "@openshapeforge/operations": "^0.2.0"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",

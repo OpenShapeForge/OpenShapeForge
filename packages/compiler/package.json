@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/compiler",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "Compiles OpenShapeForge authoring YAML into database, API, UI and Keycloak artifacts. Runs under Bun; see docs/consuming.md in the repository.",
   "//publishConfig": "Published with its operations and interface-web runtime dependencies by .github/workflows/package-compiler.yml on pushes to main (only when a package version does not exist there yet). The registry pin prevents a stray npm publish from landing on npmjs.com.",
   "publishConfig": {
@@ -31,7 +31,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@openshapeforge/operations": "^0.1.0",
+    "@openshapeforge/operations": "^0.2.0",
     "@openshapeforge/interface-web": "^0.2.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

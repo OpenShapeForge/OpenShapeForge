@@ -95,6 +95,30 @@ describe("schema-3 field relationship storage", () => {
     expect(sql(manifest)).toContain(`REFERENCES "directory"."${target(manifest).name}"`);
   });
 
+  it("never lowers a foreign key the referencing entity's own compilation did not register", () => {
+    // A plugin entity (pre-v3, another module) references a base entity; the
+    // base entity's derived collection must not add the cross-module FK the
+    // referencing side reports as unregistered.
+    const plugin = (contract: CompiledEntityContract) => {
+      if (contract.entity.name === sourceName) {
+        Object.assign(contract, { authoringVersion: 2 });
+        contract.entity.module = "plugin";
+      }
+    };
+    const derived = compileRelations(plugin);
+    const belongsToOnly = compileRelations((contract) => {
+      plugin(contract);
+      if (contract.entity.name === targetName) {
+        contract.model.relationships = contract.model.relationships.filter((relationship) => relationship.kind === "belongsTo");
+        contract.graphql.relationships = contract.graphql.relationships.filter((relationship) => relationship.resolve === "belongsTo");
+      }
+    });
+    expect(sql(derived)).toBe(sql(belongsToOnly));
+    expect(sql(derived)).not.toContain(`REFERENCES "erp"."${target(derived).name}"`);
+    expect(source(derived).source?.relationshipStatus?.skippedReferences).toContainEqual(expect.stringContaining("cross-module unregistered"));
+    expect(target(derived).source?.relationshipStatus?.skippedReferences).toContainEqual("rowAccessOwners<-RowAccessOwner (referencing entity keeps its own foreign-key policy)");
+  });
+
   it("fails closed for an absent target or absent foreign-key column", () => {
     expect(() => compileRelations(undefined, false)).toThrow("targets missing entity");
     expect(() => compileRelations((contract) => {

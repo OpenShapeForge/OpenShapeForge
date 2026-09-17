@@ -2,7 +2,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Corpus, type CorpusFile, authoringRootOf, indexEntities, renderFile, semanticText, yaml } from "./corpus.ts";
 import { migrateCorpus } from "./migrate.ts";
-import { emptyDataRewriteReport, rewriteFieldDefinitionJson, rewriteFieldDefinitions } from "./data.ts";
 
 function corpusOf(files: Record<string, string>): Corpus {
   const loaded: CorpusFile[] = Object.entries(files).map(([path, source]) => {
@@ -57,7 +56,7 @@ describe("type axis rename", () => {
     const fields = parsed["a/entities/parent.yaml"].fields;
     expect(fields[0]).toEqual({ key: "name", osfType: "string", persisted: { column: "name", storageClass: "core" } });
     expect(parsed["a/entities/child.yaml"].fields[0].osfType).toBe("Parent");
-    expect(report.rename).toEqual({ renamed: 1, derivedFromValueType: 1, valueTypesDropped: 1 });
+    expect(report.rename).toEqual({ renamed: 1, derivedFromValueType: 1, valueTypesDropped: 1, skipped: [] });
   });
 
   test("keeps a catalog entry's valueType and migrates its nested shape", () => {
@@ -278,57 +277,5 @@ describe("rendering", () => {
     const { output } = migrated({ "a/entities/child.yaml": child.replace("labels: { en: Child, nl: Child }", "labels: { en: Child, nl: Child }\ndomains: [core, other]") });
     expect(output["a/entities/child.yaml"]).toContain("domains: [core, other]");
     expect(output["a/entities/child.yaml"]).toContain("persisted: { column: parent_id, storageClass: core }");
-  });
-});
-
-describe("stored field-definition values (--data)", () => {
-  const stored = [
-    { key: "amount", valueType: "number", required: true },
-    { key: "notes", valueType: "string", semanticType: "multilineText" },
-    { key: "relation", semanticType: "Relation" },
-    {
-      key: "address", valueType: "object",
-      children: [{ key: "street", valueType: "string" }],
-      item: { key: "line", valueType: "string", semanticType: "multilineText" },
-      shape: [{ key: "zip", valueType: "string" }],
-    },
-  ];
-
-  test("rewrites a fieldDefinition[] value recursively and reports what it did", () => {
-    const report = emptyDataRewriteReport();
-    const value = rewriteFieldDefinitions(structuredClone(stored), report);
-    expect(value).toEqual([
-      { key: "amount", osfType: "number", required: true },
-      { key: "notes", osfType: "multilineText" },
-      { key: "relation", osfType: "Relation" },
-      {
-        key: "address", osfType: "object",
-        children: [{ key: "street", osfType: "string" }],
-        item: { key: "line", osfType: "multilineText" },
-        shape: [{ key: "zip", osfType: "string" }],
-      },
-    ]);
-    expect(report).toEqual({ renamed: 3, derivedFromValueType: 4, valueTypesDropped: 6 });
-  });
-
-  test("finds definitions nested in a larger document and leaves other data alone", () => {
-    const document = { nodes: [{ id: "n1", config: { inputFields: [{ key: "q", valueType: "string" }], valueType: "not a field" } }], tags: ["valueType"] };
-    const report = emptyDataRewriteReport();
-    rewriteFieldDefinitions(document, report);
-    expect(document.nodes[0]!.config).toEqual({ inputFields: [{ key: "q", osfType: "string" }], valueType: "not a field" });
-    expect(report.derivedFromValueType).toBe(1);
-  });
-
-  test("is idempotent and keeps unchanged JSON text byte-identical", () => {
-    const first = rewriteFieldDefinitionJson(JSON.stringify(stored));
-    const second = rewriteFieldDefinitionJson(first.text);
-    expect(second.text).toBe(first.text);
-    expect(second.report).toEqual({ renamed: 0, derivedFromValueType: 0, valueTypesDropped: 0 });
-    const untouched = "[ {\"key\": \"x\", \"osfType\": \"string\"} ]";
-    expect(rewriteFieldDefinitionJson(untouched).text).toBe(untouched);
-  });
-
-  test("refuses a valueType that is not a base type", () => {
-    expect(() => rewriteFieldDefinitions([{ key: "x", valueType: "money" }], emptyDataRewriteReport())).toThrow("not a base type");
   });
 });

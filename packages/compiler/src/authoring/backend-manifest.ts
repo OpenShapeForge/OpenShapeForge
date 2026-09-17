@@ -988,6 +988,15 @@ function compileFieldRelationStorage(
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
         attachReference(table, column, target.table, relationship.unique);
       } else if (relationship.kind === "hasMany") {
+        // A derived collection never lowers a foreign key the referencing
+        // field's own compilation did not: a pre-v3 referencing entity keeps
+        // its legacy policy (cross-module references stay unregistered and
+        // are owned by hand-written SQL).
+        if (Number(target.candidate.contract.authoringVersion) !== 3) {
+          const skipped = table.source?.relationshipStatus?.skippedReferences;
+          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity keeps its own foreign-key policy)`);
+          continue;
+        }
         const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
         if (relationship.through) {

@@ -39,6 +39,12 @@ export interface Corpus {
   files: CorpusFile[];
   /** authoringRoot -> entity name -> entity. */
   entities: Map<string, Map<string, EntityRef>>;
+  /**
+   * Set when several repositories are migrated in one run: their entities
+   * form one namespace, so a plugin's reference to a base entity is seen
+   * and inverse ambiguity is judged across all of them.
+   */
+  shared?: Map<string, EntityRef>;
 }
 
 export const scalarValue = (node: unknown): string | undefined =>
@@ -134,9 +140,32 @@ function listYamlFiles(root: string): string[] {
 }
 
 export function loadCorpus(root: string, paths: string[] = listYamlFiles(root)): Corpus {
+  return indexed(loadFiles(root, paths, false));
+}
+
+/** Several repositories as one corpus; file paths are absolute and their entities share one namespace. */
+export function loadCorpora(roots: readonly string[]): Corpus {
+  if (roots.length === 1) return loadCorpus(roots[0]!);
+  const files = roots.flatMap((root) => loadFiles(root, listYamlFiles(root), true));
+  const shared = new Map<string, EntityRef>();
+  for (const byName of indexEntities(files).values()) {
+    for (const [name, entity] of byName) {
+      if (shared.has(name)) throw new Error(`${entity.file.path}: entity ${name} is also declared in ${shared.get(name)!.file.path}.`);
+      shared.set(name, entity);
+    }
+  }
+  return { files, entities: indexEntities(files), shared };
+}
+
+function indexed(files: CorpusFile[]): Pick<Corpus, "files" | "entities"> {
+  return { files, entities: indexEntities(files) };
+}
+
+function loadFiles(root: string, paths: readonly string[], absolute: boolean): CorpusFile[] {
   const files: CorpusFile[] = [];
-  for (const path of paths) {
-    const source = readFileSync(join(root, path), "utf8");
+  for (const relativePath of paths) {
+    const path = absolute ? join(root, relativePath) : relativePath;
+    const source = readFileSync(join(root, relativePath), "utf8");
     if (path.includes("/templates/") && source.includes("{{-")) continue; // Helm templates are not YAML until rendered.
     const documents = yaml.parseAllDocuments(source);
     if (documents.length !== 1) continue; // Multi-document files carry no authoring; leave them alone.
@@ -145,7 +174,7 @@ export function loadCorpus(root: string, paths: string[] = listYamlFiles(root)):
     const kind = yaml.isMap(doc.contents) ? getString(doc.contents as YAMLMap, "kind") : undefined;
     files.push({ path, source, semantic: semanticText(doc), doc, kind, authoringRoot: authoringRootOf(path) });
   }
-  return { files, entities: indexEntities(files) };
+  return files;
 }
 
 export function indexEntities(files: readonly CorpusFile[]): Corpus["entities"] {
@@ -164,6 +193,7 @@ export function indexEntities(files: readonly CorpusFile[]): Corpus["entities"] 
 }
 
 export function entitiesOf(corpus: Corpus, file: CorpusFile): Map<string, EntityRef> {
+  if (corpus.shared) return corpus.shared;
   return (file.authoringRoot && corpus.entities.get(file.authoringRoot)) || new Map();
 }
 

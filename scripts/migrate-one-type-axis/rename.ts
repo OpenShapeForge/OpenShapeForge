@@ -17,6 +17,28 @@ export interface RenameReport {
   renamed: number;
   derivedFromValueType: number;
   valueTypesDropped: number;
+  /** Files left alone because they are data, not compiler definitions. */
+  skipped: string[];
+}
+
+/** Document kinds whose fields are compiler FieldDefinitions. */
+export const DEFINITION_KINDS: ReadonlySet<string> = new Set([
+  "coreEntity", "baseEntity", "entityPatch", "entityProfile", "semanticTypeCatalog", "workflowNode",
+  "connector", "view", "operationCatalog", "settingsDefinition", "settingsProvider", "fieldAuthoringProfileCatalog",
+  "preferenceDefinitions",
+]);
+
+const DEFINITION_DIRECTORIES = /\/authoring\/(entities|catalogs|views|operations|connectors|workflow-nodes|domain-workflow-nodes|contexts)\//;
+
+/**
+ * Only compiler definitions are renamed. Seed and fixture files carry other
+ * vocabularies as data (an integration's own field definitions, sample
+ * rows) and keep `valueType`/`semanticType` unless `--include-seeds` asks.
+ */
+export function isDefinitionDocument(file: { path: string; kind: string | undefined }, includeSeeds = false): boolean {
+  if (includeSeeds) return true;
+  if (file.kind && DEFINITION_KINDS.has(file.kind)) return true;
+  return DEFINITION_DIRECTORIES.test(`/${file.path}`);
 }
 
 const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);

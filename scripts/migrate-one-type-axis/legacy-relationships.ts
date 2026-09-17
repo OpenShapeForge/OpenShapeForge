@@ -16,7 +16,7 @@ import type { Pair, YAMLMap, YAMLSeq } from "yaml";
 import { defaultInverseKey } from "../../packages/compiler/src/authoring/inverse-collections.ts";
 import {
   type Corpus, type CorpusFile, type EntityRef,
-  deletePair, entitiesOf, findFieldByColumn, findPair, getMap, getSeq, getString, insertPair, plainEqual, toPlain, yaml,
+  deletePair, entitiesOf, findFieldByColumn, findPair, getMap, getSeq, getString, insertPair, pairKey, plainEqual, toPlain, yaml,
 } from "./corpus.ts";
 import { entityLabels } from "./inverse-fold.ts";
 
@@ -131,9 +131,59 @@ export function foldLegacyBelongsTo(corpus: Corpus, file: CorpusFile, options: L
       if (getMap(field, "relationship")?.has("foreignKey")) deletePair(getMap(field, "relationship")!, "foreignKey");
     }
     relationships.items.splice(index, 1);
-    report.belongsToFolded.push(`${owner}.${key} -> ${owner}.${getString(field, "key")}`);
+    const fieldKey = getString(field, "key")!;
+    if (fieldKey !== key) renameRelationshipReferences(root, key, fieldKey);
+    report.belongsToFolded.push(`${owner}.${key} -> ${owner}.${fieldKey}`);
   }
   if (relationships.items.length === 0) deletePair(root, "relationships");
+}
+
+/**
+ * Views reference a relationship by key: `layout.context.relationships`,
+ * a tab or group's `relationship`, a RelationshipUsage `name`, a timeline
+ * include. When a belongsTo relationship becomes a field with another key,
+ * every such reference in `interfaces` and the legacy `ui` block follows.
+ */
+export function renameRelationshipReferences(root: YAMLMap, from: string, to: string): void {
+  const visit = (node: unknown, underUsage: boolean): void => {
+    if (yaml.isSeq(node)) {
+      for (const item of node.items) {
+        if (yaml.isScalar(item) && item.value === from && underUsage) item.value = to;
+        else visit(item, underUsage);
+      }
+      return;
+    }
+    if (!yaml.isMap(node)) return;
+    for (const pair of (node as YAMLMap).items as Pair[]) {
+      const key = pairKey(pair);
+      if (key === "relationship" && yaml.isScalar(pair.value) && pair.value.value === from) pair.value.value = to;
+      else if (key === "relationship" && yaml.isMap(pair.value)) renameUsage(pair.value as YAMLMap, from, to);
+      else if (key === "relationships") visit(pair.value, true);
+      else visit(pair.value, false);
+    }
+  };
+  const renameUsage = (usage: YAMLMap, from: string, to: string) => {
+    const name = usage.get("name", true);
+    if (yaml.isScalar(name) && name.value === from) name.value = to;
+  };
+  for (const section of ["interfaces", "ui"]) {
+    const block = root.get(section, true);
+    if (yaml.isMap(block)) {
+      visit(block, false);
+      // RelationshipUsage objects inside `relationships:` lists carry `name`.
+      const walkUsages = (node: unknown): void => {
+        if (yaml.isSeq(node)) { for (const item of node.items) walkUsages(item); return; }
+        if (!yaml.isMap(node)) return;
+        for (const pair of (node as YAMLMap).items as Pair[]) {
+          if (pairKey(pair) === "relationships" && yaml.isSeq(pair.value)) {
+            for (const item of pair.value.items) if (yaml.isMap(item)) renameUsage(item as YAMLMap, from, to);
+          }
+          walkUsages(pair.value);
+        }
+      };
+      walkUsages(block);
+    }
+  }
 }
 
 export function foldLegacyHasMany(corpus: Corpus, file: CorpusFile, report: LegacyFoldReport): void {

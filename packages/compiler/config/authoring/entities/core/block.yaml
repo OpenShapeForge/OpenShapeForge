@@ -108,6 +108,13 @@ operations:
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
+  delete:
+    name: Delete block
+    description: Remove a block from its template variant or document revision.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
 interfaces:
   rest: {}
   graphql: {}

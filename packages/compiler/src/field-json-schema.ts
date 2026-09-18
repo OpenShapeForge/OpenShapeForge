@@ -214,11 +214,15 @@ export function stringRule(rule: unknown): string | undefined {
 
 /**
  * A compiled field carries its derived `baseType`; an authored FieldDefinition
- * that never went through entity normalization (connector operation fields)
- * carries a base osf type directly.
+ * that never went through entity normalization resolves a base osf type to
+ * itself. A catalog type without a resolved base is refused rather than
+ * projected as a string: the caller has to resolve it through the osf-type
+ * catalog first (connector-schemas.ts does).
  */
-export function sourceBaseType(field: Pick<SchemaSourceField, "baseType" | "osfType">): string {
-  return field.baseType ?? (isBaseType(field.osfType) ? field.osfType : "string");
+export function sourceBaseType(field: Pick<SchemaSourceField, "key" | "baseType" | "osfType">): string {
+  if (field.baseType) return field.baseType;
+  if (isBaseType(field.osfType)) return field.osfType;
+  throw new Error(`${field.key}: osfType ${field.osfType ?? "(none)"} has no resolved base type; resolve it through the osf-type catalog before building a schema.`);
 }
 
 export function baseTypeFor(field: SchemaSourceField): JsonObject {

@@ -27,6 +27,15 @@ describe("connector field schemas", () => {
     });
   });
 
+  it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
+    const osfTypes = { amount: { valueType: "number" as const, label: { en: "Amount" } } };
+    const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
+    expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0 });
+    // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.
+    expect(() => connectorFieldSchema(field)).toThrow("Connector field total: unknown osfType amount.");
+    expect(() => buildOperationSchemas([field], { cardinality: "one", fields: [] })).toThrow("unknown osfType amount");
+  });
+
   it("maps value types and formats", () => {
     const cases: [string, Record<string, unknown>][] = [
       ["boolean", { type: "boolean" }],

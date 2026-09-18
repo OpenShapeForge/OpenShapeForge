@@ -7,6 +7,7 @@ import {
   type OperationError,
   type OperationTargetBinding,
 } from "@openshapeforge/operations";
+import { sanitizeError } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
 import { normalizeTimestampToken } from "../../db/timestamps.js";
@@ -959,9 +960,19 @@ export async function executeEntityOperation(
       }
     }
   } catch (error) {
+    const operationError = operationErrorOf(error);
+    // A canonical failure is the answer; anything else is a defect. Report it
+    // before it collapses into the opaque internal error the caller sees, so
+    // the server log holds the cause (#471). Message only — no input, no session.
+    if (!operationError) {
+      console.error(
+        `[entity-runtime] ${request.operation.id} (${request.operation.intent}) failed unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        sanitizeError(error, "entity.unexpected"),
+      );
+    }
     return {
       intent: request.operation.intent,
-      error: operationErrorOf(error) ?? internalOperationError(),
+      error: operationError ?? internalOperationError(),
     } as EntityOperationResult;
   }
 }

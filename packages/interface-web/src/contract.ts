@@ -170,7 +170,13 @@ export type WebFieldProjection = {
   supports: { read: boolean; create: boolean; update: boolean };
 };
 
-export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[] };
+export type WebFieldGroup = {
+  id: string;
+  title: LocalizedText;
+  fields: string[];
+  /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
+  fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
+};
 
 export type WebCollectionView = {
   id: string;

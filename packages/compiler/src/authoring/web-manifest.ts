@@ -243,14 +243,33 @@ function fieldKeys(
   });
 }
 
+/**
+ * Presentation-renderer overrides authored on a FieldRef entry, keyed by
+ * field key. Still in development: nothing prunes this yet, so a FieldRef's
+ * `render` survives compilation instead of being silently dropped alongside
+ * the key-only projection in fieldKeys().
+ */
+function fieldOverrides(
+  group: CompiledViewGroup,
+  excluded: ReadonlySet<string> = new Set(),
+): Record<string, { render: { component: string } }> | undefined {
+  const entries = (group.fields ?? []).flatMap((entry) => {
+    if (typeof entry === "string" || !entry.renderOverride) return [];
+    if (entry.fieldDisplayMode === "hidden" || excluded.has(entry.key)) return [];
+    return [[entry.key, { render: entry.renderOverride }] as const];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
 ): WebFieldGroup[] {
   return (groups ?? []).flatMap((group) => {
     const keys = fieldKeys(group, excluded);
+    const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys }]
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
     return [...projected, ...projectGroups(group.groups, excluded)];
   });
@@ -258,9 +277,10 @@ function projectGroups(
 
 function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
   const ownFields = fieldKeys(tab);
+  const overrides = fieldOverrides(tab);
   return [
     ...(ownFields.length > 0
-      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields }]
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
     ...projectGroups(tab.groups),
   ];
@@ -492,16 +512,14 @@ function withoutCreate<T extends { create?: unknown }>(operations: T): Omit<T, "
   return rest;
 }
 
-function projectEntity(
-  source: ProjectableEntity,
-  all: ReadonlyMap<string, ProjectableEntity>,
-): WebEntityInterface {
-  const { contract, view, customOperations } = source;
-  const createUnsupported = unsupportedGenericCreate(source, all);
-  const operations: ProjectableEntity["operations"] = createUnsupported ? withoutCreate(source.operations) : source.operations;
+/**
+ * Fields the server fills on create, so no form offers them: the secure-input
+ * target, derived-on-create fields, every collection, and the foreign key of
+ * an owned inverse collection (the owner's atomic insert writes it).
+ */
+function serverOwnedFieldKeys(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): Set<string> {
+  const { contract } = source;
   const entityName = contract.entity.name;
-  const createVariant = view?.form?.variants.create;
-  const updateVariant = view?.form?.variants.edit;
   const serverOwnedFields = new Set(
     contract.entityOperations.create?.interaction.secureInput?.into
       ? [contract.entityOperations.create.interaction.secureInput.into]
@@ -521,15 +539,65 @@ function projectEntity(
       if (inverse) serverOwnedFields.add(inverse.field);
     }
   }
+  return serverOwnedFields;
+}
+
+/**
+ * The keys a create of `source` accepts from the user: the fields its create
+ * form shows, plus every single entity reference the server does not own.
+ * A reference key is accepted without being shown so a parent record can
+ * pre-fill it ("add a child from here"); it stays out when the field is
+ * read-only, derived on create or written by an owner's atomic insert. Empty
+ * when generic create is unsupported or the entity has no create form.
+ */
+function createWritableFieldKeys(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): Set<string> {
+  const createVariant = source.view?.form?.variants.create;
+  if (!createVariant || unsupportedGenericCreate(source, all)) return new Set();
+  const serverOwned = serverOwnedFieldKeys(source, all);
+  const inForm = new Set(formGroups(createVariant, undefined, serverOwned).flatMap(({ fields }) => fields));
+  return new Set(source.contract.model.fields
+    .filter((field) => !field.readOnly && !field.deriveOnCreate &&
+      (inForm.has(field.key) || (field.relationship?.kind === "belongsTo" && !serverOwned.has(field.key))))
+    .map((field) => field.key));
+}
+
+/**
+ * A derived collection offers "create a child from here" when the child form
+ * can be pre-filled with the parent key: the child supports generic create
+ * and the referencing field is one the user may write on create. An owned
+ * collection's key is server-owned (the atomic insert writes it), so it
+ * keeps no create — the owned-collection Operations are its way.
+ */
+function collectionCreateSupported(
+  relationship: CompiledEntityContract["model"]["relationships"][number],
+  target: ProjectableEntity,
+  all: ReadonlyMap<string, ProjectableEntity>,
+): boolean {
+  if (relationship.kind !== "hasMany" || relationship.through || !relationship.foreignKey || !target.operations.create) return false;
+  const referencing = target.contract.storage.columns.find((column) => column.column === relationship.foreignKey)?.field;
+  return referencing !== undefined && createWritableFieldKeys(target, all).has(referencing);
+}
+
+function projectEntity(
+  source: ProjectableEntity,
+  all: ReadonlyMap<string, ProjectableEntity>,
+): WebEntityInterface {
+  const { contract, view, customOperations } = source;
+  const createUnsupported = unsupportedGenericCreate(source, all);
+  const operations: ProjectableEntity["operations"] = createUnsupported ? withoutCreate(source.operations) : source.operations;
+  const entityName = contract.entity.name;
+  const createVariant = view?.form?.variants.create;
+  const updateVariant = view?.form?.variants.edit;
+  const serverOwnedFields = serverOwnedFieldKeys(source, all);
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
   const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
-  const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
+  const createFields = createWritableFieldKeys(source, all);
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   const explicitFields = contract.model.fields.map((field) => {
     const projected = projectField(field, entityName, {
         read: true,
-        create: !field.readOnly && !field.deriveOnCreate && createFields.has(field.key),
+        create: createFields.has(field.key),
         update: !field.readOnly && !field.immutable && !field.deriveOnCreate && updateFields.has(field.key),
     }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
@@ -543,7 +611,9 @@ function projectEntity(
     if (!target || (!relationship.foreignKey && !relationship.via)) return [];
     const list = target.operations.list;
     const get = target.operations.get;
-    const create = target.operations.create;
+    // A single reference never creates its target from the picker; a
+    // collection creates a child when the child form can carry the parent key.
+    const create = collectionCreateSupported(relationship, target, all) ? target.operations.create : undefined;
     const definitions = contract.model.fields.find((field) => field.key === (relationship.fieldKey ?? relationship.key))?.allowedDefinitions;
     const nativeOperations: Pick<WebRelationshipProjection["operations"], "insert" | "move" | "update" | "remove"> = {};
     for (const operation of contract.pluginOperations ?? []) {
@@ -574,9 +644,9 @@ function projectEntity(
       ...(relationship.via ? { via: relationship.via } : {}),
       ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
-      operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create && !relationship.fieldKey ? { create } : {}), ...nativeOperations },
+      operations: { ...(list ? { list } : {}), ...(get ? { get } : {}), ...(create ? { create } : {}), ...nativeOperations },
       ...(list ? { collection: { ...target.collection,
-        ...((relationship.fieldKey || unsupportedGenericCreate(target, all)) ? { operations: withoutCreate(target.collection.operations) } : {}),
+        ...(create ? {} : { operations: withoutCreate(target.collection.operations) }),
         id: `${target.contract.entity.name}.relationship.collection` } } : {}),
     };
     return [[relationship.key, projected]];

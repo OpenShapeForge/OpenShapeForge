@@ -53,13 +53,13 @@ export function getFieldVariableSuggestions(
     }
     // Consumer semantic types (variableTemplate, condition) are containers of
     // variables, not typed slots — any suggestion can be dropped in as a
-    // placeholder. Inferring a semanticType filter from the field's own type
+    // placeholder. Inferring a osfType filter from the field's own type
     // would incorrectly filter the pool to zero. Only apply the inferred
     // filter when the field is a typed consumer; an explicit
     // `suggestions.filter` still wins so authors can narrow when they need to.
     const isConsumerField =
-      field.semanticType === "variableTemplate" ||
-      field.semanticType === "condition";
+      field.osfType === "variableTemplate" ||
+      field.osfType === "condition";
     // `filter` is an optional authoring narrowing that the compiled
     // `FieldSuggestions` contract in this repo does not model, so it is read
     // structurally: authored narrowing still wins where a catalog provides it,
@@ -171,8 +171,8 @@ export function variableSuggestionFromFieldDefinitionRow(
       typeof row.valueType === "string"
         ? (row.valueType as VariableSuggestion["fieldType"])
         : "string",
-    ...(typeof row.semanticType === "string"
-      ? { semanticType: row.semanticType }
+    ...(typeof row.osfType === "string"
+      ? { osfType: row.osfType }
       : {}),
   };
 }

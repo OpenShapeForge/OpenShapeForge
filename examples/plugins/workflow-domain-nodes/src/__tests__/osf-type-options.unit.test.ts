@@ -2,7 +2,7 @@
 /**
  * The two catalog slices must enrich an authored field identically.
  *
- * `semantic-type-options.ts` here restates what the workflow plugin applies to
+ * `osf-type-options.ts` here restates what the workflow plugin applies to
  * the standard catalog, for the reason its docblock gives — reaching that
  * plugin's copy means pulling in entity loading, the active manifest and the
  * whole entity-node generator to reuse forty lines. That trade is defensible;
@@ -22,9 +22,9 @@
 import { describe, expect, test } from "bun:test";
 import type {
   Field,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../../../../../packages/compiler/src/authoring/types.js";
-import { enrichFieldsWithEntityIdOptions } from "../semantic-type-options.js";
+import { enrichFieldsWithEntityIdOptions } from "../osf-type-options.js";
 // The standard catalog's copy. Note the interfaces are NOT the same: arguments
 // are reversed and it takes a Record where this plugin takes a Map. That makes
 // them a reimplementation rather than a restatement, which is more room to
@@ -35,7 +35,7 @@ import { enrichFieldsWithEntityIdRemoteOptions } from "../../../workflow/src/wor
  * One entity-ID type with a list URL, one without, and one that is not an
  * entity ID at all — the three branches the enricher distinguishes.
  */
-const semanticTypeEntries: [string, SemanticTypeDefinition][] = [
+const osfTypeEntries: [string, OsfTypeDefinition][] = [
   [
     "relationId",
     {
@@ -58,7 +58,7 @@ const semanticTypeEntries: [string, SemanticTypeDefinition][] = [
   ],
 ];
 
-const semanticTypes = new Map<string, SemanticTypeDefinition>(semanticTypeEntries);
+const osfTypes = new Map<string, OsfTypeDefinition>(osfTypeEntries);
 
 /**
  * Deliberately exercises every path: a bare entity ID, one that already
@@ -66,37 +66,37 @@ const semanticTypes = new Map<string, SemanticTypeDefinition>(semanticTypeEntrie
  * non-entity field, nested `children`, and an array `item`.
  */
 const fields = [
-  { key: "relation", valueType: "string", semanticType: "relationId" },
+  { key: "relation", osfType: "relationId" },
   {
     key: "preAuthored",
-    valueType: "string",
-    semanticType: "relationId",
+    osfType: "relationId",
     options: { type: "static", items: [{ value: "a" }] },
     render: { component: "Input" },
   },
-  { key: "orphan", valueType: "string", semanticType: "orphanId" },
-  { key: "plain", valueType: "string", semanticType: "plainText" },
-  { key: "noSemanticType", valueType: "string" },
+  { key: "orphan", osfType: "orphanId" },
+  { key: "plain", osfType: "plainText" },
+  { key: "bareString", osfType: "string" },
   {
     key: "group",
-    valueType: "object",
+    osfType: "object",
     children: [
-      { key: "nestedRelation", valueType: "string", semanticType: "relationId" },
-      { key: "nestedPlain", valueType: "string", semanticType: "plainText" },
+      { key: "nestedRelation", osfType: "relationId" },
+      { key: "nestedPlain", osfType: "plainText" },
     ],
   },
   {
     key: "list",
-    valueType: "array",
-    item: { key: "itemRelation", valueType: "string", semanticType: "relationId" },
+    osfType: "object",
+    cardinality: "collection",
+    item: { key: "itemRelation", osfType: "relationId" },
   },
 ] as unknown as Field[];
 
 describe("entity-ID enrichment", () => {
   test("agrees field for field with the standard catalog's implementation", () => {
-    const domain = enrichFieldsWithEntityIdOptions(fields, semanticTypes);
+    const domain = enrichFieldsWithEntityIdOptions(fields, osfTypes);
     const standard = enrichFieldsWithEntityIdRemoteOptions(
-      Object.fromEntries(semanticTypes),
+      Object.fromEntries(osfTypes),
       fields,
     );
 
@@ -109,7 +109,7 @@ describe("entity-ID enrichment", () => {
 
   test("enriches an entity ID and leaves everything else alone", () => {
     const [relation, preAuthored, orphan, plain, bare, group, list] =
-      enrichFieldsWithEntityIdOptions(fields, semanticTypes) as any[];
+      enrichFieldsWithEntityIdOptions(fields, osfTypes) as any[];
 
     // The picker, sourced from the semantic type rather than the node YAML.
     expect(relation.options).toEqual({ type: "remote", remoteUrl: "/api/options/relations" });
@@ -127,6 +127,12 @@ describe("entity-ID enrichment", () => {
     expect(plain.render).toBeUndefined();
     expect(bare.render).toBeUndefined();
 
+    // Every field leaves with the base type its osfType resolves to.
+    expect(relation.baseType).toBe("string");
+    expect(bare.baseType).toBe("string");
+    expect(group.baseType).toBe("object");
+    expect(group.children[0].baseType).toBe("string");
+
     // Nesting: a picker three levels down is still a picker.
     expect(group.children[0].render.component).toBe("OptionVariablePicker");
     expect(group.children[1].render).toBeUndefined();
@@ -135,7 +141,7 @@ describe("entity-ID enrichment", () => {
 
   test("does not mutate the fields it was handed", () => {
     const before = JSON.stringify(fields);
-    enrichFieldsWithEntityIdOptions(fields, semanticTypes);
+    enrichFieldsWithEntityIdOptions(fields, osfTypes);
     // The parsed YAML is shared with the caller's entry list; enrichment
     // reaching back into it would corrupt the entry that was already emitted.
     expect(JSON.stringify(fields)).toBe(before);

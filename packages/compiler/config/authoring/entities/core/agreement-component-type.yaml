@@ -16,7 +16,7 @@ domains:
   - contracts
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -31,7 +31,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -46,7 +46,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -59,9 +58,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -75,7 +74,7 @@ fields:
       column: unit_id
       storageClass: core
   - key: applicableToAgreementTypes
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Applicable to agreement types
@@ -93,7 +92,6 @@ fields:
       max: unbounded
     item:
       key: agreementType
-      valueType: string
       required: false
       label:
         en: Agreement type
@@ -101,9 +99,9 @@ fields:
       options:
         type: referentiedata
         referentieGroep: AGREEMENTTYPE
-      semanticType: referenceDataCode
+      osfType: referenceDataCode
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -123,9 +121,10 @@ fields:
     persisted:
       column: debit_ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
+      inverse: false
   - key: creditLedgerAccountId
     label:
       en: Credit ledger account
@@ -133,9 +132,10 @@ fields:
     persisted:
       column: credit_ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
+      inverse: false
   - key: defaultCostDimensionId
     label:
       en: Default cost dimension
@@ -143,7 +143,7 @@ fields:
     persisted:
       column: default_cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
 authorization:

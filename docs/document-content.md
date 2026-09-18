@@ -31,9 +31,11 @@ Document ──publish──▶ DocumentVersion (generic publishedSnapshot; an u
   reference, `writtenBy: [Document.linkTemplate, Template.publish]`),
   `parameters` (jsonb), `followError`, and the owned collection `variants`.
 - **`DocumentVariant`** (`entities/core/document-variant.yaml`): `document`,
-  `channel`, `locale`, unique per document; owned sortable `blocks` with
-  `childAuthorization: owner`, `childLock: locked` and the same
-  `allowedDefinitions` as `TemplateVariant.blocks`.
+  `channel`, `locale`, unique per document. Its owned sortable `blocks`
+  collection is derived from `Block.documentVariant`, whose
+  `relationship.inverse` declares `childAuthorization: owner`,
+  `childLock: locked` and the same `allowedDefinitions` as the template
+  variant's collection (one type axis, `docs/authoring.md`).
 - **`Block`** keeps one table with two nullable owner FKs, `variant` and
   `documentVariant` (compiler check `num_nonnulls(document_variant_id, variant_id) = 1`),
   provenance `origin` (`template` | `local`), `templateBlockId` (id inside
@@ -66,8 +68,8 @@ generic `Block.update`) and copied to the document block it seeds. A
 collection authored with `childLock: <booleanField>` makes the owner's
 `update`, `move` and `remove` collection Operations refuse a child whose flag
 is set with `INVALID_STATE` (`apps/api/src/operations/entity/collection-mutations.ts`);
-`insert` is unaffected. `DocumentVariant.blocks` sets it, `TemplateVariant.blocks`
-does not. The compiler also drops the lock field and every owning foreign key of
+`insert` is unaffected. `Block.documentVariant` declares it on its inverse
+collection, `Block.variant` does not. The compiler also drops the lock field and every owning foreign key of
 the child from the owner-scoped `insertBlock`/`updateBlock` values contracts
 (`packages/compiler/src/authoring/collection-operations.ts`), so the schema
 promises no more than the storage guards admit. The database keeps `locked` server-managed on a document block (an
@@ -77,9 +79,10 @@ block from the new snapshot, whatever happened to it locally.
 ### Plugin patches apply to both block collections
 
 An `entityPatch` targets one base entity and `allowedDefinitions` replaces
-wholesale (`docs/layers.md`), so a plugin adding a block definition ships two
-patch files, `template-variant.yaml` and `document-variant.yaml`, restating
-the full list. The compiler unions them for `Block.values`; keep them equal or
+wholesale (`docs/layers.md`). Both block collections are declared on `Block`
+(`variant.relationship.inverse` and `documentVariant.relationship.inverse`),
+so a plugin adding a block definition patches `block.yaml`, restating the full
+list on both references. The compiler unions them for `Block.values`; keep them equal or
 the follow rule skips the block (see below).
 
 ## Who reads and writes what

@@ -10,8 +10,8 @@
  * condition type definitions. Outputs are duplicated to multiple target directories
  * (workflow/contract, compiler, features/renderer/generated).
  *
- * Input:  Compiler types.ts source, authoring YAML catalogs (semantic-types, components).
- * Output: Map<string, string> — generated .ts files for node-field-contract, semantic-types,
+ * Input:  Compiler types.ts source, authoring YAML catalogs (osf-types, components).
+ * Output: Map<string, string> — generated .ts files for node-field-contract, osf-types,
  *         component-defaults, and canonical-condition types.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -66,7 +66,7 @@ const CONTRACT_DECLARATIONS = [
   { kind: "interface", name: "ComputedField" },
   { kind: "interface", name: "FieldOptionStatic" },
   { kind: "interface", name: "FieldOptions" },
-  { kind: "interface", name: "SemanticTypeLookupDefinition" },
+  { kind: "interface", name: "OsfTypeLookupDefinition" },
   { kind: "interface", name: "DataClassification" },
   { kind: "interface", name: "RetentionPolicy" },
   { kind: "interface", name: "ContextHints" },
@@ -77,13 +77,14 @@ const CONTRACT_DECLARATIONS = [
   { kind: "type", name: "FieldDefinitionRelationshipConstraints" },
   { kind: "type", name: "FieldDefinitionValidation" },
   { kind: "interface", name: "FieldDefinitionSuggestions" },
+  { kind: "interface", name: "FieldDefinitionInverseCollection" },
   { kind: "interface", name: "FieldDefinitionRelationship" },
   { kind: "interface", name: "FieldDefinitionDeriveOnCreate" },
   { kind: "interface", name: "FieldDefinitionRuntimeMetadata" },
   { kind: "interface", name: "FieldDefinitionWorkflowInspector" },
   { kind: "interface", name: "FieldDefinitionAuthoringMetadata" },
   { kind: "interface", name: "FieldDefinition" },
-  { kind: "interface", name: "SemanticTypeDefinition" },
+  { kind: "interface", name: "OsfTypeDefinition" },
   { kind: "type", name: "FieldSuggestions" },
   { kind: "type", name: "FieldRelationship" },
   { kind: "type", name: "FieldRuntimeMetadata" },
@@ -192,7 +193,7 @@ function buildNodeFieldContractSource() {
   ].join("\n");
 }
 
-type SemanticTypeCatalog = {
+type OsfTypeCatalog = {
   types?: Record<string, unknown>;
 };
 
@@ -212,13 +213,13 @@ function loadYamlFile<T>(filePath: string): T {
   return parseYaml(readFileSync(filePath, "utf-8")) as T;
 }
 
-type CategorizedSemanticTypes = {
+type CategorizedOsfTypes = {
   core: Record<string, unknown>;
   context: Record<string, unknown>;
   entityIds: Record<string, unknown>;
 };
 
-function enrichEntityIdSemanticType(definition: unknown): unknown {
+function enrichEntityIdOsfType(definition: unknown): unknown {
   if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
     return definition;
   }
@@ -250,7 +251,7 @@ function enrichEntityIdSemanticType(definition: unknown): unknown {
 }
 
 /**
- * Splits the hand-authored semantic-types catalog into the three partials
+ * Splits the hand-authored osf-types catalog into the three partials
  * the runtime contract emits. Entries are routed by their `kind` field:
  *   - `kind: "entityId"` → `entityIds` partial (consumed by the workflow
  *     designer's `core-entity-options` route).
@@ -261,10 +262,10 @@ function enrichEntityIdSemanticType(definition: unknown): unknown {
  * the YAML catalog is the single source of truth for every semantic type
  * the runtime sees.
  */
-function loadCategorizedSemanticTypes(
+function loadCategorizedOsfTypes(
   authoringDir: string,
   readableEntitySlugs: ReadonlySet<string>,
-): CategorizedSemanticTypes {
+): CategorizedOsfTypes {
   const core: Record<string, unknown> = {};
   const context: Record<string, unknown> = {};
   const entityIds: Record<string, unknown> = {};
@@ -279,7 +280,7 @@ function loadCategorizedSemanticTypes(
       if (def.entity && !readableEntitySlugs.has(toKebabCase(def.entity))) {
         return;
       }
-      entityIds[key] = enrichEntityIdSemanticType(definition);
+      entityIds[key] = enrichEntityIdOsfType(definition);
     } else if (bucket === "core") {
       core[key] = definition;
     } else {
@@ -287,9 +288,9 @@ function loadCategorizedSemanticTypes(
     }
   };
 
-  const corePath = join(authoringDir, "catalogs", "semantic-types.yaml");
+  const corePath = join(authoringDir, "catalogs", "osf-types.yaml");
   if (existsSync(corePath)) {
-    const types = loadYamlFile<SemanticTypeCatalog>(corePath).types ?? {};
+    const types = loadYamlFile<OsfTypeCatalog>(corePath).types ?? {};
     for (const [key, definition] of Object.entries(types)) {
       route(key, definition, "core");
     }
@@ -305,13 +306,13 @@ function loadCategorizedSemanticTypes(
       const contextPath = join(
         contextsDir,
         entry.name,
-        "semantic-types.yaml",
+        "osf-types.yaml",
       );
       if (!existsSync(contextPath)) {
         continue;
       }
 
-      const types = loadYamlFile<SemanticTypeCatalog>(contextPath).types ?? {};
+      const types = loadYamlFile<OsfTypeCatalog>(contextPath).types ?? {};
       for (const [key, definition] of Object.entries(types)) {
         route(key, definition, "context");
       }
@@ -342,12 +343,12 @@ function loadFieldAuthoringProfiles(authoringDir: string) {
 }
 
 const SEMANTIC_PARTIALS = [
-  { suffix: "core", constName: "COMPILER_SEMANTIC_TYPES_CORE", source: "catalogs/semantic-types.yaml" },
-  { suffix: "context", constName: "COMPILER_SEMANTIC_TYPES_CONTEXT", source: "contexts/*/semantic-types.yaml" },
-  { suffix: "entity-ids", constName: "COMPILER_SEMANTIC_TYPES_ENTITY_IDS", source: "catalogs/semantic-types.yaml + contexts/*/semantic-types.yaml (entries with kind: entityId)" },
+  { suffix: "core", constName: "COMPILER_OSF_TYPES_CORE", source: "catalogs/osf-types.yaml" },
+  { suffix: "context", constName: "COMPILER_OSF_TYPES_CONTEXT", source: "contexts/*/osf-types.yaml" },
+  { suffix: "entity-ids", constName: "COMPILER_OSF_TYPES_ENTITY_IDS", source: "catalogs/osf-types.yaml + contexts/*/osf-types.yaml (entries with kind: entityId)" },
 ] as const;
 
-function buildSemanticTypesPartialSource(
+function buildOsfTypesPartialSource(
   importPath: string,
   constName: string,
   sourceDescription: string,
@@ -360,43 +361,43 @@ function buildSemanticTypesPartialSource(
     `// Source of truth: packages/compiler/config/authoring/${sourceDescription}`,
     "// Do not edit manually.",
     "",
-    `import type { SemanticTypeDefinition } from "${importPath}";`,
+    `import type { OsfTypeDefinition } from "${importPath}";`,
     "",
-    `export const ${constName} = ${serialized} as const satisfies Record<string, SemanticTypeDefinition>;`,
+    `export const ${constName} = ${serialized} as const satisfies Record<string, OsfTypeDefinition>;`,
     "",
   ].join("\n");
 }
 
-function buildSemanticTypesBarrelSource(importPath: string) {
+function buildOsfTypesBarrelSource(importPath: string) {
   return [
     "// Generated by OpenShapeForge Service Compiler.",
-    "// Source of truth: packages/compiler/config/authoring/**/semantic-types.yaml",
+    "// Source of truth: packages/compiler/config/authoring/**/osf-types.yaml",
     "// Do not edit manually.",
     "",
-    `import type { SemanticTypeDefinition } from "${importPath}";`,
-    `import { COMPILER_SEMANTIC_TYPES_CORE } from "./semantic-types-core";`,
-    `import { COMPILER_SEMANTIC_TYPES_CONTEXT } from "./semantic-types-context";`,
-    `import { COMPILER_SEMANTIC_TYPES_ENTITY_IDS } from "./semantic-types-entity-ids";`,
+    `import type { OsfTypeDefinition } from "${importPath}";`,
+    `import { COMPILER_OSF_TYPES_CORE } from "./osf-types-core";`,
+    `import { COMPILER_OSF_TYPES_CONTEXT } from "./osf-types-context";`,
+    `import { COMPILER_OSF_TYPES_ENTITY_IDS } from "./osf-types-entity-ids";`,
     "",
-    "export const COMPILER_SEMANTIC_TYPES = {",
-    "  ...COMPILER_SEMANTIC_TYPES_CORE,",
-    "  ...COMPILER_SEMANTIC_TYPES_CONTEXT,",
-    "  ...COMPILER_SEMANTIC_TYPES_ENTITY_IDS,",
-    `} as const satisfies Record<string, SemanticTypeDefinition>;`,
+    "export const COMPILER_OSF_TYPES = {",
+    "  ...COMPILER_OSF_TYPES_CORE,",
+    "  ...COMPILER_OSF_TYPES_CONTEXT,",
+    "  ...COMPILER_OSF_TYPES_ENTITY_IDS,",
+    `} as const satisfies Record<string, OsfTypeDefinition>;`,
     "",
-    "export type CompilerSemanticTypeKey = keyof typeof COMPILER_SEMANTIC_TYPES;",
+    "export type CompilerOsfTypeKey = keyof typeof COMPILER_OSF_TYPES;",
     "",
-    "export const COMPILER_SEMANTIC_TYPE_KEYS = Object.keys(COMPILER_SEMANTIC_TYPES) as CompilerSemanticTypeKey[];",
+    "export const COMPILER_OSF_TYPE_KEYS = Object.keys(COMPILER_OSF_TYPES) as CompilerOsfTypeKey[];",
     "",
-    "export { COMPILER_SEMANTIC_TYPES_CORE } from \"./semantic-types-core\";",
-    "export { COMPILER_SEMANTIC_TYPES_CONTEXT } from \"./semantic-types-context\";",
-    "export { COMPILER_SEMANTIC_TYPES_ENTITY_IDS } from \"./semantic-types-entity-ids\";",
+    "export { COMPILER_OSF_TYPES_CORE } from \"./osf-types-core\";",
+    "export { COMPILER_OSF_TYPES_CONTEXT } from \"./osf-types-context\";",
+    "export { COMPILER_OSF_TYPES_ENTITY_IDS } from \"./osf-types-entity-ids\";",
     "",
   ].join("\n");
 }
 
-type SemanticTypeLookupManifestEntry = {
-  semanticType: string;
+type OsfTypeLookupManifestEntry = {
+  osfType: string;
   provider: string;
   remoteUrl: string;
   searchParam: string;
@@ -423,17 +424,17 @@ function normalizeLookupFilters(
   return Object.keys(filters).length > 0 ? filters : undefined;
 }
 
-function buildSemanticTypeLookupManifest(
-  categorized: CategorizedSemanticTypes,
-): Record<string, SemanticTypeLookupManifestEntry> {
-  const lookups: Record<string, SemanticTypeLookupManifestEntry> = {};
+function buildOsfTypeLookupManifest(
+  categorized: CategorizedOsfTypes,
+): Record<string, OsfTypeLookupManifestEntry> {
+  const lookups: Record<string, OsfTypeLookupManifestEntry> = {};
   const allTypes = {
     ...categorized.core,
     ...categorized.context,
     ...categorized.entityIds,
   };
 
-  for (const [semanticType, rawDefinition] of Object.entries(allTypes)) {
+  for (const [osfType, rawDefinition] of Object.entries(allTypes)) {
     const definition = rawDefinition as {
       kind?: string;
       entity?: string;
@@ -448,9 +449,9 @@ function buildSemanticTypeLookupManifest(
     if (definition.lookup?.provider) {
       const remoteUrl =
         definition.lookup.remoteUrl?.trim() ||
-        `/api/runtime/lookups?semanticType=${encodeURIComponent(semanticType)}`;
-      lookups[semanticType] = {
-        semanticType,
+        `/api/runtime/lookups?osfType=${encodeURIComponent(osfType)}`;
+      lookups[osfType] = {
+        osfType,
         provider: definition.lookup.provider,
         remoteUrl,
         searchParam: definition.lookup.searchParam?.trim() || "search",
@@ -463,8 +464,8 @@ function buildSemanticTypeLookupManifest(
     }
 
     if (definition.kind === "entityId" && definition.entity && definition.listUrl) {
-      lookups[semanticType] = {
-        semanticType,
+      lookups[osfType] = {
+        osfType,
         provider: "generatedEntity",
         entity: definition.entity,
         remoteUrl: definition.listUrl,
@@ -476,18 +477,18 @@ function buildSemanticTypeLookupManifest(
   return lookups;
 }
 
-function buildSemanticTypeLookupsSource(
-  lookups: Record<string, SemanticTypeLookupManifestEntry>,
+function buildOsfTypeLookupsSource(
+  lookups: Record<string, OsfTypeLookupManifestEntry>,
 ) {
   const serialized = JSON.stringify(lookups, null, 2);
 
   return [
     "// Generated by OpenShapeForge Service Compiler.",
-    "// Source of truth: packages/compiler/config/authoring/**/semantic-types.yaml",
+    "// Source of truth: packages/compiler/config/authoring/**/osf-types.yaml",
     "// Do not edit manually.",
     "",
-    "export interface CompilerSemanticTypeLookupDefinition {",
-    "  semanticType: string;",
+    "export interface CompilerOsfTypeLookupDefinition {",
+    "  osfType: string;",
     "  provider: string;",
     "  remoteUrl: string;",
     "  searchParam: string;",
@@ -495,32 +496,32 @@ function buildSemanticTypeLookupsSource(
     "  filters?: Record<string, string | number | boolean>;",
     "}",
     "",
-    `export const COMPILER_SEMANTIC_TYPE_LOOKUPS = ${serialized} as const satisfies Record<string, CompilerSemanticTypeLookupDefinition>;`,
+    `export const COMPILER_OSF_TYPE_LOOKUPS = ${serialized} as const satisfies Record<string, CompilerOsfTypeLookupDefinition>;`,
     "",
-    "export type CompilerSemanticTypeLookupKey = keyof typeof COMPILER_SEMANTIC_TYPE_LOOKUPS;",
+    "export type CompilerOsfTypeLookupKey = keyof typeof COMPILER_OSF_TYPE_LOOKUPS;",
     "",
   ].join("\n");
 }
 
-function emitSemanticTypesFiles(
+function emitOsfTypesFiles(
   files: Map<string, string>,
   prefix: string,
   importPath: string,
-  categorized: CategorizedSemanticTypes,
+  categorized: CategorizedOsfTypes,
 ) {
   const categories = [categorized.core, categorized.context, categorized.entityIds] as const;
 
   for (let i = 0; i < SEMANTIC_PARTIALS.length; i++) {
     const partial = SEMANTIC_PARTIALS[i]!;
     files.set(
-      `${prefix}/semantic-types-${partial.suffix}.ts`,
-      buildSemanticTypesPartialSource(importPath, partial.constName, partial.source, categories[i]!),
+      `${prefix}/osf-types-${partial.suffix}.ts`,
+      buildOsfTypesPartialSource(importPath, partial.constName, partial.source, categories[i]!),
     );
   }
 
   files.set(
-    `${prefix}/semantic-types.ts`,
-    buildSemanticTypesBarrelSource(importPath),
+    `${prefix}/osf-types.ts`,
+    buildOsfTypesBarrelSource(importPath),
   );
 }
 
@@ -663,11 +664,11 @@ function buildLabelAutocompleteSource(contractImportPath: string): string {
 export function generateWorkflowContractArtifacts(authoringDir: string): Map<string, string> {
   const files = new Map<string, string>();
   const coreEntityGraphqlRegistry = getWorkflowCoreEntityGraphqlRegistry(authoringDir);
-  const categorizedSemanticTypes = loadCategorizedSemanticTypes(
+  const categorizedOsfTypes = loadCategorizedOsfTypes(
     authoringDir,
     new Set(Object.keys(coreEntityGraphqlRegistry)),
   );
-  const semanticTypeLookupManifest = buildSemanticTypeLookupManifest(categorizedSemanticTypes);
+  const osfTypeLookupManifest = buildOsfTypeLookupManifest(categorizedOsfTypes);
 
   const fieldContractSource = buildNodeFieldContractSource();
   const componentDefaultsSource = buildFieldComponentDefaultsSource(authoringDir);
@@ -677,8 +678,8 @@ export function generateWorkflowContractArtifacts(authoringDir: string): Map<str
   const coreEntityGraphqlRegistrySource = buildCoreEntityGraphqlRegistrySource(
     coreEntityGraphqlRegistry,
   );
-  const semanticTypeLookupsSource = buildSemanticTypeLookupsSource(
-    semanticTypeLookupManifest,
+  const osfTypeLookupsSource = buildOsfTypeLookupsSource(
+    osfTypeLookupManifest,
   );
 
   for (const prefix of ["workflow/contract", "compiler", "generated/compiler", "features/renderer/generated"]) {
@@ -691,8 +692,8 @@ export function generateWorkflowContractArtifacts(authoringDir: string): Map<str
     files.set(`${prefix}/expression-evaluator.ts`, expressionEvaluatorSource);
     files.set(`${prefix}/label-autocomplete.ts`, buildLabelAutocompleteSource(importPath));
     files.set(`${prefix}/core-entity-graphql-registry.ts`, coreEntityGraphqlRegistrySource);
-    files.set(`${prefix}/semantic-type-lookups.ts`, semanticTypeLookupsSource);
-    emitSemanticTypesFiles(files, prefix, importPath, categorizedSemanticTypes);
+    files.set(`${prefix}/osf-type-lookups.ts`, osfTypeLookupsSource);
+    emitOsfTypesFiles(files, prefix, importPath, categorizedOsfTypes);
   }
 
   const workflowEntityNodeFiles = generateWorkflowEntityNodeArtifacts(authoringDir);

@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: lineNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Line number
@@ -29,7 +29,6 @@ fields:
       column: line_number
       storageClass: core
   - key: side
-    valueType: string
     required: true
     label:
       en: Side
@@ -43,9 +42,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: LEDGERSIDE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -53,12 +51,12 @@ fields:
     description:
       en: Monetary amount of the line.
       nl: Geldbedrag van de regel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -78,7 +76,7 @@ fields:
     persisted:
       column: ledger_posting_id
       storageClass: core
-    semanticType: LedgerPosting
+    osfType: LedgerPosting
     relationship:
       ownership: reference
   - key: ledgerAccountId
@@ -88,7 +86,7 @@ fields:
     persisted:
       column: ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: agreementId
@@ -98,7 +96,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: relationId
@@ -108,7 +106,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: dimension1Id
@@ -118,9 +116,10 @@ fields:
     persisted:
       column: dimension_1_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
   - key: dimension2Id
     label:
       en: Cost dimension 2
@@ -128,9 +127,10 @@ fields:
     persisted:
       column: dimension_2_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
   - key: vatDimensionId
     label:
       en: VAT dimension
@@ -138,9 +138,10 @@ fields:
     persisted:
       column: vat_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
 authorization:
   roles:
     read:

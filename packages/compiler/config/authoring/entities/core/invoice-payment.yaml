@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: paidAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Paid at
@@ -27,7 +27,6 @@ fields:
       column: paid_at
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -35,7 +34,7 @@ fields:
     description:
       en: Amount of the payment applied to the invoice.
       nl: Bedrag van de betaling dat op de factuur is verwerkt.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
@@ -46,7 +45,7 @@ fields:
     persisted:
       column: invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
   - key: paymentMethodId
@@ -56,7 +55,7 @@ fields:
     persisted:
       column: payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
   - key: bankStatementLineId
@@ -66,7 +65,7 @@ fields:
     persisted:
       column: bank_statement_line_id
       storageClass: core
-    semanticType: BankStatementLine
+    osfType: BankStatementLine
     relationship:
       ownership: reference
 authorization:

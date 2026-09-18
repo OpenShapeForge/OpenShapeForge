@@ -37,18 +37,33 @@ export function collectionMutationError(
     collections.some((relationship) => typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0) ||
     table.columns.some((column) => column.required && managed.has(column.name))
   );
-  const affectsCollection = operation === "delete" && (
-    collections.some((relationship) => relationship.ownership === "owned") ||
+  // Deleting an owned child generically is always refused; deleting an
+  // OWNER is refused only while owned children exist, which is a row-level
+  // check the delete makes inside its transaction (ownedChildrenExist).
+  const affectsCollection = operation === "delete" &&
     tables.some((owner) => owner.source?.graphql?.relationships?.some((relationship) =>
       relationship.fieldKey && relationship.resolve !== "belongsTo" &&
-      relationship.target === table.source?.graphql?.typeName && relationship.ownership === "owned"))
-  );
+      relationship.target === table.source?.graphql?.typeName && relationship.ownership === "owned"));
   if (!explicit && !required && !affectsCollection) return undefined;
   return {
     code: "RELATION_COLLECTION_MUTATION_UNSUPPORTED",
     message: `Collection mutation${explicit ? ` of ${explicit}` : ""} is not supported by generic ${operation}; an atomic collection Operation is required.`,
     retryable: false,
   };
+}
+
+/** The owned collections of `table`: the child table and the child column that points back at the owner. */
+export function ownedCollectionsOf(
+  table: GeneratedCrudTable,
+  tables: readonly GeneratedCrudTable[],
+): Array<{ key: string; child: GeneratedCrudTable; column: string }> {
+  const owned: Array<{ key: string; child: GeneratedCrudTable; column: string }> = [];
+  for (const relationship of table.source?.graphql?.relationships ?? []) {
+    if (!relationship.fieldKey || relationship.resolve === "belongsTo" || relationship.ownership !== "owned" || !relationship.foreignKey || relationship.via) continue;
+    const child = tables.find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
+    if (child) owned.push({ key: relationship.fieldKey, child, column: relationship.foreignKey });
+  }
+  return owned;
 }
 
 /** Remove unsupported values from transport schemas without changing the authored contract. */

@@ -475,7 +475,7 @@ type RelationshipTarget = { label: string; listTool?: string };
 /**
  * The storage column a `belongsTo` foreign key lands in, and the field key
  * every transport addresses it by. Undefined for relationships that carry no
- * foreign key (`hasMany`, `manyToMany`, or a `belongsTo` resolved elsewhere).
+ * foreign key (`hasMany`, or a `belongsTo` resolved elsewhere).
  */
 function relationshipColumn(
   contract: CompiledEntityContract,
@@ -560,7 +560,7 @@ function sortableFieldKeys(
       (field) =>
         field.key !== excludedField &&
         field.cardinality !== "collection" &&
-        field.valueType !== "object",
+        field.baseType !== "object",
     )
     .map((field) => field.key);
 }
@@ -785,7 +785,7 @@ function buildToolsForEntity(
       if (
         field.key === mcp.elicitOnCreate?.into ||
         field.cardinality === "collection" ||
-        field.valueType === "object"
+        field.baseType === "object"
       )
         continue;
       const schema = compiledFieldSchemaWithoutDefinitions(
@@ -1062,7 +1062,7 @@ export type McpEntityCatalogEntry = {
     key: string;
     label?: string;
     description?: string;
-    valueType: CompiledField["valueType"];
+    baseType: CompiledField["baseType"];
     cardinality: CompiledField["cardinality"];
     required: boolean;
     readOnly: boolean;
@@ -1435,7 +1435,7 @@ export function buildMcpCatalog(
           key: field.key,
           ...(label ? { label } : {}),
           ...(description ? { description } : {}),
-          valueType: field.valueType,
+          baseType: field.baseType,
           cardinality: field.cardinality,
           required: field.required === true,
           readOnly: field.readOnly === true,

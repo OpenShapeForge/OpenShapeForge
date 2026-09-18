@@ -33,10 +33,14 @@ function resolveLabel(label: LocalizedLabel | undefined | null, fallback: string
  */
 function mapToRendererField(formField: ActionFormField): Field {
   const valueType = normalizeFieldValueType(formField.valueType);
+  // The action form field keeps the workflow service's valueType/osfType
+  // pair; the renderer's Field names one osfType with the base resolved.
+  const { valueType: _valueType, osfType, ...rest } = formField;
   return {
-    ...formField,
+    ...rest,
     key: formField.key,
-    valueType,
+    osfType: osfType ?? valueType,
+    baseType: valueType,
     cardinality: formField.cardinality ?? "single",
     required: formField.required ?? false,
     label: formField.label as { nl?: string; en?: string },
@@ -47,7 +51,7 @@ function mapToRendererField(formField: ActionFormField): Field {
 
 function normalizeFieldValueType(
   valueType: unknown,
-): Field["valueType"] {
+): NonNullable<Field["baseType"]> {
   switch (valueType) {
     case "string":
       return "string";
@@ -68,7 +72,7 @@ function normalizeFieldValueType(
   }
 }
 
-function getDefaultRender(valueType: Field["valueType"]): { component: string } | undefined {
+function getDefaultRender(valueType: NonNullable<Field["baseType"]>): { component: string } | undefined {
   switch (valueType) {
     case "string":
       return { component: "Input" };

@@ -21,12 +21,17 @@ indexes:
 fields:
   - key: document
     label: { en: Document, nl: Document }
-    semanticType: Document
+    osfType: Document
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: variants
+        label: { en: Content, nl: Inhoud }
+        ownership: owned
   - key: channel
     label: { en: Channel, nl: Kanaal }
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     options:
@@ -37,28 +42,16 @@ fields:
         - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
     persisted: { column: channel, storageClass: core }
   - key: locale
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     defaultValue: nl
     validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
     label: { en: Content language, nl: Inhoudstaal }
     persisted: { column: locale, storageClass: core }
-  - key: blocks
-    label: { en: Blocks, nl: Blokken }
-    semanticType: Block
-    cardinality: collection
-    sortable: true
-    relationship: { inverse: documentVariant, ownership: owned }
-    # A document editor holds no Block role; the variant's collection
-    # Operations carry the document editor's authority to its blocks.
-    childAuthorization: owner
-    # A block copied from a locked template block refuses updateBlock,
-    # moveBlock and removeBlock; the follow rule always overwrites it.
-    childLock: locked
-    # Keep identical to TemplateVariant.blocks. A plugin entityPatch targets one
-    # entity, so a plugin adding a definition patches both files.
-    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
+  # The owned, sortable, lock-aware `blocks` collection is derived from
+  # Block.documentVariant (entities/core/block.yaml), where its
+  # allowedDefinitions, childAuthorization and childLock are declared.
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }

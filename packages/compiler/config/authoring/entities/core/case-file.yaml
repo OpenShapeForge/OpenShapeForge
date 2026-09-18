@@ -38,7 +38,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -50,7 +50,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -62,7 +62,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -72,9 +71,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseFileType
-    valueType: string
     required: true
     label:
       en: Case file type
@@ -85,9 +83,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEFILETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -98,9 +95,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEFILESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: confidentiality
-    valueType: string
     required: false
     label:
       en: Confidentiality
@@ -111,9 +107,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEFILECONFIDENTIALITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: archiveStatus
-    valueType: string
     required: false
     label:
       en: Archive status
@@ -124,9 +119,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEFILEARCHIVESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: openedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Opened at
@@ -135,7 +130,7 @@ fields:
       column: opened_at
       storageClass: core
   - key: closedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Closed at
@@ -144,7 +139,7 @@ fields:
       column: closed_at
       storageClass: core
   - key: archiveActionAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Archive action at
@@ -153,7 +148,7 @@ fields:
       column: archive_action_at
       storageClass: core
   - key: retentionUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Retention until
@@ -162,7 +157,6 @@ fields:
       column: retention_until
       storageClass: core
   - key: aiSummary
-    valueType: string
     required: false
     readOnly: true
     label:
@@ -173,9 +167,9 @@ fields:
     persisted:
       column: ai_summary
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -192,9 +186,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Case files
+          nl: Dossiers
   - key: parentCaseFileId
     label:
       en: Parent case file
@@ -202,45 +200,14 @@ fields:
     persisted:
       column: parent_case_file_id
       storageClass: core
-    semanticType: CaseFile
+    osfType: CaseFile
     relationship:
       ownership: reference
-  - key: childCaseFiles
-    label:
-      en: Child case files
-      nl: Onderliggende dossiers
-    semanticType: CaseFile
-    cardinality: collection
-    relationship:
-      inverse: parentCaseFileId
-      ownership: reference
-  - key: cases
-    label:
-      en: Cases
-      nl: Zaken
-    semanticType: Case
-    cardinality: collection
-    relationship:
-      inverse: caseFileId
-      ownership: reference
-  - key: processes
-    label:
-      en: Processes
-      nl: Processen
-    semanticType: Process
-    cardinality: collection
-    relationship:
-      inverse: caseFileId
-      ownership: reference
-  - key: documents
-    label:
-      en: Documents
-      nl: Documenten
-    semanticType: Document
-    cardinality: collection
-    relationship:
-      inverse: caseFileId
-      ownership: reference
+      inverse:
+        key: childCaseFiles
+        label:
+          en: Child case files
+          nl: Onderliggende dossiers
 operations:
   list:
     name: List Case file

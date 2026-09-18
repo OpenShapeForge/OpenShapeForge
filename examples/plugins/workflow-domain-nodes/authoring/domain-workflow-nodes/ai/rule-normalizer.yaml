@@ -12,7 +12,7 @@ description:
   en: Normalizes AI output to reference data and review fields.
 configFields:
   - key: policyMode
-    valueType: string
+    osfType: string
     label:
       nl: Policy mode
       en: Policy mode
@@ -33,7 +33,7 @@ configFields:
     render:
       component: Select
   - key: policy
-    valueType: object
+    osfType: object
     label:
       nl: Policy editor
       en: Policy editor
@@ -41,8 +41,10 @@ configFields:
       nl: Bewerk de embedded policy als gestructureerd JSON-object.
       en: Edit the embedded policy as a structured JSON object.
     help:
-      nl: Deze policy bevat verplichte velden, reviewdrempels, mappings en regels waarmee AI-output naar codes en reviewstatus wordt genormaliseerd.
-      en: This policy contains required fields, review thresholds, mappings, and rules used to normalize AI output into codes and review status.
+      nl: Deze policy bevat verplichte velden, reviewdrempels, mappings en regels waarmee AI-output naar codes en reviewstatus
+        wordt genormaliseerd.
+      en: This policy contains required fields, review thresholds, mappings, and rules used to normalize AI output into codes
+        and review status.
     defaultValue:
       version: 1
       requiredFields:
@@ -87,7 +89,7 @@ configFields:
     render:
       component: JsonFieldEditor
   - key: outputParameters
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -104,7 +106,7 @@ configFields:
       - id: normalize-object
         key: normalized
         label: Genormaliseerd
-        valueType: object
+        osfType: object
         required: false
       - id: normalize-priority
         key: priority
@@ -114,12 +116,12 @@ configFields:
       - id: normalize-review
         key: reviewRequired
         label: Review vereist
-        valueType: boolean
+        osfType: boolean
         required: false
       - id: normalize-missing
         key: missingFields
         label: Ontbrekende velden
-        valueType: object
+        osfType: object
         cardinality:
           min: 0
           max: "unbounded"
@@ -127,7 +129,7 @@ configFields:
       - id: normalize-reasons
         key: reasons
         label: Redenen
-        valueType: object
+        osfType: object
         cardinality:
           min: 0
           max: "unbounded"
@@ -149,7 +151,7 @@ configFields:
         required: false
     item:
       key: parameter
-      valueType: object
+      osfType: object
       description:
         nl: Eén outputparameter die door de rule normalizer beschikbaar wordt gemaakt.
         en: One output parameter exposed by the rule normalizer.
@@ -158,7 +160,7 @@ configFields:
         en: Change this list only when downstream steps need different normalized output fields.
       children:
         - key: id
-          valueType: string
+          osfType: string
           label:
             nl: Interne ID
             en: Internal ID
@@ -171,7 +173,7 @@ configFields:
           render:
             component: Input
         - key: key
-          valueType: string
+          osfType: string
           label:
             nl: Sleutel
             en: Key
@@ -184,7 +186,7 @@ configFields:
           render:
             component: Input
         - key: label
-          valueType: string
+          osfType: string
           label:
             nl: Label
             en: Label
@@ -197,7 +199,7 @@ configFields:
           render:
             component: Input
         - key: type
-          valueType: string
+          osfType: string
           label:
             nl: Type
             en: Type
@@ -242,7 +244,7 @@ configFields:
           render:
             component: Select
         - key: required
-          valueType: boolean
+          osfType: boolean
           label:
             nl: Verplicht
             en: Required
@@ -255,11 +257,11 @@ configFields:
           defaultValue: false
           render:
             component: Switch
-        - key: semanticTypeKey
-          valueType: string
+        - key: osfTypeKey
+          osfType: string
           label:
-            nl: Semantisch type
-            en: Semantic type
+            nl: OSF-type
+            en: OSF type
           description:
             nl: Optioneel semantisch type voor variabele-compatibiliteit.
             en: Optional semantic type for variable compatibility.
@@ -269,7 +271,7 @@ configFields:
           render:
             component: Input
         - key: description
-          valueType: string
+          osfType: string
           label:
             nl: Beschrijving
             en: Description
@@ -284,7 +286,7 @@ configFields:
             props:
               rows: 2
         - key: placeholder
-          valueType: string
+          osfType: string
           label:
             nl: Placeholder
             en: Placeholder

@@ -22,7 +22,7 @@ indexes:
     unique: true
 fields:
   - key: idempotencyKey
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Idempotency key
@@ -39,7 +39,6 @@ fields:
       column: idempotency_key
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -51,9 +50,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: BILLINGRUNITEMSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: mode
-    valueType: string
     required: true
     label:
       en: Mode
@@ -65,9 +63,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: BILLINGRUNMODE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: periodStart
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Period start
@@ -81,7 +79,7 @@ fields:
       column: period_start
       storageClass: core
   - key: periodEnd
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Period end
@@ -95,7 +93,7 @@ fields:
       column: period_end
       storageClass: core
   - key: lockedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Locked at
@@ -107,7 +105,7 @@ fields:
       column: locked_at
       storageClass: core
   - key: lockedBy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Locked by
@@ -121,7 +119,7 @@ fields:
       column: locked_by
       storageClass: core
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Completed at
@@ -130,7 +128,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: failureCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Failure code
@@ -141,7 +139,6 @@ fields:
       column: failure_code
       storageClass: core
   - key: failureMessage
-    valueType: string
     required: false
     label:
       en: Failure message
@@ -151,9 +148,9 @@ fields:
     persisted:
       column: failure_message
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: failureContext
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Failure context
@@ -166,7 +163,6 @@ fields:
       column: failure_context
       storageClass: core
   - key: amountTotal
-    valueType: number
     required: false
     label:
       en: Amount total
@@ -174,7 +170,7 @@ fields:
     description:
       en: Total amount of the invoice produced for this item (or 0 when skipped/failed).
       nl: Totaalbedrag van de factuur die voor dit item is geproduceerd (of 0 bij overgeslagen/mislukt).
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_total
       storageClass: core
@@ -185,7 +181,7 @@ fields:
     persisted:
       column: billing_run_id
       storageClass: core
-    semanticType: BillingRun
+    osfType: BillingRun
     relationship:
       ownership: reference
   - key: agreementId
@@ -195,7 +191,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: billingScheduleId
@@ -205,7 +201,7 @@ fields:
     persisted:
       column: billing_schedule_id
       storageClass: core
-    semanticType: BillingSchedule
+    osfType: BillingSchedule
     relationship:
       ownership: reference
   - key: agreementMilestoneId
@@ -215,7 +211,7 @@ fields:
     persisted:
       column: agreement_milestone_id
       storageClass: core
-    semanticType: AgreementMilestone
+    osfType: AgreementMilestone
     relationship:
       ownership: reference
   - key: producedInvoiceId
@@ -225,7 +221,7 @@ fields:
     persisted:
       column: produced_invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
 authorization:

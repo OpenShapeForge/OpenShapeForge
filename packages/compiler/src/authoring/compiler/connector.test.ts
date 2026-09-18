@@ -26,8 +26,8 @@ function definition(
         key: "listObjects",
         kind: "query",
         authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-        input: [{ key: "prefix", valueType: "string" }],
-        output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+        input: [{ key: "prefix", osfType: "string" }],
+        output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
     ],
     ...overrides,
@@ -57,7 +57,7 @@ describe("buildConnector — surface projection", () => {
             key: "putObject",
             kind: "mutation",
             authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
-            output: { cardinality: "one", fields: [{ key: "key", valueType: "string" }] },
+            output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
           },
         ],
       }),
@@ -130,7 +130,7 @@ describe("buildConnector — fail closed", () => {
       buildConnector(
         definition({
           configuration: {
-            fields: [{ key: "platform.oauth", valueType: "string", secret: true }],
+            fields: [{ key: "platform.oauth", osfType: "string", secret: true }],
           },
         }),
         "object-store",
@@ -322,7 +322,7 @@ describe("buildConnector — reliability", () => {
           key: "putObject",
           kind: "mutation",
           authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
-          input: [{ key: "requestId", valueType: "string" }],
+          input: [{ key: "requestId", osfType: "string" }],
           output: { cardinality: "one", fields: [] },
           reliability,
         },
@@ -519,9 +519,9 @@ describe("buildConnector — oauth", () => {
   function withAuth(
     auth: Record<string, unknown>,
     fields: Record<string, unknown>[] = [
-      { key: "region", valueType: "string" },
-      { key: "clientId", valueType: "string" },
-      { key: "clientSecret", valueType: "string", secret: true },
+      { key: "region", osfType: "string" },
+      { key: "clientId", osfType: "string" },
+      { key: "clientSecret", osfType: "string", secret: true },
     ],
     egress: string[] = ["*.provider.example"],
   ) {
@@ -590,8 +590,8 @@ describe("buildConnector — oauth", () => {
     expect(() =>
       buildConnector(
         withAuth({}, [
-          { key: "clientId", valueType: "string" },
-          { key: "clientSecret", valueType: "string" },
+          { key: "clientId", osfType: "string" },
+          { key: "clientSecret", osfType: "string" },
         ]),
         "s",
         ORIGIN,
@@ -679,9 +679,9 @@ describe("buildConnector — oauth client credentials", () => {
     return definition({
       configuration: {
         fields: [
-          { key: "host", valueType: "string" },
-          { key: "clientId", valueType: "string" },
-          { key: "clientSecret", valueType: "string", secret: true },
+          { key: "host", osfType: "string" },
+          { key: "clientId", osfType: "string" },
+          { key: "clientSecret", osfType: "string", secret: true },
         ],
       },
       network: { egress: ["*.provider.example"] },

@@ -9,7 +9,7 @@ import type {
   LocalizedText,
   FieldValidation,
   FieldRender,
-  SemanticTypeLookupDefinition,
+  OsfTypeLookupDefinition,
   EntityPermissions,
   FieldOptions,
   DataClassification,
@@ -19,12 +19,13 @@ import type {
   AuthorizationConfig,
   ProfileAuthorizationConfig,
 } from "./common.js";
-import type { Relationship, UIDefinition } from "./views.js";
+import type { UIDefinition } from "./views.js";
 import type {
   FieldDefinition,
   FieldDefinitionAuthoringMetadata,
   FieldDefinitionCardinality,
   FieldDefinitionRelationship,
+  FieldDefinitionValueType,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSuggestions,
   FieldDefinitionWorkflowInspector,
@@ -36,6 +37,11 @@ import type {
  * hatches that have not yet moved into the enforced authoring schema.
  */
 export interface Field extends FieldDefinition {
+  /**
+   * Compiler-derived base of `osfType`: the type itself for a base type, the
+   * catalog entry's `valueType` otherwise. Never authored.
+   */
+  baseType?: FieldDefinitionValueType;
   /**
    * Escape hatch to override the emitted GraphQL type for a non-persisted
    * field. When set, the GraphQL codegen skips the default `FIELD_TO_GQL_TYPE`
@@ -73,8 +79,8 @@ export interface ComponentCatalog {
   components: Record<string, ComponentDefinition>;
 }
 
-export interface SemanticTypeDefinition {
-  /** Derived from the entity corpus, never authored in the semantic-type catalog. */
+export interface OsfTypeDefinition {
+  /** Derived from the entity corpus, never authored in the osf-type catalog. */
   entityIdentity?: boolean;
   /** Derived: the entity declares `versioning`, so a reference to it may say `version: current`. */
   versioned?: boolean;
@@ -101,7 +107,7 @@ export interface SemanticTypeDefinition {
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
-  lookup?: SemanticTypeLookupDefinition;
+  lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
     input: string;
@@ -127,7 +133,7 @@ export interface SemanticTypeDefinition {
    * For entity-ID semantic types (`kind: "entityId"`): the kebab-case slug
    * of the entity this type identifies. Lets downstream consumers
    * (variable pickers, workflow inspector, the core-entity-options route)
-   * resolve from a `semanticType` string back to the entity it represents.
+   * resolve from an `osfType` string back to the entity it represents.
    */
   entity?: string;
   /**
@@ -148,10 +154,10 @@ export interface SemanticTypeDefinition {
   filterField?: string;
 }
 
-export interface SemanticTypeCatalog {
+export interface OsfTypeCatalog {
   schemaVersion: number;
-  kind: "semanticTypeCatalog";
-  types: Record<string, SemanticTypeDefinition>;
+  kind: "osfTypeCatalog";
+  types: Record<string, OsfTypeDefinition>;
 }
 
 export interface RetentionPolicyCatalog {
@@ -787,7 +793,6 @@ export interface CoreEntity {
     snapshot?: { ownedRelationships?: "recursive" };
   };
   fields: Field[];
-  relationships?: Relationship[];
   hooks?: EntityHooks;
   permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
@@ -914,7 +919,6 @@ export interface EntityProfile {
    */
   filterField?: string;
   fields?: Field[];
-  relationships?: Relationship[];
   authorization?: ProfileAuthorizationConfig;
   projection?: {
     thirdPartyApi?: {

@@ -11,10 +11,10 @@ function entity(name: string, fields: Array<Record<string, unknown>>, relationsh
 }
 
 const relation = entity("Relation", [
-  { key: "relationType", valueType: "string", cardinality: "single" },
+  { key: "relationType", osfType: "string", baseType: "string", cardinality: "single" },
 ], [{ key: "groupMemberships", kind: "hasMany", target: "RelationGroupMembership", foreignKey: "relation_id" }]);
 const membership = entity("RelationGroupMembership", [
-  { key: "relationGroupId", valueType: "string", cardinality: "single" },
+  { key: "relationGroupId", osfType: "string", baseType: "string", cardinality: "single" },
 ]);
 
 describe("relationship constraints", () => {

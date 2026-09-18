@@ -26,7 +26,6 @@ domains:
 # still refused on update by the ordinary generated transports.
 fields:
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -40,9 +39,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: basisAmount
-    valueType: number
     required: false
     readOnly: true
     immutable: true
@@ -54,12 +52,12 @@ fields:
         amount instead of a percentage.
       nl: De waarde waartegen een percentage wordt berekend, eenmalig vastgelegd bij aanmaak. Leeg wanneer de mijlpaal een
         vast bedrag gebruikt in plaats van een percentage.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: basis_amount
       storageClass: core
   - key: percentOfBasis
-    valueType: number
+    osfType: number
     required: false
     readOnly: true
     immutable: true
@@ -78,7 +76,6 @@ fields:
       column: percent_of_basis
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     readOnly: true
     immutable: true
@@ -92,12 +89,12 @@ fields:
       nl: Het daadwerkelijk te factureren bedrag voor deze mijlpaal. Wanneer percentOfBasis is ingevuld, eenmalig bij aanmaak
         berekend als basisbedrag * percentage / 100 en daarna bevroren; anders rechtstreeks als vast bedrag opgegeven
         bij aanmaak.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Status
@@ -113,7 +110,7 @@ fields:
       type: referentiedata
       referentieGroep: AGREEMENTMILESTONESTATUS
   - key: expectedAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Expected on
@@ -129,7 +126,7 @@ fields:
       column: expected_at
       storageClass: core
   - key: triggeredAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Triggered at
@@ -141,7 +138,7 @@ fields:
       column: triggered_at
       storageClass: core
   - key: triggeredBy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Triggered by
@@ -161,7 +158,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: producedInvoiceId
@@ -171,7 +168,7 @@ fields:
     persisted:
       column: produced_invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
 authorization:

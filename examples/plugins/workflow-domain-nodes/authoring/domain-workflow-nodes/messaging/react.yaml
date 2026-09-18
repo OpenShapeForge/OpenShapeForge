@@ -12,7 +12,7 @@ description:
   en: Adds an emoji reaction to an existing message.
 configFields:
   - key: messageId
-    valueType: string
+    osfType: string
     label:
       nl: Bericht-ID
       en: Message ID
@@ -31,7 +31,7 @@ configFields:
       props:
         valueMode: insertText
   - key: emoji
-    valueType: string
+    osfType: string
     label:
       nl: Emoji
       en: Emoji

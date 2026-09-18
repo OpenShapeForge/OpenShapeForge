@@ -16,7 +16,8 @@ function field(
 ): CompiledField {
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: overrides.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -84,7 +85,7 @@ const contract = {
         deriveOnCreate: { from: "title", transform: "slug", onConflict: "suffix" },
       }),
       field("reviewedAt", { writtenBy: ["example.work-item.review"] }),
-      field("secretValues", { valueType: "object" }),
+      field("secretValues", { baseType: "object" }),
     ],
     relationships: [{
       key: "project",
@@ -130,7 +131,7 @@ const contracts = [
 const adapterContract = {
   entity: { id: "example.Adapter", name: "Adapter", title: "Adapter" },
   model: {
-    fields: [field("configurationFields", { valueType: "object" })],
+    fields: [field("configurationFields", { baseType: "object" })],
     relationships: [],
   },
   storage: {

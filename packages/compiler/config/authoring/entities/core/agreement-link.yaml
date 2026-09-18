@@ -14,7 +14,6 @@ domains:
   - contracts
 fields:
   - key: linkType
-    valueType: string
     required: true
     label:
       en: Link type
@@ -28,9 +27,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: AGREEMENTLINKTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -42,7 +41,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -60,9 +59,10 @@ fields:
     persisted:
       column: from_agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
+      inverse: false
   - key: toAgreementId
     label:
       en: To agreement
@@ -70,9 +70,10 @@ fields:
     persisted:
       column: to_agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
+      inverse: false
 authorization:
   roles:
     read:

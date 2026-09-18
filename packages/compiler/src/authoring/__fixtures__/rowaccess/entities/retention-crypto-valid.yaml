@@ -32,7 +32,7 @@ retention:
       keyReference: retention-subject-key
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name

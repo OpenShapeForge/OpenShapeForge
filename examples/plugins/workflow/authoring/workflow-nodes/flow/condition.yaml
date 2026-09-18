@@ -12,7 +12,7 @@ description:
   en: Branches the workflow based on condition rules.
 configFields:
   - key: branches
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -27,7 +27,7 @@ configFields:
       en: Use this list to attach free-form conditions to outgoing branches.
     item:
       key: branch
-      valueType: object
+      osfType: object
       description:
         en: One conditional branch row.
         nl: Eén conditioneel pad.
@@ -36,7 +36,7 @@ configFields:
         nl: Elke regel definieert één uitgaand pad met een eigen label en conditie.
       children:
         - key: label
-          valueType: string
+          osfType: string
           label:
             nl: Label
             en: Label
@@ -54,8 +54,7 @@ configFields:
           render:
             component: Input
         - key: when
-          valueType: object
-          semanticType: condition
+          osfType: condition
           label:
             nl: Voorwaarde
             en: Condition

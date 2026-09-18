@@ -33,7 +33,7 @@ authorization:
         - edit
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -42,7 +42,7 @@ fields:
       column: title
       storageClass: core
   - key: authorization
-    valueType: object
+    osfType: object
     required: true
     defaultValue: {}
     label:

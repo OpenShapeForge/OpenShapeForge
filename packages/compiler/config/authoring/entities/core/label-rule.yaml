@@ -24,7 +24,7 @@ authorization:
       - General.All.ReadWrite
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -39,8 +39,7 @@ fields:
       column: name
       storageClass: core
   - key: entityType
-    valueType: string
-    semanticType: entityTypeName
+    osfType: entityTypeName
     required: true
     label:
       en: Entity type
@@ -55,7 +54,7 @@ fields:
       column: entity_type
       storageClass: core
   - key: label
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Label text
@@ -70,8 +69,7 @@ fields:
       column: label
       storageClass: core
   - key: variant
-    valueType: string
-    semanticType: badgeVariant
+    osfType: badgeVariant
     required: true
     label:
       en: Variant
@@ -87,14 +85,18 @@ fields:
       column: variant
       storageClass: core
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Variable key
       nl: Variabele-sleutel
     description:
-      en: Identifier used to surface this rule as a flat top-level variable on the entity (e.g. `isAggressive`, `arrearsTotal`). Must be a valid JS-style identifier — starts with a lowercase letter, contains only letters and digits.
-      nl: Identifier waarmee deze regel als platte top-level variabele op de entiteit beschikbaar wordt (bijv. `isAggressive`, `arrearsTotal`). Moet een geldige JS-achtige identifier zijn — begint met een kleine letter en bevat alleen letters en cijfers.
+      en: Identifier used to surface this rule as a flat top-level variable on the entity (e.g. `isAggressive`,
+        `arrearsTotal`). Must be a valid JS-style identifier — starts with a lowercase letter, contains only letters and
+        digits.
+      nl: Identifier waarmee deze regel als platte top-level variabele op de entiteit beschikbaar wordt (bijv. `isAggressive`,
+        `arrearsTotal`). Moet een geldige JS-achtige identifier zijn — begint met een kleine letter en bevat alleen
+        letters en cijfers.
     validation:
       minLength: 1
       maxLength: 120
@@ -103,29 +105,31 @@ fields:
       column: key
       storageClass: core
   - key: outputType
-    valueType: string
-    semanticType: labelOutputType
+    osfType: labelOutputType
     required: true
     label:
       en: Output type
       nl: Uitvoertype
     description:
-      en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`, `numberValue`, or `stringValue`) and how the variable is typed downstream.
-      nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`, `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
+      en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`,
+        `numberValue`, or `stringValue`) and how the variable is typed downstream.
+      nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`,
+        `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
     defaultValue: boolean
     persisted:
       column: output_type
       storageClass: core
   - key: expression
-    valueType: object
     required: true
     label:
       en: Expression
       nl: Expressie
     description:
-      en: Expression evaluated against entity data to produce the label's output value. Supports conditions, arithmetic, string helpers, and aggregates over related collections.
-      nl: Expressie die wordt geëvalueerd tegen entiteitsgegevens om de uitvoerwaarde van het label te produceren. Ondersteunt condities, rekenkundige bewerkingen, tekstfuncties en aggregaties over gerelateerde collecties.
-    semanticType: condition
+      en: Expression evaluated against entity data to produce the label's output value. Supports conditions, arithmetic,
+        string helpers, and aggregates over related collections.
+      nl: Expressie die wordt geëvalueerd tegen entiteitsgegevens om de uitvoerwaarde van het label te produceren. Ondersteunt
+        condities, rekenkundige bewerkingen, tekstfuncties en aggregaties over gerelateerde collecties.
+    osfType: condition
     persisted:
       column: expression
       storageClass: core
@@ -137,7 +141,6 @@ fields:
     suggestions:
       sourceKey: entityFields
   - key: descriptionTemplate
-    valueType: string
     required: false
     label:
       en: Description template
@@ -145,7 +148,7 @@ fields:
     description:
       en: Template with dynamic variables that produces a personalized explanation when the label is clicked.
       nl: Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt.
-    semanticType: variableTemplate
+    osfType: variableTemplate
     validation:
       maxLength: 2000
     persisted:
@@ -159,7 +162,7 @@ fields:
     suggestions:
       sourceKey: entityFields
   - key: priority
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Priority
@@ -172,7 +175,7 @@ fields:
       column: priority
       storageClass: core
   - key: active
-    valueType: boolean
+    osfType: boolean
     label:
       en: Active
       nl: Actief
@@ -184,28 +187,31 @@ fields:
       column: active
       storageClass: core
   - key: validity
-    valueType: string
-    semanticType: labelValidity
+    osfType: labelValidity
     required: true
     label:
       en: Validity
       nl: Geldigheid
     description:
-      en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional` honors the dates plus any context-specific conditions (e.g. tenant or process state).
-      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate; `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
+      en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional`
+        honors the dates plus any context-specific conditions (e.g. tenant or process state).
+      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate;
+        `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
     defaultValue: permanent
     persisted:
       column: validity
       storageClass: core
   - key: startDate
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Start date
       nl: Begindatum
     description:
-      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `temporary` or `conditional`.
-      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
+      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `temporary` or
+        `conditional`.
+      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `temporary` of
+        `conditional` staat.
     persisted:
       column: start_date
       storageClass: core
@@ -217,14 +223,16 @@ fields:
             - temporary
             - conditional
   - key: endDate
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: End date
       nl: Einddatum
     description:
-      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `temporary` or `conditional`.
-      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
+      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `temporary` or
+        `conditional`.
+      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `temporary` of
+        `conditional` staat.
     persisted:
       column: end_date
       storageClass: core

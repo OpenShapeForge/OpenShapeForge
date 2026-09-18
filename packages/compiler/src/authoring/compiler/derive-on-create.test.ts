@@ -6,7 +6,8 @@ import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 function field(key: string, overrides: Partial<CompiledField> = {}): CompiledField {
   return {
     key,
-    valueType: "string",
+    osfType: "string",
+    baseType: "string",
     cardinality: "single",
     required: true,
     label: { en: key },

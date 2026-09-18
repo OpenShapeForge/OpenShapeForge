@@ -45,8 +45,8 @@ implementation:
   license:
     spdx: LicenseRef-BatterAI-Commercial
     notice: >-
-      The implementation package ships separately under its own license and is
-      not covered by the BUSL-1.1 grant on this repository.
+      The implementation package ships separately under its own license and is not covered by the BUSL-1.1 grant on this
+      repository.
 
 availability:
   entitlement: connector.afas-profit
@@ -61,7 +61,7 @@ configuration:
   verify: true
   fields:
     - key: environmentId
-      valueType: string
+      osfType: string
       required: true
       label: { en: Environment number, nl: Omgevingsnummer }
       description:
@@ -69,18 +69,16 @@ configuration:
         nl: Het deelnemersnummer in cijfers, zonder de voorloopletter O, A of T.
       help:
         en: >-
-          An AFAS environment is named like O12345AA, A12345AA or T12345AA. Only
-          the digits appear in the REST host, and the leading letter is what the
-          environment field below records instead.
+          An AFAS environment is named like O12345AA, A12345AA or T12345AA. Only the digits appear in the REST host, and
+          the leading letter is what the environment field below records instead.
         nl: >-
-          Een AFAS-omgeving heet bijvoorbeeld O12345AA, A12345AA of T12345AA.
-          Alleen de cijfers komen in de REST-host voor; de voorloopletter legt
-          het veld hieronder vast.
+          Een AFAS-omgeving heet bijvoorbeeld O12345AA, A12345AA of T12345AA. Alleen de cijfers komen in de REST-host
+          voor; de voorloopletter legt het veld hieronder vast.
       validation:
         pattern: "^[0-9]{3,10}$"
 
     - key: environmentType
-      valueType: string
+      osfType: string
       required: true
       defaultValue: production
       label: { en: Environment, nl: Omgeving }
@@ -95,7 +93,7 @@ configuration:
           - { value: test, label: { en: Test, nl: Test } }
 
     - key: token
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: AppConnector token, nl: AppConnector-token }
@@ -104,12 +102,11 @@ configuration:
         nl: Het base64-token dat AFAS voor de AppConnector uitgeeft.
       help:
         en: >-
-          Paste the token exactly as AFAS shows it. It is sent as
-          "Authorization: AfasToken <token>" and is never read back once stored.
+          Paste the token exactly as AFAS shows it. It is sent as "Authorization: AfasToken <token>" and is never read
+          back once stored.
         nl: >-
-          Plak het token precies zoals AFAS het toont. Het wordt verstuurd als
-          "Authorization: AfasToken <token>" en is na opslaan niet meer op te
-          vragen.
+          Plak het token precies zoals AFAS het toont. Het wordt verstuurd als "Authorization: AfasToken <token>" en is
+          na opslaan niet meer op te vragen.
 
 network:
   # One entry, at any depth under AFAS's own domain.
@@ -138,7 +135,7 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: connectorId
-        valueType: string
+        osfType: string
         required: true
         label: { en: GetConnector, nl: GetConnector }
         description:
@@ -148,13 +145,13 @@ operations:
           minLength: 1
           maxLength: 128
       - key: skip
-        valueType: integer
+        osfType: integer
         defaultValue: 0
         label: { en: Skip, nl: Overslaan }
         validation:
           min: 0
       - key: take
-        valueType: integer
+        osfType: integer
         defaultValue: 100
         label: { en: Take, nl: Ophalen }
         description:
@@ -169,17 +166,17 @@ operations:
       # would have to be lowered back into this shape anyway — and lowered by
       # the one component least able to report what went wrong.
       - key: filterFieldIds
-        valueType: string
+        osfType: string
         label: { en: Filter fields, nl: Filtervelden }
         validation:
           maxLength: 1024
       - key: filterValues
-        valueType: string
+        osfType: string
         label: { en: Filter values, nl: Filterwaarden }
         validation:
           maxLength: 4096
       - key: operatorTypes
-        valueType: string
+        osfType: string
         label: { en: Filter operators, nl: Filteroperatoren }
         description:
           en: AFAS numeric operator codes, one per filter field.
@@ -190,12 +187,12 @@ operations:
       cardinality: one
       fields:
         - key: rows
-          valueType: object
+          osfType: object
           cardinality: collection
           required: true
           label: { en: Rows, nl: Rijen }
         - key: hasMore
-          valueType: boolean
+          osfType: boolean
           required: true
           label: { en: More rows available, nl: Meer rijen beschikbaar }
           description:
@@ -221,7 +218,7 @@ operations:
         invoke: [Connectors.All.ReadWrite]
     input:
       - key: connectorId
-        valueType: string
+        osfType: string
         required: true
         label: { en: UpdateConnector, nl: UpdateConnector }
         description:
@@ -231,7 +228,7 @@ operations:
           minLength: 1
           maxLength: 128
       - key: mode
-        valueType: string
+        osfType: string
         required: true
         defaultValue: update
         label: { en: Mode, nl: Modus }
@@ -244,7 +241,7 @@ operations:
             - { value: insert, label: { en: Insert, nl: Toevoegen } }
             - { value: update, label: { en: Update, nl: Bijwerken } }
       - key: payload
-        valueType: object
+        osfType: object
         required: true
         label: { en: Payload, nl: Payload }
         description:
@@ -254,7 +251,7 @@ operations:
       cardinality: one
       fields:
         - key: result
-          valueType: object
+          osfType: object
           required: true
           label: { en: Result, nl: Resultaat }
     reliability:

@@ -14,7 +14,7 @@ domains:
   - energy
 fields:
   - key: measuredAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Measured at
@@ -26,7 +26,7 @@ fields:
       column: measured_at
       storageClass: core
   - key: value
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Value
@@ -38,7 +38,7 @@ fields:
       column: value
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -58,7 +58,7 @@ fields:
     persisted:
       column: monitor_interval_id
       storageClass: core
-    semanticType: MonitorInterval
+    osfType: MonitorInterval
     relationship:
       ownership: reference
   - key: monitorLogId
@@ -68,7 +68,7 @@ fields:
     persisted:
       column: monitor_log_id
       storageClass: core
-    semanticType: MonitorLog
+    osfType: MonitorLog
     relationship:
       ownership: reference
 authorization:

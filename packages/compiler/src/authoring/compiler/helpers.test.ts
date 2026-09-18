@@ -7,9 +7,9 @@ import { fieldGraphqlBaseType, fieldSqlType } from "./helpers.js";
 function integerField(
   validation?: Field["validation"],
   cardinality?: Field["cardinality"],
-): Pick<Field, "valueType" | "validation" | "cardinality"> {
+): Pick<Field, "baseType" | "validation" | "cardinality"> {
   return {
-    valueType: "integer",
+    baseType: "integer",
     ...(validation ? { validation } : {}),
     ...(cardinality ? { cardinality } : {}),
   };
@@ -57,8 +57,8 @@ describe("bounded integer storage and GraphQL projection", () => {
   });
 
   test("does not change number or UUID mappings", () => {
-    const number = { valueType: "number", validation: { max: Number.MAX_SAFE_INTEGER } } as const;
-    const uuid = { valueType: "string", validation: { format: "uuid" } } as const;
+    const number = { baseType: "number", validation: { max: Number.MAX_SAFE_INTEGER } } as const;
+    const uuid = { baseType: "string", validation: { format: "uuid" } } as const;
     expect(fieldSqlType(number)).toBe("numeric");
     expect(fieldGraphqlBaseType(number)).toBe("Float");
     expect(fieldSqlType(uuid)).toBe("uuid");

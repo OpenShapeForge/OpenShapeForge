@@ -8,19 +8,21 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
     recordIdField,
     {
       key: "actions",
-      valueType: "object",
+      osfType: "fieldDefinition",
+      baseType: "object",
       cardinality: { min: 0, max: "unbounded" },
-      semanticType: "fieldDefinition",
       required: true,
       validation: { minItems: 1 },
       label: { nl: "Acties", en: "Actions" },
       item: {
         key: "actionItem",
-        valueType: "object",
+        osfType: "object",
+        baseType: "object",
         children: [
           {
             key: "key",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: true,
             validation: { pattern: "^[a-z][a-z0-9-]*$" },
             label: { nl: "Sleutel", en: "Key" },
@@ -28,7 +30,8 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
           },
           {
             key: "label",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: true,
             localized: true,
             label: { nl: "Knop-label", en: "Button label" },
@@ -36,7 +39,8 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
           },
           {
             key: "description",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             localized: true,
             label: { nl: "Hulptekst", en: "Helper text" },
@@ -44,14 +48,16 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
           },
           {
             key: "icon",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             label: { nl: "Icoon", en: "Icon" },
             render: { component: "IconPicker" },
           },
           {
             key: "tone",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             defaultValue: "default",
             label: { nl: "Uitstraling", en: "Tone" },
@@ -67,21 +73,24 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
           },
           {
             key: "visibleWhen",
-            valueType: "object",
+            osfType: "object",
+            baseType: "object",
             required: false,
             label: { nl: "Zichtbaar wanneer", en: "Visible when" },
             render: { component: "VisibilityConditionBuilder" },
           },
           {
             key: "disabledWhen",
-            valueType: "object",
+            osfType: "object",
+            baseType: "object",
             required: false,
             label: { nl: "Uitgeschakeld wanneer", en: "Disabled when" },
             render: { component: "VisibilityConditionBuilder" },
           },
           {
             key: "disabledMessage",
-            valueType: "string",
+            osfType: "string",
+            baseType: "string",
             required: false,
             localized: true,
             label: { nl: "Bericht bij uitgeschakeld", en: "Disabled tooltip" },
@@ -92,7 +101,8 @@ export function buildAwaitActionConfigFields(recordIdField: Field): Field[] {
     },
     {
       key: "timeout",
-      valueType: "string",
+      osfType: "string",
+      baseType: "string",
       required: false,
       label: { nl: "Time-out", en: "Timeout" },
       description: { nl: "Optionele time-out zoals 24h of 7d.", en: "Optional timeout such as 24h or 7d." },
@@ -117,7 +127,8 @@ export function buildListConfigFields(
   return [
     {
       key: "limit",
-      valueType: "integer",
+      osfType: "integer",
+      baseType: "integer",
       label: { en: "Limit", nl: "Limiet" },
       description: {
         en: "Maximum number of records to fetch.",
@@ -127,7 +138,8 @@ export function buildListConfigFields(
     },
     {
       key: "filterCondition",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: { en: "Filter condition", nl: "Filtervoorwaarde" },
       description: {
         en: "Optional condition to filter which records are returned.",
@@ -148,7 +160,8 @@ export function buildListConfigFields(
     },
     {
       key: "sort",
-      valueType: "object",
+      osfType: "object",
+      baseType: "object",
       label: { en: "Sort order", nl: "Sortering" },
       description: {
         en: "Optional ordering applied to the returned records.",
@@ -157,7 +170,8 @@ export function buildListConfigFields(
       children: [
         {
           key: "field",
-          valueType: "string",
+          osfType: "string",
+          baseType: "string",
           label: { en: "Field", nl: "Veld" },
           ...(defaultSort ? { defaultValue: defaultSort.field } : {}),
           options: {
@@ -171,7 +185,8 @@ export function buildListConfigFields(
         },
         {
           key: "direction",
-          valueType: "string",
+          osfType: "string",
+          baseType: "string",
           label: { en: "Direction", nl: "Richting" },
           defaultValue: defaultSort?.direction ?? "asc",
           options: {
@@ -227,7 +242,8 @@ export function buildDesignerConfigFields(input: {
         recordIdField,
         {
           key: "values",
-          valueType: "object",
+          osfType: "object",
+          baseType: "object",
           label: { en: "Values", nl: "Waarden" },
           description: {
             en: "Fields to update on the record.",
@@ -240,7 +256,8 @@ export function buildDesignerConfigFields(input: {
       return [
         {
           key: "values",
-          valueType: "object",
+          osfType: "object",
+          baseType: "object",
           label: { en: "Values", nl: "Waarden" },
           description: {
             en: "Fields to set when creating the record.",

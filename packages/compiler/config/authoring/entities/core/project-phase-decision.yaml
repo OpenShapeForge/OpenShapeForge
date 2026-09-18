@@ -14,7 +14,7 @@ domains:
   - project
 fields:
   - key: decidedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Decided at
@@ -26,7 +26,6 @@ fields:
       column: decided_at
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -39,9 +38,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: outcome
-    valueType: string
     required: true
     label:
       en: Outcome
@@ -55,9 +53,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROJECTPHASEDECISION
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -77,7 +75,7 @@ fields:
     persisted:
       column: project_phase_id
       storageClass: core
-    semanticType: ProjectPhase
+    osfType: ProjectPhase
     relationship:
       ownership: reference
   - key: decidedById
@@ -87,7 +85,7 @@ fields:
     persisted:
       column: decided_by_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
 authorization:

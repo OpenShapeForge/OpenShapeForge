@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: firstName
-    valueType: string
+    osfType: string
     required: true
     label:
       en: First name
@@ -44,7 +44,7 @@ fields:
       column: first_name
       storageClass: core
   - key: lastName
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Last name
@@ -59,7 +59,7 @@ fields:
       column: last_name
       storageClass: core
   - key: initials
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Initials
@@ -73,7 +73,7 @@ fields:
       column: initials
       storageClass: core
   - key: namePrefix
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name prefix
@@ -87,7 +87,7 @@ fields:
       column: name_prefix
       storageClass: core
   - key: birthName
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Birth name
@@ -101,7 +101,7 @@ fields:
       column: birth_name
       storageClass: core
   - key: dateOfBirth
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Date of birth
@@ -113,7 +113,7 @@ fields:
       column: date_of_birth
       storageClass: core
   - key: dateOfDeath
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Date of death
@@ -125,7 +125,6 @@ fields:
       column: date_of_death
       storageClass: core
   - key: gender
-    valueType: string
     required: false
     label:
       en: Gender
@@ -141,9 +140,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: GENDER
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: salutation
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Salutation
@@ -157,7 +156,7 @@ fields:
       column: salutation
       storageClass: core
   - key: preferredName
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Preferred name
@@ -171,7 +170,7 @@ fields:
       column: preferred_name
       storageClass: core
   - key: callName
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Call name
@@ -185,7 +184,7 @@ fields:
       column: call_name
       storageClass: core
   - key: preferredLanguage
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Preferred language
@@ -199,7 +198,7 @@ fields:
       column: preferred_language
       storageClass: core
   - key: nationality
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Nationality
@@ -219,32 +218,14 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
-      ownership: reference
-  - key: addresses
-    label:
-      en: Addresses
-      nl: Adressen
-    semanticType: Address
-    cardinality: collection
-    relationship:
-      inverse: naturalPersonId
-      ownership: reference
-  - key: accounts
-    label:
-      en: Accounts
-      nl: Accounts
-    semanticType: Account
-    cardinality: collection
-    relationship:
-      inverse: naturalPersonId
       ownership: reference
   - key: contactMoments
     label:
       en: Contact moments
       nl: Contactmomenten
-    semanticType: ContactMoment
+    osfType: ContactMoment
     cardinality: collection
     relationship:
       inverse: relationId

@@ -30,7 +30,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -42,7 +42,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -54,7 +54,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -64,9 +63,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseType
-    valueType: string
     required: true
     label:
       en: Case type
@@ -77,9 +75,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: version
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Version
@@ -89,7 +87,6 @@ fields:
       column: version
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -100,9 +97,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASETEMPLATESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: isDefault
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Default for case type
@@ -115,7 +112,7 @@ fields:
       column: is_default
       storageClass: core
   - key: allowAdHocSteps
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Allow ad-hoc steps
@@ -128,7 +125,7 @@ fields:
       column: allow_ad_hoc_steps
       storageClass: core
   - key: estimatedDurationHours
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Estimated duration (hours)
@@ -141,7 +138,7 @@ fields:
       storageClass: core
   - key: defaultWorkQueueId
     required: false
-    semanticType: WorkQueue
+    osfType: WorkQueue
     label:
       en: Default work queue
       nl: Standaard werkqueue
@@ -164,7 +161,7 @@ fields:
       ownership: reference
   - key: completionApprovalGroupId
     required: false
-    semanticType: RelationGroup
+    osfType: RelationGroup
     label:
       en: Completion approval group
       nl: Afrondingsgoedkeuringsgroep
@@ -185,7 +182,6 @@ fields:
     relationship:
       ownership: reference
   - key: fieldDefinitions
-    valueType: object
     label:
       en: Case variables
       nl: Zaakvariabelen
@@ -199,18 +195,9 @@ fields:
     cardinality:
       min: 0
       max: unbounded
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     authoring:
       profile: workflowInputField
-  - key: steps
-    label:
-      en: Case step templates
-      nl: Zaakstapsjablonen
-    semanticType: CaseStepTemplate
-    cardinality: collection
-    relationship:
-      inverse: templateId
-      ownership: reference
 operations:
   list:
     name: List Case Template

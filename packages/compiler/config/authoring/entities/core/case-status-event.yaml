@@ -28,7 +28,6 @@ authorization:
     empty: public
 fields:
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -39,9 +38,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: statusReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status reason
@@ -52,7 +51,7 @@ fields:
       column: status_reason
       storageClass: core
   - key: enteredAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Entered at
@@ -61,7 +60,7 @@ fields:
       column: entered_at
       storageClass: core
   - key: exitedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Exited at
@@ -70,7 +69,7 @@ fields:
       column: exited_at
       storageClass: core
   - key: actorId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Actor ID
@@ -81,7 +80,6 @@ fields:
       column: actor_id
       storageClass: core
   - key: actorType
-    valueType: string
     required: false
     label:
       en: Actor type
@@ -92,9 +90,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEACTORTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: source
-    valueType: string
     required: false
     label:
       en: Source
@@ -105,9 +102,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTATUSEVENTSOURCE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -117,7 +113,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseId
     label:
       en: Case
@@ -125,9 +121,14 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        key: statusEvents
+        label:
+          en: Status events
+          nl: Statusgebeurtenissen
   - key: accountId
     label:
       en: Account
@@ -135,7 +136,7 @@ fields:
     persisted:
       column: account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
 operations:

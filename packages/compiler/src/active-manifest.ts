@@ -9,6 +9,7 @@ import {
 import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { buildConnector } from "./authoring/compiler/connector.js";
 import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
+import { loadOsfTypes } from "./authoring/loader.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
 import { canonicalRepoRelativePath, resolvePackagedConfigPath } from "./packaged-config.js";
@@ -106,10 +107,11 @@ function compileActiveConnectors(
   authoringDir: string,
   sourcePathPrefix: string,
 ): CompiledConnectorContract[] {
+  const osfTypes = loadOsfTypes(authoringDir);
   return listConnectorFiles(authoringDir)
     .map(({ slug, path }) => {
       const origin = join(sourcePathPrefix, "connectors", `${slug}.yaml`);
-      return buildConnector(loadConnector(path, slug, origin), slug, origin);
+      return buildConnector(loadConnector(path, slug, origin), slug, origin, osfTypes);
     })
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }

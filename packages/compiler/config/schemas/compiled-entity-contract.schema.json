@@ -188,7 +188,7 @@
               "type": { "type": "string" },
               "resolve": {
                 "type": "string",
-                "enum": ["hasMany", "belongsTo", "manyToMany"]
+                "enum": ["hasMany", "belongsTo"]
               },
               "foreignKey": { "type": "string" },
               "via": { "type": "string" }
@@ -216,7 +216,7 @@
                     "mappedFrom": { "type": "string" },
                     "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
                     "description": { "type": "string" },
-                    "semanticType": { "type": "string" },
+                    "osfType": { "type": "string" },
                     "render": { "$ref": "#/$defs/compiledViewRender" },
                     "displayRender": { "$ref": "#/$defs/compiledViewRender" },
                     "validation": { "type": "object" },
@@ -419,7 +419,7 @@
         "key": { "type": "string" },
         "valueType": { "type": "string" },
         "cardinality": { "type": "string", "enum": ["single", "collection"] },
-        "semanticType": { "type": "string" },
+        "osfType": { "type": "string" },
         "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
         "required": { "type": "boolean" },
         "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },

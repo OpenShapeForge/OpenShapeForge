@@ -16,7 +16,7 @@ domains:
   - relations
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -31,7 +31,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -46,7 +46,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -59,9 +58,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: severity
-    valueType: string
     required: true
     label:
       en: Severity
@@ -75,9 +73,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ALERTSEVERITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -91,9 +88,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ALERTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: raisedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Raised at
@@ -105,7 +102,7 @@ fields:
       column: raised_at
       storageClass: core
   - key: resolvedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Resolved at
@@ -117,7 +114,7 @@ fields:
       column: resolved_at
       storageClass: core
   - key: dueDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Due date
@@ -129,7 +126,7 @@ fields:
       column: due_date
       storageClass: core
   - key: subjectType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Subject type
@@ -144,7 +141,7 @@ fields:
       column: subject_type
       storageClass: core
   - key: subjectId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Subject ID
@@ -158,7 +155,7 @@ fields:
     validation:
       format: uuid
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -178,9 +175,10 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse: false
   - key: assignedToId
     label:
       en: Assigned to
@@ -188,9 +186,10 @@ fields:
     persisted:
       column: assigned_to_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse: false
 authorization:
   roles:
     read:

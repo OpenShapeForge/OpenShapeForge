@@ -14,7 +14,7 @@ domains:
   - energy
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,6 @@ fields:
       column: code
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -43,9 +42,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MONITORLOGSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Started at
@@ -57,7 +56,7 @@ fields:
       column: started_at
       storageClass: core
   - key: endedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Ended at
@@ -69,7 +68,7 @@ fields:
       column: ended_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -89,7 +88,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

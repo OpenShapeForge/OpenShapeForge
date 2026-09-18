@@ -70,7 +70,7 @@ export interface CanonicalField {
   description?: LocalizedText;
   required: boolean;
   readOnly?: boolean;
-  semanticType?: string;
+  osfType?: string;
   defaultValue?: unknown;
   validation?: FieldValidation;
   render?: CompiledRender;

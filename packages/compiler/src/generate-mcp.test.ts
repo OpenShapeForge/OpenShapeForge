@@ -19,7 +19,8 @@ const field = (
   overrides: Partial<CompiledField> & { key: string },
 ): CompiledField =>
   ({
-    valueType: "string",
+    baseType: "string",
+    osfType: overrides.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: overrides.key },
@@ -580,7 +581,7 @@ describe("buildMcpCatalog", () => {
                 }),
                 field({
                   key: "score",
-                  valueType: "integer",
+                  baseType: "integer",
                   validation: { min: 0, max: 10 },
                 }),
               ],
@@ -613,8 +614,8 @@ describe("buildMcpCatalog", () => {
               fields: [
                 field({
                   key: "definition",
-                  valueType: "object",
-                  semanticType: "fieldDefinition",
+                  baseType: "object",
+                  osfType: "fieldDefinition",
                 }),
               ],
             }),
@@ -722,7 +723,7 @@ describe("buildMcpCatalog", () => {
         entity: "Relation",
       });
       expect(catalog.entities[0]?.fields[0]).toMatchObject({
-        valueType: "string",
+        baseType: "string",
         cardinality: "single",
         immutable: false,
       });
@@ -767,8 +768,8 @@ describe("buildMcpCatalog", () => {
               fields: [
                 field({ key: "id" }),
                 field({ key: "tenantId" }),
-                field({ key: "createdAt", valueType: "datetime" }),
-                field({ key: "updatedAt", valueType: "datetime" }),
+                field({ key: "createdAt", baseType: "datetime" }),
+                field({ key: "updatedAt", baseType: "datetime" }),
                 field({ key: "slug", readOnly: true }),
                 field({
                   key: "total",
@@ -937,7 +938,7 @@ describe("buildMcpCatalog", () => {
                 field({ key: "name", required: true, defaultValue: "Unnamed" }),
                 field({
                   key: "metadata",
-                  valueType: "object",
+                  baseType: "object",
                   children: [field({ key: "source", defaultValue: "api" })],
                 }),
               ],
@@ -966,7 +967,7 @@ describe("buildMcpCatalog", () => {
               fields: [
                 field({ key: "name" }),
                 field({ key: "tags", cardinality: "collection" }),
-                field({ key: "payload", valueType: "object" }),
+                field({ key: "payload", baseType: "object" }),
               ],
             }),
           ),
@@ -1659,7 +1660,7 @@ describe("relationship keys", () => {
           contract({
             name: "PaymentDetail",
             fields: [
-              field({ key: "relationId", valueType: "string" }),
+              field({ key: "relationId", baseType: "string" }),
               field({ key: "iban" }),
             ],
             relationships: [belongsTo("relation", "Relation", "relation_id")],

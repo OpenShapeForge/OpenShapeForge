@@ -7,10 +7,11 @@ import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import { generateArtifacts } from "../generate.js";
 import { collectPluginMigrationRegistry } from "../generate-plugin-migrations.js";
 import type { CoreEntity, Field } from "./types.js";
+import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
 import type { PlatformSchemaManifest } from "../schema.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
-import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 
 const entityOperation = (action: string) => ({
   name: action, description: action, implementation: { type: "entity", action },
@@ -27,7 +28,7 @@ const materialize = {
   effects: { data: "read", external: "none" },
   reliability: { idempotency: { mode: "natural" } }, confirmation: { mode: "none" },
 };
-const id: Field = { key: "id", valueType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "id", storageClass: "core" } };
+const id: Field = { key: "id", osfType: "string", required: true, validation: { format: "uuid" }, persisted: { column: "id", storageClass: "core" } };
 
 function entity(name: string, fields: Field[], definition = false): CoreEntity {
   return {
@@ -41,16 +42,16 @@ function entity(name: string, fields: Field[], definition = false): CoreEntity {
 }
 function corpus(): CoreEntity[] {
   return [
-    entity("Page", [{ key: "placements", semanticType: "Placement", cardinality: { min: 0, max: "unbounded" }, sortable: true,
-      relationship: { inverse: "page", ownership: "owned" }, allowedDefinitions: ["Copy", "Link"] }]),
+    entity("Page", []),
     entity("Placement", [
-      { key: "page", semanticType: "Page", required: true },
-      { key: "definitionKey", valueType: "string", required: true, persisted: { column: "definition_key", storageClass: "core" } },
-      { key: "values", semanticType: "entityValue", required: true, entityValue: { definitionField: "definitionKey" }, persisted: { column: "values", storageClass: "core" } },
+      { key: "page", osfType: "Page", required: true,
+        relationship: { inverse: { key: "placements", ownership: "owned", sortable: true, allowedDefinitions: ["Copy", "Link"] } } },
+      { key: "definitionKey", osfType: "string", required: true, persisted: { column: "definition_key", storageClass: "core" } },
+      { key: "values", osfType: "entityValue", required: true, entityValue: { definitionField: "definitionKey" }, persisted: { column: "values", storageClass: "core" } },
     ]),
-    entity("Resource", [{ key: "name", valueType: "string", persisted: { column: "name", storageClass: "core" } }]),
-    entity("Copy", [{ key: "body", semanticType: "shortText", required: true }, { key: "tags", valueType: "string", cardinality: { min: 0, max: 4 } }], true),
-    entity("Link", [{ key: "label", valueType: "string", required: true }, { key: "resource", semanticType: "Resource", required: true }], true),
+    entity("Resource", [{ key: "name", osfType: "string", persisted: { column: "name", storageClass: "core" } }]),
+    entity("Copy", [{ key: "body", osfType: "shortText", required: true }, { key: "tags", osfType: "string", cardinality: { min: 0, max: 4 } }], true),
+    entity("Link", [{ key: "label", osfType: "string", required: true }, { key: "resource", osfType: "Resource", required: true }], true),
   ];
 }
 
@@ -65,7 +66,7 @@ function compileFixture(
     mkdirSync(join(dir, "entities")); mkdirSync(join(dir, "catalogs"));
     write("catalogs/components.yaml", { defaults: {}, components: {} });
     write("catalogs/transforms.yaml", { transforms: {} });
-    write("catalogs/semantic-types.yaml", { types: {
+    write("catalogs/osf-types.yaml", { types: {
       entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } },
       shortText: { kind: "scalar", valueType: "string", validation: { maxLength: 80 }, label: { en: "Text" } },
     } });
@@ -86,6 +87,8 @@ function compileFixture(
   }
 }
 const named = (entities: CoreEntity[], name: string) => entities.find((entity) => entity.entity === name)!;
+/** The derived `Page.placements` collection is shaped on the referencing field. */
+const placements = (entities: CoreEntity[]) => named(entities, "Placement").fields[1]!.relationship!.inverse as FieldDefinitionInverseCollection;
 const carrier = (manifest: PlatformSchemaManifest) => manifest.entityValues!.carriers[0]!;
 const table = (manifest: PlatformSchemaManifest) => manifest.tables.find((table) => table.source?.authoringEntityName === "Placement")!;
 const artifacts = (manifest: PlatformSchemaManifest) => generateArtifacts(manifest);
@@ -100,7 +103,7 @@ describe("entityValue compiled storage and registry", () => {
     expect(firstChecks.every((constraint) => /^0001_entity-value-.+-[a-f0-9]{12}$/.test(constraint.version))).toBe(true);
 
     const second = compileFixture((entities) => {
-      named(entities, "Copy").fields.push({ key: "subtitle", valueType: "string" });
+      named(entities, "Copy").fields.push({ key: "subtitle", osfType: "string" });
     });
     const firstVersion = firstChecks.find((constraint) => constraint.name.includes("copy_values"))!.version;
     const secondVersion = table(second).constraints!.find((constraint) => constraint.name.includes("copy_values"))!.version;
@@ -129,10 +132,10 @@ describe("entityValue compiled storage and registry", () => {
     immutable: true,
   })) {
     it(`rejects unsupported ${policy} policies on own fields, references and nested leaves`, () => {
-      const protectedField = { key: "guarded", valueType: "string", [policy]: value } as Field;
+      const protectedField = { key: "guarded", osfType: "string", [policy]: value } as Field;
       for (const field of [protectedField,
-        { key: "nested", valueType: "object", children: [protectedField] } as Field,
-        { key: "items", valueType: "object", cardinality: "collection", item: protectedField } as Field,
+        { key: "nested", osfType: "object", children: [protectedField] } as Field,
+        { key: "items", osfType: "object", cardinality: "collection", item: protectedField } as Field,
       ]) {
         expect(() => compileFixture((entities) => named(entities, "Copy").fields.push(field))).toThrow(`field policy ${policy}`);
       }
@@ -142,15 +145,15 @@ describe("entityValue compiled storage and registry", () => {
 
   it("allows immutable:false but rejects inherited immutable:true on nested value fields", () => {
     expect(() => compileFixture((entities) => named(entities, "Copy").fields[0]!.immutable = false)).not.toThrow();
-    const definition = entity("FixedValue", [{ key: "nested", valueType: "object", children: [{ key: "fixed", semanticType: "fixedText" }] }], true);
+    const definition = entity("FixedValue", [{ key: "nested", osfType: "object", children: [{ key: "fixed", osfType: "fixedText" }] }], true);
     const fixedText = { kind: "scalar" as const, valueType: "string" as const, label: { en: "Fixed" }, immutable: true };
-    expect(() => normalizeEntityFields(definition, deriveEntitySemanticTypes([definition], { fixedText }))).toThrow("field policy immutable");
+    expect(() => normalizeEntityFields(definition, deriveEntityOsfTypes([definition], { fixedText }))).toThrow("field policy immutable");
   });
 
   it("rejects guarded profile fields and semantic policies before model projection can erase them", () => {
-    expect(() => compileFixture(undefined, [{ key: "profileSecret", valueType: "string", permissions: { read: ["Example.Read"] } }])).toThrow("field policy permissions");
-    const definition = entity("SecureValue", [{ key: "nested", valueType: "object", children: [{ key: "sensitive", semanticType: "privateText" }] }], true);
-    const catalog = deriveEntitySemanticTypes([definition], {
+    expect(() => compileFixture(undefined, [{ key: "profileSecret", osfType: "string", permissions: { read: ["Example.Read"] } }])).toThrow("field policy permissions");
+    const definition = entity("SecureValue", [{ key: "nested", osfType: "object", children: [{ key: "sensitive", osfType: "privateText" }] }], true);
+    const catalog = deriveEntityOsfTypes([definition], {
       privateText: { kind: "scalar", valueType: "string", label: { en: "Private" }, classification: { sensitivity: "pii" } },
     });
     expect(() => normalizeEntityFields(definition, catalog)).toThrow("field policy classification");
@@ -173,7 +176,7 @@ describe("entityValue compiled storage and registry", () => {
     const copy = carrier(manifest).definitions.Copy!;
     expect(copy).toMatchObject({ schemaVersion: 1, references: [] });
     expect(copy.materializeOperationId).toContain("materialize");
-    expect(copy.fields.find((field) => field.key === "body")).toMatchObject({ valueType: "string", validation: { maxLength: 80 } });
+    expect(copy.fields.find((field) => field.key === "body")).toMatchObject({ baseType: "string", validation: { maxLength: 80 } });
     expect(copy.fields.find((field) => field.key === "tags")!.cardinality).toEqual({ min: 0, max: 4 });
     expect(copy.valueSchema).toMatchObject({ type: "object", additionalProperties: false, required: ["body"] });
     expect(copy.definitionHash).toMatch(/^[a-f0-9]{64}$/);
@@ -212,9 +215,9 @@ describe("entityValue compiled storage and registry", () => {
   });
 
   it("includes profile-resolved value fields and references rather than a second registry", () => {
-    const manifest = compileFixture(undefined, [{ key: "caption", semanticType: "shortText" }, { key: "source", semanticType: "Resource" }]);
+    const manifest = compileFixture(undefined, [{ key: "caption", osfType: "shortText" }, { key: "source", osfType: "Resource" }]);
     const copy = carrier(manifest).definitions.Copy!;
-    expect(copy.fields.find((field) => field.key === "caption")).toMatchObject({ valueType: "string", validation: { maxLength: 80 } });
+    expect(copy.fields.find((field) => field.key === "caption")).toMatchObject({ baseType: "string", validation: { maxLength: 80 } });
     expect(copy.references).toHaveLength(1);
     expect(copy.references[0]).toMatchObject({ fieldKey: "source", targetEntity: "Resource", required: false });
     expect(constraints(manifest)).toContain(`"definition_key" = 'Copy' OR "${copy.references[0]!.column}" IS NULL`);
@@ -222,14 +225,14 @@ describe("entityValue compiled storage and registry", () => {
 
   it("projects the same logical definition fields into Web without SQL storage or standalone routes", () => {
     const entries: Array<{ slug: string; contract: CompiledEntityContract }> = [];
-    const manifest = compileFixture(undefined, [{ key: "caption", semanticType: "shortText" }],
+    const manifest = compileFixture(undefined, [{ key: "caption", osfType: "shortText" }],
       (contract) => entries.push({ slug: contract.entity.name.toLowerCase(), contract }));
     const web = JSON.parse(renderWebManifest(buildWebManifest(entries)));
     expect(web.entities.Copy).toBeUndefined();
     expect(web.entities.Link).toBeUndefined();
     expect(web.entityValueDefinitions.Copy.fields.map((field: { key: string }) => field.key)).toEqual(carrier(manifest).definitions.Copy!.fields.map((field) => field.key));
-    expect(web.entityValueDefinitions.Copy.fields.find((field: { key: string }) => field.key === "caption")).toMatchObject({ valueType: "string", maxLength: 80 });
-    expect(web.entityValueDefinitions.Link.fields.find((field: { key: string }) => field.key === "resource")).toMatchObject({ valueType: "string", semanticType: "Resource", cardinality: "one", required: true, relationship: { targetEntityId: "Resource" } });
+    expect(web.entityValueDefinitions.Copy.fields.find((field: { key: string }) => field.key === "caption")).toMatchObject({ baseType: "string", maxLength: 80 });
+    expect(web.entityValueDefinitions.Link.fields.find((field: { key: string }) => field.key === "resource")).toMatchObject({ baseType: "string", osfType: "Resource", cardinality: "one", required: true, relationship: { targetEntityId: "Resource" } });
     expect(web.entityValueDefinitions.Link.materializeOperationId).toBe(carrier(manifest).definitions.Link!.materializeOperationId);
     const json = JSON.stringify(web.entityValueDefinitions);
     for (const physical of ["valuesColumn", "definitionColumn", "foreignKey", "references", '"table"', '"schema"', '"route"', '"operations"', carrier(manifest).definitions.Link!.references[0]!.column]) {
@@ -249,9 +252,9 @@ describe("entityValue compiled storage and registry", () => {
   });
 
   it("fails closed for missing/non-value definitions and direct references to identityless entities", () => {
-    expect(() => compileFixture((entities) => named(entities, "Page").fields[1]!.allowedDefinitions = ["Missing"])).toThrow("unknown allowed definition");
+    expect(() => compileFixture((entities) => placements(entities).allowedDefinitions = ["Missing"])).toThrow("unknown allowed definition");
     expect(() => compileFixture((entities) => named(entities, "Copy").fields.unshift(id))).toThrow("baseEntity:false without an id");
-    expect(() => compileFixture((entities) => named(entities, "Resource").fields.push({ key: "bad", semanticType: "Copy" }))).toThrow("identity-less entity Copy");
+    expect(() => compileFixture((entities) => named(entities, "Resource").fields.push({ key: "bad", osfType: "Copy" }))).toThrow("identity-less entity Copy");
   });
 
   it("fails closed for standalone definition CRUD, record targets and mutating materialization", () => {
@@ -265,22 +268,22 @@ describe("entityValue compiled storage and registry", () => {
   });
 
   it("fails closed for reference collections, absent target storage and JSON-hidden references", () => {
-    expect(() => compileFixture((entities) => named(entities, "Link").fields[1]!.cardinality = "collection")).toThrow("only single");
-    expect(() => compileFixture((entities) => entities.splice(entities.findIndex((entity) => entity.entity === "Resource"), 1))).toThrow("unknown semanticType Resource");
-    expect(() => compileFixture((entities) => named(entities, "Copy").fields.push({ key: "nested", valueType: "object", children: [{ key: "hidden", semanticType: "Resource" }] }))).toThrow("not IDs inside JSON");
-    expect(() => compileFixture((entities) => named(entities, "Copy").fields.push({ key: "nestedItems", valueType: "object", cardinality: "collection", item: { key: "hidden", semanticType: "Resource" } }))).toThrow("not IDs inside JSON");
+    expect(() => compileFixture((entities) => named(entities, "Link").fields[1]!.cardinality = "collection")).toThrow("inverse collections are derived");
+    expect(() => compileFixture((entities) => entities.splice(entities.findIndex((entity) => entity.entity === "Resource"), 1))).toThrow("unknown osfType Resource");
+    expect(() => compileFixture((entities) => named(entities, "Copy").fields.push({ key: "nested", osfType: "object", children: [{ key: "hidden", osfType: "Resource" }] }))).toThrow("not IDs inside JSON");
+    expect(() => compileFixture((entities) => named(entities, "Copy").fields.push({ key: "nestedItems", osfType: "object", cardinality: "collection", item: { key: "hidden", osfType: "Resource" } }))).toThrow("not IDs inside JSON");
   });
 
   it("fails closed for unbounded collection definition choice and non-scalar discriminators", () => {
-    expect(() => compileFixture((entities) => delete named(entities, "Page").fields[1]!.allowedDefinitions)).toThrow("identity-less entities must be used");
+    expect(() => compileFixture((entities) => delete placements(entities).allowedDefinitions)).toThrow("identity-less entities must be used");
     expect(() => compileFixture((entities) => {
       const field = named(entities, "Placement").fields[2]!;
-      delete field.valueType; field.semanticType = "Resource";
+      field.osfType = "Resource";
     })).toThrow("required persisted scalar string");
   });
 
   it("namespaces the same reference field independently for different definitions and targets", () => {
-    const manifest = compileFixture((entities) => named(entities, "Copy").fields.push({ key: "resource", semanticType: "Page" }));
+    const manifest = compileFixture((entities) => named(entities, "Copy").fields.push({ key: "resource", osfType: "Page" }));
     const definitions = carrier(manifest).definitions;
     expect(definitions.Copy!.references[0]!.column).not.toBe(definitions.Link!.references[0]!.column);
     expect(definitions.Copy!.references[0]!.targetEntity).toBe("Page");
@@ -290,12 +293,10 @@ describe("entityValue compiled storage and registry", () => {
 
   it("constrains each owning collection independently and prevents orphan or double ownership", () => {
     const manifest = compileFixture((entities) => {
-      const page = named(entities, "Page");
-      page.fields[1]!.allowedDefinitions = ["Copy"];
-      page.fields.push({ key: "links", semanticType: "Placement", cardinality: "collection", relationship: { inverse: "linkPage", ownership: "owned" }, allowedDefinitions: ["Link"] });
+      placements(entities).allowedDefinitions = ["Copy"];
       const placement = named(entities, "Placement");
       placement.fields[1]!.required = false;
-      placement.fields.push({ key: "linkPage", semanticType: "Page" });
+      placement.fields.push({ key: "linkPage", osfType: "Page", relationship: { inverse: { key: "links", ownership: "owned", allowedDefinitions: ["Link"] } } });
     });
     const ddl = constraints(manifest);
     expect(ddl).toContain(`"page_id" IS NULL OR "definition_key" IN ('Copy')`);
@@ -318,9 +319,9 @@ describe("entityValue compiled storage and registry", () => {
   });
 
   it("rejects duplicate profile fields and unsafe entityValue metadata shapes", () => {
-    expect(() => compileFixture(undefined, [{ key: "body", valueType: "boolean" }])).toThrow("duplicate effective value fields");
+    expect(() => compileFixture(undefined, [{ key: "body", osfType: "boolean" }])).toThrow("duplicate effective value fields");
     expect(() => compileFixture((entities) => named(entities, "Placement").fields[3]!.cardinality = "collection")).toThrow("single entityValue object");
     expect(() => compileFixture((entities) => delete named(entities, "Placement").fields[3]!.entityValue)).toThrow("definitionField metadata");
-    expect(() => compileFixture((entities) => named(entities, "Page").fields[1]!.relationship!.ownership = "reference")).toThrow("owned inverse collection");
+    expect(() => compileFixture((entities) => placements(entities).ownership = "reference")).toThrow("owned inverse collection");
   });
 });

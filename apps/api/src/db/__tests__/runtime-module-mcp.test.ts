@@ -214,7 +214,7 @@ describe("generated MCP runtime module security boundary", () => {
              status, visible_roles, internal_only, bindings)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
-             '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"},{"key":"provider","valueType":"string"}]'::jsonb,
+             '[{"key":"sourceReference","osfType":"string"},{"key":"scope","osfType":"string"},{"key":"provider","osfType":"string"}]'::jsonb,
              '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
              1, 'published', '["reader"]'::jsonb, false,
              jsonb_build_array(

@@ -14,8 +14,7 @@ domains:
   - finance
 fields:
   - key: quoteStatus
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Quote status
@@ -30,7 +29,7 @@ fields:
       type: referentiedata
       referentieGroep: QUOTESTATUS
   - key: quoteNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Quote number
@@ -45,7 +44,7 @@ fields:
       column: quote_number
       storageClass: core
   - key: issueDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Issue date
@@ -57,7 +56,7 @@ fields:
       column: issue_date
       storageClass: core
   - key: expiresAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Expires at
@@ -69,7 +68,7 @@ fields:
       column: expires_at
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -85,7 +84,6 @@ fields:
       column: currency_code
       storageClass: core
   - key: amountBase
-    valueType: number
     required: false
     label:
       en: Base amount
@@ -93,12 +91,11 @@ fields:
     description:
       en: Sum of line base amounts, excluding VAT.
       nl: Som van de basisbedragen van de regels, exclusief BTW.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
   - key: amountVat
-    valueType: number
     required: false
     label:
       en: VAT amount
@@ -106,12 +103,11 @@ fields:
     description:
       en: Sum of VAT amounts on the quote.
       nl: Som van de BTW-bedragen op de offerte.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core
   - key: amountTotal
-    valueType: number
     required: false
     label:
       en: Total amount
@@ -119,13 +115,12 @@ fields:
     description:
       en: Total quote amount including VAT.
       nl: Totaalbedrag van de offerte inclusief BTW.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_total
       storageClass: core
   - key: description
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Description
@@ -139,7 +134,7 @@ fields:
       column: description
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -159,7 +154,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: agreementId
@@ -169,7 +164,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: document
@@ -182,7 +177,7 @@ fields:
     persisted:
       column: document_id
       storageClass: core
-    semanticType: Document
+    osfType: Document
     relationship:
       ownership: reference
 operations:

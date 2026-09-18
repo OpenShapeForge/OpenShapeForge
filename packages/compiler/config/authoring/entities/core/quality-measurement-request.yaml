@@ -37,7 +37,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -52,7 +52,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Title
@@ -66,7 +66,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -79,9 +78,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: measurementKind
-    valueType: string
     required: false
     label:
       en: Kind
@@ -95,9 +93,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: QUALITYMEASUREMENTKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -111,9 +108,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: QUALITYMEASUREMENTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: closedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -126,7 +123,7 @@ fields:
       column: closed_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -146,7 +143,7 @@ fields:
     persisted:
       column: target_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: researchAssignmentId
@@ -156,9 +153,14 @@ fields:
     persisted:
       column: research_assignment_id
       storageClass: core
-    semanticType: ResearchAssignment
+    osfType: ResearchAssignment
     relationship:
       ownership: reference
+      inverse:
+        key: measurementRequests
+        label:
+          en: Measurement requests
+          nl: Metingsverzoeken
   - key: measurementResultId
     label:
       en: Measurement result
@@ -166,7 +168,7 @@ fields:
     persisted:
       column: measurement_result_id
       storageClass: core
-    semanticType: QualityMeasurementResult
+    osfType: QualityMeasurementResult
     relationship:
       ownership: reference
   - key: caseId
@@ -176,7 +178,7 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
   - key: contactMomentId
@@ -186,7 +188,7 @@ fields:
     persisted:
       column: contact_moment_id
       storageClass: core
-    semanticType: ContactMoment
+    osfType: ContactMoment
     relationship:
       ownership: reference
 operations:

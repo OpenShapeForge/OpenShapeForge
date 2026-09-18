@@ -24,9 +24,9 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 ## Order in `compile()`
 
 1. `resolveStorageColumns(coreFields, profiles, relationships)`
-2. `resolveModelFields(coreFields, componentCatalog, semanticTypes)`
+2. `resolveModelFields(coreFields, componentCatalog, osfTypes)`
 3. `resolveRelationships(artifacts)`
-4. `buildGraphQL(coreEntity, profiles, relationships, componentCatalog, semanticTypes)`
+4. `buildGraphQL(coreEntity, profiles, relationships, componentCatalog, osfTypes)`
 5. `buildRest(coreEntity)` — order-independent; returns undefined unless the entity opts in via `rest:`
 6. `buildViews(coreEntity, profiles, componentCatalog, viewDefinition?)`
 7. `buildProfiles(profiles, mappings)`

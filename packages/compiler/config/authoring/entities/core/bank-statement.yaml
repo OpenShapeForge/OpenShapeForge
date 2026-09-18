@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: accountIban
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Account IBAN
@@ -28,7 +28,7 @@ fields:
       column: account_iban
       storageClass: core
   - key: statementNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Statement number
@@ -40,7 +40,7 @@ fields:
       column: statement_number
       storageClass: core
   - key: statementDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Statement date
@@ -52,7 +52,6 @@ fields:
       column: statement_date
       storageClass: core
   - key: openingBalance
-    valueType: number
     required: true
     label:
       en: Opening balance
@@ -60,12 +59,11 @@ fields:
     description:
       en: Opening balance of the account at the start of the statement period.
       nl: Beginsaldo van de rekening aan het begin van de afschriftperiode.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: opening_balance
       storageClass: core
   - key: closingBalance
-    valueType: number
     required: true
     label:
       en: Closing balance
@@ -73,12 +71,12 @@ fields:
     description:
       en: Closing balance of the account at the end of the statement period.
       nl: Eindsaldo van de rekening aan het einde van de afschriftperiode.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: closing_balance
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -94,7 +92,7 @@ fields:
       column: currency_code
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code

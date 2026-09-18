@@ -35,8 +35,8 @@ implementation:
   license:
     spdx: LicenseRef-BatterAI-Commercial
     notice: >-
-      The implementation package ships separately under its own license and is
-      not covered by the BUSL-1.1 grant on this repository.
+      The implementation package ships separately under its own license and is not covered by the BUSL-1.1 grant on this
+      repository.
 
 availability:
   entitlement: connector.dynamics-finance
@@ -49,7 +49,7 @@ configuration:
   verify: true
   fields:
     - key: environmentHost
-      valueType: string
+      osfType: string
       required: true
       label: { en: Environment host, nl: Omgevingshost }
       description:
@@ -57,18 +57,16 @@ configuration:
         nl: De host van je Dynamics-omgeving, zonder https://.
       help:
         en: >-
-          Production looks like contoso.operations.dynamics.com; a sandbox is
-          usually deeper, such as contoso-uat.sandbox.operations.dynamics.com.
-          Both are covered.
+          Production looks like contoso.operations.dynamics.com; a sandbox is usually deeper, such as
+          contoso-uat.sandbox.operations.dynamics.com. Both are covered.
         nl: >-
-          Productie ziet eruit als contoso.operations.dynamics.com; een sandbox
-          is meestal dieper, bijvoorbeeld contoso-uat.sandbox.operations.dynamics.com.
-          Beide worden ondersteund.
+          Productie ziet eruit als contoso.operations.dynamics.com; een sandbox is meestal dieper, bijvoorbeeld
+          contoso-uat.sandbox.operations.dynamics.com. Beide worden ondersteund.
       validation:
         pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
 
     - key: tenantId
-      valueType: string
+      osfType: string
       required: true
       label: { en: Entra tenant ID, nl: Entra-tenant-ID }
       description:
@@ -78,12 +76,12 @@ configuration:
         pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 
     - key: clientId
-      valueType: string
+      osfType: string
       required: true
       label: { en: Application (client) ID, nl: Applicatie-(client-)ID }
 
     - key: clientSecret
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: Client secret, nl: Client secret }
@@ -125,7 +123,7 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: entity
-        valueType: string
+        osfType: string
         required: true
         label: { en: Data entity, nl: Data-entiteit }
         description:
@@ -135,24 +133,24 @@ operations:
           minLength: 1
           maxLength: 256
       - key: select
-        valueType: string
+        osfType: string
         label: { en: Fields, nl: Velden }
         validation:
           maxLength: 2048
       - key: filter
-        valueType: string
+        osfType: string
         label: { en: Filter, nl: Filter }
         validation:
           maxLength: 4096
       - key: top
-        valueType: integer
+        osfType: integer
         defaultValue: 100
         label: { en: Maximum records, nl: Maximum aantal records }
         validation:
           min: 1
           max: 1000
       - key: skipToken
-        valueType: string
+        osfType: string
         label: { en: Continuation token, nl: Vervolgtoken }
         validation:
           maxLength: 4096
@@ -160,12 +158,12 @@ operations:
       cardinality: one
       fields:
         - key: records
-          valueType: object
+          osfType: object
           cardinality: collection
           required: true
           label: { en: Records, nl: Records }
         - key: nextSkipToken
-          valueType: string
+          osfType: string
           label: { en: Next continuation token, nl: Volgend vervolgtoken }
     reliability:
       timeouts:
@@ -184,21 +182,21 @@ operations:
         invoke: [Connectors.All.ReadWrite]
     input:
       - key: entity
-        valueType: string
+        osfType: string
         required: true
         label: { en: Data entity, nl: Data-entiteit }
         validation:
           minLength: 1
           maxLength: 256
       - key: payload
-        valueType: object
+        osfType: object
         required: true
         label: { en: Payload, nl: Payload }
     output:
       cardinality: one
       fields:
         - key: record
-          valueType: object
+          osfType: object
           required: true
           label: { en: Record, nl: Record }
     reliability:

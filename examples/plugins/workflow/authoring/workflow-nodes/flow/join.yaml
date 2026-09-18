@@ -12,7 +12,7 @@ description:
   en: Joins multiple workflow branches.
 configFields:
   - key: waitMode
-    valueType: string
+    osfType: string
     label:
       nl: Wacht op
       en: Wait for
@@ -52,7 +52,7 @@ configFields:
             nl: Specifieke takken
             en: Specific branches
   - key: requiredCount
-    valueType: integer
+    osfType: integer
     label:
       nl: Aantal vereiste takken
       en: Required branches
@@ -60,8 +60,10 @@ configFields:
       nl: Hoeveel takken voltooid moeten zijn voordat het samenvoegpunt vrijgeeft.
       en: How many branches must complete before the join releases.
     help:
-      en: Only used in authoring when `waitMode` is `n_of_m`. Store here how many incoming branches should count as enough before the join may continue.
-      nl: Wordt in authoring alleen gebruikt wanneer `waitMode` `n_of_m` is. Leg hier vast hoeveel binnenkomende takken genoeg moeten zijn voordat de join verder mag.
+      en: Only used in authoring when `waitMode` is `n_of_m`. Store here how many incoming branches should count as enough
+        before the join may continue.
+      nl: Wordt in authoring alleen gebruikt wanneer `waitMode` `n_of_m` is. Leg hier vast hoeveel binnenkomende takken genoeg
+        moeten zijn voordat de join verder mag.
     defaultValue: 1
     validation:
       required: true
@@ -82,7 +84,7 @@ configFields:
           operator: eq
           value: n_of_m
   - key: expectedSourceNodeIds
-    valueType: string
+    osfType: string
     cardinality:
       min: 0
       max: "unbounded"
@@ -100,13 +102,15 @@ configFields:
       required: true
     item:
       key: nodeId
-      valueType: string
+      osfType: string
       description:
         en: One upstream node id that this join should wait for.
         nl: Eén upstream-node-id waarop deze join moet wachten.
       help:
-        en: The inspector fills this from the currently connected upstream branches and stores node ids under the hood while showing human-readable labels to the author.
-        nl: De inspector vult dit vanuit de momenteel verbonden upstream-takken en slaat onder water node-id's op terwijl de auteur leesbare labels ziet.
+        en: The inspector fills this from the currently connected upstream branches and stores node ids under the hood while
+          showing human-readable labels to the author.
+        nl: De inspector vult dit vanuit de momenteel verbonden upstream-takken en slaat onder water node-id's op terwijl de
+          auteur leesbare labels ziet.
     render:
       component: JoinExpectedBranches
     options:
@@ -119,7 +123,7 @@ configFields:
           operator: eq
           value: specific_nodes
   - key: timeoutAmount
-    valueType: integer
+    osfType: integer
     label:
       nl: Timeout (aantal)
       en: Timeout (amount)
@@ -141,7 +145,7 @@ configFields:
           operator: neq
           value: first_result
   - key: timeoutUnit
-    valueType: string
+    osfType: string
     label:
       nl: Timeout-eenheid
       en: Timeout unit
@@ -149,8 +153,10 @@ configFields:
       en: Time unit paired with `timeoutAmount` in the authored join configuration.
       nl: Tijdseenheid die in de authored join-configuratie samen met `timeoutAmount` wordt gebruikt.
     help:
-      en: Only relevant when a timeout amount is configured. In this repo I could verify the authored shape and the extra `timeout` handle in the designer, but not a seeded runtime execution path for join timeouts yet.
-      nl: Alleen relevant wanneer een timeout-aantal is ingevuld. In deze repo kon ik de authored vorm en de extra `timeout`-handle in de designer verifiëren, maar nog geen seeded runtime-uitvoeringspad voor join-timeouts.
+      en: Only relevant when a timeout amount is configured. In this repo I could verify the authored shape and the extra
+        `timeout` handle in the designer, but not a seeded runtime execution path for join timeouts yet.
+      nl: Alleen relevant wanneer een timeout-aantal is ingevuld. In deze repo kon ik de authored vorm en de extra
+        `timeout`-handle in de designer verifiëren, maar nog geen seeded runtime-uitvoeringspad voor join-timeouts.
     defaultValue: minutes
     render:
       component: ReferenceSelect
@@ -178,7 +184,7 @@ configFields:
           operator: neq
           value: first_result
   - key: remainingBranches
-    valueType: string
+    osfType: string
     label:
       nl: Resterende takken
       en: Remaining branches

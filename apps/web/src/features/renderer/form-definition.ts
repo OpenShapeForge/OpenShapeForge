@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 /**
  * RendererFormDefinition — the core type that drives all form rendering.
  *
@@ -95,9 +96,9 @@ export interface RendererTimelineConfig {
 export interface RendererRelationshipFieldUsage {
   key: string;
   label?: LocalizedText;
-  valueType?: Field["valueType"];
+  baseType?: Field["baseType"];
   cardinality?: Field["cardinality"];
-  semanticType?: string;
+  osfType?: string;
   layoutFraction?: number;
   render?: Field["render"];
   validation?: Field["validation"];

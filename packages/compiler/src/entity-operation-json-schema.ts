@@ -286,7 +286,7 @@ function relationshipAnyFilters(
     if (!target?.entityOperations.list) continue;
     const properties: JsonObject = {};
     for (const field of target.model.fields) {
-      if (field.cardinality === "collection" || field.valueType === "object") continue;
+      if (field.cardinality === "collection" || field.baseType === "object") continue;
       const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
       delete schema.default;
       properties[field.key] = exactFilter(schema);
@@ -383,7 +383,7 @@ export function entityOperationJsonSchemas(
         if (
           field.key === secureInputTarget ||
           field.cardinality === "collection" ||
-          field.valueType === "object"
+          field.baseType === "object"
         ) continue;
         const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
         delete schema.default;
@@ -397,7 +397,7 @@ export function entityOperationJsonSchemas(
         .filter((field) =>
           field.key !== secureInputTarget &&
           field.cardinality !== "collection" &&
-          field.valueType !== "object"
+          field.baseType !== "object"
         )
         .map((field) => field.key);
       return {

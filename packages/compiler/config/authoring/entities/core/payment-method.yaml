@@ -14,7 +14,6 @@ domains:
   - finance
 fields:
   - key: code
-    valueType: string
     required: true
     label:
       en: Code
@@ -31,9 +30,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PAYMENTMETHODCODE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -48,7 +47,7 @@ fields:
       column: name
       storageClass: core
   - key: requiresIban
-    valueType: boolean
+    osfType: boolean
     label:
       en: Requires IBAN
       nl: IBAN vereist
@@ -60,7 +59,7 @@ fields:
       column: requires_iban
       storageClass: core
   - key: requiresMandate
-    valueType: boolean
+    osfType: boolean
     label:
       en: Requires mandate
       nl: Machtiging vereist
@@ -72,7 +71,7 @@ fields:
       column: requires_mandate
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code

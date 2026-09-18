@@ -52,8 +52,7 @@ export function createWorkflowStatusField(
 ): FieldWithAuthoringMetadata {
   return {
     key: WORKFLOW_STATUS_FIELD_KEY,
-    valueType: "string",
-    semanticType: "string",
+    osfType: "string",
     cardinality: { min: 1, max: 1 },
     label: getWorkflowStatusLabel(),
     description: getWorkflowStatusDescription(),

@@ -258,7 +258,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       if (!property || typeof property !== "object" || Array.isArray(property) || !("x-osf-inputFields" in property)) continue;
       const source = (property as Record<string, unknown>)["x-osf-inputFields"];
       const field = typeof source === "string" ? fieldsByKey.get(source) : undefined;
-      if (operation.target?.scope !== "record" || !field || field.semanticType !== "fieldDefinition" || fieldCardinality(field) !== "collection") {
+      if (operation.target?.scope !== "record" || !field || field.osfType !== "fieldDefinition" || fieldCardinality(field) !== "collection") {
         throw new Error(`${origin} Operation ${operationKey} input ${inputKey}: x-osf-inputFields must reference a fieldDefinition collection on its target record.`);
       }
     }
@@ -549,7 +549,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             `"${version.field}", which must resolve to a persisted runtime column.`,
         );
       }
-      if (field.valueType !== "datetime" || field.readOnly !== true) {
+      if (field.baseType !== "datetime" || field.readOnly !== true) {
         throw new Error(
           `${origin} operation "${operationKey}" uses concurrency version field ` +
             `"${version.field}", which must be a readOnly datetime field.`,
@@ -608,7 +608,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       }
       const challengeCardinality = challengeField.cardinality;
       if (
-        challengeField.valueType === "object" ||
+        challengeField.baseType === "object" ||
         (challengeCardinality !== undefined && challengeCardinality !== "single") ||
         challengeField.children !== undefined ||
         challengeField.shape !== undefined ||

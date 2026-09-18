@@ -12,7 +12,7 @@ description:
   en: Defines a case step inside a case workflow.
 configFields:
   - key: definitionId
-    valueType: string
+    osfType: string
     label:
       nl: Procesworkflow
       en: Process workflow
@@ -38,7 +38,7 @@ configFields:
         selectionSync: publishedWorkflow
         hideVariables: true
   - key: waitForCompletion
-    valueType: boolean
+    osfType: boolean
     label:
       nl: Wacht op voltooiing
       en: Wait for completion
@@ -54,7 +54,7 @@ configFields:
     render:
       component: Switch
   - key: childExecutionMode
-    valueType: string
+    osfType: string
     label:
       nl: Substappen uitvoeren
       en: Run substeps
@@ -85,7 +85,7 @@ configFields:
       props:
         clearable: false
   - key: childFailurePolicy
-    valueType: string
+    osfType: string
     label:
       nl: Foutafhandeling substappen
       en: Substep failure handling
@@ -110,7 +110,7 @@ configFields:
     render:
       component: ReferenceSelect
   - key: definitionName
-    valueType: string
+    osfType: string
     label:
       nl: Interne workflownaam
       en: Internal workflow name
@@ -126,7 +126,7 @@ configFields:
     render:
       component: Input
   - key: publishedVersion
-    valueType: string
+    osfType: string
     label:
       nl: Interne versie
       en: Internal version
@@ -143,7 +143,7 @@ configFields:
     render:
       component: Input
   - key: processStepValues
-    valueType: object
+    osfType: object
     label:
       nl: Zaakstap-eigenschappen
       en: Case-step properties
@@ -153,13 +153,13 @@ configFields:
     help:
       nl: Deze waarden beschrijven de zaakstap in de zaakhiërarchie. Ze veranderen niet de innerlijke workflowlogica van de
         gekoppelde case_step-subflow.
-      en: These values describe the case step in the case hierarchy. They do not change the inner workflow logic of the
-        linked case_step subflow.
+      en: These values describe the case step in the case hierarchy. They do not change the inner workflow logic of the linked
+        case_step subflow.
     workflowInspector:
       objectPresentation: inlineChildren
     children:
       - key: description
-        valueType: string
+        osfType: string
         required: false
         label:
           en: Description
@@ -176,7 +176,7 @@ configFields:
             rows: 3
             maxLength: 4000
       - key: isMilestone
-        valueType: boolean
+        osfType: boolean
         required: true
         label:
           en: Milestone
@@ -185,14 +185,14 @@ configFields:
           en: Marks this case step as an important milestone.
           nl: Markeert deze zaakstap als belangrijk formeel moment.
         help:
-          nl: Mijlpalen kunnen in overzichten en voortgang worden uitgelicht. Zet dit alleen aan voor stappen die echt een
-            formeel beslis- of voortgangsmoment zijn.
-          en: Milestones can be highlighted in overviews and progress. Enable this only for steps that are truly formal
-            decision or progress moments.
+          nl: Mijlpalen kunnen in overzichten en voortgang worden uitgelicht. Zet dit alleen aan voor stappen die echt een formeel
+            beslis- of voortgangsmoment zijn.
+          en: Milestones can be highlighted in overviews and progress. Enable this only for steps that are truly formal decision
+            or progress moments.
         render:
           component: Switch
       - key: isBlocking
-        valueType: boolean
+        osfType: boolean
         required: true
         label:
           en: Blocking
@@ -203,12 +203,11 @@ configFields:
         help:
           nl: Blokkerende stappen houden afhankelijke opvolging tegen tot de stap klaar is. Gebruik dit voor verplichte
             inhoudelijke stappen, niet voor puur informatieve taken.
-          en: Blocking steps hold dependent follow-up work until the step is done. Use this for required substantive steps,
-            not for purely informational tasks.
+          en: Blocking steps hold dependent follow-up work until the step is done. Use this for required substantive steps, not
+            for purely informational tasks.
         render:
           component: Switch
       - key: assignedGroupId
-        valueType: string
         validation:
           format: uuid
         required: false
@@ -219,11 +218,11 @@ configFields:
           en: Choose the assigned group to associate.
           nl: Kies de toegewezen groep om te koppelen.
         help:
-          nl: Kies de relatiegroep of gebruik een variabele die een relationGroupId oplevert. De waarde wordt op de ERP
-            processtap opgeslagen voor werkverdeling.
+          nl: Kies de relatiegroep of gebruik een variabele die een relationGroupId oplevert. De waarde wordt op de ERP processtap
+            opgeslagen voor werkverdeling.
           en: Choose the relation group or use a variable that resolves to a relationGroupId. The value is stored on the ERP
             process step for work assignment.
-        semanticType: relationGroupId
+        osfType: relationGroupId
         options:
           type: remote
           remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
@@ -232,7 +231,7 @@ configFields:
           props:
             valueMode: insertText
   - key: terminalPaths
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -251,17 +250,16 @@ configFields:
     workflowInspector: *hiddenWorkflowInspector
     item:
       key: terminalPath
-      valueType: object
+      osfType: object
       description:
         nl: Eén eindpad van de gekoppelde zaakstap-workflow.
         en: One terminal path of the linked case-step workflow.
       help:
-        nl: Elke entry vertegenwoordigt een end-node in de zaakstap-subflow en bepaalt een mogelijke uitgang op deze
-          zaakstap.
+        nl: Elke entry vertegenwoordigt een end-node in de zaakstap-subflow en bepaalt een mogelijke uitgang op deze zaakstap.
         en: Each entry represents an end node in the case-step subflow and determines one possible exit on this case step.
       children:
         - key: endNodeId
-          valueType: string
+          osfType: string
           label:
             nl: Eindnode ID
             en: End node ID
@@ -272,7 +270,7 @@ configFields:
             nl: Deze id wordt gebruikt als connector-handle en moet overeenkomen met de gepubliceerde subflow.
             en: This id is used as the connector handle and must match the published subflow.
         - key: endLabel
-          valueType: string
+          osfType: string
           label:
             nl: Padlabel
             en: Path label
@@ -283,7 +281,7 @@ configFields:
             nl: Dit label verschijnt op de connector zodat auteurs het juiste vervolgpad kunnen kiezen.
             en: This label appears on the connector so authors can choose the right follow-up path.
         - key: outputs
-          valueType: object
+          osfType: object
           cardinality:
             min: 0
             max: "unbounded"
@@ -291,13 +289,13 @@ configFields:
             nl: Outputvelden die de zaakstap-subflow op dit eindpad publiceert.
             en: Output fields published by the case-step subflow on this terminal path.
           help:
-            nl: Deze velden worden beschikbaar als zaakstap-output voor downstream nodes en, bij sequentiële zaakstappen,
-              voor latere zaakstappen in de case.
-            en: These fields become case-step output for downstream nodes and, with sequential case steps, later case steps in
-              the case.
+            nl: Deze velden worden beschikbaar als zaakstap-output voor downstream nodes en, bij sequentiële zaakstappen, voor
+              latere zaakstappen in de case.
+            en: These fields become case-step output for downstream nodes and, with sequential case steps, later case steps in the
+              case.
           item:
             key: output
-            valueType: object
+            osfType: object
             description:
               nl: Eén gepubliceerd outputveld van het terminale zaakstappad.
               en: One published output field from the terminal case-step path.
@@ -306,7 +304,7 @@ configFields:
               en: The entry summarizes an output field on the end node of the case-step subflow.
             children:
               - key: key
-                valueType: string
+                osfType: string
                 label:
                   nl: Sleutel
                   en: Key
@@ -317,7 +315,7 @@ configFields:
                   nl: Variabelen en mappings gebruiken deze key om de zaakstap-output te lezen.
                   en: Variables and mappings use this key to read the case-step output.
               - key: label
-                valueType: string
+                osfType: string
                 label:
                   nl: Label
                   en: Label
@@ -327,8 +325,8 @@ configFields:
                 help:
                   nl: Dit label helpt auteurs het veld te herkennen in de variabelezoeker.
                   en: This label helps authors recognize the field in the variable picker.
-              - key: semanticType
-                valueType: string
+              - key: osfType
+                osfType: string
                 label:
                   nl: Semantisch type
                   en: Semantic type

@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +44,6 @@ fields:
       column: name
       storageClass: core
   - key: accountType
-    valueType: string
     required: true
     label:
       en: Account type
@@ -58,9 +57,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: LEDGERACCOUNTTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: isPostable
-    valueType: boolean
+    osfType: boolean
     label:
       en: Postable
       nl: Boekbaar
@@ -73,7 +72,7 @@ fields:
       column: is_postable
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -89,7 +88,6 @@ fields:
       column: currency_code
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -102,9 +100,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -124,18 +122,14 @@ fields:
     persisted:
       column: parent_ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
-  - key: childLedgerAccounts
-    label:
-      en: Child ledger accounts
-      nl: Onderliggende grootboekrekeningen
-    semanticType: LedgerAccount
-    cardinality: collection
-    relationship:
-      inverse: parentLedgerAccountId
-      ownership: reference
+      inverse:
+        key: childLedgerAccounts
+        label:
+          en: Child ledger accounts
+          nl: Onderliggende grootboekrekeningen
 authorization:
   roles:
     read:

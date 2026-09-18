@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: creditorNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Creditor number
@@ -30,7 +30,6 @@ fields:
       column: creditor_number
       storageClass: core
   - key: status
-    valueType: string
     required: false
     label:
       en: Status
@@ -44,9 +43,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ROLEASSIGNMENTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: paymentTerms
-    valueType: string
     required: false
     label:
       en: Payment terms
@@ -60,9 +58,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PAYMENTTERMS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: defaultIban
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Default IBAN
@@ -76,7 +74,7 @@ fields:
       column: default_iban
       storageClass: core
   - key: vatNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: VAT number
@@ -90,7 +88,7 @@ fields:
       column: vat_number
       storageClass: core
   - key: chamberOfCommerceNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Chamber of commerce number
@@ -104,7 +102,6 @@ fields:
       column: chamber_of_commerce_number
       storageClass: core
   - key: creditLimit
-    valueType: number
     required: false
     label:
       en: Credit limit
@@ -112,12 +109,11 @@ fields:
     description:
       en: Maximum outstanding amount allowed for this creditor.
       nl: Maximaal toegestaan openstaand bedrag voor deze crediteur.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: credit_limit
       storageClass: core
   - key: currentBalance
-    valueType: number
     required: false
     label:
       en: Current balance
@@ -125,12 +121,12 @@ fields:
     description:
       en: Current outstanding balance — projection populated by the audit/timeline service.
       nl: Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: current_balance
       storageClass: core
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -142,7 +138,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -154,7 +150,7 @@ fields:
       column: end_date
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name
@@ -168,7 +164,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -181,9 +176,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -203,7 +198,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: defaultLedgerAccountId
@@ -213,7 +208,7 @@ fields:
     persisted:
       column: default_ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: defaultPaymentMethodId
@@ -223,7 +218,7 @@ fields:
     persisted:
       column: default_payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
 authorization:

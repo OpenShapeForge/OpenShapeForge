@@ -60,8 +60,8 @@ function connectorDefinition(
         key: "listObjects",
         kind: "query",
         authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-        input: [{ key: "prefix", valueType: "string" }],
-        output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+        input: [{ key: "prefix", osfType: "string" }],
+        output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
       },
     ],
     ...overrides,
@@ -113,14 +113,14 @@ describe("the schema registry", () => {
     )!;
     const recursiveDefinition = {
       key: "address",
-      valueType: "object",
+      osfType: "object",
       children: [
-        { key: "street", valueType: "string" },
+        { key: "street", osfType: "string" },
         {
           key: "residents",
-          valueType: "object",
+          osfType: "object",
           cardinality: "collection",
-          item: { key: "resident", valueType: "object" },
+          item: { key: "resident", osfType: "object" },
         },
       ],
     };
@@ -129,10 +129,10 @@ describe("the schema registry", () => {
     expect(compatibility(recursiveDefinition)).toBe(true);
     expect(compatibilityDefinition(recursiveDefinition)).toBe(true);
     expect(compatibilityProperties(recursiveDefinition)).toBe(true);
-    expect(canonical({ valueType: "string" })).toBe(false);
-    expect(compatibility({ valueType: "string" })).toBe(false);
-    expect(compatibilityDefinition({ valueType: "string" })).toBe(false);
-    expect(compatibilityProperties({ valueType: "string" })).toBe(false);
+    expect(canonical({ osfType: "string" })).toBe(false);
+    expect(compatibility({ osfType: "string" })).toBe(false);
+    expect(compatibilityDefinition({ osfType: "string" })).toBe(false);
+    expect(compatibilityProperties({ osfType: "string" })).toBe(false);
 
     for (const definition of Object.keys(fieldV2Schema.$defs)) {
       expect(ajv.getSchema(`${fieldV2Schema.$id}#/$defs/${definition}`)).toBeDefined();
@@ -149,15 +149,14 @@ describe("the schema registry", () => {
 
     const semanticField = {
       key: "definition",
-      valueType: "object",
-      semanticType: "fieldDefinition",
+      osfType: "fieldDefinition",
     };
     expect(canonical(semanticField)).toBe(true);
     expect(compatibility(semanticField)).toBe(true);
 
     for (const ambiguous of [
-      { ...semanticField, children: [{ key: "extra", valueType: "string" }] },
-      { ...semanticField, item: { key: "extra", valueType: "string" } },
+      { ...semanticField, children: [{ key: "extra", osfType: "string" }] },
+      { ...semanticField, item: { key: "extra", osfType: "string" } },
     ]) {
       expect(canonical(ambiguous)).toBe(false);
       expect(compatibility(ambiguous)).toBe(false);
@@ -166,8 +165,8 @@ describe("the schema registry", () => {
     expect(
       canonical({
         key: "ordinaryObject",
-        valueType: "object",
-        children: [{ key: "extra", valueType: "string" }],
+        osfType: "object",
+        children: [{ key: "extra", osfType: "string" }],
       }),
     ).toBe(true);
   });
@@ -269,9 +268,9 @@ describe("the schema registry", () => {
 
 describe("a violation is rejected, with the offending path named", () => {
   it("rejects a core entity field in the superseded v1 shape", () => {
-    // `type` was the v1 spelling; the compiler has taken `valueType` for a long
-    // time, but core-entity.schema.json still required `type` — the exact drift
-    // that made every shipped entity fail its own schema.
+    // `type` was the v1 spelling, long superseded (first by `valueType`, now by
+    // `osfType`), but core-entity.schema.json still required `type` — the exact
+    // drift that made every shipped entity fail its own schema.
     expect(() =>
       validator.validate(
         {
@@ -298,7 +297,7 @@ describe("a violation is rejected, with the offending path named", () => {
           entity: "Widget",
           title: "Widget",
           language: "en",
-          fields: [{ key: "name", valueType: "string", notAThing: true }],
+          fields: [{ key: "name", osfType: "string", notAThing: true }],
         },
         "widget.yaml",
       ),
@@ -315,7 +314,7 @@ describe("a violation is rejected, with the offending path named", () => {
           entity: "Widget",
           title: "Widget",
           language: "en",
-          fields: [{ key: "name", valueType: "string", required: true }],
+          fields: [{ key: "name", osfType: "string", required: true }],
         },
         "widget.yaml",
       ),
@@ -340,7 +339,7 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
         {
           key: "listObjects",
           kind: "query",
-          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+          output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
           reliability: { retry: { eligible: true, backoff: "sideways" } },
         },
       ],
@@ -367,7 +366,7 @@ describe("connector contracts are validated at LOAD, not only in the corpus gate
           key: "list`Objects",
           kind: "query",
           authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+          output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
         },
       ],
     });
@@ -393,7 +392,7 @@ describe("schema and compiler agree", () => {
             key: "listObjects",
             kind: "query",
             authorization: { roles: { invoke: ["Connectors.All.Read"] } },
-            output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+            output: { cardinality: "many", fields: [{ key: "key", osfType: "string" }] },
             reliability: { timeouts: { attemptMs: 10_000, totalMs: 30_000 } },
           },
         ],
@@ -407,8 +406,8 @@ describe("schema and compiler agree", () => {
             key: "putObject",
             kind: "mutation",
             authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
-            input: [{ key: "requestId", valueType: "string" }],
-            output: { cardinality: "one", fields: [{ key: "key", valueType: "string" }] },
+            input: [{ key: "requestId", osfType: "string" }],
+            output: { cardinality: "one", fields: [{ key: "key", osfType: "string" }] },
             reliability: {
               retry: { eligible: true, maxAttempts: 3, backoff: "exponential" },
               idempotency: { strategy: "key", keyInput: "requestId" },
@@ -422,8 +421,8 @@ describe("schema and compiler agree", () => {
       connectorDefinition({
         configuration: {
           fields: [
-            { key: "endpoint", valueType: "string", required: true },
-            { key: "accessKeyId", valueType: "string", required: true, secret: true },
+            { key: "endpoint", osfType: "string", required: true },
+            { key: "accessKeyId", osfType: "string", required: true, secret: true },
           ],
         },
       }),
@@ -455,7 +454,7 @@ describe("coreEntity properties the compiler implements", () => {
       entity: "BillingRun",
       title: "Billing run",
       language: "en",
-      fields: [{ key: "idempotencyKey", valueType: "string" }],
+      fields: [{ key: "idempotencyKey", osfType: "string" }],
       ...overrides,
     };
   }
@@ -625,7 +624,7 @@ describe("coreEntity properties the compiler implements", () => {
       schemaVersion: 2,
       fields: [{
         key: "authorization",
-        valueType: "object",
+        osfType: "object",
         required: true,
         defaultValue: {},
         persisted: { column: "authorization", storageClass: "core" },
@@ -733,8 +732,8 @@ describe("coreEntity properties the compiler implements", () => {
     const document = coreEntity({
       schemaVersion: 2,
       fields: [
-        { key: "adapterId", valueType: "string" },
-        { key: "configurationValues", valueType: "object" },
+        { key: "adapterId", osfType: "string" },
+        { key: "configurationValues", osfType: "object" },
       ],
       operations: { create },
       interfaces: { rest: {}, graphql: {}, mcp: {} },
@@ -842,8 +841,8 @@ describe("coreEntity properties the compiler implements", () => {
     const document = coreEntity({
       schemaVersion: 2,
       fields: [
-        { key: "updatedAt", valueType: "datetime", readOnly: true },
-        { key: "idempotencyKey", valueType: "string" },
+        { key: "updatedAt", osfType: "datetime", readOnly: true },
+        { key: "idempotencyKey", osfType: "string" },
       ],
       operations: { update },
       interfaces: { rest: { operations: { update: {} } } },
@@ -919,10 +918,10 @@ describe("coreEntity properties the compiler implements", () => {
     // generators/pages.ts mirrors this onto the generated page field.
     const document = coreEntity({
       fields: [
-        { key: "entityType", valueType: "string" },
+        { key: "entityType", osfType: "string" },
         {
           key: "descriptionTemplate",
-          valueType: "string",
+          osfType: "string",
           variables: "template",
           suggestions: { sourceField: "entityType" },
         },
@@ -936,7 +935,7 @@ describe("coreEntity properties the compiler implements", () => {
       fields: [
         {
           key: "descriptionTemplate",
-          valueType: "string",
+          osfType: "string",
           suggestions: { sourceEntity: "LabelRule" },
         },
       ],
@@ -959,8 +958,8 @@ describe("coreEntity properties the compiler implements", () => {
   it("does not let derived execution rename the authored URL selector", () => {
     const document = coreEntity({
       fields: [
-        { key: "bindings", valueType: "object" },
-        { key: "version", valueType: "integer" },
+        { key: "bindings", osfType: "object" },
+        { key: "version", osfType: "integer" },
       ],
       mcp: {
         derivedTools: {
@@ -993,14 +992,12 @@ describe("coreEntity properties the compiler implements", () => {
       fields: [
         {
           key: "inputs",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
           cardinality: { min: 0, max: "unbounded" },
         },
         {
           key: "outputs",
-          valueType: "object",
-          semanticType: "fieldDefinition",
+          osfType: "fieldDefinition",
           cardinality: { min: 0, max: "unbounded" },
         },
       ],
@@ -1022,8 +1019,8 @@ describe("coreEntity properties the compiler implements", () => {
   it("does not let derived execution delegate a header name to caller input", () => {
     const document = coreEntity({
       fields: [
-        { key: "bindings", valueType: "object" },
-        { key: "version", valueType: "integer" },
+        { key: "bindings", osfType: "object" },
+        { key: "version", osfType: "integer" },
       ],
       mcp: {
         derivedTools: {

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import { isFieldCardinalityCollection } from "@/features/renderer/edit/controls/complex/field-schema-editor/utils";
 import { translateRendererText } from "@/features/renderer/runtime/field-utils";
 import { resolveFieldIcon } from "@/features/renderer/runtime/field-icons";
@@ -149,23 +150,19 @@ export function resolveCollectionItemIcon(
     if ("kind" in record && (record as { kind?: unknown }).kind === "variable") {
       return itemField
         ? resolveFieldIcon(itemField)
-        : resolveFieldIcon({ valueType: "string" });
+        : resolveFieldIcon({ osfType: "string" });
     }
     const looksLikeField =
-      typeof record.key === "string" && typeof record.valueType === "string";
+      typeof record.key === "string" && typeof record.osfType === "string";
     if (looksLikeField) {
       const fromItem = resolveFieldIcon({
-        valueType: record.valueType as Field["valueType"],
+        osfType: record.osfType as string,
         cardinality: isFieldCardinalityCollection(record.cardinality)
           ? "collection"
           : "single",
         validation:
           typeof record.validation === "object" && record.validation
             ? (record.validation as Field["validation"])
-            : undefined,
-        semanticType:
-          typeof record.semanticType === "string"
-            ? record.semanticType
             : undefined,
       });
       if (fromItem) return fromItem;

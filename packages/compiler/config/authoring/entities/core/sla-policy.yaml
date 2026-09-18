@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -41,7 +41,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +53,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,9 +62,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -76,9 +74,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SLAPOLICYSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: targetEntity
-    valueType: string
     required: true
     label:
       en: Target entity
@@ -89,9 +86,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SLAPOLICYTARGETENTITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: firstResponseMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: First response minutes
@@ -100,7 +97,7 @@ fields:
       column: first_response_minutes
       storageClass: core
   - key: resolutionMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Resolution minutes
@@ -109,7 +106,7 @@ fields:
       column: resolution_minutes
       storageClass: core
   - key: breachWarningMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Breach warning minutes
@@ -118,7 +115,7 @@ fields:
       column: breach_warning_minutes
       storageClass: core
   - key: escalationAfterMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Escalation after minutes
@@ -127,7 +124,7 @@ fields:
       column: escalation_after_minutes
       storageClass: core
   - key: businessHoursProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Business hours profile
@@ -138,7 +135,7 @@ fields:
       column: business_hours_profile
       storageClass: core
   - key: pauseOnWaitingCustomer
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Pause on waiting for customer
@@ -148,7 +145,7 @@ fields:
       column: pause_on_waiting_customer
       storageClass: core
   - key: pauseOnPendingExternal
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Pause on pending external dependency
@@ -158,7 +155,7 @@ fields:
       column: pause_on_pending_external
       storageClass: core
   - key: autoCloseOnResolution
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Auto-close on resolution
@@ -174,26 +171,8 @@ fields:
     persisted:
       column: escalation_queue_id
       storageClass: core
-    semanticType: WorkQueue
+    osfType: WorkQueue
     relationship:
-      ownership: reference
-  - key: cases
-    label:
-      en: Cases
-      nl: Zaken
-    semanticType: Case
-    cardinality: collection
-    relationship:
-      inverse: slaPolicyId
-      ownership: reference
-  - key: milestones
-    label:
-      en: Milestones
-      nl: Mijlpalen
-    semanticType: Milestone
-    cardinality: collection
-    relationship:
-      inverse: slaPolicyId
       ownership: reference
 operations:
   list:

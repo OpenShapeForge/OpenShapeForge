@@ -12,7 +12,7 @@ description:
   en: Classifies context as one of the configured intents.
 configFields:
   - key: context
-    valueType: string
+    osfType: string
     label:
       nl: Context
       en: Context
@@ -32,7 +32,7 @@ configFields:
       props:
         rows: 5
   - key: intents
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -54,16 +54,17 @@ configFields:
           en: Define at least two intents — otherwise there's nothing to classify.
     item:
       key: intent
-      valueType: object
+      osfType: object
       description:
         nl: Eén intent die als afzonderlijke uitgaande route op de node verschijnt.
         en: One intent that appears as a separate outgoing route on the node.
       help:
-        nl: De runtime gebruikt de beschrijving en voorbeelden om de beste match te kiezen. De sleutel wordt stabiel afgeleid voor canvas-edges.
+        nl: De runtime gebruikt de beschrijving en voorbeelden om de beste match te kiezen. De sleutel wordt stabiel afgeleid
+          voor canvas-edges.
         en: The runtime uses the description and examples to pick the best match. The key is derived stably for canvas edges.
       children:
         - key: label
-          valueType: string
+          osfType: string
           label:
             nl: Label
             en: Label
@@ -81,7 +82,7 @@ configFields:
           render:
             component: Input
         - key: description
-          valueType: string
+          osfType: string
           label:
             nl: Beschrijving voor AI
             en: Description for AI
@@ -101,7 +102,7 @@ configFields:
             props:
               rows: 2
         - key: examples
-          valueType: string
+          osfType: string
           label:
             nl: Voorbeelden (optioneel)
             en: Examples (optional)
@@ -116,17 +117,16 @@ configFields:
             props:
               rows: 2
         - key: workflowIds
-          valueType: string
           cardinality:
             min: 0
             max: "unbounded"
-          semanticType: caseTemplateId
+          osfType: caseTemplateId
           label:
             nl: Zaken
             en: Cases
           description:
-            nl: Selecteer één of meerdere zaaksjablonen. Bij een match laat de AI in een tweede stap kiezen welk sjabloon
-              het beste bij het bericht past; het gekozen sjabloon-ID verschijnt in de output.
+            nl: Selecteer één of meerdere zaaksjablonen. Bij een match laat de AI in een tweede stap kiezen welk sjabloon het beste
+              bij het bericht past; het gekozen sjabloon-ID verschijnt in de output.
             en: Pick one or more case templates. On a match the AI runs a second step to choose which template best fits the
               message; the selected template ID appears in the output.
           help:
@@ -149,7 +149,7 @@ configFields:
                 en: No case templates found.
               allowDynamicVariables: false
   - key: timeoutMs
-    valueType: number
+    osfType: number
     label:
       nl: Timeout (ms)
       en: Timeout (ms)
@@ -158,7 +158,8 @@ configFields:
       en: Maximum time to wait for the classification.
     help:
       nl: Als classificatie of workflow-keuze niet op tijd klaar is, moet de workflow via zijn foutafhandeling verder.
-      en: If classification or workflow selection does not finish in time, the workflow must continue through its error handling.
+      en: If classification or workflow selection does not finish in time, the workflow must continue through its error
+        handling.
     defaultValue: 60000
     validation:
       required: true

@@ -28,7 +28,7 @@ authorization:
     empty: public
 fields:
   - key: username
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Username
@@ -43,7 +43,7 @@ fields:
       column: username
       storageClass: core
   - key: email
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Email
@@ -58,7 +58,7 @@ fields:
       column: email
       storageClass: core
   - key: keycloakSub
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -73,7 +73,6 @@ fields:
       column: keycloak_sub
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -90,9 +89,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ACCOUNTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: lastLoginAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -105,7 +104,7 @@ fields:
       column: last_login_at
       storageClass: core
   - key: validFrom
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Valid from
@@ -117,7 +116,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Valid until
@@ -129,7 +128,7 @@ fields:
       column: valid_until
       storageClass: core
   - key: passwordChangedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -148,9 +147,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Accounts
+          nl: Accounts
   - key: naturalPersonId
     label:
       en: Natural person
@@ -158,9 +161,13 @@ fields:
     persisted:
       column: natural_person_id
       storageClass: core
-    semanticType: NaturalPerson
+    osfType: NaturalPerson
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Accounts
+          nl: Accounts
 operations:
   list:
     name: List Account

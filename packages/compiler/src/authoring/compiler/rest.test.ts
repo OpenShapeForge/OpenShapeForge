@@ -11,7 +11,7 @@ const entityWithRest = (rest: CoreEntity["rest"]): CoreEntity =>
     entity: "RelationGroup",
     title: "Relation Group",
     language: "en",
-    fields: [{ key: "name", valueType: "string" }],
+    fields: [{ key: "name", osfType: "string" }],
     ...(rest === undefined ? {} : { rest }),
   }) as CoreEntity;
 

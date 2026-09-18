@@ -72,7 +72,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,
-  "semantic-type-catalog.schema.json": 1,
+  "osf-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,
   "workflow-node.schema.json": 44,
   // Zero on purpose: the compiler reads these kinds, but no layer in this

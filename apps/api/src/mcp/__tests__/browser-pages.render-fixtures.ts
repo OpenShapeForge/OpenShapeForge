@@ -65,21 +65,21 @@ const { token } = await mintConfiguration({
   definitions: [
     {
       key: "clientId",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: { en: "OAuth client ID" },
       description: { en: "From the Google Cloud console, under Credentials." },
     },
     {
       key: "clientSecret",
-      valueType: "string",
+      osfType: "string",
       required: true,
       label: { en: "OAuth client secret" },
       classification: { sensitivity: "confidential" },
     },
     {
       key: "region",
-      valueType: "string",
+      osfType: "string",
       required: false,
       label: { en: "Data region" },
       options: {
@@ -91,7 +91,7 @@ const { token } = await mintConfiguration({
     },
     {
       key: "sandbox",
-      valueType: "boolean",
+      osfType: "boolean",
       required: false,
       label: { en: "Use the sandbox environment" },
     },

@@ -26,7 +26,7 @@ describe("typed RelationGroups and many-relation memberships", () => {
     const legacy = relation.model.fields.find(({ key }) => key === "relationGroupId");
     expect(legacy).toMatchObject({
       key: "relationGroupId",
-      semanticType: "RelationGroup",
+      osfType: "RelationGroup",
       readOnly: true,
       immutable: true,
       relationship: {
@@ -197,5 +197,7 @@ describe("typed RelationGroups and many-relation memberships", () => {
       required: true,
       default: "'active'",
     });
-  });
+  // Compiles the whole core corpus, like the generate suites (60 s there);
+  // the default 5 s budget is what a slow runner overruns.
+  }, 30_000);
 });

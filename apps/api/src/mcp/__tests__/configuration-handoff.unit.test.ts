@@ -33,27 +33,27 @@ const KEYRING = keyringFromEnv(
 const DEFINITIONS = [
   {
     key: "subdomain",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "Zendesk subdomain" },
     description: { en: "The part before .zendesk.com." },
   },
   {
     key: "clientSecret",
-    valueType: "string",
+    osfType: "string",
     required: true,
     label: { en: "OAuth client secret" },
     classification: { sensitivity: "confidential" },
   },
   {
     key: "retries",
-    valueType: "integer",
+    osfType: "integer",
     required: false,
     label: { en: "Retries" },
   },
   {
     key: "sandbox",
-    valueType: "boolean",
+    osfType: "boolean",
     required: false,
     label: { en: "Sandbox" },
   },
@@ -203,7 +203,7 @@ describe("renderConfigurationForm", () => {
       definitions: [
         {
           key: `x" autofocus onfocus="alert(1)`,
-          valueType: "string",
+          osfType: "string",
           required: true,
         },
       ],

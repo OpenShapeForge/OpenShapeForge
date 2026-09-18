@@ -1,19 +1,16 @@
-// @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Relationship compiler — aggregates relationship declarations from core entity
- * and all profiles into a unified list.
+ * Relationship compiler — projects the relational fields of the normalized
+ * core entity into the flat CompiledRelationship list that GraphQL, storage,
+ * views and the interface manifests consume.
  *
- * Pipeline position: called early by the main compiler, before GraphQL and view
- * compilation which both depend on the resolved relationship set. Validates that
- * no duplicate relationship keys exist across core and profile definitions.
- *
- * Input:  LoadedArtifacts (core entity relationships + profile relationships).
- * Output: CompiledRelationship[] — flat, deduplicated list of all entity relationships.
+ * Every relationship is a field: a single entity reference (`belongsTo`) or
+ * a collection the compiler derived from one (`hasMany`, see
+ * ../inverse-collections.ts). Profiles contribute no relationships of their
+ * own.
  */
 import type { CompiledRelationship } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
-import { deriveTableName } from "./helpers.js";
 
 export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelationship[] {
   const rels: CompiledRelationship[] = [];
@@ -21,64 +18,32 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
   for (const field of artifacts.coreEntity.fields) {
     const rel = field.relationship;
     if (!rel?.target) continue;
+    if (rel.kind !== "belongsTo" && rel.kind !== "hasMany") {
+      throw new Error(`${artifacts.coreEntity.entity}.${field.key}: relationship is not normalized.`);
+    }
     rels.push({
       key: field.key,
       fieldKey: field.key,
-      kind: rel.kind!,
+      kind: rel.kind,
       target: rel.target,
-      foreignKey: rel.foreignKey,
-      inverse: rel.inverse,
+      ...(rel.foreignKey ? { foreignKey: rel.foreignKey } : {}),
+      ...(typeof rel.inverse === "string" ? { inverse: rel.inverse } : {}),
       ...(rel.through ? { through: rel.through } : {}),
-      ownership: rel.ownership,
-      cardinality: field.cardinality,
-      sortable: field.sortable,
+      ...(rel.ownership ? { ownership: rel.ownership } : {}),
+      ...(field.cardinality ? { cardinality: field.cardinality } : {}),
+      ...(field.sortable ? { sortable: field.sortable } : {}),
       ...(field.childAuthorization ? { childAuthorization: field.childAuthorization } : {}),
       ...(field.childLock ? { childLock: field.childLock } : {}),
       ...(rel.version ? { version: rel.version } : {}),
-      unique: rel.unique,
-      ...(rel.kind === "manyToMany" ? {
-        via: `${deriveTableName(artifacts.coreEntity.entity)}_${field.key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()}`,
-      } : {}),
-      label: field.label,
+      ...(rel.unique ? { unique: rel.unique } : {}),
+      ...(field.label ? { label: field.label } : {}),
       ...(rel.constraints ? { constraints: structuredClone(rel.constraints) } : {}),
     });
   }
 
-  if (artifacts.coreEntity.relationships) {
-    for (const rel of artifacts.coreEntity.relationships) {
-      rels.push({
-        key: rel.key,
-        kind: rel.kind,
-        target: rel.target,
-        foreignKey: rel.foreignKey,
-        via: rel.via,
-        label: rel.label,
-        ...(rel.constraints ? { constraints: structuredClone(rel.constraints) } : {}),
-      });
-    }
-  }
-
-  for (const profile of artifacts.profiles) {
-    if (!profile.relationships) continue;
-    for (const rel of profile.relationships) {
-      rels.push({
-        key: rel.key,
-        kind: rel.kind,
-        target: rel.target,
-        foreignKey: rel.foreignKey,
-        via: rel.via,
-        label: rel.label,
-        ...(rel.constraints ? { constraints: structuredClone(rel.constraints) } : {}),
-      });
-    }
-  }
-
-  // Detect duplicate keys
   const seen = new Set<string>();
   for (const rel of rels) {
-    if (seen.has(rel.key)) {
-      throw new Error(`Duplicate relationship key "${rel.key}" — defined in both core entity and profile`);
-    }
+    if (seen.has(rel.key)) throw new Error(`Duplicate relationship key "${rel.key}" on ${artifacts.coreEntity.entity}`);
     seen.add(rel.key);
   }
 

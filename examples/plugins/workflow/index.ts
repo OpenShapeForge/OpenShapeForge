@@ -27,7 +27,7 @@
  *
  * The `compiler/` and `generated/compiler/` prefixes carry the web client's
  * copies of the field contract (`field-contract`, `canonical-condition`,
- * `semantic-types`, …). Despite living behind a workflow-named generator these
+ * `osf-types`, …). Despite living behind a workflow-named generator these
  * are the *renderer's* core type surface — `@/generated/compiler/field-contract`
  * alone has ~87 importers across `features/renderer` and `components/entity` —
  * so they are mapped and emitted whenever `apps/web` exists. Both prefixes

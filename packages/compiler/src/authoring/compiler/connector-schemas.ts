@@ -19,7 +19,7 @@ import {
   applyCollectionShape,
   bundleFieldDefinitionSchema,
   constraintsForField,
-  FIELD_DEFINITION_SEMANTIC_TYPE,
+  FIELD_DEFINITION_OSF_TYPE,
   fieldDefinitionValueSchema,
   isCollection,
   localizedText,
@@ -29,6 +29,8 @@ import {
 } from "../../field-json-schema.js";
 import type { FieldDefinition } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
+import type { OsfTypeDefinition } from "../types/authoring.js";
+import { resolveBaseType } from "../entity-fields.js";
 
 /**
  * A closed vocabulary, when the field declares one. Only `static` options are
@@ -42,15 +44,28 @@ function staticEnum(field: FieldDefinition): string[] | undefined {
   return options.items.map((item) => item.value);
 }
 
+export type ConnectorOsfTypes = Record<string, OsfTypeDefinition>;
+
+/**
+ * Connector fields never go through entity normalization, so their base type
+ * is resolved here: a base osf type is its own base, a catalog key resolves
+ * through the catalog, anything else is refused.
+ */
+function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): FieldDefinition & { baseType: string } {
+  const baseType = resolveBaseType(field.osfType, osfTypes);
+  if (!baseType) throw new Error(`Connector field ${field.key}: unknown osfType ${field.osfType}.`);
+  return { ...field, baseType };
+}
+
 /**
  * Key order matches the MCP catalog's: constraints, then enum, then
  * description, then default, then the collection wrapper.
  */
-function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObject {
+function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes: ConnectorOsfTypes): JsonObject {
   const scalar =
-    field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE
+    field.osfType === FIELD_DEFINITION_OSF_TYPE
       ? fieldDefinitionValueSchema()
-      : constraintsForField(field);
+      : constraintsForField(withBaseType(field, osfTypes));
 
   const values = staticEnum(field);
   if (values) scalar.enum = values;
@@ -68,15 +83,15 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObj
   return isCollection(field) ? applyCollectionShape(scalar, field) : scalar;
 }
 
-export function connectorFieldSchema(field: FieldDefinition): JsonObject {
-  return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field));
+export function connectorFieldSchema(field: FieldDefinition, osfTypes: ConnectorOsfTypes = {}): JsonObject {
+  return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field, osfTypes));
 }
 
-export function connectorObjectSchema(fields: FieldDefinition[]): JsonObject {
+export function connectorObjectSchema(fields: FieldDefinition[], osfTypes: ConnectorOsfTypes = {}): JsonObject {
   return bundleFieldDefinitionSchema(
     objectSchemaFrom(
       fields,
-      (field) => connectorFieldSchemaWithoutDefinitions(field as FieldDefinition),
+      (field) => connectorFieldSchemaWithoutDefinitions(field as FieldDefinition, osfTypes),
       { requireRequired: true },
     ),
   );
@@ -95,11 +110,12 @@ export type ConnectorOperationSchemas = {
 export function buildOperationSchemas(
   input: FieldDefinition[],
   output: ConnectorOperationOutput,
+  osfTypes: ConnectorOsfTypes = {},
 ): ConnectorOperationSchemas {
-  const rowSchema = connectorObjectSchema(output.fields);
+  const rowSchema = connectorObjectSchema(output.fields, osfTypes);
   const { schema: row, definitions } = splitBundledDefinitions(rowSchema);
   return {
-    input: connectorObjectSchema(input),
+    input: connectorObjectSchema(input, osfTypes),
     output:
       output.cardinality === "many"
         ? {

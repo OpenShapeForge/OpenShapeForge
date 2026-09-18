@@ -39,7 +39,7 @@ export function getFieldTypeOptions(
 
 export function getFieldTypeKey(field: Field): CompilerAuthorableFieldType {
   if (isFieldCardinalityCollection(field.cardinality)) {
-    return field.valueType === "object" && field.semanticType === "fieldDefinition"
+    return field.osfType === "fieldDefinition"
       ? FIELD_DEFINITION_SEMANTIC_COLLECTION_TYPE
       : "collection";
   }
@@ -49,10 +49,10 @@ export function getFieldTypeKey(field: Field): CompilerAuthorableFieldType {
 export function getFieldSelectionTypeKey(selection: {
   valueType: string;
   cardinality: "single" | "collection";
-  semanticType?: string;
+  osfType?: string;
 }): CompilerAuthorableFieldType {
   if (selection.cardinality === "collection") {
-    return selection.valueType === "object" && selection.semanticType === "fieldDefinition"
+    return selection.osfType === "fieldDefinition"
       ? FIELD_DEFINITION_SEMANTIC_COLLECTION_TYPE
       : "collection";
   }
@@ -65,23 +65,24 @@ export function applyFieldTypeSelection(
   selection: {
     valueType: string;
     cardinality: "single" | "collection";
-    semanticType?: string;
+    osfType?: string;
   },
   createEmptyField: () => Field,
 ): Field {
-  const valueType = selection.valueType as Field["valueType"];
+  const valueType = selection.valueType as NonNullable<Field["baseType"]>;
+  // One type axis: a catalog key refines the base; without one the base is the type.
+  const osfType = selection.osfType ?? valueType;
 
   if (selection.cardinality === "collection") {
     const cardinality = normalizeFieldCardinality("collection", getEffectiveRequired(field));
     const existingShape = Array.isArray((field as { shape?: Field[] }).shape)
       ? (field as { shape?: Field[] }).shape
       : field.children;
-    if (valueType === "object" && selection.semanticType === "fieldDefinition") {
+    if (selection.osfType === "fieldDefinition") {
       return {
         ...field,
-        valueType: "object",
         cardinality,
-        semanticType: "fieldDefinition",
+        osfType: "fieldDefinition",
         shape: undefined,
         children: undefined,
         item: undefined,
@@ -90,9 +91,8 @@ export function applyFieldTypeSelection(
 
     return {
       ...field,
-      valueType,
+      osfType,
       cardinality,
-      ...(selection.semanticType ? { semanticType: selection.semanticType } : { semanticType: undefined }),
       ...(valueType === "object"
         ? { shape: existingShape ?? [], children: existingShape ?? [] }
         : { shape: undefined, children: undefined }),
@@ -107,9 +107,8 @@ export function applyFieldTypeSelection(
 
     return {
       ...field,
-      valueType: "object",
+      osfType,
       cardinality: normalizeFieldCardinality("single", getEffectiveRequired(field)),
-      ...(selection.semanticType ? { semanticType: selection.semanticType } : { semanticType: undefined }),
       shape: existingShape ?? [],
       children: existingShape ?? [],
       item: undefined,
@@ -118,9 +117,8 @@ export function applyFieldTypeSelection(
 
   return {
     ...field,
-    valueType,
+    osfType,
     cardinality: normalizeFieldCardinality("single", getEffectiveRequired(field)),
-    ...(selection.semanticType ? { semanticType: selection.semanticType } : { semanticType: undefined }),
     shape: undefined,
     children: undefined,
     item: undefined,

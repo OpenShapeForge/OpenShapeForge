@@ -75,14 +75,14 @@ function validateShape(shape: ContentValueShape) {
   assertContentRecord(shape, "field metadata");
   if (
     !["string", "integer", "number", "boolean", "date", "datetime", "object"].includes(
-      shape.valueType,
+      shape.baseType,
     )
   ) {
-    contentError("INVALID_VALUE", "Field metadata requires a resolved base valueType.");
+    contentError("INVALID_VALUE", "Field metadata requires a resolved baseType.");
   }
   contentCardinality(shape);
   if (shape.fields) {
-    if (shape.valueType !== "object")
+    if (shape.baseType !== "object")
       contentError("INVALID_VALUE", "Only object fields may declare nested fields.");
     assertContentRecord(shape.fields, "nested field metadata");
     for (const nested of Object.values(shape.fields)) validateShape(nested);
@@ -98,23 +98,23 @@ function validateScalar(value: JsonValue, shape: ContentValueShape, field: strin
     Number.isFinite(Date.parse(value)) &&
     new Date(value).toISOString().slice(0, 10) === value;
   const valid =
-    shape.valueType === "object"
+    shape.baseType === "object"
       ? typeof value === "object" && value !== null && !Array.isArray(value)
-      : shape.valueType === "integer"
+      : shape.baseType === "integer"
         ? Number.isSafeInteger(value)
-        : shape.valueType === "number"
+        : shape.baseType === "number"
           ? typeof value === "number" && Number.isFinite(value)
-          : shape.valueType === "date"
+          : shape.baseType === "date"
             ? typeof value === "string" && validDate(value)
-            : shape.valueType === "datetime"
+            : shape.baseType === "datetime"
               ? typeof value === "string" &&
                 validDate(value.slice(0, 10)) &&
                 /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
                   value,
                 ) &&
                 Number.isFinite(Date.parse(value))
-              : typeof value === shape.valueType;
-  if (!valid) contentError("INVALID_VALUE", `${field} must have base type ${shape.valueType}.`);
+              : typeof value === shape.baseType;
+  if (!valid) contentError("INVALID_VALUE", `${field} must have base type ${shape.baseType}.`);
   if (shape.enum && !shape.enum.some((item) => canonicalJson(item) === canonicalJson(value))) {
     contentError("INVALID_VALUE", `${field} is not an allowed value.`);
   }
@@ -211,7 +211,7 @@ export function validateContentRegistry(
         if (
           !parameters ||
           parameters.relationship ||
-          parameters.valueType !== "object" ||
+          parameters.baseType !== "object" ||
           contentCardinality(parameters).collection
         ) {
           contentError("INVALID_VALUE", "Composition parameters must be an embedded object field.");

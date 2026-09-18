@@ -35,7 +35,7 @@ fields:
     description:
       en: Identifier of the related relation instance.
       nl: Identifier van de gerelateerde relatie-instantie.
-    semanticType: Relation
+    osfType: Relation
     persisted:
       column: relation_id
       storageClass: core
@@ -46,8 +46,12 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Contact details
+          nl: Contactgegevens
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -65,7 +69,7 @@ fields:
       type: referentiedata
       referentieGroep: CONTACTDETAILTYPE
   - key: value
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Value
@@ -80,7 +84,7 @@ fields:
       column: value
       storageClass: core
   - key: detailType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Detail type
@@ -94,7 +98,7 @@ fields:
       column: detail_type
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -108,7 +112,7 @@ fields:
       column: status
       storageClass: core
   - key: confidentiality
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Confidentiality
@@ -122,7 +126,7 @@ fields:
       column: confidentiality
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary
@@ -134,7 +138,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: preferenceRank
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Preference rank
@@ -146,7 +150,7 @@ fields:
       column: preference_rank
       storageClass: core
   - key: isReachable
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Reachable
@@ -158,7 +162,7 @@ fields:
       column: is_reachable
       storageClass: core
   - key: verifiedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Verified at
@@ -170,7 +174,7 @@ fields:
       column: verified_at
       storageClass: core
   - key: consentStatus
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Consent status
@@ -187,7 +191,7 @@ fields:
       column: consent_status
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -199,7 +203,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -217,9 +221,13 @@ fields:
     persisted:
       column: relation_role_id
       storageClass: core
-    semanticType: RelationRole
+    osfType: RelationRole
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Contact details
+          nl: Contactgegevens
 operations:
   list:
     name: { en: List contact details, nl: Contactgegevens tonen }

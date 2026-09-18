@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: postingDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Posting date
@@ -27,7 +27,7 @@ fields:
       column: posting_date
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -41,7 +41,6 @@ fields:
       column: description
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -55,9 +54,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: LEDGERPOSTINGSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: sourceType
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Source type
@@ -71,7 +70,7 @@ fields:
       column: source_type
       storageClass: core
   - key: sourceId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source ID
@@ -85,7 +84,7 @@ fields:
     validation:
       format: uuid
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -105,7 +104,7 @@ fields:
     persisted:
       column: fiscal_period_id
       storageClass: core
-    semanticType: FiscalPeriod
+    osfType: FiscalPeriod
     relationship:
       ownership: reference
   - key: reversalOfId
@@ -115,7 +114,7 @@ fields:
     persisted:
       column: reversal_of_id
       storageClass: core
-    semanticType: LedgerPosting
+    osfType: LedgerPosting
     relationship:
       ownership: reference
 authorization:

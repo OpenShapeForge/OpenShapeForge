@@ -13,7 +13,8 @@ function field(
 ): CompiledField {
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: overrides.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -38,7 +39,7 @@ const contract = {
         classification: { sensitivity: "confidential" },
       }),
       field("reviewerId", {
-        semanticType: "Relation",
+        osfType: "Relation",
         relationship: { ownership: "reference" },
       }),
     ],

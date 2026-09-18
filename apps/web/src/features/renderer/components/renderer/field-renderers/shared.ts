@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field as CompilerField } from "../../../../../generated/compiler/field-contract";
 import { isFieldCollection } from "../../../../../lib/field-contract/field-v2";
 import {
@@ -56,7 +57,7 @@ export function isEffectivelyRequired(
   field: CompilerField,
   generatedRequired: boolean | undefined,
 ): boolean {
-  if (field.valueType === "boolean" && !isFieldCollection(field)) {
+  if (fieldValueType(field) === "boolean" && !isFieldCollection(field)) {
     return false;
   }
   return Boolean(generatedRequired ?? field.required);

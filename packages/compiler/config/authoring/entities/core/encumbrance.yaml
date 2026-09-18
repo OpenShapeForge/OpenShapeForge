@@ -14,7 +14,6 @@ domains:
   - asset
 fields:
   - key: encumbranceKind
-    valueType: string
     required: true
     label:
       en: Encumbrance kind
@@ -28,9 +27,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ENCUMBRANCEKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -45,7 +44,6 @@ fields:
       column: code
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -58,9 +56,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: amount
-    valueType: number
     required: false
     label:
       en: Amount
@@ -68,12 +65,12 @@ fields:
     description:
       en: Optional principal amount associated with the encumbrance.
       nl: Optioneel hoofdbedrag dat aan de zekerheid is verbonden.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -89,7 +86,7 @@ fields:
       column: currency_code
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Valid from
@@ -101,7 +98,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid to
@@ -113,7 +110,7 @@ fields:
       column: valid_to
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -133,7 +130,7 @@ fields:
     persisted:
       column: asset_id
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
   - key: holderId
@@ -143,7 +140,7 @@ fields:
     persisted:
       column: holder_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
 authorization:

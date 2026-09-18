@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type {
   ComponentCatalog,
   Field,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import { resolveModelFields } from "./model.js";
 
@@ -17,7 +17,7 @@ const catalog: ComponentCatalog = {
 
 describe("semantic renderer mapping", () => {
   test("retains authored and semantic collection bounds after normalization", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       boundedTags: {
         label: { en: "Tags" },
         valueType: "string",
@@ -26,14 +26,14 @@ describe("semantic renderer mapping", () => {
     };
 
     const [semantic, authored] = resolveModelFields([
-      { key: "tags", valueType: "string", semanticType: "boundedTags" },
+      { key: "tags", osfType: "boundedTags" },
       {
         key: "steps",
-        valueType: "object",
+        osfType: "object",
         cardinality: { min: 2, max: "unbounded" },
-        item: { key: "step", valueType: "object" },
+        item: { key: "step", osfType: "object" },
       },
-    ], catalog, semanticTypes);
+    ], catalog, osfTypes);
 
     expect(semantic).toMatchObject({
       cardinality: "collection",
@@ -46,7 +46,7 @@ describe("semantic renderer mapping", () => {
   });
 
   test("resolves input component and props centrally while preserving field options", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
         valueType: "string",
@@ -56,12 +56,11 @@ describe("semantic renderer mapping", () => {
     };
     const fields: Field[] = [{
       key: "status",
-      valueType: "string",
-      semanticType: "referenceDataCode",
+      osfType: "referenceDataCode",
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
     }];
 
-    expect(resolveModelFields(fields, catalog, semanticTypes)[0]).toMatchObject({
+    expect(resolveModelFields(fields, catalog, osfTypes)[0]).toMatchObject({
       key: "status",
       render: { component: "ReferenceSelect", props: { clearable: false } },
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
@@ -69,7 +68,7 @@ describe("semantic renderer mapping", () => {
   });
 
   test("uses the semantic display renderer for a read-only companion field", () => {
-    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+    const osfTypes: Record<string, OsfTypeDefinition> = {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
         valueType: "string",
@@ -84,10 +83,9 @@ describe("semantic renderer mapping", () => {
 
     expect(resolveModelFields([{
       key: "storageLocation",
-      valueType: "string",
-      semanticType: "fileStorageLocation",
+      osfType: "fileStorageLocation",
       readOnly: true,
-    }], catalog, semanticTypes)[0]?.render).toEqual({
+    }], catalog, osfTypes)[0]?.render).toEqual({
       component: "TextDisplay",
       props: {
         fileNameField: "fileName",
@@ -101,10 +99,10 @@ describe("semantic renderer mapping", () => {
 test("inherits semantic choices recursively while explicit options win", () => {
   const options = { type: "static" as const, items: [{ value: "first", label: { en: "First" } }] };
   const fields = resolveModelFields([
-    { key: "choice", semanticType: "choice", valueType: "string" },
-    { key: "override", semanticType: "choice", valueType: "string", options: { type: "static", items: [] } },
-    { key: "nested", valueType: "object", children: [{ key: "choice", semanticType: "choice", valueType: "string" }] },
-    { key: "items", valueType: "string", cardinality: "collection", item: { key: "choice", semanticType: "choice", valueType: "string" } },
+    { key: "choice", osfType: "choice" },
+    { key: "override", osfType: "choice", options: { type: "static", items: [] } },
+    { key: "nested", osfType: "object", children: [{ key: "choice", osfType: "choice" }] },
+    { key: "items", osfType: "string", cardinality: "collection", item: { key: "choice", osfType: "choice" } },
   ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
   expect(fields[0]!.options).toEqual(options);
   expect(fields[1]!.options?.items).toEqual([]);

@@ -139,12 +139,12 @@ function compiledFieldToCanonicalField(
   return normalizeCanonicalField({
     id,
     key: field.key,
-    type: field.cardinality === "collection" ? "array" : field.valueType,
+    type: field.cardinality === "collection" ? "array" : field.baseType,
     label: field.label,
     description: field.description,
     required: field.required,
     readOnly: field.readOnly,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     defaultValue: field.defaultValue,
     validation: field.validation,
     render: field.render,
@@ -171,7 +171,7 @@ function compiledProfileFieldToCanonicalField(
     validation: field.validation,
     render: field.render ?? field.displayRender,
     options: undefined,
-    semanticType: field.semanticType,
+    osfType: field.osfType,
     source: "profile",
   });
 }

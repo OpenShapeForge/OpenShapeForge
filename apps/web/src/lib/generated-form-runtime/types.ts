@@ -41,8 +41,8 @@ export type GeneratedFormFieldValidation = {
 export type GeneratedFieldSuggestionsFilter = {
   valueType?: "string" | "number" | "boolean" | "object" | "array";
   fieldType?: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object" | "uuid" | "array" | "fieldArray";
-  semanticType?: string;
-  itemSemanticType?: string;
+  osfType?: string;
+  itemOsfType?: string;
   fieldDefinitionSource?: boolean;
   anyOf?: GeneratedFieldSuggestionsFilter[];
 };
@@ -74,11 +74,11 @@ export type GeneratedFormVariableSource = {
 export type GeneratedFormFieldConfig = {
   key: string;
   dataPath: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   cardinality?: "single" | "collection";
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
-  semanticType?: string;
+  osfType?: string;
   label?: LocalizedText;
   description?: LocalizedText;
   /** Longer guidance; shown in the field help dialog (not inline with description). */

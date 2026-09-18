@@ -168,7 +168,8 @@ jobs:
           src/auth/__tests__/organization-binding.unit.test.ts
           src/auth/__tests__/organization-tenant-cache-key.unit.test.ts
           src/artifacts/rest-routes.test.ts
-          src/documents/__tests__
+          src/documents/__tests__/generated-contract.unit.test.ts
+          src/documents/__tests__/rest-routes.unit.test.ts
           src/rest/rest-docs.test.ts
           src/rest/generated-rest-session.test.ts
           src/rest/serialize-generated-row.test.ts
@@ -409,6 +410,7 @@ jobs:
           bun test src/db
           bun test src/operations
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
+          bun test src/documents/__tests__/document-revisions-db.test.ts src/documents/__tests__/document-revisions-authorization-db.test.ts
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
           bun test src/modules/platform-artifact-transaction.test.ts
 

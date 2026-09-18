@@ -14,7 +14,8 @@ function field(
 ): CompiledField {
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: overrides.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: text(key),
@@ -156,10 +157,10 @@ describe("web manifest projection", () => {
     definition.contract.entity.valueDefinition = true;
     definition.contract.entityOperations = {};
     const placement = entity("Placement", "placement", [field("values", {
-      valueType: "object", semanticType: "entityValue", entityValue: { definitionField: "definitionKey" },
+      baseType: "object", osfType: "entityValue", entityValue: { definitionField: "definitionKey" },
     })], coreView());
     const page = entity("Page", "page", [field("placements", {
-      semanticType: "Placement", cardinality: "collection", allowedDefinitions: ["Snippet"],
+      osfType: "Placement", cardinality: "collection", allowedDefinitions: ["Snippet"],
     })], coreView(), [{ key: "placements", fieldKey: "placements", kind: "hasMany", target: "Placement", foreignKey: "page_id", ownership: "owned" }]);
     const output = JSON.parse(renderWebManifest(buildWebManifest([page, placement, definition])));
     expect(output.entities.Placement.fields.values.entityValue).toEqual({ definitionField: "definitionKey" });
@@ -170,12 +171,12 @@ describe("web manifest projection", () => {
     expect(renderWebManifest(buildWebManifest([page, placement, definition]))).toBe(renderWebManifest(buildWebManifest([definition, placement, page])));
   });
 
-  test("schema-3 uses authored relation field keys and exposes junctions read-only", () => {
+  test("schema-3 uses authored relation field keys and exposes via traversals read-only", () => {
     const view = coreView();
     view.form!.variants.create!.groups[0]!.fields = ["displayName", "owner", "related"];
     const definition = entity("Example", "example", [field("displayName"), field("owner"), field("related", { cardinality: "collection" })], view, [
       { key: "owner", fieldKey: "owner", kind: "belongsTo", target: "Target", foreignKey: "owner_id" },
-      { key: "related", fieldKey: "related", kind: "manyToMany", target: "Target", via: "examples_related", sortable: true, ownership: "reference", cardinality: "collection" },
+      { key: "related", fieldKey: "related", kind: "hasMany", target: "Target", inverse: "example", via: "owner", through: { field: "owner", column: "owner_id", target: "Target" }, foreignKey: "example_id", ownership: "reference", cardinality: "collection" },
     ]);
     definition.contract.authoringVersion = 3;
     definition.contract.interfaces = { web: { operations: { list: true, get: true, create: true, update: true, delete: true } } };
@@ -183,7 +184,7 @@ describe("web manifest projection", () => {
     const target = entity("Target", "target", [field("displayName")], coreView());
     const projected = buildWebManifest([definition, target]).entities.Example!;
     expect(projected.relationships.owner?.recordField).toBe("owner");
-    expect(projected.relationships.related).toMatchObject({ fieldKey: "related", kind: "manyToMany", via: "examples_related", positionColumn: "position", mutationSupport: "unsupported" });
+    expect(projected.relationships.related).toMatchObject({ fieldKey: "related", kind: "hasMany", via: "owner", through: { field: "owner", column: "owner_id", target: "Target" }, mutationSupport: "unsupported" });
     expect(projected.relationships.related?.operations.create).toBeUndefined();
     expect(projected.fields.related?.supports).toEqual({ read: true, create: false, update: false });
     target.contract.model.relationships.push({ key: "examples", fieldKey: "examples", kind: "hasMany", target: "Example", foreignKey: "owner_id", ownership: "owned" });
@@ -212,8 +213,8 @@ describe("web manifest projection", () => {
   });
   test("preserves nested canonical labels and option values for read presentation", () => {
     const definition = entity("Example", "example", [field("displayName"), field("settings", {
-      valueType: "object", children: [field("state", { label: text("State", "Toestand"), options: { type: "static", items: [{ value: "ready", label: text("Ready", "Gereed") }] } })],
-    }), field("entries", { valueType: "object", cardinality: "collection", item: field("item", { valueType: "object", children: [field("name", { label: text("Name", "Naam") })] }) })], coreView());
+      baseType: "object", children: [field("state", { label: text("State", "Toestand"), options: { type: "static", items: [{ value: "ready", label: text("Ready", "Gereed") }] } })],
+    }), field("entries", { baseType: "object", cardinality: "collection", item: field("item", { baseType: "object", children: [field("name", { label: text("Name", "Naam") })] }) })], coreView());
     const projected = buildWebManifest([definition]).entities.Example!.fields;
     expect(projected.settings!.children![0]!.label.nl).toBe("Toestand");
     expect(projected.settings!.children![0]!.options![0]!.label.nl).toBe("Gereed");
@@ -232,7 +233,7 @@ describe("web manifest projection", () => {
 
   test("projects authored text length and nested entity choices for editing", () => {
     const definition = entity("Example", "example", [field("displayName", { validation: { maxLength: 4000 } }),
-      field("settings", { valueType: "object", children: [field("target", { options: { type: "entity", source: "Example", valueField: "id" }, validation: { maxLength: 200 } })] }),
+      field("settings", { baseType: "object", children: [field("target", { options: { type: "entity", source: "Example", valueField: "id" }, validation: { maxLength: 200 } })] }),
     ], coreView());
     const projected = buildWebManifest([definition]).entities.Example!.fields;
     expect(projected.displayName!.maxLength).toBe(4000);
@@ -331,9 +332,9 @@ describe("web manifest projection", () => {
       .toBe(renderWebManifest(buildWebManifest([alpha, beta])));
   });
 
-  test("projects implicit belongsTo inputs as writable Web fields", () => {
+  test("never invents a Web field for a belongsTo: the authored field is the input", () => {
     const group = entity("RelationGroup", "relation-group", [
-      field("id", { required: true, readOnly: true, semanticType: "relationGroupId" }),
+      field("id", { required: true, readOnly: true, osfType: "relationGroupId" }),
       field("name"),
     ], coreView());
     const relation = entity("Relation", "relation", [
@@ -341,6 +342,7 @@ describe("web manifest projection", () => {
       field("displayName"),
     ], coreView(), [{
       key: "relationGroup",
+      fieldKey: "relationGroupId",
       kind: "belongsTo",
       target: "RelationGroup",
       foreignKey: "relation_group_id",
@@ -355,17 +357,8 @@ describe("web manifest projection", () => {
     });
 
     const projected = buildWebManifest([relation, group]).entities.Relation!;
-    expect(projected.fields.relationGroupId).toEqual({
-      id: "Relation.relationGroupId",
-      key: "relationGroupId",
-      label: text("Relation group", "Relatiegroep"),
-      description: text("Relation group", "Relatiegroep"),
-      valueType: "string",
-      semanticType: "relationGroupId",
-      cardinality: "one",
-      required: false,
-      supports: { read: true, create: true, update: true },
-    });
+    expect(projected.fields.relationGroupId).toBeUndefined();
+    expect(Object.keys(projected.fields)).toEqual(["id", "displayName"]);
     expect(projected.relationships.relationGroup).toMatchObject({
       targetEntityId: "RelationGroup",
       foreignKey: "relation_group_id",
@@ -377,14 +370,14 @@ describe("web manifest projection", () => {
     const view = coreView();
     view.form!.variants.create!.groups[0]!.fields!.push("relationGroupId");
     const group = entity("RelationGroup", "relation-group", [
-      field("id", { required: true, readOnly: true, semanticType: "relationGroupId" }),
+      field("id", { required: true, readOnly: true, osfType: "relationGroupId" }),
       field("name"),
     ], coreView());
     const relation = entity("Relation", "relation", [
       field("displayName"),
       field("relationGroupId", {
         label: text("Protected owner"),
-        semanticType: "protectedRelationId",
+        osfType: "protectedRelationId",
         readOnly: true,
         immutable: true,
       }),
@@ -401,7 +394,7 @@ describe("web manifest projection", () => {
     const projected = buildWebManifest([relation, group]).entities.Relation!;
     expect(projected.fields.relationGroupId).toMatchObject({
       label: text("Protected owner"),
-      semanticType: "protectedRelationId",
+      osfType: "protectedRelationId",
       supports: { read: true, create: false, update: false },
     });
     expect(Object.keys(projected.fields).filter((key) => key === "relationGroupId"))
@@ -531,7 +524,7 @@ describe("web manifest projection", () => {
     createGroup.fields!.push("configurationValues");
     const connection = entity("Connection", "connection", [
       field("adapterId"),
-      field("configurationValues", { valueType: "object" }),
+      field("configurationValues", { baseType: "object" }),
     ], view);
     connection.contract.authoringVersion = 2;
     connection.contract.interfaces = {
@@ -569,7 +562,7 @@ describe("web manifest projection", () => {
     view.detail!.actions = [{ key: "recalculate", route: "recalculate" }];
     const deal = entity("Deal", "deal", [
       field("id", { required: true, readOnly: true }),
-      field("updatedAt", { valueType: "datetime", readOnly: true }),
+      field("updatedAt", { baseType: "datetime", readOnly: true }),
     ], view);
     deal.contract.authoringVersion = 2;
     deal.contract.interfaces = {
@@ -692,12 +685,12 @@ describe("web manifest projection", () => {
   test("projects semantic label sets without choosing a field renderer", () => {
     const relation = entity("Relation", "relation", [
       field("displayName"),
-      field("labels", { valueType: "object", semanticType: "labelSet", readOnly: true }),
+      field("labels", { baseType: "object", osfType: "labelSet", readOnly: true }),
     ], coreView());
 
     expect(buildWebManifest([relation]).entities.Relation?.fields.labels).toMatchObject({
-      valueType: "object",
-      semanticType: "labelSet",
+      baseType: "object",
+      osfType: "labelSet",
       cardinality: "one",
     });
     const serialized = JSON.stringify(buildWebManifest([relation]));
@@ -740,13 +733,13 @@ describe("web manifest projection", () => {
         options: { type: "static", items: [{ value: "active", label: text("Active", "Actief") }] },
       }),
       field("expression", {
-        valueType: "object",
-        semanticType: "condition",
+        baseType: "object",
+        osfType: "condition",
         variables: "template",
         suggestions: { sourceKey: "entityFields" },
       }),
       field("descriptionTemplate", {
-        semanticType: "variableTemplate",
+        osfType: "variableTemplate",
         variables: "template",
         suggestions: { sourceKey: "entityFields" },
       }),
@@ -754,12 +747,12 @@ describe("web manifest projection", () => {
 
     const projected = buildWebManifest([labelRule]).entities.LabelRule!;
     expect(projected.fields.expression).toMatchObject({
-      semanticType: "condition",
+      osfType: "condition",
       variables: "template",
       suggestions: { sourceKey: "entityFields" },
     });
     expect(projected.fields.descriptionTemplate).toMatchObject({
-      semanticType: "variableTemplate",
+      osfType: "variableTemplate",
       variables: "template",
     });
     expect(projected.fields.status?.options).toEqual([
@@ -986,7 +979,7 @@ describe("standalone Operation pages", () => {
       { value: "PENDING", label: text("Pending", "In afwachting") },
       { value: "EXPIRED", label: text("Expired", "Verlopen") },
     ]);
-    expect(manifest.entities.Tenant?.fields.sentAt?.valueType).toBe("datetime");
+    expect(manifest.entities.Tenant?.fields.sentAt?.baseType).toBe("datetime");
 
     const canonicalTenant = entity("Tenant", "tenant", [field("name")], coreView());
     const composed = buildWebManifest([canonicalTenant], {}, standalone(operationEntities));

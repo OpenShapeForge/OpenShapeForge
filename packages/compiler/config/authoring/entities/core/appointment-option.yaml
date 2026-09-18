@@ -15,7 +15,7 @@ domains:
   - relations
 fields:
   - key: optionNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Option number
@@ -27,7 +27,7 @@ fields:
       column: option_number
       storageClass: core
   - key: startsAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Starts at
@@ -39,7 +39,7 @@ fields:
       column: starts_at
       storageClass: core
   - key: endsAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Ends at
@@ -51,7 +51,7 @@ fields:
       column: ends_at
       storageClass: core
   - key: location
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Location
@@ -65,7 +65,6 @@ fields:
       column: location
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -79,9 +78,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: APPOINTMENTOPTIONSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: notes
-    valueType: string
     required: false
     label:
       en: Notes
@@ -94,7 +92,7 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: appointmentRequestId
     label:
       en: Appointment request
@@ -102,9 +100,14 @@ fields:
     persisted:
       column: appointment_request_id
       storageClass: core
-    semanticType: AppointmentRequest
+    osfType: AppointmentRequest
     relationship:
       ownership: reference
+      inverse:
+        key: options
+        label:
+          en: Options
+          nl: Opties
 authorization:
   roles:
     read:

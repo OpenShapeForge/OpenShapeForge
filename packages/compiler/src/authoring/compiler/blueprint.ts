@@ -27,16 +27,16 @@ export function buildBlueprint(
     const protectedColumn = column && [row?.owner?.column, row?.group?.column].includes(column.column);
     if (!field || !column || protectedName(key) || protectedName(column.column) ||
         protectedColumn || row?.recordPermissions?.field === key ||
-        field.cardinality !== "single" || field.valueType === "object" || column.type === "uuid" ||
+        field.cardinality !== "single" || field.baseType === "object" || column.type === "uuid" ||
         field.relationship || field.localized || field.computed || field.readOnly || field.immutable ||
-        (field.semanticType && /password|secret|token|credential/i.test(field.semanticType)) ||
+        (field.osfType && /password|secret|token|credential/i.test(field.osfType)) ||
         field.writtenBy?.length || field.authorization || field.permissions ||
         (field.classification && field.classification.sensitivity !== "public")) {
       throw new Error(`[${entity.entity}] blueprint field "${key}" must be a writable, unclassified persisted scalar without identity, relationship, or authorization semantics.`);
     }
   }
   const labelField = entity.filterField ?? keys[0]!;
-  if (!keys.includes(labelField) || fields.find((field) => field.key === labelField)?.valueType !== "string") {
+  if (!keys.includes(labelField) || fields.find((field) => field.key === labelField)?.baseType !== "string") {
     throw new Error(`[${entity.entity}] blueprint label field must be a copied string field.`);
   }
   const id = `osf-blueprints.${entity.entity}`;

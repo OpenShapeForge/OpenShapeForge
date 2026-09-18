@@ -16,7 +16,7 @@ authorization:
     owner: { column: owner_id, session: app.current_user_id }
 fields:
   - key: ownerId
-    valueType: string
+    osfType: string
     required: true
     label: { en: Owner }
     persisted: { column: owner_id, storageClass: core }

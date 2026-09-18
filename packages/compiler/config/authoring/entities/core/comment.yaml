@@ -29,7 +29,6 @@ authorization:
     empty: public
 fields:
   - key: body
-    valueType: string
     required: true
     label:
       en: Message
@@ -43,9 +42,8 @@ fields:
     persisted:
       column: body
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: source
-    valueType: string
     required: true
     label:
       en: Source
@@ -63,7 +61,7 @@ fields:
     options:
       type: referentiedata
       referentieGroep: COMMENTBRON
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: supportIssueId
     label:
       en: Support issue
@@ -71,9 +69,13 @@ fields:
     persisted:
       column: support_issue_id
       storageClass: core
-    semanticType: SupportIssue
+    osfType: SupportIssue
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Comments
+          nl: Opmerkingen
   - key: authorId
     label:
       en: Author
@@ -81,7 +83,7 @@ fields:
     persisted:
       column: author_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
 operations:

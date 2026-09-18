@@ -18,35 +18,41 @@ definition through another field:
 
 ```yaml
 - key: definitionKey
-  valueType: string
+  osfType: string
   required: true
   immutable: true
   persisted: { column: definition_key, storageClass: core }
 - key: values
-  semanticType: entityValue
+  osfType: entityValue
   entityValue: { definitionField: definitionKey }
   required: true
   persisted: { column: values, storageClass: core }
 ```
 
-The owner selects allowed definitions on its ordinary relation field:
+The owner's collection is derived from the block's reference to it; the
+reference declares the collection's key, ownership, ordering and allowed
+definitions:
 
 ```yaml
-- key: blocks
-  semanticType: Block
-  cardinality: collection
-  sortable: true
-  relationship: { inverse: variant, ownership: owned }
-  allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
+# on Block
+- key: variant
+  osfType: TemplateVariant
+  relationship:
+    inverse:
+      key: blocks
+      ownership: owned
+      sortable: true
+      allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
 ```
 
 These fragments use the schemaVersion 3 field contract. Entity semantic types
-are derived from loaded entity YAMLs, not repeated in the semantic-type catalog.
+are derived from loaded entity YAMLs, not repeated in the osf-type catalog.
 
-Two optional collection options shape how the owner's collection Operations
-treat the children: `childAuthorization: owner` lends the owner's update roles
-to them, and `childLock: <booleanField>` makes `update`, `move` and `remove`
-refuse a child whose flag is set. A document's blocks use both; see
+Two optional options of that `inverse` declaration shape how the owner's
+collection Operations treat the children: `childAuthorization: owner` lends
+the owner's update roles to them, and `childLock: <booleanField>` (a boolean
+field of the referencing entity) makes `update`, `move` and `remove` refuse a
+child whose flag is set. A document's blocks use both; see
 `docs/document-content.md`.
 
 ## Storage and logical fields

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 import type { RendererFieldConfig } from "@/features/renderer/form-definition";
-import { isFieldCollection, isFieldObject } from "@/lib/field-contract/field-v2";
+import { isFieldCollection, isFieldObject, fieldValueType } from "@/lib/field-contract/field-v2";
 import { parseRendererPath, type RendererPathPart } from "../path-utils";
 
 export function buildDefaultRendererValue(field: Field): unknown {
@@ -22,13 +22,13 @@ export function buildDefaultRendererValue(field: Field): unknown {
     return [];
   }
 
-  if (field.valueType === "boolean" && !isFieldCollection(field)) {
+  if (fieldValueType(field) === "boolean" && !isFieldCollection(field)) {
     return false;
   }
 
   if (
     !isFieldCollection(field) &&
-    (field.valueType === "integer" || field.valueType === "number")
+    (fieldValueType(field) === "integer" || fieldValueType(field) === "number")
   ) {
     return "";
   }

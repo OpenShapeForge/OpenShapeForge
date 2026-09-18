@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowEntityGenerationOptions, RuntimeRegistryEntry, DesignerLazyRegistryEntry, DesignerDetailRegistryEntry, RendererEntityFieldSuggestionEntry } from "./types.js";
-import { loadWorkflowNodeEntities, loadWorkflowNodeSemanticTypes, resolveEntityIdSemanticTypeKey } from "./catalog.js";
+import { loadWorkflowNodeEntities, loadWorkflowNodeOsfTypes, resolveEntityIdOsfTypeKey } from "./catalog.js";
 import { getActionDescription, getActionLabel } from "./labels.js";
 import { buildDesignerConfigFields, buildDesignerDefaultConfig } from "./designer-config-fields.js";
 import { buildEntityFieldSuggestionsSeedJson } from "./designer-registry-emitters.js";
@@ -10,7 +10,7 @@ import { buildEntityCatalogSeedJson, buildWorkflowBridgeIndexJson } from "./runt
 import { buildSharedErrorRoutesSource } from "./shared-error-routes-source.js";
 import { buildSharedOutputParametersSource } from "./shared-output-parameters-source.js";
 import { buildEntityTriggerRegistryEntry, buildEntityTriggerRegistrySeedJson } from "./trigger-registry.js";
-import { buildRelationshipOutputFields, buildSyntheticBelongsToIdFields, getEntityActionConfigs, resolveFieldSubset } from "./entity-field-resolution.js";
+import { getEntityActionConfigs, resolveFieldSubset } from "./entity-field-resolution.js";
 import { buildDeleteOutputFields, buildListOutputFields, buildRecordIdField, buildWaitConditionField, buildWaitEventTypeField, buildWaitOutputFields, buildWaitTimeoutField } from "./output-fields.js";
 import { cloneField, makeFieldOptional, resolveLocalizedLabel, toKebabCase, toOutputField, toRendererEntitySuggestionField, validateWorkflowReferentieGroepen } from "./utils.js";
 
@@ -46,7 +46,7 @@ export function generateWorkflowEntityNodeArtifacts(
 
   const entityMap = new Map<string, CoreEntity>();
   for (const entity of workflowEntities) entityMap.set(entity.entity, entity);
-  const semanticTypes = loadWorkflowNodeSemanticTypes(authoringDir);
+  const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   const runtimeEntries: RuntimeRegistryEntry[] = [];
   const designerLazyEntries: DesignerLazyRegistryEntry[] = [];
   const designerDetailEntries: DesignerDetailRegistryEntry[] = [];
@@ -59,28 +59,26 @@ export function generateWorkflowEntityNodeArtifacts(
     const entityLabels = resolveLocalizedLabel(entity.labels, entity.title);
     const readableFallback = entity.fields;
     const writableFallback = entity.fields.filter((field) => field.key !== "id" && !field.readOnly);
-    const syntheticBelongsToIdFields = buildSyntheticBelongsToIdFields(entity, entityMap, semanticTypes);
     const idField = entity.fields.find((field) => field.key === "id");
-    const entityIdSemanticType = resolveEntityIdSemanticTypeKey(entity.entity, idField);
+    const entityIdOsfType = resolveEntityIdOsfTypeKey(entity.entity, idField);
     const entityDir = toKebabCase(entity.entity);
     const moduleDir = toKebabCase(entity.module);
     const entityGraphqlName = entity.entity;
     const entityKey = `${entity.module}.${entity.entity}`;
     const readableFields = resolveFieldSubset(entity.fields, enabledActions.flatMap((item) => item.config.readableFields ?? []), readableFallback);
-    readableFields.push(...buildRelationshipOutputFields(entity, entityMap));
     rendererEntityFieldSuggestionEntries.push({ entity: entityGraphqlName, fields: readableFields.map(toRendererEntitySuggestionField) });
     const writableFields = resolveFieldSubset(
-      [...entity.fields, ...syntheticBelongsToIdFields],
+      entity.fields,
       enabledActions.flatMap((item) => item.config.writableFields ?? []),
-      [...writableFallback, ...syntheticBelongsToIdFields],
+      writableFallback,
     );
     validateWorkflowReferentieGroepen(readableFields, entityKey);
     validateWorkflowReferentieGroepen(writableFields, entityKey);
 
-    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdSemanticType, entity.entity);
+    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdOsfType, entity.entity);
     const listOutputFields = buildListOutputFields(entityLabels, readableFields, toKebabCase(entity.entity));
-    const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdSemanticType);
-    const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdSemanticType, readableFields);
+    const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdOsfType);
+    const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdOsfType, readableFields);
 
     const listActionConfig = enabledActions.find((item) => item.action === "list")?.config;
     const listDefaultSort = listActionConfig && "defaultSort" in listActionConfig ? listActionConfig.defaultSort : undefined;
@@ -154,8 +152,7 @@ export function generateWorkflowEntityNodeArtifacts(
 
   const triggerRegistryEntries = [];
   for (const entity of workflowEntities) {
-    const syntheticBelongsToIdFields = buildSyntheticBelongsToIdFields(entity, entityMap, semanticTypes);
-    const entry = buildEntityTriggerRegistryEntry(entity, syntheticBelongsToIdFields);
+    const entry = buildEntityTriggerRegistryEntry(entity);
     if (entry) triggerRegistryEntries.push(entry);
   }
   // Phase B "web reads from DB/API" switchover: the entity trigger-options

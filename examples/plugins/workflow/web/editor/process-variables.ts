@@ -14,7 +14,7 @@
  * every operation that changes one entry SPREADS the stored entry rather than
  * rebuilding it.** The first is what lets `toStoredGraph` compare by reference
  * and write nothing for an untouched document; the second is what stops an edit
- * to a variable's label deleting the `semanticType`, `hints` or `authoring`
+ * to a variable's label deleting the `osfType`, `hints` or `authoring`
  * block somebody else's tooling put on it.
  *
  * Pure, and here rather than in a component, for the reason everything else in
@@ -296,7 +296,7 @@ export function addProcessVariable(
  * Change one property of one declaration.
  *
  * The stored entry is SPREAD, so every key this editor does not model —
- * `semanticType`, `hints`, `authoring`, `validation`, whatever a future
+ * `osfType`, `hints`, `authoring`, `validation`, whatever a future
  * authoring pass adds — comes back untouched. Only the named property is
  * assigned, and assigning the value it already holds returns the set that was
  * given so the edit costs no undo entry and no save.

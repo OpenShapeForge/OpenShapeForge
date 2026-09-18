@@ -35,7 +35,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -49,7 +49,6 @@ fields:
       column: code
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -62,9 +61,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: assessmentScale
-    valueType: string
     required: false
     label:
       en: Assessment scale
@@ -78,9 +76,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ASSESSMENTSCALE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: assessmentValue
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Assessment value
@@ -94,7 +92,7 @@ fields:
       column: assessment_value
       storageClass: core
   - key: responseDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Response date
@@ -106,7 +104,6 @@ fields:
       column: response_date
       storageClass: core
   - key: responseStatus
-    valueType: string
     required: false
     label:
       en: Response status
@@ -120,9 +117,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: RESULTRESPONSE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: assessmentExplanation
-    valueType: string
     required: false
     label:
       en: Explanation
@@ -135,9 +131,9 @@ fields:
     persisted:
       column: assessment_explanation
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -157,7 +153,7 @@ fields:
     persisted:
       column: measurement_request_id
       storageClass: core
-    semanticType: QualityMeasurementRequest
+    osfType: QualityMeasurementRequest
     relationship:
       ownership: reference
   - key: researchAssignmentId
@@ -167,7 +163,7 @@ fields:
     persisted:
       column: research_assignment_id
       storageClass: core
-    semanticType: ResearchAssignment
+    osfType: ResearchAssignment
     relationship:
       ownership: reference
 operations:

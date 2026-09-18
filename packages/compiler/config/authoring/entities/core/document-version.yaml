@@ -49,7 +49,7 @@ authorization:
     empty: public
 fields:
   - key: versionLabel
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Version label
@@ -61,8 +61,7 @@ fields:
       column: version_label
       storageClass: core
   - key: status
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Status
@@ -74,7 +73,7 @@ fields:
       type: referentiedata
       referentieGroep: DOCUMENTVERSIONSTATUS
   - key: createdBy
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Created by
@@ -85,7 +84,7 @@ fields:
       column: created_by
       storageClass: core
   - key: fileName
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -97,7 +96,7 @@ fields:
       column: file_name
       storageClass: core
   - key: artifactId
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     immutable: true
@@ -113,7 +112,7 @@ fields:
       column: artifact_id
       storageClass: core
   - key: artifactVersion
-    valueType: integer
+    osfType: integer
     required: false
     readOnly: true
     immutable: true
@@ -127,7 +126,7 @@ fields:
       column: artifact_version
       storageClass: core
   - key: byteSize
-    valueType: integer
+    osfType: integer
     required: false
     readOnly: true
     immutable: true
@@ -141,7 +140,7 @@ fields:
       column: byte_size
       storageClass: core
   - key: mimeType
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -153,8 +152,7 @@ fields:
       column: mime_type
       storageClass: core
   - key: storageLocation
-    valueType: string
-    semanticType: fileStorageLocation
+    osfType: fileStorageLocation
     required: false
     readOnly: true
     immutable: true
@@ -167,7 +165,7 @@ fields:
       column: storage_location
       storageClass: core
   - key: checksum
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     label:
@@ -179,7 +177,7 @@ fields:
       column: checksum
       storageClass: core
   - key: isMajorVersion
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Major version
@@ -189,8 +187,7 @@ fields:
       column: is_major_version
       storageClass: core
   - key: changeSummary
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Change summary
@@ -204,7 +201,7 @@ fields:
   # null on an uploaded version. Names follow TemplateVersion so the generic
   # publish stores both the same way.
   - key: versionNumber
-    valueType: integer
+    osfType: integer
     required: false
     readOnly: true
     immutable: true
@@ -213,7 +210,7 @@ fields:
     label: { en: Version number, nl: Versienummer }
     persisted: { column: version_number, storageClass: core }
   - key: snapshot
-    valueType: object
+    osfType: object
     required: false
     readOnly: true
     immutable: true
@@ -221,7 +218,7 @@ fields:
     label: { en: Frozen content, nl: Vastgelegde inhoud }
     persisted: { column: snapshot, storageClass: core }
   - key: contentHash
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     immutable: true
@@ -230,7 +227,7 @@ fields:
     label: { en: Content checksum, nl: Inhoudschecksum }
     persisted: { column: content_hash, storageClass: core }
   - key: publishedBy
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     immutable: true
@@ -239,7 +236,7 @@ fields:
     label: { en: Published by, nl: Gepubliceerd door }
     persisted: { column: published_by, storageClass: core }
   - key: publishedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     immutable: true
@@ -256,7 +253,7 @@ fields:
     description:
       en: Immutable identifier of the document that owns this version.
       nl: Onveranderlijke identifier van het document waartoe deze versie behoort.
-    semanticType: Document
+    osfType: Document
     validation:
       format: uuid
     persisted:
@@ -267,6 +264,11 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        key: versions
+        label:
+          en: Versions
+          nl: Versies
   - key: accountId
     label:
       en: Account
@@ -274,7 +276,7 @@ fields:
     persisted:
       column: account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
 operations:

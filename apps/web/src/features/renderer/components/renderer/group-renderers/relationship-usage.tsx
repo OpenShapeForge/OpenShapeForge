@@ -255,10 +255,10 @@ export function renderRelationshipUsage(
         return renderDisplayField(
           {
             key: field.key,
-            valueType: field.valueType ?? "string",
+            osfType: field.osfType ?? field.baseType ?? "string",
+            baseType: field.baseType ?? "string",
             cardinality: field.cardinality,
             label: field.label,
-            semanticType: field.semanticType,
             layoutFraction: field.layoutFraction,
             render: field.render,
             validation: field.validation,

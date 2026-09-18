@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: targetScopeKind
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Target scope kind
@@ -44,7 +44,7 @@ fields:
       column: target_scope_kind
       storageClass: core
   - key: clientId
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Client ID
@@ -59,7 +59,7 @@ fields:
       column: client_id
       storageClass: core
   - key: permissionName
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Permission name
@@ -74,7 +74,7 @@ fields:
       column: permission_name
       storageClass: core
   - key: effect
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Effect
@@ -89,7 +89,7 @@ fields:
       column: effect
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -109,9 +109,13 @@ fields:
     persisted:
       column: target_tenant_id
       storageClass: core
-    semanticType: Tenant
+    osfType: Tenant
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Organization permissions
+          nl: Organisatierechten
   - key: targetOrgUnitId
     label:
       en: Target org unit
@@ -119,9 +123,13 @@ fields:
     persisted:
       column: target_org_unit_id
       storageClass: core
-    semanticType: OrgUnit
+    osfType: OrgUnit
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Organization permissions
+          nl: Organisatierechten
 operations:
   list:
     name: List Organization Permission

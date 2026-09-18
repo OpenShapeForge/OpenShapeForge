@@ -24,36 +24,26 @@ versioning:
 fields:
   - key: key
     label: { en: Key, nl: Sleutel }
-    valueType: string
+    osfType: string
     required: true
     deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     validation: { pattern: "^[a-z][a-z0-9.-]*$", maxLength: 100 }
     persisted: { column: key, storageClass: core }
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label: { en: Name, nl: Naam }
     validation: { maxLength: 200 }
     persisted: { column: name, storageClass: core }
   - key: description
-    valueType: string
+    osfType: string
     label: { en: Description, nl: Omschrijving }
     persisted: { column: description, storageClass: core }
   - key: parameters
-    valueType: object
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     cardinality: collection
     label: { en: Local variables, nl: Lokale variabelen }
     persisted: { column: parameters, storageClass: core }
-  - key: variants
-    semanticType: TemplateVariant
-    cardinality: collection
-    relationship: { inverse: template, ownership: owned }
-  - key: versions
-    label: { en: Versions, nl: Versies }
-    semanticType: TemplateVersion
-    cardinality: collection
-    relationship: { inverse: template, ownership: owned }
 operations:
   insertVariant:
     name: { en: Add channel variant, nl: Kanaalvariant toevoegen }

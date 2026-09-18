@@ -11,7 +11,7 @@ import { isObject, object, refuse, text, uuid } from "./validation.js";
 
 /** Persisted column of the Block entity's `definitionVersion` field (entities/core/block.yaml). */
 export const DEFINITION_VERSION_COLUMN = "definition_version";
-const VALUE_TYPES = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
+const BASE_TYPES = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
 
 export function contentCarrier(context: ModuleOperationContext): RuntimeEntityValueCarrier {
   const { platform } = contextServices(context);
@@ -27,13 +27,13 @@ export function blockDefinition(carrier: RuntimeEntityValueCarrier, name: string
 
 /** Canonical value constraints remain in valueSchema; this is only the snapshot DTO. */
 export function contentFieldProjection(field: Readonly<Record<string, unknown>>): ContentField {
-  const valueType = field.valueType;
-  if (typeof valueType !== "string" || !VALUE_TYPES.includes(valueType)) refuse("INVALID_DEFINITION", "A block field has no resolved base type.");
+  const baseType = field.baseType;
+  if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "A block field has no resolved base type.");
   const nested = Array.isArray(field.children) ? field.children : undefined;
   const relationship = isObject(field.relationship) && typeof field.relationship.target === "string" ? { target: field.relationship.target } : undefined;
   return {
-    valueType: valueType as ContentField["valueType"],
-    ...(typeof field.semanticType === "string" ? { semanticType: field.semanticType } : {}),
+    baseType: baseType as ContentField["baseType"],
+    ...(typeof field.osfType === "string" ? { osfType: field.osfType } : {}),
     required: field.required === true,
     cardinality: (field.cardinalityBounds ?? field.cardinality ?? "single") as NonNullable<ContentField["cardinality"]>,
     ...(nested ? { fields: Object.fromEntries(nested.map((child) => { const shape = object(child, "field"); return [text(shape.key, "field key"), contentFieldProjection(shape)]; })) } : {}),
@@ -84,12 +84,12 @@ export function parameterShape(schema: Record<string, unknown>, required: boolea
       max: typeof schema.maxItems === "number" ? schema.maxItems : "unbounded",
     }, ...(schema.default !== undefined ? { defaultValue: schema.default as JsonValue } : {}) };
   }
-  const valueType = schema.type === "string" && schema.format === "date" ? "date"
+  const baseType = schema.type === "string" && schema.format === "date" ? "date"
     : schema.type === "string" && schema.format === "date-time" ? "datetime" : schema.type;
-  if (typeof valueType !== "string" || !VALUE_TYPES.includes(valueType)) refuse("INVALID_DEFINITION", "The template parameter shape is unsupported.");
+  if (typeof baseType !== "string" || !BASE_TYPES.includes(baseType)) refuse("INVALID_DEFINITION", "The template parameter shape is unsupported.");
   const requiredKeys = Array.isArray(schema.required) ? schema.required : [];
   return {
-    valueType: valueType as ContentValueShape["valueType"], required,
+    baseType: baseType as ContentValueShape["baseType"], required,
     ...(isObject(schema["x-osf-reference"]) && typeof schema["x-osf-reference"].entity === "string" ? { relationship: { target: schema["x-osf-reference"].entity } } : {}),
     ...(Array.isArray(schema.enum) ? { enum: schema.enum as JsonValue[] } : {}),
     ...(isObject(schema.properties) ? { fields: Object.fromEntries(Object.entries(schema.properties).map(([name, child]) => [name, parameterShape(object(child, "parameter"), requiredKeys.includes(name))])) } : {}),

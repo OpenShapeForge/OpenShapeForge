@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: referenceNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Reference number
@@ -26,7 +26,7 @@ fields:
       column: reference_number
       storageClass: core
   - key: executionDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Execution date
@@ -38,7 +38,6 @@ fields:
       column: execution_date
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -52,9 +51,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PAYMENTORDERSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: totalAmount
-    valueType: number
     required: false
     label:
       en: Total amount
@@ -62,12 +60,12 @@ fields:
     description:
       en: Sum of all instructions in this payment order.
       nl: Som van alle instructies in deze betaalopdracht.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: total_amount
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -81,7 +79,7 @@ fields:
       column: description
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -101,7 +99,7 @@ fields:
     persisted:
       column: payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
 authorization:

@@ -29,7 +29,7 @@ describe("inputSchemaFromStoredFields", () => {
     const schema = inputSchemaFromStoredFields([
       {
         key: "query",
-        valueType: "string",
+        osfType: "string",
         required: true,
         label: { en: "Query" },
         description: { en: "Free-text search." },
@@ -37,12 +37,12 @@ describe("inputSchemaFromStoredFields", () => {
       },
       {
         key: "status",
-        valueType: "string",
+        osfType: "string",
         options: { items: [{ value: "open" }, { value: "closed" }] },
       },
       {
         key: "tags",
-        valueType: "string",
+        osfType: "string",
         cardinality: "collection",
       },
     ]);
@@ -70,7 +70,7 @@ describe("inputSchemaFromStoredFields", () => {
       properties: {},
       additionalProperties: false,
     });
-    expect(inputSchemaFromStoredFields([{ valueType: "string" }])).toEqual({
+    expect(inputSchemaFromStoredFields([{ osfType: "string" }])).toEqual({
       type: "object",
       properties: {},
       additionalProperties: false,
@@ -106,7 +106,7 @@ describe("derivedToolsFromRows", () => {
         key: "find-tickets",
         name: "Find tickets",
         description: "Find tickets.",
-        inputFields: [{ key: "query", valueType: "string", required: true }],
+        inputFields: [{ key: "query", osfType: "string", required: true }],
       },
       { id: "b", key: "reserved_name", name: "x", description: "y", inputFields: [] },
       { id: "c", key: "Bad Key", name: "x", description: "y", inputFields: [] },
@@ -188,7 +188,7 @@ describe("the language a Service is projected in", () => {
     inputFields: [
       {
         key: "decision",
-        valueType: "string",
+        osfType: "string",
         required: true,
         label: { en: "Decision", nl: "Besluit" },
         description: { en: "What the client said.", nl: "Wat de klant heeft gezegd." },
@@ -244,8 +244,8 @@ describe("the language a Service is projected in", () => {
       [
         {
           key: "client",
-          valueType: "object",
-          children: [{ key: "name", valueType: "string", label: { en: "Name", nl: "Naam" } }],
+          osfType: "object",
+          children: [{ key: "name", osfType: "string", label: { en: "Name", nl: "Naam" } }],
         },
       ],
       nl,

@@ -196,10 +196,10 @@ export function renderFieldSchemaCustomField(
         />,
       );
     case "OptionVariablePicker": {
-      const optionSourceForSemanticType =
-        props.field.render?.props?.optionSourceForSemanticType === true;
-      const suggestions = optionSourceForSemanticType
-        ? filterDynamicOptionSourceSuggestions(variableSuggestions, editorField.semanticType)
+      const optionSourceForOsfType =
+        props.field.render?.props?.optionSourceForOsfType === true;
+      const suggestions = optionSourceForOsfType
+        ? filterDynamicOptionSourceSuggestions(variableSuggestions, editorField.osfType)
         : variableSuggestions ?? [];
 
       return wrapFieldSchemaWideContent(
@@ -215,28 +215,28 @@ export function renderFieldSchemaCustomField(
           suggestions={suggestions}
           lang={lang}
           placeholder={
-            optionSourceForSemanticType
+            optionSourceForOsfType
               ? lang === "nl"
                 ? "Kies lijstvariabele..."
                 : "Choose list variable..."
               : undefined
           }
           searchPlaceholder={
-            optionSourceForSemanticType
+            optionSourceForOsfType
               ? lang === "nl"
                 ? "Zoek lijstvariabele..."
                 : "Search list variable..."
               : undefined
           }
           emptyMessage={
-            optionSourceForSemanticType
+            optionSourceForOsfType
               ? lang === "nl"
                 ? "Geen passende lijstvariabelen gevonden."
                 : "No matching list variables found."
               : undefined
           }
           variableSectionLabel={
-            optionSourceForSemanticType
+            optionSourceForOsfType
               ? lang === "nl"
                 ? "Lijstvariabelen"
                 : "List variables"

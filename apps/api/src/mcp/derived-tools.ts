@@ -12,7 +12,7 @@
  *
  * The schema translation below deliberately mirrors the compiler's
  * field-json-schema mapping for the FieldDefinition subset that can live in a
- * stored row (valueType, cardinality, required, label, description,
+ * stored row (osfType, cardinality, required, label, description,
  * validation, static options, children/item). It is hand-rolled here rather
  * than imported because the runtime consumes compiled catalogs, not the
  * compiler package.
@@ -20,6 +20,7 @@
 
 import { localizedText, type ResolvedLocale } from "./locale.js";
 import type { ExecutionCatalogEntry } from "./declarative-execution.js";
+import { storedFieldBaseType } from "./stored-field-base-type.js";
 
 export type DerivedToolsCatalogEntry = {
   entity: string;
@@ -92,7 +93,7 @@ export function deriveToolName(key: unknown): string | null {
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   cardinality?: unknown;
   required?: unknown;
   label?: unknown;
@@ -133,8 +134,7 @@ function scalarSchema(
   definition: StoredFieldDefinition,
   locale?: ResolvedLocale,
 ): Record<string, unknown> {
-  const valueType =
-    typeof definition.valueType === "string" ? definition.valueType : "string";
+  const valueType = storedFieldBaseType(definition);
   const schema: Record<string, unknown> = {
     ...(VALUE_TYPE_TO_SCHEMA[valueType] ?? { type: "string" }),
   };

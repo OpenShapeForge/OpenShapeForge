@@ -27,14 +27,14 @@ export type FieldTypeOption = {
   baseType: string;
   valueType: string;
   cardinality?: FieldTypeCardinality;
-  semanticType?: string;
+  osfType?: string;
   icon?: string;
 };
 
 type FieldTypeSelectProps = {
   value?: string;
   cardinality?: "single" | "collection";
-  semanticType?: string;
+  osfType?: string;
   usage?: "requestInput" | "workflowConfig" | "entityMapping" | "internalSchema";
   lang: "nl" | "en";
   disabled?: boolean;
@@ -45,11 +45,11 @@ type FieldTypeSelectProps = {
   onSelectionChange: (selection: {
     valueType: string;
     cardinality: "single" | "collection";
-    semanticType?: string;
+    osfType?: string;
   }) => void;
 };
 
-const FIELD_DEFINITION_SEMANTIC_TYPE = "fieldDefinition";
+const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
 const FIELD_DEFINITION_COLLECTION_VALUE = "semantic:fieldDefinition:collection";
 const FIELD_DEFINITION_COLLECTION_LABELS: Record<"nl" | "en", string> = {
   nl: "Velddefinities",
@@ -67,8 +67,8 @@ const BASE_LABELS: Record<string, { nl: string; en: string }> = {
   array: { nl: "Lijst", en: "List" },
 };
 
-function selectedValue(type?: string, cardinality?: "single" | "collection", semanticType?: string) {
-  const semantic = semanticType?.trim();
+function selectedValue(type?: string, cardinality?: "single" | "collection", osfType?: string) {
+  const semantic = osfType?.trim();
   if (semantic) {
     return cardinality === "collection"
       ? `semantic:${semantic}:collection`
@@ -83,22 +83,22 @@ function selectedValue(type?: string, cardinality?: "single" | "collection", sem
 function isFieldDefinitionCollectionSelection(
   type: string | undefined,
   cardinality: "single" | "collection" | undefined,
-  semanticType: string | undefined,
+  osfType: string | undefined,
 ) {
   return (
     cardinality === "collection" &&
-    (semanticType?.trim() === FIELD_DEFINITION_SEMANTIC_TYPE ||
-      (semanticType?.trim() ? false : type === "object"))
+    (osfType?.trim() === FIELD_DEFINITION_OSF_TYPE ||
+      (osfType?.trim() ? false : type === "object"))
   );
 }
 
 function selectedFallbackLabel(
   type: string | undefined,
   cardinality: "single" | "collection" | undefined,
-  semanticType: string | undefined,
+  osfType: string | undefined,
   lang: "nl" | "en",
 ) {
-  const semantic = semanticType?.trim();
+  const semantic = osfType?.trim();
   if (isFieldDefinitionCollectionSelection(type, cardinality, semantic)) {
     return FIELD_DEFINITION_COLLECTION_LABELS[lang];
   }
@@ -128,7 +128,7 @@ function groupOptions(options: FieldTypeOption[]) {
 export function FieldTypeSelect({
   value,
   cardinality,
-  semanticType,
+  osfType,
   usage = "requestInput",
   lang,
   disabled = false,
@@ -141,7 +141,7 @@ export function FieldTypeSelect({
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [options, setOptions] = useState<FieldTypeOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const currentValue = selectedValue(value, cardinality, semanticType);
+  const currentValue = selectedValue(value, cardinality, osfType);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query), 180);
@@ -155,7 +155,7 @@ export function FieldTypeSelect({
       usage,
       limit: open ? "50" : "20",
     });
-    const semantic = semanticType?.trim();
+    const semantic = osfType?.trim();
     const search = open ? debouncedQuery.trim() : semantic;
     if (search) params.set("search", search);
 
@@ -180,14 +180,14 @@ export function FieldTypeSelect({
     return () => {
       active = false;
     };
-  }, [debouncedQuery, lang, open, semanticType, usage]);
+  }, [debouncedQuery, lang, open, osfType, usage]);
 
   const selectedLabel = useMemo(() => {
     return (
       options.find((option) => option.value === currentValue)?.label ??
-      selectedFallbackLabel(value, cardinality, semanticType, lang)
+      selectedFallbackLabel(value, cardinality, osfType, lang)
     );
-  }, [cardinality, currentValue, lang, options, semanticType, value]);
+  }, [cardinality, currentValue, lang, options, osfType, value]);
 
   const grouped = useMemo(() => groupOptions(options), [options]);
   const hasOptions = grouped.base.length > 0 || grouped.semantic.length > 0;
@@ -196,8 +196,8 @@ export function FieldTypeSelect({
     onSelectionChange({
       valueType: option.valueType ?? option.baseType,
       cardinality: normalizeOptionCardinality(option.cardinality),
-      ...(option.semanticType
-        ? { semanticType: option.semanticType }
+      ...(option.osfType
+        ? { osfType: option.osfType }
         : {}),
     });
     setOpen(false);

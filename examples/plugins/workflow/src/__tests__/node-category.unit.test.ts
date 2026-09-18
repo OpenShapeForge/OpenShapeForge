@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 /**
- * An authoring layer holding one node file and nothing else. The semantic-type
+ * An authoring layer holding one node file and nothing else. The osf-type
  * enrichment the generator also runs tolerates an absent `catalogs/`, so a
  * category test does not have to assemble a whole authoring tree.
  */

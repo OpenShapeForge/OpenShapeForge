@@ -4,14 +4,14 @@
  * Storage compiler — maps entity fields to SQL column definitions.
  *
  * Pipeline position: called early by the main compiler orchestrator. Processes
- * core fields, belongsTo foreign key columns, and profile-specific fields into
- * a flat list of CompiledColumn objects. Only persisted fields (those with a
+ * core fields (including the foreign keys of single entity references) and
+ * profile-specific fields into a flat list of CompiledColumn objects. Only persisted fields (those with a
  * `persisted` config) produce columns. Validates that no duplicate column names exist.
  *
- * Input:  Core Field[], EntityProfile[], Relationship[] (for FK columns).
+ * Input:  Core Field[], EntityProfile[].
  * Output: CompiledColumn[] — column name, SQL type, nullable flag, storage class.
  */
-import type { Field, EntityProfile, Relationship, CompiledColumn } from "../types.js";
+import type { Field, EntityProfile, CompiledColumn } from "../types.js";
 import { fieldSqlType } from "./helpers.js";
 
 /**
@@ -40,7 +40,6 @@ function validateColumnIdentifier(column: string, source: string): void {
 export function resolveStorageColumns(
   coreFields: Field[],
   profiles: EntityProfile[],
-  relationships: Relationship[]
 ): CompiledColumn[] {
   const columns: CompiledColumn[] = [];
 
@@ -57,25 +56,10 @@ export function resolveStorageColumns(
     });
   }
 
-  // belongsTo FK columns. Every one is a nullable uuid pointing at the target's
-  // `id`; tenancy is not modelled as a relationship here. A tenant-scoped
-  // entity gets its `tenant_id` uuid column injected by ../backend-manifest.ts,
-  // which also force-overrides the type, so a `belongsTo: Tenant` would be both
-  // redundant and unable to change the outcome.
-  for (const rel of relationships) {
-    if (rel.kind === "belongsTo" && rel.foreignKey) {
-      validateColumnIdentifier(rel.foreignKey, `belongsTo "${rel.key}" foreignKey`);
-      if (!columns.some((c) => c.column === rel.foreignKey)) {
-        columns.push({
-          field: rel.fieldKey ?? rel.key + "Id",
-          column: rel.foreignKey,
-          type: "uuid",
-          nullable: true,
-          storageClass: "core",
-        });
-      }
-    }
-  }
+  // A single entity reference is a persisted uuid field (normalized in
+  // ../entity-fields.ts), so its foreign-key column is already above.
+  // Tenancy is not modelled as a relationship: a tenant-scoped entity gets its
+  // `tenant_id` uuid column injected by ../backend-manifest.ts.
 
   // Profile fields
   for (const profile of profiles) {

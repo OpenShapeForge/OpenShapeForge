@@ -12,11 +12,10 @@ description:
   en: Starts the workflow manually with optional start variables.
 configFields:
   - key: inputParameters
-    valueType: object
     cardinality:
       min: 0
       max: "unbounded"
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     label:
       nl: Startvariabelen
       en: Start variables

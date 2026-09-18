@@ -14,7 +14,7 @@ domains:
   - relations
 fields:
   - key: supplierNumber
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Supplier number
@@ -29,7 +29,6 @@ fields:
       column: supplier_number
       storageClass: core
   - key: roleType
-    valueType: string
     required: true
     label:
       en: Role type
@@ -43,9 +42,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SUPPLIERROLE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: false
     label:
       en: Status
@@ -59,9 +57,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ROLEASSIGNMENTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: vatNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: VAT number
@@ -75,7 +73,7 @@ fields:
       column: vat_number
       storageClass: core
   - key: chamberOfCommerceNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Chamber of commerce number
@@ -89,7 +87,7 @@ fields:
       column: chamber_of_commerce_number
       storageClass: core
   - key: kvkVerified
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: KvK verified
@@ -101,7 +99,7 @@ fields:
       column: kvk_verified
       storageClass: core
   - key: defaultIban
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Default IBAN
@@ -115,7 +113,7 @@ fields:
       column: default_iban
       storageClass: core
   - key: ratingAverage
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Rating average
@@ -130,7 +128,7 @@ fields:
       column: rating_average
       storageClass: core
   - key: certifications
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Certifications
@@ -146,13 +144,13 @@ fields:
       max: unbounded
     item:
       key: certification
-      valueType: string
+      osfType: string
       required: false
       label:
         en: Certification
         nl: Certificering
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -164,7 +162,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -176,7 +174,7 @@ fields:
       column: end_date
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name
@@ -190,7 +188,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -203,9 +200,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -225,7 +222,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: defaultPaymentMethodId
@@ -235,7 +232,7 @@ fields:
     persisted:
       column: default_payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
 authorization:

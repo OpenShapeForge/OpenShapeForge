@@ -828,7 +828,8 @@ describe("identity ↔ Relation link", () => {
         if (url.endsWith("/clients?clientId=erp-provider")) {
           return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
         }
-        if (url.endsWith("/clients/erp-provider-uuid/roles")) {
+        // Client roles are read page by page (#610); one page here.
+        if (/\/clients\/erp-provider-uuid\/roles(\?first=\d+&max=\d+)?$/.test(url)) {
           return Response.json([{ id: "role-1", name: "General.All.Read" }]);
         }
         if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {
@@ -943,7 +944,8 @@ describe("identity ↔ Relation link", () => {
         if (url.endsWith("/clients?clientId=erp-provider")) {
           return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
         }
-        if (url.endsWith("/clients/erp-provider-uuid/roles")) {
+        // Client roles are read page by page (#610); one page here.
+        if (/\/clients\/erp-provider-uuid\/roles(\?first=\d+&max=\d+)?$/.test(url)) {
           return Response.json([{ id: "role-1", name: "General.All.Read" }]);
         }
         if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {

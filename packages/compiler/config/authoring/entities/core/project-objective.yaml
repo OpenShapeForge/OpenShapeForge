@@ -14,7 +14,7 @@ domains:
   - project
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,6 @@ fields:
       column: code
       storageClass: core
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -43,9 +42,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: targetValue
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Target value
@@ -59,7 +58,7 @@ fields:
       column: target_value
       storageClass: core
   - key: actualValue
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Actual value
@@ -73,7 +72,7 @@ fields:
       column: actual_value
       storageClass: core
   - key: targetDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Target date
@@ -85,7 +84,7 @@ fields:
       column: target_date
       storageClass: core
   - key: achievedAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Achieved at
@@ -103,7 +102,7 @@ fields:
     persisted:
       column: project_id
       storageClass: core
-    semanticType: Project
+    osfType: Project
     relationship:
       ownership: reference
 authorization:

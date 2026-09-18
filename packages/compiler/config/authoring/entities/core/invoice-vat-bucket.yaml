@@ -15,7 +15,6 @@ domains:
   - finance
 fields:
   - key: amountBase
-    valueType: number
     required: true
     label:
       en: Base amount
@@ -23,12 +22,11 @@ fields:
     description:
       en: Sum of net (excl. VAT) amounts for invoice lines at this VAT rate.
       nl: Som van de nettobedragen (excl. BTW) van de factuurregels op dit BTW-tarief.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
   - key: amountVat
-    valueType: number
     required: true
     label:
       en: VAT amount
@@ -36,7 +34,7 @@ fields:
     description:
       en: Sum of VAT amounts for invoice lines at this VAT rate.
       nl: Som van de BTW-bedragen van de factuurregels op dit BTW-tarief.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core
@@ -47,7 +45,7 @@ fields:
     persisted:
       column: invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
   - key: vatRateId
@@ -57,7 +55,7 @@ fields:
     persisted:
       column: vat_rate_id
       storageClass: core
-    semanticType: VatRate
+    osfType: VatRate
     relationship:
       ownership: reference
 authorization:

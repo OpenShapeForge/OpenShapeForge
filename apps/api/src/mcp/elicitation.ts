@@ -34,6 +34,7 @@ import {
 // One policy, one source: the same set decides what is encrypted at rest
 // (here) and what is barred from URL positions (declarative-execution).
 import { SECRET_SENSITIVITY } from "./declarative-execution.js";
+import { storedFieldBaseType } from "./stored-field-base-type.js";
 
 export type ElicitOnCreateEntry = {
   sourceField: string;
@@ -46,7 +47,7 @@ export type ElicitOnCreateEntry = {
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   cardinality?: unknown;
   required?: unknown;
   label?: unknown;
@@ -102,7 +103,7 @@ export function elicitationSchemaFromDefinitions(
   for (const definition of list) {
     const key = definition?.key;
     if (typeof key !== "string" || key.length === 0) continue;
-    const valueType = typeof definition.valueType === "string" ? definition.valueType : "string";
+    const valueType = storedFieldBaseType(definition);
     const schemaType = ELICITABLE_TYPES[valueType];
     if (!schemaType || definition.cardinality === "collection") {
       skipped.push(key);

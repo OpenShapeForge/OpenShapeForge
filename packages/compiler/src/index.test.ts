@@ -82,7 +82,7 @@ describe("compiler host artifact assembly", () => {
       ].join("\n"),
     );
     await writeFile(
-      join(overlay, "semantic-types.yaml"),
+      join(overlay, "osf-types.yaml"),
       [
         "types:",
         "  hostType:",
@@ -130,7 +130,7 @@ describe("compiler host artifact assembly", () => {
         workflowInputField: { typePickerUsage: "requestInput" },
         hostProfile: { futureProfileProperty: "keep-me" },
       },
-      semanticTypes: {
+      osfTypes: {
         email: { valueType: "string" },
         hostType: { futureSemanticProperty: "keep-me" },
       },

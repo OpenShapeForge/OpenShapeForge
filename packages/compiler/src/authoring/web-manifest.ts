@@ -15,6 +15,7 @@ import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifact
 import { assertEntityValueDefinition } from "./entity-values.js";
 import { materializeCollectionOperations } from "./collection-operations.js";
 import { constrainedReferenceCreateOperationId } from "../generate-operations.js";
+import { fieldOptionSource } from "./web-field-options.js";
 import type {
   CompiledEntityContract,
   CompiledEntityOperation,
@@ -101,7 +102,7 @@ function operation(
         .filter((field) =>
           field.key !== secureInputTarget &&
           field.cardinality !== "collection" &&
-          field.valueType !== "object"
+          field.baseType !== "object"
         )
         .map((field) => field.key);
       for (const relationship of contract.model.relationships) {
@@ -439,15 +440,16 @@ function projectField(
 ): WebFieldProjection {
   const nestedSupports = editNested ? supports : { read: true, create: false, update: false };
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render;
+  const optionSource = fieldOptionSource(field);
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
-    valueType: field.valueType,
+    osfType: field.osfType,
+    baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
     required: field.required,
     ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
-    ...(field.semanticType ? { semanticType: field.semanticType } : {}),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
       ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
@@ -462,12 +464,7 @@ function projectField(
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
     ...(field.options?.items?.length ? { options: field.options.items.map(({ value, label }) => ({ value, label: localized(label, value) })) } : {}),
-    ...(field.options?.type === "referentiedata" && field.options.referentieGroep
-      ? { optionSource: { type: "referentiedata" as const, group: field.options.referentieGroep } } : {}),
-    ...(field.options?.type === "entity" && field.options.source
-      ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } } : {}),
-    ...((field.options?.type === "remote" || field.options?.type === "dynamic") && (field.options.remoteUrl || field.options.source)
-      ? { optionSource: { type: field.options.type, source: field.options.remoteUrl ?? field.options.source! } } : {}),
+    ...(optionSource ? { optionSource } : {}),
     ...(field.children ? { children: field.children.map((child) => projectField(child, `${parent}.${field.key}`, nestedSupports, editNested, presentations)) } : {}),
     ...(field.item ? { item: projectField(field.item, `${parent}.${field.key}`, nestedSupports, editNested, presentations) } : {}),
     supports: {
@@ -529,7 +526,6 @@ function projectEntity(
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
-  const explicitFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
   const explicitFields = contract.model.fields.map((field) => {
     const projected = projectField(field, entityName, {
         read: true,
@@ -538,38 +534,9 @@ function projectEntity(
     }, false, contract.interfaces?.web?.fields);
     return [field.key, projected] as const;
   });
-  const implicitRelationshipFields = contract.model.relationships.flatMap((relationship) => {
-    if (relationship.kind !== "belongsTo" || !relationship.foreignKey) return [];
-    const column = contract.storage.columns.find(
-      (candidate) => candidate.column === relationship.foreignKey,
-    );
-    const key = column?.field ?? snakeToCamel(relationship.foreignKey);
-    // When an authored field owns this input key, its writability and
-    // presentation semantics are authoritative. Never widen it from the
-    // structural relationship declaration.
-    if (explicitFieldKeys.has(key)) return [];
-    const targetId = all.get(relationship.target)?.contract.model.fields.find(
-      (field) => field.key === "id",
-    );
-    const label = localized(relationship.label, relationship.key);
-    const projected: WebFieldProjection = {
-      id: `${entityName}.${key}`,
-      key,
-      label,
-      description: label,
-      valueType: "string",
-      ...(targetId?.semanticType ? { semanticType: targetId.semanticType } : {}),
-      cardinality: "one",
-      required: column ? !column.nullable : false,
-      supports: {
-        read: true,
-        create: Boolean(operations.create && createVariant),
-        update: Boolean(operations.update && updateVariant),
-      },
-    };
-    return [[key, projected] as const];
-  });
-  const fields = Object.fromEntries([...explicitFields, ...implicitRelationshipFields]);
+  // Every single entity reference is an authored field, so its writability and
+  // presentation are projected above; relationships add no implicit fields.
+  const fields = Object.fromEntries(explicitFields);
 
   const relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     const target = all.get(relationship.target);
@@ -605,7 +572,7 @@ function projectEntity(
       ...(relationship.version ? { version: relationship.version } : {}),
       ...(relationship.childLock ? { childLock: relationship.childLock } : {}),
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
-      ...(relationship.sortable ? { sortable: true, positionColumn: relationship.kind === "manyToMany" ? "position" : `${relationship.foreignKey}_position` } : {}),
+      ...(relationship.sortable ? { sortable: true, positionColumn: `${relationship.foreignKey}_position` } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),
       ...(relationship.through ? { through: relationship.through } : {}),
       ...(relationship.fieldKey && relationship.kind !== "belongsTo" ? { mutationSupport: Object.keys(nativeOperations).length ? "atomic" as const : "unsupported" as const } : {}),
@@ -1008,7 +975,7 @@ function projectStandalone(
         } | undefined;
         const title = i18n?.title;
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
-        const valueType = schema.format === "date-time"
+        const baseType = schema.format === "date-time"
           ? "datetime"
           : schema.format === "date"
             ? "date"
@@ -1021,7 +988,8 @@ function projectStandalone(
           key,
           label: localized(title, key),
           description: localized(undefined, ""),
-          valueType,
+          osfType: baseType,
+          baseType,
           ...(enumValues.length ? {
             options: enumValues.map((value) => ({
               value,

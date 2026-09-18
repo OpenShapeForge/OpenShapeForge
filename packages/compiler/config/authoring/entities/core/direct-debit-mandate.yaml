@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: mandateReference
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Mandate reference
@@ -28,7 +28,7 @@ fields:
       column: mandate_reference
       storageClass: core
   - key: iban
-    valueType: string
+    osfType: string
     required: true
     label:
       en: IBAN
@@ -42,7 +42,7 @@ fields:
       column: iban
       storageClass: core
   - key: signedDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Signed date
@@ -54,7 +54,7 @@ fields:
       column: signed_date
       storageClass: core
   - key: firstUsedDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: First used date
@@ -66,7 +66,7 @@ fields:
       column: first_used_date
       storageClass: core
   - key: lastUsedDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Last used date
@@ -78,7 +78,6 @@ fields:
       column: last_used_date
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -92,9 +91,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MANDATESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: sequenceType
-    valueType: string
     required: true
     label:
       en: Sequence type
@@ -108,9 +106,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: SEPASEQUENCETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -130,7 +128,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
 authorization:

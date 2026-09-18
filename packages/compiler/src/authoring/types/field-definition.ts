@@ -33,7 +33,7 @@ export type FieldDefinitionCardinality =
 
 export type FieldDefinitionVariableMode = "none" | "whole" | "template" | "both";
 
-export type FieldDefinitionSemanticTypeKind =
+export type FieldDefinitionOsfTypeKind =
   | "scalar"
   | "entityId"
   | "entity"
@@ -57,10 +57,35 @@ export type FieldDefinitionRelationshipConstraints = Record<
 
 export type FieldDefinitionValidation = FieldValidation;
 
+/**
+ * How a single entity reference shapes the collection the compiler derives
+ * for it on the target entity. Everything is optional: the key defaults to
+ * the lower-camel plural of the referencing entity and the label to that
+ * entity's labels. Collection policy (ownership, ordering, owner-scoped
+ * authorization, allowed value definitions) belongs to the collection and is
+ * declared here because the collection itself is never authored.
+ */
+export interface FieldDefinitionInverseCollection {
+  key?: string;
+  label?: LocalizedText;
+  ownership?: "owned" | "reference";
+  sortable?: boolean;
+  childAuthorization?: "owner";
+  /** Boolean field of the referencing (owned) entity; the owner's update, move and remove refuse a child whose flag is set. */
+  childLock?: string;
+  allowedDefinitions?: string[];
+}
+
 export interface FieldDefinitionRelationship {
-  kind?: "belongsTo" | "hasMany" | "manyToMany";
+  /** Compiler-derived: `belongsTo` for a single reference, `hasMany` for a collection. */
+  kind?: "belongsTo" | "hasMany";
   entity?: string;
-  inverse?: string;
+  /**
+   * On a single reference: the derived inverse collection (`false` declines
+   * one). On a collection — derived, or an authored `via` traversal — the key
+   * of the referencing field on the target entity.
+   */
+  inverse?: string | FieldDefinitionInverseCollection | false;
   /** Read-only inverse traversal through a local, single entity reference. */
   via?: string;
   /** Compiler-derived join source, not an authored SQL/storage choice. */
@@ -73,10 +98,11 @@ export interface FieldDefinitionRelationship {
    * the foreign key itself already pins.
    */
   version?: "pinned" | "current";
-  /** Compiler-derived identity; not authored twice beside semanticType. */
+  /** Compiler-derived identity; not authored twice beside osfType. */
   target?: string;
   fieldKey?: string;
   unique?: boolean;
+  /** Compiler-derived from `persisted.column`; never authored. */
   foreignKey?: string;
   displayField?: string;
   /** Canonical validity rules for the referenced target record. */
@@ -129,7 +155,12 @@ export interface FieldDefinitionAuthoringMetadata {
  */
 export interface FieldDefinition {
   key: string;
-  valueType?: FieldDefinitionValueType;
+  /**
+   * The one type axis. A base type (`string`, `integer`, `number`, `boolean`,
+   * `date`, `datetime`, `object`), a osf-type catalog key, or an entity
+   * name; the compiler derives the base type from the catalog.
+   */
+  osfType: string;
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
   sortable?: boolean;
@@ -179,7 +210,6 @@ export interface FieldDefinition {
   description?: LocalizedText;
   placeholder?: LocalizedText;
   help?: LocalizedText;
-  semanticType?: string;
   unit?: string;
   currency?: string;
   value?: unknown;
@@ -219,8 +249,8 @@ export interface FieldDefinitionWorkflowInspector {
   displayMode?: "hidden" | "display" | "readOnly";
 }
 
-export interface FieldDefinitionSemanticType {
-  kind?: FieldDefinitionSemanticTypeKind;
+export interface FieldDefinitionOsfType {
+  kind?: FieldDefinitionOsfTypeKind;
   label: LocalizedText;
   pluralLabel?: LocalizedText;
   valueType: FieldDefinitionValueType;

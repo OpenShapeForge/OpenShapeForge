@@ -173,7 +173,7 @@ fields:
   - key: notes
     $delete: true          # remove the notes field (keyed-array delete)
   - key: segment           # new key -> appended
-    valueType: string
+    osfType: string
     persisted: { column: segment, storageClass: core }
 ```
 

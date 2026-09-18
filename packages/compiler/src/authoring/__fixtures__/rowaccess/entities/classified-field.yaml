@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: label
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Label
@@ -38,7 +38,7 @@ fields:
       column: label
       storageClass: core
   - key: secretNote
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Secret note
@@ -49,7 +49,7 @@ fields:
       column: secret_note
       storageClass: core
   - key: personalEmail
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Personal email
@@ -60,7 +60,7 @@ fields:
       column: personal_email
       storageClass: core
   - key: internalNote
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Internal note

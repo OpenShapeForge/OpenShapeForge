@@ -28,7 +28,7 @@ authorization:
     empty: public
 fields:
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -46,7 +46,7 @@ fields:
       type: referentiedata
       referentieGroep: ADDRESSTYPE
   - key: street
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Street
@@ -60,7 +60,7 @@ fields:
       column: street
       storageClass: core
   - key: houseNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: House number
@@ -74,7 +74,7 @@ fields:
       column: house_number
       storageClass: core
   - key: houseNumberAddition
-    valueType: string
+    osfType: string
     required: false
     label:
       en: House number addition
@@ -88,7 +88,7 @@ fields:
       column: house_number_addition
       storageClass: core
   - key: postalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Postal code
@@ -102,7 +102,7 @@ fields:
       column: postal_code
       storageClass: core
   - key: city
-    valueType: string
+    osfType: string
     required: true
     label:
       en: City
@@ -117,7 +117,7 @@ fields:
       column: city
       storageClass: core
   - key: country
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Country
@@ -131,7 +131,7 @@ fields:
       column: country
       storageClass: core
   - key: latitude
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Latitude
@@ -143,7 +143,7 @@ fields:
       column: latitude
       storageClass: core
   - key: longitude
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Longitude
@@ -161,9 +161,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Addresses
+          nl: Adressen
   - key: naturalPersonId
     label:
       en: Natural person
@@ -171,9 +175,13 @@ fields:
     persisted:
       column: natural_person_id
       storageClass: core
-    semanticType: NaturalPerson
+    osfType: NaturalPerson
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Addresses
+          nl: Adressen
   - key: legalEntityId
     label:
       en: Legal entity
@@ -181,9 +189,13 @@ fields:
     persisted:
       column: legal_entity_id
       storageClass: core
-    semanticType: LegalEntity
+    osfType: LegalEntity
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Addresses
+          nl: Adressen
 operations:
   list:
     name: { en: List addresses, nl: Adressen tonen }

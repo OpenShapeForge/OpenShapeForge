@@ -52,7 +52,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -69,7 +69,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -87,8 +87,7 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Description
@@ -105,8 +104,7 @@ fields:
       column: description
       storageClass: core
   - key: documentType
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Document type
@@ -125,8 +123,7 @@ fields:
       source: DocumentType
       valueField: code
   - key: status
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Status
@@ -144,8 +141,7 @@ fields:
       type: referentiedata
       referentieGroep: DOCUMENTSTATUS
   - key: confidentiality
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: false
     label:
       en: Confidentiality
@@ -163,7 +159,7 @@ fields:
       type: referentiedata
       referentieGroep: DOCUMENTCONFIDENTIALITY
   - key: source
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source
@@ -180,7 +176,7 @@ fields:
       column: source
       storageClass: core
   - key: author
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Author
@@ -197,7 +193,7 @@ fields:
       column: author
       storageClass: core
   - key: isExternal
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: External
@@ -213,7 +209,7 @@ fields:
       column: is_external
       storageClass: core
   - key: registeredAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Registered at
@@ -228,7 +224,7 @@ fields:
       column: registered_at
       storageClass: core
   - key: receivedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Received at
@@ -243,7 +239,7 @@ fields:
       column: received_at
       storageClass: core
   - key: publishedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Published at
@@ -272,7 +268,7 @@ fields:
     persisted:
       column: current_version_id
       storageClass: core
-    semanticType: DocumentVersion
+    osfType: DocumentVersion
     relationship:
       ownership: reference
   - key: templateVersionId
@@ -285,10 +281,15 @@ fields:
     writtenBy: [Document.linkTemplate, Template.publish]
     validation: { format: uuid }
     persisted: { column: template_version_id, storageClass: core }
-    semanticType: TemplateVersion
-    relationship: { ownership: reference, version: pinned }
+    osfType: TemplateVersion
+    relationship:
+      ownership: reference
+      version: pinned
+      inverse:
+        key: documents
+        label: { en: Documents, nl: Documenten }
   - key: parameters
-    valueType: object
+    osfType: object
     required: false
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
@@ -301,7 +302,7 @@ fields:
     description:
       en: Why the last template republish could not be applied to this document; cleared when a later republish succeeds.
       nl: Waarom de laatste herpublicatie van de template niet op dit document kon worden toegepast; gewist zodra een latere herpublicatie slaagt.
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     writtenBy: [Template.publish]
@@ -314,9 +315,13 @@ fields:
     persisted:
       column: case_file_id
       storageClass: core
-    semanticType: CaseFile
+    osfType: CaseFile
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
   - key: caseId
     label:
       en: Case
@@ -324,9 +329,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
   - key: relationId
     label:
       en: Relation
@@ -334,23 +343,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
-  - key: versions
-    label:
-      en: Versions
-      nl: Versies
-    semanticType: DocumentVersion
-    cardinality: collection
-    relationship:
-      inverse: documentId
-      ownership: reference
-  - key: variants
-    label: { en: Content, nl: Inhoud }
-    semanticType: DocumentVariant
-    cardinality: collection
-    relationship: { inverse: document, ownership: owned }
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
 operations:
   list:
     name: { en: List documents, nl: Documenten tonen }
@@ -589,11 +588,11 @@ interfaces:
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Document, nl: Document }
-                  fields: [ code, title, description, documentType, status ]
+                  fields: [code, title, description, documentType, status]
                 - title: { en: Origin and access, nl: Herkomst en toegang }
-                  fields: [ author, source, isExternal, confidentiality ]
+                  fields: [author, source, isExternal, confidentiality]
                 - title: { en: Registration and publication, nl: Registratie en publicatie }
-                  fields: [ receivedAt, registeredAt, publishedAt ]
+                  fields: [receivedAt, registeredAt, publishedAt]
             - id: content
               label: { en: Content, nl: Inhoud }
               relationship: variants
@@ -608,7 +607,7 @@ interfaces:
             title: { en: Create document, nl: Document aanmaken }
             groups:
               - title: { en: Document, nl: Document }
-                fields: [ title, documentType, status ]
+                fields: [title, documentType, status]
           update:
             title: { en: Edit document, nl: Document bewerken }
             groups:

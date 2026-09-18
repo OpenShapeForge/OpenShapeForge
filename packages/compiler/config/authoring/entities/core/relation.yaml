@@ -31,8 +31,7 @@ authorization:
     empty: public
 fields:
   - key: labels
-    valueType: object
-    semanticType: labelSet
+    osfType: labelSet
     required: false
     readOnly: true
     label:
@@ -43,7 +42,7 @@ fields:
       nl: Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op
         basis van label_rules.
   - key: displayName
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Display name
@@ -66,7 +65,7 @@ fields:
       column: display_name
       storageClass: core
   - key: relationType
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Relation type
@@ -81,7 +80,7 @@ fields:
       type: referentiedata
       referentieGroep: RELATIONTYPE
   - key: relationSubType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Relation subtype
@@ -95,7 +94,7 @@ fields:
       column: relation_sub_type
       storageClass: core
   - key: preferredContactChannel
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Preferred contact channel
@@ -112,7 +111,7 @@ fields:
       type: referentiedata
       referentieGroep: COMMUNICATIONCHANNEL
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -126,7 +125,7 @@ fields:
       column: status
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -140,7 +139,7 @@ fields:
       column: external_code
       storageClass: core
   - key: address
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Address
@@ -152,7 +151,7 @@ fields:
       column: address
       storageClass: core
   - key: location
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Location
@@ -164,7 +163,7 @@ fields:
       column: location
       storageClass: core
   - key: notes
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Notes
@@ -180,7 +179,7 @@ fields:
       column: notes
       storageClass: core
   - key: businessContext
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Business context
@@ -196,11 +195,10 @@ fields:
       column: business_context
       storageClass: core
   - key: relationGroupId
-    valueType: string
     required: false
     readOnly: true
     immutable: true
-    semanticType: RelationGroup
+    osfType: RelationGroup
     label:
       en: Legacy relation group ID
       nl: Legacy relatiegroep-ID
@@ -216,159 +214,6 @@ fields:
     classification:
       sensitivity: internal
       category: workflow
-  - key: groupMemberships
-    label:
-      en: Group memberships
-      nl: Groepslidmaatschappen
-    semanticType: RelationGroupMembership
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: roles
-    label:
-      en: Roles
-      nl: Rollen
-    semanticType: RelationRole
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: addresses
-    label:
-      en: Addresses
-      nl: Adressen
-    semanticType: Address
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: addressAssignments
-    label:
-      en: Address assignments
-      nl: Adrestoewijzingen
-    semanticType: AddressAssignment
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: contactDetails
-    label:
-      en: Contact details
-      nl: Contactgegevens
-    semanticType: ContactDetail
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: communicationPreferences
-    label:
-      en: Communication preferences
-      nl: Communicatievoorkeuren
-    semanticType: CommunicationPreference
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: paymentDetails
-    label:
-      en: Payment details
-      nl: Betaalgegevens
-    semanticType: PaymentDetail
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: contactMoments
-    label:
-      en: Contact moments
-      nl: Contactmomenten
-    semanticType: ContactMoment
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: accounts
-    label:
-      en: Accounts
-      nl: Accounts
-    semanticType: Account
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: tasks
-    label:
-      en: Tasks
-      nl: Taken
-    semanticType: Task
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: agreements
-    label:
-      en: Agreements
-      nl: Overeenkomsten
-    semanticType: Agreement
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: cases
-    label:
-      en: Cases
-      nl: Zaken
-    semanticType: Case
-    cardinality: collection
-    relationship:
-      inverse: primaryRelationId
-      ownership: reference
-  - key: caseFiles
-    label:
-      en: Case files
-      nl: Dossiers
-    semanticType: CaseFile
-    cardinality: collection
-    relationship:
-      inverse: primaryRelationId
-      ownership: reference
-  - key: documents
-    label:
-      en: Documents
-      nl: Documenten
-    semanticType: Document
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: associations
-    label:
-      en: Associations
-      nl: Koppelingen
-    semanticType: RelationAssociation
-    cardinality: collection
-    relationship:
-      inverse: relationId
-      ownership: reference
-  - key: relatedAssociations
-    label:
-      en: Related associations
-      nl: Gerelateerde koppelingen
-    semanticType: RelationAssociation
-    cardinality: collection
-    relationship:
-      inverse: relatedRelationId
-      ownership: reference
-  - key: contextAssociations
-    label:
-      en: Context associations
-      nl: Contextkoppelingen
-    semanticType: RelationAssociation
-    cardinality: collection
-    relationship:
-      inverse: contextRelationId
-      ownership: reference
 operations:
   list:
     name: { en: List relations, nl: Relaties tonen }

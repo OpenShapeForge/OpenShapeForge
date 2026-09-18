@@ -29,7 +29,6 @@ authorization:
     empty: public
 fields:
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -40,9 +39,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ASSIGNMENTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: assignedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Assigned at
@@ -51,7 +50,7 @@ fields:
       column: assigned_at
       storageClass: core
   - key: acceptedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Accepted at
@@ -60,7 +59,7 @@ fields:
       column: accepted_at
       storageClass: core
   - key: releasedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Released at
@@ -69,7 +68,7 @@ fields:
       column: released_at
       storageClass: core
   - key: reason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Reason
@@ -80,7 +79,7 @@ fields:
       column: reason
       storageClass: core
   - key: skillProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Skill profile
@@ -91,7 +90,6 @@ fields:
       column: skill_profile
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -101,7 +99,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseId
     label:
       en: Case
@@ -109,9 +107,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Assignments
+          nl: Toewijzingen
   - key: queueId
     label:
       en: Queue
@@ -119,9 +121,13 @@ fields:
     persisted:
       column: work_queue_id
       storageClass: core
-    semanticType: WorkQueue
+    osfType: WorkQueue
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Assignments
+          nl: Toewijzingen
   - key: assigneeId
     label:
       en: Assignee
@@ -129,9 +135,10 @@ fields:
     persisted:
       column: assignee_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
   - key: assignedById
     label:
       en: Assigned by
@@ -139,9 +146,10 @@ fields:
     persisted:
       column: assigned_by_account_id
       storageClass: core
-    semanticType: Account
+    osfType: Account
     relationship:
       ownership: reference
+      inverse: false
 operations:
   list:
     name: List Assignment

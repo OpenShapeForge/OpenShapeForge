@@ -5,7 +5,7 @@ import type { ModuleOperationContext } from "@openshapeforge/plugin-runtime";
 import { list, get, set, reset, profile } from "./runtime.js";
 import { catalogMigration } from "./index.js";
 
-const field = { key: "locale", valueType: "string", defaultValue: "nl", label: { en: "Language" } };
+const field = { key: "locale", osfType: "string", defaultValue: "nl", label: { en: "Language" } };
 function harness() {
   const statements: { sql: string; parameters: readonly unknown[] }[] = [];
   const values = new Map<string, unknown>();

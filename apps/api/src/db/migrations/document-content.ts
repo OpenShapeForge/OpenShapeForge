@@ -24,9 +24,9 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
 /**
  * Name and expression of the compiler-owned owner check on erp.blocks, as
  * emitted in apps/api/src/generated/db/manifest.json ("compilerOwned" check
- * with replaceExisting). The plugin-migration step later re-applies it under
- * the same name as a repeatable DROP/ADD, so installing it here first is
- * semantically a no-op for that step.
+ * with replaceExisting). The plugin-migration step applies it under the same
+ * name as a repeatable DROP/ADD; restating it here keeps the invariant
+ * visible next to the guards that rely on it and is a no-op for that step.
  */
 const BLOCK_OWNER_CHECK = {
   table: "erp.blocks",
@@ -34,54 +34,8 @@ const BLOCK_OWNER_CHECK = {
   expression: 'num_nonnulls("document_variant_id", "variant_id") = 1',
 };
 
-async function columnNullable(db: OpenShapeForgeDatabase, table: string, column: string): Promise<string | undefined> {
-  const found = await sql<{ is_nullable: string }>`
-    select is_nullable from information_schema.columns
-    where table_schema = 'erp' and table_name = ${table} and column_name = ${column}
-  `.execute(db);
-  return found.rows[0]?.is_nullable;
-}
-
-/**
- * Pre-step for two earlier shapes of erp.blocks, both of which the generated
- * roll-forward would refuse as non-additive drift. This runs BEFORE the
- * roll-forward; a fresh database, or one already migrated, is a no-op.
- *
- * 1. A database built before blocks had a second owner: variant_id is NOT
- *    NULL. It is relaxed only once no row can end up ownerless:
- *    document_variant_id is added if missing and the owner check is in place
- *    (every existing row has a variant, so it validates).
- * 2. A database from the unreleased document-revision slice: blocks carry
- *    revision_id, documents carry current_revision_id and the
- *    document_revisions table exists. Nothing of that was ever released, so
- *    revision-owned blocks are dropped with their table and columns.
- */
-export async function prepareDocumentOwnedBlocks(db: OpenShapeForgeDatabase): Promise<void> {
-  if (await columnNullable(db, "blocks", "revision_id")) {
-    // Dropping revision_id also drops the owner check that named it; it is
-    // re-created below with the current expression.
-    await sql`
-      drop trigger if exists blocks_revision_guard on erp.blocks;
-      drop function if exists app.guard_revision_block_write();
-      drop policy if exists blocks_owner_read on erp.blocks;
-      delete from erp.blocks where revision_id is not null;
-      alter table erp.blocks drop column if exists revision_id_position;
-      alter table erp.blocks drop column revision_id;
-      alter table erp.blocks add column if not exists document_variant_id uuid;
-      alter table erp.documents drop column if exists current_revision_id;
-      drop table if exists erp.document_revisions;
-      drop function if exists app.guard_document_revision_write();
-      drop function if exists app.document_revision_command();
-    `.execute(db);
-    await ensureCheckConstraint(db, BLOCK_OWNER_CHECK);
-  }
-  if ((await columnNullable(db, "blocks", "variant_id")) !== "NO") return;
-  await sql`alter table erp.blocks add column if not exists document_variant_id uuid`.execute(db);
-  await ensureCheckConstraint(db, BLOCK_OWNER_CHECK);
-  await sql`alter table erp.blocks alter column variant_id drop not null`.execute(db);
-}
-
 export async function applyDocumentContentGuards(db: OpenShapeForgeDatabase): Promise<void> {
+  await ensureCheckConstraint(db, BLOCK_OWNER_CHECK);
   await sql`
     create or replace function app.document_command() returns text
     language sql stable

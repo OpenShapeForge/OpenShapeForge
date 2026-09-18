@@ -1374,6 +1374,8 @@ export function compileAuthoringBackendManifest(
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
                   ...(normalized.sortable ? { sortable: true, positionColumn: `${normalized.foreignKey}_position` } : {}),
                   ...(normalized.childAuthorization ? { childAuthorization: normalized.childAuthorization } : {}),
+                  ...(normalized.childLock ? { childLock: normalized.childLock } : {}),
+                  ...(normalized.version ? { version: normalized.version } : {}),
                   ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
                   ...(normalized.constraints ? { constraints: structuredClone(normalized.constraints) } : {}),
                   ...(normalized.kind !== "belongsTo" ? { mutationSupport: "unsupported" as const } : {}),

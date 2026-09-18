@@ -170,7 +170,13 @@ export type WebFieldProjection = {
   supports: { read: boolean; create: boolean; update: boolean };
 };
 
-export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[] };
+export type WebFieldGroup = {
+  id: string;
+  title: LocalizedText;
+  fields: string[];
+  /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
+  fieldOverrides?: Record<string, { render: { component: WebRendererKey } }>;
+};
 
 export type WebCollectionView = {
   id: string;
@@ -203,6 +209,10 @@ export type WebRelationshipProjection = {
   fieldKey?: string;
   inverse?: string;
   ownership?: "owned" | "reference";
+  /** A single reference to a versioned target: pinned to one immutable version, or the current head (default). */
+  version?: "pinned" | "current";
+  /** Boolean field of the owned child; the owner's update, move and remove refuse a child whose flag is set. */
+  childLock?: string;
   cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
   sortable?: boolean;
   positionColumn?: string;

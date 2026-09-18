@@ -33,6 +33,8 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
       ...(field.cardinality ? { cardinality: field.cardinality } : {}),
       ...(field.sortable ? { sortable: field.sortable } : {}),
       ...(field.childAuthorization ? { childAuthorization: field.childAuthorization } : {}),
+      ...(field.childLock ? { childLock: field.childLock } : {}),
+      ...(rel.version ? { version: rel.version } : {}),
       ...(rel.unique ? { unique: rel.unique } : {}),
       ...(field.label ? { label: field.label } : {}),
       ...(rel.constraints ? { constraints: structuredClone(rel.constraints) } : {}),

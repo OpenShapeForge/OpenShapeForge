@@ -63,6 +63,9 @@ export type GeneratedCrudRelationship = {
   positionColumn?: string;
   /** Owner-scoped collection Operations authorize the children through the owner (authored per field). */
   childAuthorization?: "owner";
+  /** Child field whose true value makes the owner's update, move and remove refuse that child. */
+  childLock?: string;
+  version?: "pinned" | "current";
   via?: string;
   viaSchema?: string;
   mutationSupport?: "unsupported";

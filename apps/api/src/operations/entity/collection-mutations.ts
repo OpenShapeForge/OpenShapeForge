@@ -129,6 +129,8 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     if (binding.action === "move" && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.values !== undefined)) invalid("Move requires childId and does not accept values.");
     if (editing && (typeof request.childId !== "string" || !uuid.test(request.childId) || request.beforeId !== undefined)) invalid(`${binding.action} requires childId and does not accept beforeId.`);
     if (binding.action === "remove" && request.values !== undefined) invalid("Remove does not accept values.");
+    const lockColumn = relation.childLock ? target.columns.find((column) => fieldNameForColumn(column) === relation.childLock) : undefined;
+    if (relation.childLock && (!lockColumn || lockColumn.type !== "boolean")) unsupported("The authored child lock must be a boolean column.");
     if (binding.action === "update" && (!request.values || typeof request.values !== "object" || Array.isArray(request.values))) invalid("Update requires child values.");
     if (binding.action === "update") {
       assertEntityValueInput(target, request.values!, "update", entityValues);
@@ -208,6 +210,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       const ordered = [...rows].sort((a, b) => (relation.sortable ? Number(a[position!.name]) - Number(b[position!.name]) : 0) || String(a.id).localeCompare(String(b.id))).map((row) => String(row.id));
       if (request.beforeId != null && !ordered.includes(request.beforeId)) invalid("beforeId is not a member of this collection.");
       if ((binding.action === "move" || editing) && !ordered.includes(request.childId!)) invalid("childId is not a member of this collection.");
+      if (lockColumn && (binding.action === "move" || editing) && rows.find((row) => row.id === request.childId)?.[lockColumn.name] === true) {
+        throw generatedCrudError("This item is locked by its source and cannot be changed, moved or removed.", "INVALID_STATE");
+      }
       // All siblings whose positions can change need their own authored edit rights.
       if (updateOp) for (const row of rows) await permission(trx, session, target, String(row.id), updateOp, "edit");
       let childId = request.childId!;

@@ -62,10 +62,13 @@ const CHILD_RELATIONS = `
  * The frozen order is what a materialized version hashes, so it must be
  * canonical: owned-collection position first, then id. Without the id
  * tie-break, rows sharing a position would keep whatever order `select ...
- * for share` happened to return.
+ * for share` happened to return. The position column belongs to the owning
+ * foreign key (`<fk>_position`); a child with several owners has several, and
+ * jsonb key order would pick the wrong one.
  */
-export function orderSnapshotChildren(found: readonly Row[]): Row[] {
-  const position = found.length ? Object.keys(found[0]!).find((key) => key.endsWith("_position")) : undefined;
+export function orderSnapshotChildren(found: readonly Row[], ownerColumns: readonly string[] = []): Row[] {
+  const keys = found.length ? Object.keys(found[0]!) : [];
+  const position = ownerColumns.map((column) => `${column}_position`).find((column) => keys.includes(column)) ?? keys.find((key) => key.endsWith("_position"));
   return [...found].sort((left, right) => {
     const byPosition = position ? Number(left[position] ?? 0) - Number(right[position] ?? 0) : 0;
     return byPosition || String(left.id ?? "").localeCompare(String(right.id ?? ""));
@@ -81,7 +84,7 @@ async function snapshotNode(executor: unknown, schema: string, table: string, ro
     const values = relation.parent_columns.map((column) => row[column]);
     const found = await rows<{ row: Row }>(executor,
       `select to_jsonb(child_row.*) as row from ${identifier(relation.schema_name)}.${identifier(relation.table_name)} child_row where ${predicates} for share`, values);
-    const ordered = orderSnapshotChildren(found.map((entry) => entry.row));
+    const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.child_columns);
     children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row)));
   }
   return { table, row, children };
@@ -100,6 +103,9 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       const source = (await rows<{ row: Row }>(transaction,
         `select to_jsonb(source_row.*) as row from "erp".${identifier(sourceTable)} source_row where tenant_id = app.current_tenant() and id = $1::uuid for update`, [id]))[0]?.row;
       if (!source) fail("NOT_FOUND", "The editable source no longer exists.");
+      // Transaction-local marker for database guards that otherwise refuse a
+      // direct write to the version table (documents: core-invariants.ts).
+      await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
       const tree = await snapshotNode(transaction, "erp", sourceTable, source);
       const snapshot = { schemaVersion: 1, entity: sourceEntity, head: tree };
       const canonical = stable(snapshot);
@@ -125,6 +131,7 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
           version: inserted as PublishedVersionRow, previousVersionId: typeof previous === "string" ? previous : null,
         });
       }
+      await rows(transaction, "select set_config('app.publishing_entity', '', true)", []);
       return { value: inserted };
     });
   };

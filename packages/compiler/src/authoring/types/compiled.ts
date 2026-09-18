@@ -91,6 +91,7 @@ export interface CompiledField {
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
+  childLock?: string;
   required: boolean;
   /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
@@ -144,6 +145,10 @@ export interface CompiledRelationship {
   sortable?: boolean;
   /** Owner-scoped collection Operations authorize the children through the owner. */
   childAuthorization?: "owner";
+  /** Boolean child field that makes the owner's update, move and remove refuse that child. */
+  childLock?: string;
+  /** Single reference to a versioned target: pinned to one immutable version, or the current head (default). */
+  version?: "pinned" | "current";
   unique?: boolean;
   kind: "belongsTo" | "hasMany";
   target: string;

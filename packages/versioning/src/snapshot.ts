@@ -53,6 +53,7 @@ export function childNodes(node: SnapshotNode, table: string): readonly Snapshot
  */
 export function orderedChildren(node: SnapshotNode, table: string, positionColumn?: string): readonly SnapshotNode[] {
   const entries = childNodes(node, table);
+  // A child with several owners has several position columns; the caller names the owning one.
   const column = positionColumn ?? Object.keys(entries[0]?.row ?? {}).find((key) => key.endsWith("_position"));
   return [...entries].sort((left, right) => {
     const delta = column ? Number(left.row[column] ?? 0) - Number(right.row[column] ?? 0) : 0;

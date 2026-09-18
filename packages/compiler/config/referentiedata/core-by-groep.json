@@ -2140,6 +2140,13 @@
       }
     },
     {
+      "value": "published",
+      "label": {
+        "nl": "Gepubliceerd",
+        "en": "Published"
+      }
+    },
+    {
       "value": "superseded",
       "label": {
         "nl": "Vervangen",

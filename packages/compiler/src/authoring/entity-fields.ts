@@ -87,6 +87,7 @@ export function deriveEntityOsfTypes(
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       shape: withInverseCollections(entity.entity, entity.fields, deriveInverseCollections(entity.entity, sources, isEntityType)),
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
+      ...(entity.versioning ? { versioned: true } : {}),
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
     if (result[entity.entity]!.entityIdentity === false) continue;
@@ -103,6 +104,13 @@ export function deriveEntityOsfTypes(
       icon: "file",
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     };
+  }
+  for (const entity of entities) {
+    const versionEntity = entity.versioning?.versionEntity;
+    if (!versionEntity) continue;
+    const target = result[versionEntity];
+    if (target?.kind !== "entity") throw new Error(`${entity.entity}: versioning.versionEntity ${versionEntity} is not a loaded entity.`);
+    target.versionEntityOf = entity.entity;
   }
   return result;
 }
@@ -230,6 +238,17 @@ export function normalizeEntityFields(
       return result;
     }
     if (field.provider) throw new Error(`${path}: provider requires an osfType that names a provider-backed entity.`);
+    if (field.childLock !== undefined) {
+      if (!collection || field.relationship?.ownership !== "owned") throw new Error(`${path}: childLock requires an owned collection.`);
+      const lock = semantic?.shape?.find((candidate) => candidate.key === field.childLock);
+      if (!lock || resolveBaseType(lock.osfType, catalog) !== "boolean" || fieldCardinality(lock) !== "single") throw new Error(`${path}: childLock must name a single boolean field of ${semantic?.entity ?? field.osfType}.`);
+    }
+    if (field.relationship?.version) {
+      if (collection || field.relationship.ownership === "owned") throw new Error(`${path}: version applies to a single reference only.`);
+      if (!["pinned", "current"].includes(field.relationship.version)) throw new Error(`${path}: version must be pinned or current.`);
+      if (field.relationship.version === "pinned" && !semantic?.versionEntityOf) throw new Error(`${path}: version: pinned requires a target that is the version entity of a versioned entity.`);
+      if (field.relationship.version === "current" && !semantic?.versioned) throw new Error(`${path}: version: current requires a target that declares versioning.`);
+    }
     if (semantic?.kind !== "entity") {
       if (field.relationship) throw new Error(`${path}: relationship requires a loaded entity osfType.`);
       return result;
@@ -315,6 +334,7 @@ function relationshipOf(
       ownership: metadata.ownership ?? "reference",
       foreignKey,
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+      ...(metadata.version ? { version: metadata.version } : {}),
       ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
     };
   }

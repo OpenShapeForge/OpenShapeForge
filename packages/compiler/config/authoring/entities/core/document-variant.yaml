@@ -1,0 +1,150 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: DocumentVariant
+title: Document variant
+description: One channel and language of a document's editable content, seeded from the linked template
+  version's variant of the same channel and language. See docs/document-content.md.
+language: en
+labels: { en: Document variant, nl: Documentvariant }
+domains: [documents]
+authorization:
+  roles:
+    # Same roles as Document: a variant is part of its document, not of the template.
+    read: [CaseFile.All.Read, CaseFile.All.ReadWrite]
+    create: [CaseFile.All.ReadWrite]
+    update: [CaseFile.All.ReadWrite]
+    delete: [CaseFile.All.ReadWrite]
+displayTemplate: "{{channel}} · {{locale}}"
+indexes:
+  - { name: document_variants_tenant_document_channel_locale_uidx, fields: [tenantId, document, channel, locale], unique: true }
+fields:
+  - key: document
+    label: { en: Document, nl: Document }
+    osfType: Document
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: variants
+        label: { en: Content, nl: Inhoud }
+        ownership: owned
+  - key: channel
+    label: { en: Channel, nl: Kanaal }
+    osfType: string
+    required: true
+    immutable: true
+    options:
+      type: static
+      items:
+        - { value: document, label: { en: Document, nl: Document } }
+        - { value: email, label: { en: Email, nl: E-mail } }
+        - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
+    persisted: { column: channel, storageClass: core }
+  - key: locale
+    osfType: string
+    required: true
+    immutable: true
+    defaultValue: nl
+    validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
+    label: { en: Content language, nl: Inhoudstaal }
+    persisted: { column: locale, storageClass: core }
+  # The owned, sortable, lock-aware `blocks` collection is derived from
+  # Block.documentVariant (entities/core/block.yaml), where its
+  # allowedDefinitions, childAuthorization and childLock are declared.
+operations:
+  insertBlock:
+    name: { en: Add block, nl: Blok toevoegen }
+    description: Insert an allowed block into this variant atomically, at the end or before another block.
+    implementation: { type: collection, action: insert, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  moveBlock:
+    name: { en: Move block, nl: Blok verplaatsen }
+    description: Move an unlocked block within this variant atomically.
+    implementation: { type: collection, action: move, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  updateBlock:
+    name: { en: Edit block, nl: Blok bewerken }
+    description: Change the values of one unlocked block of this variant, authorized through the variant.
+    implementation: { type: collection, action: update, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  removeBlock:
+    name: { en: Remove block, nl: Blok verwijderen }
+    description: Remove one unlocked block from this variant, authorized through the variant.
+    implementation: { type: collection, action: remove, field: blocks }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  list:
+    name: List document variants
+    description: Read accessible document variant records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read document variant
+    description: Read one accessible document variant record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create document variant
+    description: Add a channel and language to a document's content, without a template.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update document variant
+    description: Internal-only; the block Operations above are the only writes. Kept because the collection machinery requires the child to be mutable.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      update: false
+  graphql:
+    operations:
+      update: false
+  mcp:
+    tools: generic
+    operations:
+      update: false
+  web:
+    operations:
+      update: false
+    views:
+      collection:
+        route: /document-variants
+        title: { en: Document variants, nl: Documentvarianten }
+        columns: [{ key: channel }, { key: locale }]
+      record:
+        routes: { read: "/document-variants/:id", create: /document-variants/new }
+        title: "{{channel}} · {{locale}}"
+        layout:
+          tabs:
+            - id: variant
+              label: { en: Variant, nl: Variant }
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }]
+            - id: blocks
+              label: { en: Blocks, nl: Blokken }
+              relationship: blocks
+        modes:
+          create:
+            title: { en: Create, nl: Toevoegen }
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }]

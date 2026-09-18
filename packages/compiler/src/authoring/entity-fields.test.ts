@@ -166,3 +166,43 @@ describe("provider-backed reference", () => {
     expect(() => normalizeEntityFields(relation({ key: "page", osfType: "Page", provider: { bindings: { relationId: "id" } } }), withProviders())).toThrow("provider requires an osfType that names a provider-backed entity");
   });
 });
+
+describe("collection locks and reference versions", () => {
+  const versioned = (): CoreEntity => ({ ...entity("Template", []), versioning: { strategy: "publishedSnapshot", versionEntity: "TemplateVersion", versionsField: "versions" } });
+  const version = entity("TemplateVersion", [{ key: "template", osfType: "Template", required: true, relationship: { inverse: { key: "versions", ownership: "owned" } } }]);
+  const variant = (inverse: Record<string, unknown> = { key: "variants", ownership: "owned", childLock: "locked" }) => entity("Variant", [
+    { key: "template", osfType: "Template", required: true, relationship: { inverse } },
+    { key: "locked", osfType: "boolean", required: true },
+    { key: "note", osfType: "string" },
+  ]);
+  const corpus = (variantEntity = variant()) => deriveEntityOsfTypes([versioned(), version, variantEntity, block, page], {});
+
+  test("derives which entities are versioned and which are version entities", () => {
+    expect(corpus().Template).toMatchObject({ versioned: true });
+    expect(corpus().TemplateVersion).toMatchObject({ versionEntityOf: "Template" });
+    expect(corpus().Variant!.versioned).toBeUndefined();
+    expect(() => deriveEntityOsfTypes([{ ...versioned(), versioning: { strategy: "publishedSnapshot", versionEntity: "Missing", versionsField: "versions" } }], {})).toThrow("not a loaded entity");
+  });
+  test("childLock rides the derived collection, names a single boolean field of the owned child, and reaches the compiled relationship", () => {
+    const normalized = normalizeEntityFields(versioned(), corpus());
+    const variants = normalized.fields.find((field) => field.key === "variants");
+    expect(variants).toMatchObject({ childLock: "locked", relationship: { ownership: "owned", inverse: "template" } });
+    expect(resolveRelationships({ coreEntity: normalized, profiles: [] } as unknown as LoadedArtifacts).find((relationship) => relationship.key === "variants")).toMatchObject({ childLock: "locked" });
+    for (const key of ["note", "missing"]) {
+      expect(() => normalizeEntityFields(versioned(), corpus(variant({ key: "variants", ownership: "owned", childLock: key })))).toThrow("single boolean");
+    }
+    expect(() => normalizeEntityFields(versioned(), corpus(variant({ key: "variants", ownership: "reference", childLock: "locked" })))).toThrow("owned collection");
+  });
+  test("version: pinned needs a version entity as target, version: current a versioned one, and nothing else is accepted", () => {
+    const reference = (target: string, version: string) => entity("Document", [{ key: "ref", osfType: target, relationship: { ownership: "reference", version: version as "pinned", inverse: false } }]);
+    expect(normalizeEntityFields(reference("TemplateVersion", "pinned"), corpus()).fields[0]?.relationship).toMatchObject({ version: "pinned", ownership: "reference" });
+    expect(normalizeEntityFields(reference("Template", "current"), corpus()).fields[0]?.relationship).toMatchObject({ version: "current" });
+    expect(normalizeEntityFields(reference("Variant", "" as "pinned"), corpus()).fields[0]?.relationship?.version).toBeUndefined();
+    expect(() => normalizeEntityFields(reference("Variant", "pinned"), corpus())).toThrow("version entity of a versioned entity");
+    expect(() => normalizeEntityFields(reference("Template", "pinned"), corpus())).toThrow("version entity of a versioned entity");
+    expect(() => normalizeEntityFields(reference("TemplateVersion", "current"), corpus())).toThrow("declares versioning");
+    expect(() => normalizeEntityFields(reference("TemplateVersion", "latest"), corpus())).toThrow("pinned or current");
+    const owned = entity("Document", [{ key: "ref", osfType: "TemplateVersion", relationship: { ownership: "owned", version: "pinned", inverse: false } }]);
+    expect(() => normalizeEntityFields(owned, corpus())).toThrow("single reference only");
+  });
+});

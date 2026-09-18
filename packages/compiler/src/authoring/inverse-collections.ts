@@ -63,6 +63,7 @@ export function deriveInverseCollection(
     cardinality: "collection",
     ...(declaration?.sortable ? { sortable: true } : {}),
     ...(declaration?.childAuthorization ? { childAuthorization: declaration.childAuthorization } : {}),
+    ...(declaration?.childLock ? { childLock: declaration.childLock } : {}),
     ...(declaration?.allowedDefinitions ? { allowedDefinitions: [...declaration.allowedDefinitions] } : {}),
     relationship: { inverse: field.key, ownership: declaration?.ownership ?? "reference" },
   };

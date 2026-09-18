@@ -197,6 +197,53 @@ describe("web manifest projection", () => {
     expect(blocked.views.record?.routes.create).toBeUndefined();
     expect(blocked.fields.displayName?.supports.create).toBe(false);
   });
+  test("a derived collection offers create when the child accepts the parent key on create", () => {
+    // Child: a single reference to Parent that no create-form group lists,
+    // the way a migrated relationships-block key or an unlisted reference is.
+    const childOf = (overrides: Partial<CompiledField> = {}) => {
+      const child = entity("Child", "child", [
+        field("id", { required: true, readOnly: true, osfType: "childId" }),
+        field("displayName"),
+        field("parentId", { osfType: "Parent", relationship: { kind: "belongsTo", target: "Parent", fieldKey: "parentId", foreignKey: "parent_id" }, ...overrides }),
+      ], coreView(), [{ key: "parentId", fieldKey: "parentId", kind: "belongsTo", target: "Parent", foreignKey: "parent_id", ownership: "reference" }]);
+      child.contract.authoringVersion = 3;
+      child.contract.interfaces = { web: { operations: { list: true, get: true, create: true, update: true, delete: true } } };
+      child.contract.storage.columns.find((column) => column.field === "parentId")!.column = "parent_id";
+      return child;
+    };
+    const parentOf = (ownership: "reference" | "owned") => {
+      const parent = entity("Parent", "parent", [
+        field("id", { required: true, readOnly: true, osfType: "parentId" }),
+        field("displayName"),
+        field("children", { osfType: "Child", cardinality: "collection" }),
+      ], coreView(), [{ key: "children", fieldKey: "children", kind: "hasMany", target: "Child", foreignKey: "parent_id", inverse: "parentId", ownership, cardinality: "collection" }]);
+      parent.contract.authoringVersion = 3;
+      parent.contract.interfaces = { web: { operations: { list: true, get: true, create: true, update: true, delete: true } } };
+      return parent;
+    };
+
+    // Writable key: the child form can be pre-filled with the parent, so the
+    // collection creates a child from the parent record.
+    const open = buildWebManifest([parentOf("reference"), childOf()]);
+    expect(open.entities.Child!.fields.parentId?.supports).toEqual({ read: true, create: true, update: false });
+    expect(open.entities.Parent!.relationships.children?.operations.create).toMatchObject({ id: "Child.create" });
+    expect(open.entities.Parent!.relationships.children?.collection?.operations.create).toMatchObject({ id: "Child.create" });
+    // A single reference never creates its target from the picker.
+    expect(open.entities.Child!.relationships.parentId?.operations.create).toBeUndefined();
+
+    // Read-only key: nothing can pre-fill it, so no create from the parent.
+    const readOnly = buildWebManifest([parentOf("reference"), childOf({ readOnly: true })]);
+    expect(readOnly.entities.Child!.fields.parentId?.supports.create).toBe(false);
+    expect(readOnly.entities.Parent!.relationships.children?.operations.create).toBeUndefined();
+    expect(readOnly.entities.Parent!.relationships.children?.collection?.operations.create).toBeUndefined();
+
+    // Owned key: the owner's atomic insert writes it, so the key is
+    // server-owned and the collection keeps no generic create.
+    const owned = buildWebManifest([parentOf("owned"), childOf()]);
+    expect(owned.entities.Child!.fields.parentId?.supports.create).toBe(false);
+    expect(owned.entities.Parent!.relationships.children?.operations.create).toBeUndefined();
+    expect(owned.entities.Parent!.relationships.children?.collection?.operations.create).toBeUndefined();
+  });
   test("does not invent a context summary by copying the first detail group", () => {
     const example = entity("Example", "example", [field("displayName")], coreView());
     expect(buildWebManifest([example]).entities.Example!.views.record!.layout.context).toEqual({ groups: [], relationships: [] });

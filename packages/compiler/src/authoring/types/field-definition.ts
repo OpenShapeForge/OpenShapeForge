@@ -71,6 +71,8 @@ export interface FieldDefinitionInverseCollection {
   ownership?: "owned" | "reference";
   sortable?: boolean;
   childAuthorization?: "owner";
+  /** Boolean field of the referencing (owned) entity; the owner's update, move and remove refuse a child whose flag is set. */
+  childLock?: string;
   allowedDefinitions?: string[];
 }
 
@@ -89,6 +91,13 @@ export interface FieldDefinitionRelationship {
   /** Compiler-derived join source, not an authored SQL/storage choice. */
   through?: { field: string; column: string; target: string };
   ownership?: "owned" | "reference";
+  /**
+   * How a single reference relates to a versioned target: `current` (the
+   * default, the target's editable head) or `pinned` (one immutable version,
+   * moved only by an authored command). Metadata for readers of the manifest;
+   * the foreign key itself already pins.
+   */
+  version?: "pinned" | "current";
   /** Compiler-derived identity; not authored twice beside osfType. */
   target?: string;
   fieldKey?: string;
@@ -177,6 +186,11 @@ export interface FieldDefinition {
    * child entity's own roles. Explicit per collection; never implied.
    */
   childAuthorization?: "owner";
+  /**
+   * Key of a boolean field on the owned child. The owner's collection update,
+   * move and remove Operations refuse a child whose flag is set.
+   */
+  childLock?: string;
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;

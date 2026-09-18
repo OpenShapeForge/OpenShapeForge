@@ -13,6 +13,14 @@ describe("frozen child order", () => {
     expect(orderSnapshotChildren(rows).map((row) => row.id)).toEqual(expected);
     expect(orderSnapshotChildren([...rows].reverse()).map((row) => row.id)).toEqual(expected);
   });
+  test("orders a child with several owners by the owning key's position column, not the first jsonb key", () => {
+    const rows = [
+      { id: "a", variant_id_position: 0, document_variant_id_position: 1 },
+      { id: "b", variant_id_position: 0, document_variant_id_position: 0 },
+    ];
+    expect(orderSnapshotChildren(rows, ["tenant_id", "document_variant_id"]).map((row) => row.id)).toEqual(["b", "a"]);
+    expect(orderSnapshotChildren(rows, ["tenant_id", "variant_id"]).map((row) => row.id)).toEqual(["a", "b"]);
+  });
   test("falls back to id order for collections without a position column", () => {
     const rows = [{ id: "b" }, { id: "a" }, { id: "c" }];
     expect(orderSnapshotChildren(rows).map((row) => row.id)).toEqual(["a", "b", "c"]);

@@ -988,7 +988,10 @@ const objectResolvers = Object.fromEntries(
         return [
           [
             relationship.name,
-            async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
+            // Projected like the root resolvers: a refusal inside the edge
+            // (FORBIDDEN on the target) must reach the client with its code,
+            // not as a masked "Unexpected error." (#471).
+            (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => projectGraphqlOperation(async () => {
               const db = requireGeneratedDb(context);
               // Reading the related entity requires read authorization on the
               // TARGET entity (#94): a caller with no read grant on the target
@@ -1003,11 +1006,11 @@ const objectResolvers = Object.fromEntries(
               return relationship.resolve === "belongsTo"
                 ? result.rows[0] ?? null
                 : result.rows;
-            },
+            }),
           ],
           [
             `${relationship.name}Aggregate`,
-            async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
+            (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => projectGraphqlOperation(async () => {
               const db = requireGeneratedDb(context);
               assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
               // The count IS this field, so it is always computed here.
@@ -1020,7 +1023,7 @@ const objectResolvers = Object.fromEntries(
                 includeTotalCount: true,
               });
               return { count: result.totalCount };
-            },
+            }),
           ],
         ];
       }),

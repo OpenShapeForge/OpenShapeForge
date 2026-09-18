@@ -262,8 +262,12 @@ function providerRelationshipOf(
   if (nested) throw new Error(`${path}: provider-backed references are top-level fields, not values inside JSON.`);
   if (entity.schemaVersion !== 3) throw new Error(`${path}: provider-backed references require schemaVersion 3.`);
   if (field.persisted) throw new Error(`${path}: a provider-backed reference has no storage of its own; the ${target} Operations resolve it.`);
-  if (field.relationship) throw new Error(`${path}: a provider-backed reference declares provider.bindings, not relationship metadata.`);
-  const bindings = field.provider?.bindings;
+  // Normalization runs more than once (loader, then compile): a relationship
+  // this function derived earlier is not authored metadata.
+  if (field.relationship && !field.relationship.provider) {
+    throw new Error(`${path}: a provider-backed reference declares provider.bindings, not relationship metadata.`);
+  }
+  const bindings = field.provider?.bindings ?? field.relationship?.provider?.bindings;
   if (!bindings || Object.keys(bindings).length === 0) {
     throw new Error(`${path}: provider.bindings maps ${target} Operation input fields to fields of ${entity.entity}.`);
   }

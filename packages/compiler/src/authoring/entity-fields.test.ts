@@ -149,6 +149,11 @@ describe("provider-backed reference", () => {
     ]);
     expect(resolveStorageColumns(normalized.fields, [])).toEqual([]);
   });
+  test("normalizing an already normalized entity again derives the same provider relationship", () => {
+    const once = normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "id" } } }), withProviders());
+    const twice = normalizeEntityFields(once, withProviders());
+    expect(twice.fields.find((field) => field.key === "account")).toEqual(once.fields.find((field) => field.key === "account"));
+  });
   test("a collection reference becomes a hasMany with the same binding", () => {
     const normalized = normalizeEntityFields(relation({ key: "accounts", osfType: "Account", cardinality: "collection", provider: { bindings: { relationId: "id" } } }), withProviders());
     expect(normalized.fields.find((field) => field.key === "accounts")?.relationship).toMatchObject({ kind: "hasMany", target: "Account", provider: { bindings: { relationId: "id" } } });

@@ -47,6 +47,19 @@ export function materializeCollectionOperations(
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
       if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" || definition.concurrency?.editLease) fail("unsupported collection guard/effect combination.");
 
+      // A child never chooses its owner nor its lock through the owner's
+      // collection Operations: every owning foreign key of the child (this
+      // collection's inverse and any other entity's) and the collection's
+      // childLock field leave the values contract, so the schema promises no
+      // more than the storage guards admit.
+      const excluded = new Set<string>([relation.inverse, ...(relation.childLock ? [relation.childLock] : []),
+        ...contracts.flatMap((contract) => contract.model.relationships
+          .filter((candidate) => candidate.kind === "hasMany" && candidate.ownership === "owned" && candidate.target === child.entity.name && candidate.inverse)
+          .map((candidate) => candidate.inverse!))]);
+      const withoutExcluded = (values: Record<string, unknown>) => {
+        for (const key of excluded) delete (values.properties as Record<string, unknown>)[key];
+        if (Array.isArray(values.required)) values.required = values.required.filter((key) => !excluded.has(String(key)));
+      };
       const properties: Record<string, unknown> = {
         id: { ...uuid, ...title("Parent ID", "Bovenliggend ID") },
         expectedVersion: { type: "string", format: "date-time", ...title("Expected version", "Verwachte versie") },
@@ -59,9 +72,8 @@ export function materializeCollectionOperations(
         const input = entityOperationJsonSchemas(child, create, contracts, referentiedata).inputSchema;
         const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
         if (!values || values.type !== "object" || !values.properties) fail("child create must expose a concrete values object.");
+        withoutExcluded(values);
         const valueProperties = values.properties as Record<string, unknown>;
-        delete valueProperties[relation.inverse];
-        if (Array.isArray(values.required)) values.required = values.required.filter((key) => key !== relation.inverse);
         definitions = input.$defs;
         const branches: Record<string, unknown>[] = [];
         for (const valueField of child.model.fields.filter((field) => field.entityValue)) {
@@ -103,8 +115,7 @@ export function materializeCollectionOperations(
         const input = entityOperationJsonSchemas(child, childUpdate, contracts, referentiedata).inputSchema;
         const values = structuredClone((input.properties as Record<string, unknown>).values) as Record<string, unknown>;
         if (!values || values.type !== "object" || !values.properties) fail("child update must expose a concrete values object.");
-        delete (values.properties as Record<string, unknown>)[relation.inverse];
-        if (Array.isArray(values.required)) values.required = values.required.filter((key) => key !== relation.inverse);
+        withoutExcluded(values);
         definitions = input.$defs;
         delete properties.beforeId;
         properties.childId = { ...uuid, ...title("Child ID", "Onderliggend ID") }; required.push("childId");

@@ -3,8 +3,9 @@ kind: coreEntity
 module: core
 entity: Document
 title: Document
-description: A governed document container linked to a case file, optionally a case, and optionally a relation; version
-  and artifact facts live on DocumentVersion.
+description: A governed document container linked to a case file, optionally a case, and optionally a relation. Its
+  editable content lives in owned variants seeded from a linked template version; version and artifact facts live on
+  DocumentVersion. See docs/document-content.md.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -30,6 +31,11 @@ retention:
       - publishedAt
       - registeredAt
       - receivedAt
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: DocumentVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
 authorization:
   roles:
     read:
@@ -265,23 +271,43 @@ fields:
     osfType: DocumentVersion
     relationship:
       ownership: reference
-  - key: currentRevisionId
+  - key: templateVersionId
+    label: { en: Template version, nl: Templateversie }
+    description:
+      en: The published template version this document's content is seeded from. Pinned; moves only through Link template or when the template is republished.
+      nl: De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd.
     required: false
     readOnly: true
-    label:
-      en: Current revision ID
-      nl: Huidige revisie-ID
-    description:
-      en: Server-managed pointer to the revision that was published last.
-      nl: Door de server beheerde verwijzing naar de laatst gepubliceerde revisie.
-    validation:
-      format: uuid
-    persisted:
-      column: current_revision_id
-      storageClass: core
-    osfType: DocumentRevision
+    writtenBy: [Document.linkTemplate, Template.publish]
+    validation: { format: uuid }
+    persisted: { column: template_version_id, storageClass: core }
+    osfType: TemplateVersion
     relationship:
       ownership: reference
+      version: pinned
+      inverse:
+        key: documents
+        label: { en: Documents, nl: Documenten }
+  - key: parameters
+    osfType: object
+    required: false
+    defaultValue: {}
+    label: { en: Local values, nl: Lokale waarden }
+    description:
+      en: Values for the linked template's local variables, resolved when the content is materialized.
+      nl: Waarden voor de lokale variabelen van de gekoppelde template, ingevuld bij het samenstellen van de inhoud.
+    persisted: { column: parameters, storageClass: core }
+  - key: followError
+    label: { en: Follow problem, nl: Volgprobleem }
+    description:
+      en: Why the last template republish could not be applied to this document; cleared when a later republish succeeds.
+      nl: Waarom de laatste herpublicatie van de template niet op dit document kon worden toegepast; gewist zodra een latere herpublicatie slaagt.
+    osfType: string
+    required: false
+    readOnly: true
+    writtenBy: [Template.publish]
+    validation: { maxLength: 2000 }
+    persisted: { column: follow_error, storageClass: core }
   - key: caseFileId
     label:
       en: Case file
@@ -462,20 +488,20 @@ operations:
       - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
       - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
-  startRevision:
-    name: { en: Start revision, nl: Revisie starten }
+  linkTemplate:
+    name: { en: Link template, nl: Template koppelen }
     description:
-      en: Start an editable draft revision of this document, seeded from a published template version.
-      nl: Start een bewerkbare conceptrevisie van dit document, overgenomen uit een gepubliceerde templateversie.
-    implementation: { type: plugin, plugin: documents, handler: startRevision }
-    target: { scope: record, inputField: documentId }
+      en: Seed this document's content from a published template version, one variant per channel and language of the template. Linking a newer version of the same template follows it like a republish; linking another template replaces the content only when replace is set.
+      nl: Neem de inhoud van dit document over uit een gepubliceerde templateversie, één variant per kanaal en taal van de template. Een nieuwere versie van dezelfde template wordt gevolgd zoals bij herpubliceren; een andere template vervangt de inhoud alleen als replace is gezet.
+    implementation: { type: plugin, plugin: documents, handler: linkTemplate }
+    target: { scope: record, inputField: id }
     input:
       schema:
         type: object
         additionalProperties: false
-        required: [documentId, channel, locale]
+        required: [id, templateVersionId]
         properties:
-          documentId:
+          id:
             type: string
             format: uuid
             x-osf-reference: { entity: Document }
@@ -485,53 +511,31 @@ operations:
             format: uuid
             x-osf-reference: { entity: TemplateVersion }
             x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
-          channel:
-            type: string
-            enum: [document, email, whatsapp]
-            x-osf-i18n:
-              title: { en: Channel, nl: Kanaal }
-              enum:
-                {
-                  document: { en: Document, nl: Document },
-                  email: { en: Email, nl: E-mail },
-                  whatsapp: { en: WhatsApp, nl: WhatsApp }
-                }
-          locale:
-            type: string
-            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
-            x-osf-i18n: { title: { en: Language, nl: Taal } }
           parameters:
             type: object
             x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
+          replace:
+            type: boolean
+            default: false
+            x-osf-i18n:
+              title: { en: Replace local content, nl: Lokale inhoud vervangen }
+              description: { en: Discard local blocks when linking a different template., nl: Lokale blokken weggooien bij het koppelen van een andere template. }
     output:
       schema:
         type: object
         additionalProperties: true
-        required: [id, document, status]
+        required: [id, templateVersionId]
         properties:
-          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Revision, nl: Revisie } } }
-          document: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
-          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          templateVersionId: { type: string, format: uuid, x-osf-i18n: { title: { en: Template version, nl: Templateversie } } }
+          followError: { type: [string, "null"], x-osf-i18n: { title: { en: Follow problem, nl: Volgprobleem } } }
     errors:
-      - { status: 400, code: VALIDATION, description: The revision input is invalid. }
+      - { status: 400, code: VALIDATION, description: The link input or the local values are invalid. }
       - { status: 403, code: FORBIDDEN, description: The document or template version is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The document or template version does not exist. }
-      - {
-          status: 404,
-          code: DEPENDENCY_UNRESOLVED,
-          description: The template version has no variant for this channel and locale.
-        }
+      - { status: 409, code: INVALID_STATE, description: "The template version is not published, or another template is linked while local blocks exist and replace is not set." }
     auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
-  removeRevision:
-    name: { en: Remove revision, nl: Revisie verwijderen }
-    description:
-      en: Remove an unpublished revision and its blocks, authorized through the document.
-      nl: Verwijder een niet-gepubliceerde revisie met haar blokken, geautoriseerd via het document.
-    implementation: { type: collection, action: remove, field: revisions }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
@@ -542,7 +546,7 @@ operations:
     implementation: { type: entity, action: update }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
-    # Owner-scoped revision removal needs the owner's version; same contract as Template.update.
+    # Owner-scoped writes need the owner's version; same contract as Template.update.
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
   delete:
@@ -555,7 +559,7 @@ operations:
 interfaces:
   rest:
     operations:
-      startRevision: { method: POST, path: "/api/document-content/:documentId/revisions", response: { status: 201, kind: json } }
+      linkTemplate: { method: POST, path: "/api/document-content/:id/link-template" }
   graphql: {}
   mcp: {}
   web:
@@ -574,11 +578,11 @@ interfaces:
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"
-        actions: [startRevision]
+        actions: [linkTemplate]
         layout:
           context:
-            fields: [documentType, confidentiality, author, registeredAt]
-            relationships: [relationId, caseFileId, caseId, currentVersionId, currentRevisionId]
+            fields: [ documentType, confidentiality, author, registeredAt, lifecycleStatus ]
+            relationships: [ relationId, caseFileId, caseId, currentVersionId, templateVersionId ]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
@@ -589,9 +593,12 @@ interfaces:
                   fields: [author, source, isExternal, confidentiality]
                 - title: { en: Registration and publication, nl: Registratie en publicatie }
                   fields: [receivedAt, registeredAt, publishedAt]
-            - id: revisions
-              label: { en: Revisions, nl: Revisies }
-              relationship: revisions
+            - id: content
+              label: { en: Content, nl: Inhoud }
+              relationship: variants
+            - id: variables
+              label: { en: Variables, nl: Variabelen }
+              groups: [{ title: { en: Local values, nl: Lokale waarden }, fields: [templateVersionId, parameters, followError] }]
             - id: versions
               label: { en: Versions, nl: Versies }
               relationship: versions
@@ -601,3 +608,10 @@ interfaces:
             groups:
               - title: { en: Document, nl: Document }
                 fields: [title, documentType, status]
+          update:
+            title: { en: Edit document, nl: Document bewerken }
+            groups:
+              - title: { en: Document, nl: Document }
+                fields: [ code, title, description, documentType, status, confidentiality, source, author, isExternal ]
+              - title: { en: Local values, nl: Lokale waarden }
+                fields: [ parameters ]

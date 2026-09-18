@@ -410,7 +410,7 @@ jobs:
           bun test src/db
           bun test src/operations
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
-          bun test src/documents/__tests__/document-revisions-db.test.ts src/documents/__tests__/document-revisions-authorization-db.test.ts
+          bun test src/documents/__tests__/document-content-db.test.ts src/documents/__tests__/document-content-authorization-db.test.ts
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
           bun test src/modules/platform-artifact-transaction.test.ts
 

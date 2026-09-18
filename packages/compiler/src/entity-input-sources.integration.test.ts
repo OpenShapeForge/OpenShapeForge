@@ -70,7 +70,7 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   });
   expect(versionProperties.status).toMatchObject({
     type: "string",
-    enum: ["draft", "final", "superseded", "withdrawn"],
+    enum: ["draft", "final", "published", "superseded", "withdrawn"],
   });
   expect(versionProperties.accountId).toMatchObject({
     type: "string",

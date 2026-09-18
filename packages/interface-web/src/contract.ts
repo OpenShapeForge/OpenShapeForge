@@ -211,6 +211,12 @@ export type WebRelationshipProjection = {
   mutationSupport?: "unsupported" | "atomic";
   allowedDefinitions?: string[];
   constraints?: WebRelationshipConstraints;
+  /**
+   * Present when the target is a provider-backed entity: no foreign key exists.
+   * The browser runs the target's Operations, filling each input field named
+   * in `bindings` from the field of the current record it maps to.
+   */
+  source?: { kind: "provider"; bindings: Record<string, string> };
   operations: {
     list?: WebOperationRef;
     get?: WebOperationRef;

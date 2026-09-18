@@ -19,7 +19,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
 import { assertV2Authoring } from "./entity-v2.js";
-import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
+import { loadOperationCatalogs } from "./operation-catalog.js";
 import type {
   CoreEntity,
   EntityProfile,
@@ -501,7 +502,10 @@ export function loadOsfTypes(authoringDir: string): Record<string, OsfTypeDefini
     Object.assign(merged, types);
   }
   const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
-  return deriveEntityOsfTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
+  const withEntities = deriveEntityOsfTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
+  // Provider-backed entities (declared by Operation catalogs) are relationship
+  // targets too: a field may name one as its osfType.
+  return deriveProviderOsfTypes(loadOperationCatalogs(authoringDir).map(({ document }) => document), withEntities);
 }
 
 export interface OsfTypeCatalogSource {

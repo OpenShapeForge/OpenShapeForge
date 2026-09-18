@@ -151,6 +151,8 @@ export interface CompiledRelationship {
   via?: string;
   label?: LocalizedText;
   constraints?: import("./field-definition.js").FieldDefinitionRelationshipConstraints;
+  /** The target is provider-backed: no storage, no foreign key; its Operations resolve the records. */
+  provider?: import("./field-definition.js").FieldDefinitionProvider;
 }
 
 export interface GraphQLField {

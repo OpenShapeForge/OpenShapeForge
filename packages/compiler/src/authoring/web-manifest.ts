@@ -492,9 +492,46 @@ function withoutCreate<T extends { create?: unknown }>(operations: T): Omit<T, "
   return rest;
 }
 
+/**
+ * A relationship whose target is provider-backed: nothing is joined, the
+ * target's list/get Operations run with the bound record fields as input.
+ */
+function projectProviderRelationship(
+  entityName: string,
+  relationship: CompiledEntityContract["model"]["relationships"][number],
+  providers: ReadonlyMap<string, WebEntityInterface>,
+  fields: Record<string, unknown>,
+): [string, WebRelationshipProjection][] {
+  const origin = `${entityName}.${relationship.key}`;
+  const provider = providers.get(relationship.target);
+  if (!provider) throw new Error(`${origin}: provider entity ${relationship.target} is not projected to the web.`);
+  const bindings = relationship.provider!.bindings;
+  const list = provider.views.collection.operations.read;
+  const get = provider.views.record?.operations.read;
+  const input = objectProperties("input" in list && list.input?.kind === "json-schema" ? list.input.schema : undefined);
+  for (const [inputField, ownField] of Object.entries(bindings)) {
+    if (!input[inputField]) throw new Error(`${origin}: provider.bindings.${inputField} is not an input of ${list.id}.`);
+    if (!fields[ownField]) throw new Error(`${origin}: provider.bindings.${inputField} names unknown field ${entityName}.${ownField}.`);
+  }
+  return [[relationship.key, {
+    id: origin,
+    key: relationship.key,
+    label: localized(relationship.label, relationship.key),
+    kind: relationship.kind,
+    targetEntityId: provider.entityId,
+    targetRoute: provider.views.collection.route,
+    ...(relationship.fieldKey ? { fieldKey: relationship.fieldKey } : {}),
+    ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
+    source: { kind: "provider", bindings: { ...bindings } },
+    operations: { list, ...(get ? { get } : {}) },
+    collection: { ...provider.views.collection, id: `${provider.entityId}.relationship.collection` },
+  }]];
+}
+
 function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
+  providers: ReadonlyMap<string, WebEntityInterface> = new Map(),
 ): WebEntityInterface {
   const { contract, view, customOperations } = source;
   const createUnsupported = unsupportedGenericCreate(source, all);
@@ -526,7 +563,10 @@ function projectEntity(
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
-  const explicitFields = contract.model.fields.map((field) => {
+  // A provider-backed reference is only a relationship: it has no value of its
+  // own to read or write, so it is not a field on any interface.
+  const providerFieldKeys = new Set(contract.model.relationships.flatMap((relationship) => relationship.provider && relationship.fieldKey ? [relationship.fieldKey] : []));
+  const explicitFields = contract.model.fields.filter((field) => !providerFieldKeys.has(field.key)).map((field) => {
     const projected = projectField(field, entityName, {
         read: true,
         create: !field.readOnly && !field.deriveOnCreate && createFields.has(field.key),
@@ -539,6 +579,7 @@ function projectEntity(
   const fields = Object.fromEntries(explicitFields);
 
   const relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
+    if (relationship.provider) return projectProviderRelationship(entityName, relationship, providers, fields);
     const target = all.get(relationship.target);
     if (!target || (!relationship.foreignKey && !relationship.via)) return [];
     const list = target.operations.list;
@@ -1114,9 +1155,11 @@ export function buildWebManifest(
       ...(materialize ? { materializeOperationId: materialize.id } : {}),
     }];
   }));
-  const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
-  const projected = projectable.map((entity) => projectEntity(entity, byName));
+  // Provider-backed entities project first: a core entity may reference one.
   const pages = projectStandalone(standalone);
+  const providers = new Map(Object.entries(pages?.entities ?? {}));
+  const byName = new Map(projectable.map((entity) => [entity.contract.entity.name, entity]));
+  const projected = projectable.map((entity) => projectEntity(entity, byName, providers));
   const missing = missingUiTranslations(projected);
   missing.push(...missingUiTranslations(pages?.operations ?? {}));
   if (resolved.requireTranslations) for (const entity of projectable) {

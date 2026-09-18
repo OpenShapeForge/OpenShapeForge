@@ -46,7 +46,9 @@ export function buildGraphQL(
     };
   });
 
-  const gqlRels: GraphQLRelationship[] = relationships.map((r) => ({
+  // A provider-backed reference has no column to join on; its target's
+  // Operations resolve it outside GraphQL.
+  const gqlRels: GraphQLRelationship[] = relationships.filter((r) => !r.provider).map((r) => ({
     name: r.key,
     target: r.target,
     type: r.kind === "hasMany"

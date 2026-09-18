@@ -84,7 +84,6 @@ export type {
   FieldDefinitionValueType,
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
-  FieldV2,
   CompiledField,
   CompiledEntityOperation,
   ComponentCatalog,

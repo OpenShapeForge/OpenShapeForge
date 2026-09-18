@@ -328,6 +328,20 @@
         "defaultValue": {},
         "validation": { "$ref": "#/$defs/validation" },
         "relationship": { "$ref": "#/$defs/relationship" },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bindings"],
+          "properties": {
+            "bindings": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "description": "Operation input field of the provider-backed entity -> field of this entity whose value fills it."
+            }
+          },
+          "description": "A reference to a provider-backed entity (declared by an Operation catalog, no storage). The target's Operations resolve it from this record; the field itself is never stored."
+        },
         "options": { "$ref": "#/$defs/fieldOptions" },
         "persisted": {
           "type": "object",

@@ -1175,3 +1175,88 @@ describe("standalone Operation pages", () => {
       .toThrow(/control\.get-tenant\.input\.properties\.slug\.x-osf-i18n\.title/);
   });
 });
+
+describe("provider-backed relationships", () => {
+  const accounts: OperationCatalogDefinition = {
+    ...controlCatalog,
+    operations: {
+      ...controlCatalog.operations,
+      listAccounts: {
+        ...controlCatalog.operations.listTenants!,
+        id: "control.list-accounts",
+        name: text("Accounts"),
+        description: text("The accounts of one relation.", "De accounts van één relatie."),
+        implementation: { type: "plugin", plugin: "osf-control", handler: "listAccounts" },
+        input: { schema: { type: "object", additionalProperties: false, required: ["relationId"], properties: {
+          relationId: { type: "string", "x-osf-i18n": { title: text("Relation", "Relatie") } },
+        } } },
+        output: { schema: { type: "object", additionalProperties: false, properties: {
+          accounts: { type: "array", items: { type: "object", additionalProperties: false, properties: {
+            id: { type: "string", "x-osf-i18n": { title: text("Id") } },
+            email: { type: "string", "x-osf-i18n": { title: text("Email", "E-mail") } },
+          }, required: ["id", "email"] }, "x-osf-i18n": { title: text("Accounts") } },
+        }, required: ["accounts"] } },
+      },
+    },
+    interfaces: {
+      ...controlCatalog.interfaces,
+      rest: { operations: {
+        ...controlCatalog.interfaces.rest!.operations,
+        listAccounts: { method: "GET", path: "/api/control/v1/accounts", response: { status: 200, kind: "json" } },
+      } },
+      web: {
+        pages: {}, operations: {}, entities: {
+          Account: {
+            title: text("Accounts"), route: "/accounts", idField: "id", displayField: "email", fields: ["id", "email"], columns: ["email"],
+            operations: { list: { operation: "listAccounts", resultField: "accounts" } },
+          },
+        },
+      },
+    },
+  };
+  const providerRelationship = (bindings: Record<string, string>) => ({
+    key: "account", fieldKey: "account", kind: "belongsTo" as const, target: "Account", ownership: "reference" as const, provider: { bindings },
+  });
+  const relationView = () => {
+    const view = coreView();
+    const detail = view.detail!;
+    detail.groups.items = [detail.groups.items[0]!, {
+      id: "account",
+      label: text("Account"),
+      relationship: { render: { component: "RelationshipPanel" }, name: "account" },
+    }];
+    view.presentations.detail = detail;
+    return view;
+  };
+  const relation = (bindings: Record<string, string> = { relationId: "id" }) => entity("Relation", "relation", [
+    field("id", { required: true, readOnly: true }),
+    field("displayName"),
+    field("account", { baseType: "object", readOnly: true }),
+  ], relationView(), [providerRelationship(bindings)]);
+
+  test("projects a relationship to a provider-backed entity: no foreign key, the target's Operations bound from this record", () => {
+    const manifest = buildWebManifest([relation()], {}, standalone(accounts));
+    const account = manifest.entities.Relation?.relationships.account;
+    expect(account).toMatchObject({
+      id: "Relation.account", kind: "belongsTo", targetEntityId: "Account", targetRoute: "/accounts", fieldKey: "account",
+      source: { kind: "provider", bindings: { relationId: "id" } },
+      operations: { list: { id: "control.list-accounts" } },
+      collection: { id: "Account.relationship.collection", route: "/accounts" },
+    });
+    expect(account).not.toHaveProperty("recordField");
+    expect(account).not.toHaveProperty("foreignKey");
+    // The reference is only a relationship: no field of its own on any interface.
+    expect(manifest.entities.Relation?.fields.account).toBeUndefined();
+    expect(manifest.entities.Relation?.views.record?.layout.tabs.map((tab) => tab.id)).toEqual(["overview", "account"]);
+    expect(manifest.entities.Relation?.views.record?.layout.tabs[1]).toMatchObject({ relationshipId: "account" });
+    expect(renderWebManifest(manifest)).toBe(renderWebManifest(buildWebManifest([relation()], {}, standalone(accounts))));
+  });
+
+  test("refuses a binding the provider's list Operation does not take, an unknown own field, or an unprojected provider", () => {
+    expect(() => buildWebManifest([relation({ slug: "id" })], {}, standalone(accounts)))
+      .toThrow("Relation.account: provider.bindings.slug is not an input of control.list-accounts");
+    expect(() => buildWebManifest([relation({ relationId: "nope" })], {}, standalone(accounts)))
+      .toThrow("Relation.account: provider.bindings.relationId names unknown field Relation.nope");
+    expect(() => buildWebManifest([relation()])).toThrow("Relation.account: provider entity Account is not projected to the web");
+  });
+});

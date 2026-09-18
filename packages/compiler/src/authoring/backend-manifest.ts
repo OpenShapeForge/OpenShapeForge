@@ -970,6 +970,8 @@ function compileFieldRelationStorage(
   for (const { candidate, table } of byEntity.values()) {
     if (Number(candidate.contract.authoringVersion) !== 3) continue;
     for (const relationship of candidate.contract.model.relationships) {
+      // Provider-backed: no storage on either side, nothing to reference.
+      if (relationship.provider) continue;
       const target = byEntity.get(relationship.target);
       if (!target) {
         // A derived inverse collection has no storage of its own: when the

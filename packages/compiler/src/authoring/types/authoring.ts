@@ -93,7 +93,7 @@ export interface OsfTypeDefinition {
    * JSON schema and `checks.ts` for enforcement). Absent on value-shape
    * semantic types.
    */
-  kind?: "scalar" | "entityId" | "entity" | "object";
+  kind?: "scalar" | "entityId" | "entity" | "object" | "provider";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
   valueType:

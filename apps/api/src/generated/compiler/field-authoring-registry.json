@@ -39061,6 +39061,42 @@
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
       }
+    },
+    "TenantMember": {
+      "kind": "provider",
+      "entity": "TenantMember",
+      "valueType": "object",
+      "label": {
+        "en": "Members",
+        "nl": "Leden"
+      }
+    },
+    "TenantInvitation": {
+      "kind": "provider",
+      "entity": "TenantInvitation",
+      "valueType": "object",
+      "label": {
+        "en": "Invitations",
+        "nl": "Uitnodigingen"
+      }
+    },
+    "TenantCredential": {
+      "kind": "provider",
+      "entity": "TenantCredential",
+      "valueType": "object",
+      "label": {
+        "en": "Credentials",
+        "nl": "Credentials"
+      }
+    },
+    "CatalogEntry": {
+      "kind": "provider",
+      "entity": "CatalogEntry",
+      "valueType": "object",
+      "label": {
+        "en": "Services",
+        "nl": "Services"
+      }
     }
   },
   "referentiedata": {

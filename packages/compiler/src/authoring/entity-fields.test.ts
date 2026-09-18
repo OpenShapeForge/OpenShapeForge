@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { resolveStorageColumns } from "./compiler/storage.js";
 import { resolveRelationships } from "./compiler/relationships.js";
 import { resolveModelFields } from "./compiler/model.js";
-import type { CoreEntity, Field } from "./types.js";
+import type { CoreEntity, Field, OperationCatalogDefinition } from "./types.js";
 import { assertNoRelationshipsBlock, type LoadedArtifacts } from "./loader.js";
 
 const entity = (name: string, fields: Field[]): CoreEntity => ({
@@ -121,6 +121,49 @@ describe("one relational field contract", () => {
     const right = entity("Right", [{ key: "left", osfType: "Left", relationship: { inverse: {} } }]);
     expect(() => deriveEntityOsfTypes([left, right], {})).toThrow("a single reference names its inverse collection as an object");
     expect(() => normalizeEntityFields(left, deriveEntityOsfTypes([{ ...left, fields: [] }, { ...right, fields: [] }], {}))).toThrow("declares its inverse collection as an object");
+  });
+});
+
+describe("provider-backed reference", () => {
+  const accountCatalog = {
+    kind: "operationCatalog",
+    interfaces: { web: { pages: {}, operations: {}, entities: {
+      Account: { title: { en: "Account" }, route: "/accounts", idField: "id", displayField: "email", fields: ["id", "email"], columns: ["email"], operations: { list: { operation: "listAccounts", resultField: "accounts" } } },
+    } } },
+  } as unknown as OperationCatalogDefinition;
+  const withProviders = () => deriveProviderOsfTypes([accountCatalog], catalog());
+  const relation = (account: Field) => entity("Relation", [{ key: "id", osfType: "string" }, account]);
+
+  test("registers a catalog's web entities as provider osf types, next to the loaded entities", () => {
+    expect(withProviders().Account).toEqual({ kind: "provider", entity: "Account", valueType: "object", label: { en: "Account" } });
+    expect(withProviders().Block).toMatchObject({ kind: "entity" });
+    expect(() => deriveProviderOsfTypes([accountCatalog], withProviders())).toThrow("duplicates a loaded entity or provider entity");
+  });
+  test("a single reference becomes a read-only belongsTo without storage, bound from this entity's fields", () => {
+    const normalized = normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "id" } } }), withProviders());
+    const account = normalized.fields.find((field) => field.key === "account")!;
+    expect(account).toMatchObject({ readOnly: true, baseType: "object" });
+    expect(account.persisted).toBeUndefined();
+    expect(resolveRelationships({ coreEntity: normalized, profiles: [] } as unknown as LoadedArtifacts)).toEqual([
+      { key: "account", fieldKey: "account", kind: "belongsTo", target: "Account", ownership: "reference", provider: { bindings: { relationId: "id" } } },
+    ]);
+    expect(resolveStorageColumns(normalized.fields, [])).toEqual([]);
+  });
+  test("normalizing an already normalized entity again derives the same provider relationship", () => {
+    const once = normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "id" } } }), withProviders());
+    const twice = normalizeEntityFields(once, withProviders());
+    expect(twice.fields.find((field) => field.key === "account")).toEqual(once.fields.find((field) => field.key === "account"));
+  });
+  test("a collection reference becomes a hasMany with the same binding", () => {
+    const normalized = normalizeEntityFields(relation({ key: "accounts", osfType: "Account", cardinality: "collection", provider: { bindings: { relationId: "id" } } }), withProviders());
+    expect(normalized.fields.find((field) => field.key === "accounts")?.relationship).toMatchObject({ kind: "hasMany", target: "Account", provider: { bindings: { relationId: "id" } } });
+  });
+  test("refuses storage, relationship metadata, empty or dangling bindings, and provider on a stored entity", () => {
+    expect(() => normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "id" } }, persisted: { column: "account_id", storageClass: "core" } }), withProviders())).toThrow("has no storage of its own");
+    expect(() => normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "id" } }, relationship: { ownership: "owned" } }), withProviders())).toThrow("not relationship metadata");
+    expect(() => normalizeEntityFields(relation({ key: "account", osfType: "Account" }), withProviders())).toThrow("provider.bindings maps Account Operation input fields");
+    expect(() => normalizeEntityFields(relation({ key: "account", osfType: "Account", provider: { bindings: { relationId: "nope" } } }), withProviders())).toThrow("names unknown field Relation.nope");
+    expect(() => normalizeEntityFields(relation({ key: "page", osfType: "Page", provider: { bindings: { relationId: "id" } } }), withProviders())).toThrow("provider requires an osfType that names a provider-backed entity");
   });
 });
 

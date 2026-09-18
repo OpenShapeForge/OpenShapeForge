@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CoreEntity, Field, OsfTypeDefinition } from "./types.js";
+import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
 import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
 import { type InverseCollectionSource, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
@@ -129,6 +129,28 @@ export function inverseCollectionsFor(entity: string, catalog: Record<string, Os
   return deriveInverseCollections(entity, sources, isEntityType);
 }
 
+/**
+ * Provider-backed entities are projections of the loaded Operation catalogs:
+ * relationship targets without storage, resolved by their own Operations.
+ */
+export function deriveProviderOsfTypes(
+  catalogs: readonly OperationCatalogDefinition[],
+  catalog: Record<string, OsfTypeDefinition>,
+): Record<string, OsfTypeDefinition> {
+  const result = { ...catalog };
+  for (const definition of catalogs) {
+    for (const [name, entity] of Object.entries(definition.interfaces?.web?.entities ?? {})) {
+      if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) throw new Error(`Invalid provider entity osf type name: ${name}.`);
+      // A loaded entity of the same name owns the type, as it owns the route in
+      // the web manifest; the provider projection stays reachable only there.
+      if (result[name]?.kind === "entity") continue;
+      if (result[name]) throw new Error(`Osf type ${name} duplicates a loaded entity or provider entity.`);
+      result[name] = { kind: "provider", entity: name, valueType: "object", label: entity.title };
+    }
+  }
+  return result;
+}
+
 /** Profile fields are not normalized as an entity; they still need their base type. */
 export function withBaseTypes(fields: readonly Field[], catalog: Record<string, OsfTypeDefinition>): Field[] {
   return fields.map((field) => {
@@ -211,6 +233,11 @@ export function normalizeEntityFields(
     }
     if (field.sortable && !collection) throw new Error(`${path}: sortable requires a collection.`);
     if (field.childAuthorization && (!collection || field.relationship?.ownership !== "owned")) throw new Error(`${path}: childAuthorization requires an owned collection.`);
+    if (semantic?.kind === "provider") {
+      result.relationship = providerRelationshipOf(entity, field, result, semantic, nested, collection);
+      return result;
+    }
+    if (field.provider) throw new Error(`${path}: provider requires an osfType that names a provider-backed entity.`);
     if (field.childLock !== undefined) {
       if (!collection || field.relationship?.ownership !== "owned") throw new Error(`${path}: childLock requires an owned collection.`);
       const lock = semantic?.shape?.find((candidate) => candidate.key === field.childLock);
@@ -234,6 +261,49 @@ export function normalizeEntityFields(
   };
   const fields = withInverseCollections(entity.entity, entity.fields, inverseCollectionsFor(entity.entity, catalog));
   return { ...entity, fields: fields.map((field) => normalize(field)) };
+}
+
+/**
+ * A reference to a provider-backed entity: nothing is stored on this entity,
+ * the target's Operations resolve the records from the bound field values.
+ * The field is read-only on every interface; only the relationship is projected.
+ */
+function providerRelationshipOf(
+  entity: CoreEntity,
+  field: Field,
+  result: Field,
+  semantic: OsfTypeDefinition,
+  nested: boolean,
+  collection: boolean,
+): NonNullable<Field["relationship"]> {
+  const path = `${entity.entity}.${field.key}`;
+  const target = semantic.entity!;
+  if (nested) throw new Error(`${path}: provider-backed references are top-level fields, not values inside JSON.`);
+  if (entity.schemaVersion !== 3) throw new Error(`${path}: provider-backed references require schemaVersion 3.`);
+  if (field.persisted) throw new Error(`${path}: a provider-backed reference has no storage of its own; the ${target} Operations resolve it.`);
+  // Normalization runs more than once (loader, then compile): a relationship
+  // this function derived earlier is not authored metadata.
+  if (field.relationship && !field.relationship.provider) {
+    throw new Error(`${path}: a provider-backed reference declares provider.bindings, not relationship metadata.`);
+  }
+  const bindings = field.provider?.bindings ?? field.relationship?.provider?.bindings;
+  if (!bindings || Object.keys(bindings).length === 0) {
+    throw new Error(`${path}: provider.bindings maps ${target} Operation input fields to fields of ${entity.entity}.`);
+  }
+  for (const [input, own] of Object.entries(bindings)) {
+    if (!entity.fields.some((candidate) => candidate.key === own)) {
+      throw new Error(`${path}: provider.bindings.${input} names unknown field ${entity.entity}.${own}.`);
+    }
+  }
+  result.readOnly = true;
+  return {
+    kind: collection ? "hasMany" : "belongsTo",
+    entity: slug(target),
+    target,
+    fieldKey: field.key,
+    ownership: "reference",
+    provider: { bindings: { ...bindings } },
+  };
 }
 
 function relationshipOf(

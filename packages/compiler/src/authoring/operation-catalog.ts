@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { OperationCatalogDefinition } from "./types.js";
 import { authoringValidator } from "./schema-validation.js";
@@ -105,6 +105,14 @@ function assertWebInterface(path: string, catalog: OperationCatalogDefinition): 
   }
 }
 
+/**
+ * Validated catalogs by path, keyed on the raw source so an edited file is
+ * revalidated and an unchanged one is not: the osf-type catalog derives from
+ * these on every `loadOsfTypes`, which the compiler calls hundreds of times
+ * per build, and ajv validation is the expensive part.
+ */
+const validatedCatalogs = new Map<string, { source: string; document: OperationCatalogDefinition }>();
+
 export function loadOperationCatalogs(authoringDir: string): LoadedOperationCatalog[] {
   const root = join(authoringDir, "operations");
   if (!existsSync(root)) return [];
@@ -118,6 +126,9 @@ export function loadOperationCatalogs(authoringDir: string): LoadedOperationCata
   };
   walk(root);
   return paths.sort().map((path) => {
+    const source = readFileSync(path, "utf-8");
+    const cached = validatedCatalogs.get(path);
+    if (cached && cached.source === source) return { path, document: structuredClone(cached.document) };
     const { document } = authoringValidator().validateFile(path, path);
     const catalog = document as OperationCatalogDefinition;
     for (const [key, operation] of Object.entries(catalog.operations)) {
@@ -158,6 +169,7 @@ export function loadOperationCatalogs(authoringDir: string): LoadedOperationCata
       }
     }
     assertWebInterface(path, catalog);
+    validatedCatalogs.set(path, { source, document: structuredClone(catalog) });
     return { path, document: catalog };
   });
 }

@@ -38,6 +38,7 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
       ...(rel.unique ? { unique: rel.unique } : {}),
       ...(field.label ? { label: field.label } : {}),
       ...(rel.constraints ? { constraints: structuredClone(rel.constraints) } : {}),
+      ...(rel.provider ? { provider: structuredClone(rel.provider) } : {}),
     });
   }
 

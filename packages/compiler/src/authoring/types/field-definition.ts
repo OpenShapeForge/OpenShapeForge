@@ -107,6 +107,18 @@ export interface FieldDefinitionRelationship {
   displayField?: string;
   /** Canonical validity rules for the referenced target record. */
   constraints?: FieldDefinitionRelationshipConstraints;
+  /** Compiler-derived from the field's `provider`: the target's Operations resolve the reference. */
+  provider?: FieldDefinitionProvider;
+}
+
+/**
+ * A reference to a provider-backed entity (one declared by an Operation
+ * catalog, without storage). The target's Operations resolve the related
+ * records; `bindings` maps each Operation input field to the field of this
+ * entity whose value fills it, so the caller never names the parent itself.
+ */
+export interface FieldDefinitionProvider {
+  bindings: Record<string, string>;
 }
 
 export interface FieldDefinitionSuggestions {
@@ -216,6 +228,8 @@ export interface FieldDefinition {
   defaultValue?: unknown;
   validation?: FieldDefinitionValidation;
   relationship?: FieldDefinitionRelationship;
+  /** Authored only on a field whose osfType names a provider-backed entity. */
+  provider?: FieldDefinitionProvider;
   options?: FieldOptions;
   persisted?: FieldPersisted;
   render?: FieldRender;

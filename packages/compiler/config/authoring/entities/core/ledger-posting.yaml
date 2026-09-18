@@ -107,7 +107,9 @@ fields:
     osfType: FiscalPeriod
     relationship:
       ownership: reference
+  # System-written by the reversal that creates this posting, not an input.
   - key: reversalOfId
+    readOnly: true
     label:
       en: Reversal of
       nl: Tegenboeking van

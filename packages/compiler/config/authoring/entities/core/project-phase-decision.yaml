@@ -78,7 +78,9 @@ fields:
     osfType: ProjectPhase
     relationship:
       ownership: reference
+  # System-written approval attribution: who decided, not an input.
   - key: decidedById
+    readOnly: true
     label:
       en: Decided by
       nl: Besloten door

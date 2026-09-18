@@ -74,7 +74,9 @@ fields:
     osfType: PaymentPlan
     relationship:
       ownership: reference
+  # System-written by payment settlement: the payment that covered this instalment, not an input.
   - key: invoicePaymentId
+    readOnly: true
     label:
       en: Invoice payment
       nl: Factuurbetaling

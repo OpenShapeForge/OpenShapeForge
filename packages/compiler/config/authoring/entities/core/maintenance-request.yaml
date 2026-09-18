@@ -113,7 +113,9 @@ fields:
     persisted:
       column: external_code
       storageClass: core
+  # System-written attribution: the reporting user, not an input.
   - key: reportedById
+    readOnly: true
     label:
       en: Reported by
       nl: Gemeld door

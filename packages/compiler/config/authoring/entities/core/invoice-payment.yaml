@@ -58,7 +58,9 @@ fields:
     osfType: PaymentMethod
     relationship:
       ownership: reference
+  # System-written by bank reconciliation (BankReconciliation is the authored match), not an input.
   - key: bankStatementLineId
+    readOnly: true
     label:
       en: Bank statement line
       nl: Bankafschriftregel

@@ -131,7 +131,9 @@ fields:
     osfType: FiscalPeriod
     relationship:
       ownership: reference
+  # System-written by invoicing: the invoice that billed this cumulative, not an input.
   - key: invoiceId
+    readOnly: true
     label:
       en: Invoice
       nl: Factuur

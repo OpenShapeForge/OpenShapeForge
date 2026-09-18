@@ -43,6 +43,12 @@ The owner selects allowed definitions on its ordinary relation field:
 These fragments use the schemaVersion 3 field contract. Entity semantic types
 are derived from loaded entity YAMLs, not repeated in the semantic-type catalog.
 
+Two optional collection options shape how the owner's collection Operations
+treat the children: `childAuthorization: owner` lends the owner's update roles
+to them, and `childLock: <booleanField>` makes `update`, `move` and `remove`
+refuse a child whose flag is set. A document's blocks use both; see
+`docs/document-content.md`.
+
 ## Storage and logical fields
 
 The compiler emits the owner foreign key, ordering column, tenant-scoped indexes

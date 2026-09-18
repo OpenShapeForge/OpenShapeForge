@@ -109,6 +109,10 @@
         "inverse": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "via": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "ownership": { "enum": ["owned", "reference"] },
+        "version": {
+          "type": "string", "enum": ["pinned", "current"],
+          "description": "How a single reference relates to a versioned target. current (the default): the reference means the target's editable head. pinned: the reference names one immutable version and moves only through an authored command, never by itself."
+        },
         "kind": { "type": "string", "enum": ["belongsTo", "hasMany"] },
         "entity": {
           "type": "string",
@@ -234,6 +238,10 @@
         "childAuthorization": {
           "type": "string", "enum": ["owner"],
           "description": "owner: the owner's collection Operations on this field authorize its owned children through the owner's update roles instead of the child entity's own roles."
+        },
+        "childLock": {
+          "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$",
+          "description": "Key of a boolean field on the owned child entity. The owner's collection update, move and remove Operations on this field refuse a child whose flag is set with INVALID_STATE; insert is unaffected."
         },
         "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
         "suggestions": {

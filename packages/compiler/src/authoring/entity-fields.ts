@@ -135,6 +135,12 @@ export function normalizeEntityFields(
     }
     if (field.sortable && !collection) throw new Error(`${entity.entity}.${field.key}: sortable requires a collection.`);
     if (field.childAuthorization && (!collection || field.relationship?.ownership !== "owned")) throw new Error(`${entity.entity}.${field.key}: childAuthorization requires an owned collection.`);
+    if (field.childLock !== undefined) {
+      if (!collection || field.relationship?.ownership !== "owned") throw new Error(`${entity.entity}.${field.key}: childLock requires an owned collection.`);
+      const lock = semantic?.shape?.find((candidate) => candidate.key === field.childLock);
+      if (!lock || lock.valueType !== "boolean" || fieldCardinality(lock) !== "single") throw new Error(`${entity.entity}.${field.key}: childLock must name a single boolean field of ${semantic?.entity ?? field.semanticType}.`);
+    }
+    if (field.relationship?.version && (collection || field.relationship.ownership === "owned")) throw new Error(`${entity.entity}.${field.key}: version applies to a single reference only.`);
     if (semantic?.kind !== "entity") {
       if (field.relationship) {
         throw new Error(`${entity.entity}.${field.key}: relationship requires a loaded entity semanticType.`);
@@ -207,6 +213,7 @@ export function normalizeEntityFields(
       ...(foreignKey ? { foreignKey } : {}),
       ...(unique ? { unique: true } : {}),
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+      ...(metadata.version ? { version: metadata.version } : {}),
       ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
     };
     return result;

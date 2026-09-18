@@ -2,8 +2,8 @@
 /**
  * Publish followers: work another module runs inside the same transaction
  * right after `publish()` stored a new immutable version. The documents module
- * uses this to move draft DocumentRevisions to a republished Template
- * (docs/document-revisions.md). Registration happens at module load; there is
+ * uses this to move documents to a republished Template
+ * (docs/document-content.md). Registration happens at module load; there is
  * no request-time lookup by name.
  */
 import type { PluginPlatformServices, PluginSessionContext } from "@openshapeforge/plugin-runtime";

@@ -639,6 +639,8 @@ function projectEntity(
       ...(relationship.constraints ? { constraints: structuredClone(relationship.constraints) } : {}),
       ...(relationship.inverse ? { inverse: relationship.inverse } : {}),
       ...(relationship.ownership ? { ownership: relationship.ownership } : {}),
+      ...(relationship.version ? { version: relationship.version } : {}),
+      ...(relationship.childLock ? { childLock: relationship.childLock } : {}),
       ...(relationship.cardinality ? { cardinality: relationship.cardinality } : {}),
       ...(relationship.sortable ? { sortable: true, positionColumn: `${relationship.foreignKey}_position` } : {}),
       ...(relationship.via ? { via: relationship.via } : {}),

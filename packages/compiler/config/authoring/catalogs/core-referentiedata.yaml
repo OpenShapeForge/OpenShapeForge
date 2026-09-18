@@ -817,6 +817,8 @@ groepen:
         label: { nl: Concept, en: Draft, fr: Brouillon }
       - value: final
         label: { nl: Definitief, en: Final, fr: Définitif }
+      - value: published
+        label: { nl: Gepubliceerd, en: Published, fr: Publié }
       - value: superseded
         label: { nl: Vervangen, en: Superseded, fr: Remplacé }
       - value: withdrawn

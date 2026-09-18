@@ -174,8 +174,7 @@ describe("Document commands", () => {
       "materializeTemplate",
       "createDocumentFromTemplate",
       "renderSnapshot",
-      "startRevision",
-      "publishRevision",
+      "linkTemplate",
     ]);
   });
 

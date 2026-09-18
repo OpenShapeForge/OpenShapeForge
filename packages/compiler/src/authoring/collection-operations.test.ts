@@ -88,6 +88,26 @@ test("real authored template collection Operations compile the direct-edit varia
   for (const values of [{ locale: "nl" }, { channel: "sms", locale: "nl" }, { channel: "email", locale: "dutch" }, { channel: "email", locale: "nl", unknown: true }]) expect(validate({ ...base, values })).toBe(false);
 });
 
+test("a block's owner keys and the document lock never enter the owner-scoped values contracts", () => {
+  const authoringDir = join(import.meta.dir, "../../config/authoring");
+  const entries = ["template", "template-version", "template-variant", "document", "document-version", "document-variant", "block", "text-block", "youtube-embed", "template-block",
+    "document-type", "case-file", "case", "relation", "account"].map((slug) => {
+    const contract = compileEntity(loadEntity(authoringDir, slug));
+    contract.pluginOperations = contract.pluginOperations?.filter((operation) => operation.definition.implementation.type === "collection") ?? [];
+    return { slug, contract };
+  });
+  const operations = collectAuthoredEntityPluginOperations(entries, { ...context, authoringDir });
+  const values = (id: string) => Object.keys((operations.find((operation) => operation.id === id)!.inputSchema.properties as Record<string, { properties: Record<string, unknown> }>).values!.properties);
+  // Neither owner FK is a caller choice through a collection; the lock is server-managed on a document block only.
+  for (const id of ["DocumentVariant.insertBlock", "DocumentVariant.updateBlock"]) {
+    expect(values(id)).not.toContain("variant"); expect(values(id)).not.toContain("documentVariant"); expect(values(id)).not.toContain("locked");
+  }
+  for (const id of ["TemplateVariant.insertBlock", "TemplateVariant.updateBlock"]) {
+    expect(values(id)).not.toContain("variant"); expect(values(id)).not.toContain("documentVariant"); expect(values(id)).toContain("locked");
+  }
+  expect(values("DocumentVariant.insertBlock")).toContain("values");
+});
+
 test("lowers native collection declarations to the canonical invoke catalog and validates concrete input", () => {
   const entries = fixture();
   const operations = compile(entries);

@@ -62,8 +62,8 @@ implementation:
   license:
     spdx: LicenseRef-BatterAI-Commercial
     notice: >-
-      The implementation package ships separately under its own license and is
-      not covered by the BUSL-1.1 grant on this repository.
+      The implementation package ships separately under its own license and is not covered by the BUSL-1.1 grant on this
+      repository.
 
 availability:
   entitlement: connector.twinfield
@@ -78,7 +78,7 @@ configuration:
   verify: true
   fields:
     - key: clusterHost
-      valueType: string
+      osfType: string
       required: true
       defaultValue: accounting.twinfield.com
       label: { en: Cluster host, nl: Clusterhost }
@@ -87,17 +87,14 @@ configuration:
         nl: De Twinfield-host waarop de gegevens van deze organisatie staan.
       help:
         en: >-
-          Twinfield places each organisation on a cluster and every call after
-          sign-in goes there. Most organisations are on accounting.twinfield.com;
-          if yours is not, Twinfield reports the cluster with your access token
-          and support can tell you. Test connection fails plainly when it is
-          wrong, rather than returning somebody else's books.
+          Twinfield places each organisation on a cluster and every call after sign-in goes there. Most organisations
+          are on accounting.twinfield.com; if yours is not, Twinfield reports the cluster with your access token and
+          support can tell you. Test connection fails plainly when it is wrong, rather than returning somebody else's
+          books.
         nl: >-
-          Twinfield plaatst elke organisatie op een cluster en elke aanroep na
-          het inloggen gaat daarheen. De meeste organisaties staan op
-          accounting.twinfield.com; staat de jouwe ergens anders, dan meldt
-          Twinfield het cluster bij je access token en kan support het vertellen.
-          Verbinding testen faalt duidelijk als dit verkeerd staat.
+          Twinfield plaatst elke organisatie op een cluster en elke aanroep na het inloggen gaat daarheen. De meeste
+          organisaties staan op accounting.twinfield.com; staat de jouwe ergens anders, dan meldt Twinfield het cluster
+          bij je access token en kan support het vertellen. Verbinding testen faalt duidelijk als dit verkeerd staat.
       validation:
         # Constrained to the vendor's own domain. network.egress refuses
         # anything else at runtime anyway, but a typo deserves an answer while
@@ -106,26 +103,24 @@ configuration:
         pattern: "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+twinfield\\.com$"
 
     - key: companyCode
-      valueType: string
+      osfType: string
       label: { en: Company code, nl: Administratiecode }
       description:
         en: The administration this installation works in. Left empty, each document names its own.
         nl: De administratie waarin deze installatie werkt. Leeg gelaten noemt elk document zijn eigen.
       help:
         en: >-
-          Twinfield sends this in the SOAP header of every call, which is how it
-          selects the administration. Leave it empty until you know the code —
-          listOffices reports the ones this authorization can reach.
+          Twinfield sends this in the SOAP header of every call, which is how it selects the administration. Leave it
+          empty until you know the code — listOffices reports the ones this authorization can reach.
         nl: >-
-          Twinfield stuurt dit mee in de SOAP-header van elke aanroep en kiest
-          daarmee de administratie. Laat het leeg tot je de code kent —
-          listOffices toont de administraties die deze autorisatie kan bereiken.
+          Twinfield stuurt dit mee in de SOAP-header van elke aanroep en kiest daarmee de administratie. Laat het leeg
+          tot je de code kent — listOffices toont de administraties die deze autorisatie kan bereiken.
       validation:
         maxLength: 30
         pattern: "^[A-Za-z0-9._-]+$"
 
     - key: clientId
-      valueType: string
+      osfType: string
       required: true
       label: { en: Client ID, nl: Client-ID }
       description:
@@ -133,7 +128,7 @@ configuration:
         nl: Van de applicatie die je bij Twinfield hebt geregistreerd.
 
     - key: clientSecret
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: Client secret, nl: Client secret }
@@ -189,7 +184,7 @@ operations:
       cardinality: one
       fields:
         - key: offices
-          valueType: object
+          osfType: object
           cardinality: collection
           required: true
           label: { en: Companies, nl: Administraties }
@@ -214,7 +209,7 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: document
-        valueType: string
+        osfType: string
         required: true
         label: { en: Request document, nl: Aanvraagdocument }
         description:
@@ -222,15 +217,13 @@ operations:
           nl: Een XML-leesdocument, bijvoorbeeld <read><type>dimension</type>…</read>.
         help:
           en: >-
-            Its root element must be a read verb — read, list or columns. A
-            document that writes is refused here and belongs in submitDocument,
-            so that a read can stay retryable and stay marked read-only to the
-            clients that ask.
+            Its root element must be a read verb — read, list or columns. A document that writes is refused here and
+            belongs in submitDocument, so that a read can stay retryable and stay marked read-only to the clients that
+            ask.
           nl: >-
-            Het hoofdelement moet een leeswerkwoord zijn — read, list of columns.
-            Een schrijvend document wordt hier geweigerd en hoort in
-            submitDocument, zodat een leesoperatie herhaalbaar blijft en
-            alleen-lezen blijft heten.
+            Het hoofdelement moet een leeswerkwoord zijn — read, list of columns. Een schrijvend document wordt hier
+            geweigerd en hoort in submitDocument, zodat een leesoperatie herhaalbaar blijft en alleen-lezen blijft
+            heten.
         validation:
           minLength: 1
           maxLength: 131072
@@ -238,18 +231,18 @@ operations:
       cardinality: one
       fields:
         - key: document
-          valueType: string
+          osfType: string
           required: true
           label: { en: Response document, nl: Antwoorddocument }
           description:
             en: Twinfield's answer, verbatim, because its shape is per document type.
             nl: Het antwoord van Twinfield, letterlijk, omdat de vorm per documenttype verschilt.
         - key: succeeded
-          valueType: boolean
+          osfType: boolean
           required: true
           label: { en: Accepted, nl: Geaccepteerd }
         - key: messages
-          valueType: string
+          osfType: string
           cardinality: collection
           required: true
           label: { en: Messages, nl: Meldingen }
@@ -271,7 +264,7 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: type
-        valueType: string
+        osfType: string
         required: true
         label: { en: Search type, nl: Zoektype }
         description:
@@ -281,13 +274,13 @@ operations:
           minLength: 1
           maxLength: 32
       - key: pattern
-        valueType: string
+        osfType: string
         defaultValue: "*"
         label: { en: Pattern, nl: Patroon }
         validation:
           maxLength: 256
       - key: field
-        valueType: integer
+        osfType: integer
         defaultValue: 0
         label: { en: Field, nl: Veld }
         description:
@@ -297,13 +290,13 @@ operations:
           min: 0
           max: 32
       - key: firstRow
-        valueType: integer
+        osfType: integer
         defaultValue: 1
         label: { en: First row, nl: Eerste rij }
         validation:
           min: 1
       - key: maxRows
-        valueType: integer
+        osfType: integer
         defaultValue: 100
         label: { en: Maximum rows, nl: Maximum aantal rijen }
         validation:
@@ -313,7 +306,7 @@ operations:
       cardinality: one
       fields:
         - key: rows
-          valueType: object
+          osfType: object
           cardinality: collection
           required: true
           label: { en: Rows, nl: Rijen }
@@ -321,7 +314,7 @@ operations:
             en: One object per row, each carrying the row's column values in order.
             nl: Eén object per rij, met de kolomwaarden van die rij op volgorde.
         - key: totalRows
-          valueType: integer
+          osfType: integer
           required: true
           label: { en: Total rows, nl: Totaal aantal rijen }
           description:
@@ -348,7 +341,7 @@ operations:
         invoke: [Connectors.All.ReadWrite]
     input:
       - key: document
-        valueType: string
+        osfType: string
         required: true
         label: { en: Request document, nl: Aanvraagdocument }
         description:
@@ -361,7 +354,7 @@ operations:
       cardinality: one
       fields:
         - key: document
-          valueType: string
+          osfType: string
           required: true
           label: { en: Response document, nl: Antwoorddocument }
         # Required, and the reason this operation has an output shape at all:
@@ -369,14 +362,14 @@ operations:
         # outcome as a result attribute inside the document. A caller reading
         # only the status code books nothing and is told it worked.
         - key: succeeded
-          valueType: boolean
+          osfType: boolean
           required: true
           label: { en: Accepted, nl: Geaccepteerd }
           description:
             en: False when Twinfield rejected the document — its HTTP status says 200 either way.
             nl: Onwaar als Twinfield het document heeft geweigerd — de HTTP-status is hoe dan ook 200.
         - key: messages
-          valueType: string
+          osfType: string
           cardinality: collection
           required: true
           label: { en: Messages, nl: Meldingen }

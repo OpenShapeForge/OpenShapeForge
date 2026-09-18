@@ -22,7 +22,7 @@ const expected = {
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
     ],
-    relationships: ["relationId", "agreementId", "document"],
+    relationships: ["relationId", "agreementId", "document", "quoteLines"],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "quote-line": {
@@ -48,7 +48,13 @@ const expected = {
       "noticeTerm", "terminationReason", "terminationReasonDetail", "sequenceNumber",
       "externalCode",
     ],
-    relationships: ["relationId", "caseId", "parentAgreementId", "document", "childAgreements", "parties"],
+    // Single references first; the collections the corpus derives follow, sorted by key.
+    relationships: [
+      "relationId", "caseId", "parentAgreementId", "document",
+      "agreementComponentCumulatives", "agreementComponents", "agreementMilestones", "billingRunItems",
+      "billingSchedules", "childAgreements", "invoices", "ledgerPostingLines", "maintenanceOrders",
+      "parties", "purchaseOrders", "quotes", "timeEntries",
+    ],
     operations: ["list", "get", "create", "update", "delete"],
   },
   "agreement-milestone": {
@@ -58,7 +64,7 @@ const expected = {
       "sourceOrganization", "sourceAdministration", "description", "basisAmount",
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],
-    relationships: ["agreementId", "producedInvoiceId"],
+    relationships: ["agreementId", "producedInvoiceId", "billingRunItems"],
     operations: ["list", "get", "update", "delete"],
   },
 } as const;

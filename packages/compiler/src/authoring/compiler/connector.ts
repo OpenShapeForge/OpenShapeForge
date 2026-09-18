@@ -27,7 +27,7 @@ import type {
   ConnectorOperation,
 } from "../types/connector.js";
 import { CONNECTOR_EGRESS_PATTERN } from "../connector-loader.js";
-import { buildOperationSchemas, connectorObjectSchema } from "./connector-schemas.js";
+import { type ConnectorOsfTypes, buildOperationSchemas, connectorObjectSchema } from "./connector-schemas.js";
 import { deriveToolPrefix } from "./mcp.js";
 
 /**
@@ -500,6 +500,8 @@ export function buildConnector(
   definition: ConnectorDefinition,
   slug: string,
   origin: string,
+  /** The osf-type catalog the connector's fields resolve their base types through. */
+  osfTypes: ConnectorOsfTypes = {},
 ): CompiledConnectorContract {
   if (definition.schemaVersion !== 1) {
     throw new Error(
@@ -678,7 +680,7 @@ export function buildConnector(
       roles: { invoke: [...new Set(roles)].sort() },
       input: operation.input ?? [],
       output: operation.output,
-      schemas: buildOperationSchemas(operation.input ?? [], operation.output),
+      schemas: buildOperationSchemas(operation.input ?? [], operation.output, osfTypes),
       reliability: buildReliability(operation, origin),
     };
   });
@@ -713,7 +715,7 @@ export function buildConnector(
         .filter((field) => field.secret === true)
         .map((field) => field.key)
         .sort(),
-      schema: connectorObjectSchema(configFields),
+      schema: connectorObjectSchema(configFields, osfTypes),
     },
     ...(auth ? { auth } : {}),
     network: { egress: egressAllowlist },

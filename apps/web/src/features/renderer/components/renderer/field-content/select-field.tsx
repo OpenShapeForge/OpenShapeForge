@@ -7,7 +7,7 @@ import { resolveRendererReferenceItems } from "@/features/renderer/runtime/optio
 import type { FieldControlProps } from "@/features/renderer/components/field";
 import type { Field } from "@/generated/compiler/field-contract";
 import {
-  getFieldSemanticTypeDefinition,
+  getFieldOsfTypeDefinition,
   resolveFieldInputRender,
 } from "@/lib/field-rendering/compiler-field-rendering";
 
@@ -67,7 +67,7 @@ export function renderSelectField(
   lang: string,
 ): ReactNode {
   const effectiveOptions =
-    field.options ?? getFieldSemanticTypeDefinition(field)?.options;
+    field.options ?? getFieldOsfTypeDefinition(field)?.options;
   if (effectiveOptions?.type === "remote") {
     return (
       <RemoteSelectField

@@ -10,7 +10,15 @@ authorization:
   roles:
     # Document roles read revision-owned blocks only; the restrictive database
     # policy blocks_owner_read separates the owners. Writes stay template-only.
-    read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite]
+    read:
+      [
+        Templates.Read,
+        Organization.All.ReadWrite,
+        General.All.Read,
+        General.All.ReadWrite,
+        CaseFile.All.Read,
+        CaseFile.All.ReadWrite
+      ]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
@@ -19,29 +27,52 @@ fields:
   # Exactly one owner is set; the compiler emits num_nonnulls(revision_id, variant_id) = 1.
   - key: variant
     label: { en: Template variant, nl: Templatevariant }
-    semanticType: TemplateVariant
+    osfType: TemplateVariant
     required: false
     immutable: true
+    relationship:
+      inverse:
+        label:
+          en: Blocks
+          nl: Blokken
+        ownership: owned
+        sortable: true
+        allowedDefinitions:
+          - TextBlock
+          - YouTubeEmbed
+          - TemplateBlock
   - key: revision
     label: { en: Document revision, nl: Documentrevisie }
-    semanticType: DocumentRevision
+    osfType: DocumentRevision
     required: false
     immutable: true
+    relationship:
+      inverse:
+        label:
+          en: Blocks
+          nl: Blokken
+        ownership: owned
+        sortable: true
+        childAuthorization: owner
+        allowedDefinitions:
+          - TextBlock
+          - YouTubeEmbed
+          - TemplateBlock
   - key: definitionKey
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     label: { en: Block type, nl: Bloktype }
     persisted: { column: definition_key, storageClass: core }
   - key: definitionVersion
     label: { en: Definition version, nl: Definitieversie }
-    valueType: integer
+    osfType: integer
     required: true
     defaultValue: 1
     immutable: true
     persisted: { column: definition_version, storageClass: core }
   - key: values
-    semanticType: entityValue
+    osfType: entityValue
     entityValue: { definitionField: definitionKey, parameterBindings: true }
     required: true
     label: { en: Values, nl: Waarden }
@@ -51,7 +82,7 @@ fields:
     description:
       en: Whether a revision block was seeded from its template or added locally. Always local on a template variant.
       nl: Of een revisieblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal.
-    valueType: string
+    osfType: string
     required: true
     readOnly: true
     writtenBy: [Document.startRevision, Template.publish]
@@ -67,7 +98,7 @@ fields:
     description:
       en: Id of the block inside the template snapshot this revision block was seeded from.
       nl: Id van het blok in de templatesnapshot waaruit dit revisieblok is overgenomen.
-    valueType: string
+    osfType: string
     required: false
     readOnly: true
     writtenBy: [Document.startRevision, Template.publish]
@@ -78,7 +109,7 @@ fields:
     description:
       en: Set when the template was republished but this block kept a local edit.
       nl: Gezet als de template opnieuw is gepubliceerd maar dit blok een lokale wijziging behield.
-    valueType: boolean
+    osfType: boolean
     required: true
     defaultValue: false
     readOnly: true

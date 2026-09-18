@@ -7,7 +7,7 @@
  * The only consumer was a `JSON.parse` in `check:authoring-local`, which proved
  * the files were syntactically valid JSON and nothing more. Drift was therefore
  * silent in both directions, and it had happened: `core-entity.schema.json`
- * still described the pre-`valueType` field shape, and `connector.schema.json`
+ * still described the pre-`osfType` field shape, and `connector.schema.json`
  * declared a `reliability.timeoutMs` the compiler never reads.
  *
  * Two properties this module is built around:
@@ -47,7 +47,7 @@ export const SCHEMAS_DIR = join(
  * Authoring `kind` -> the schema that describes it.
  *
  * Explicit rather than derived from each schema's `properties.kind.const`,
- * because two schemas claim `semanticTypeCatalog` (a v1 and a v2 shape) and
+ * because two schemas claim `osfTypeCatalog` (a v1 and a v2 shape) and
  * only one of them describes what this repo authors today. Deriving the map
  * would make that ambiguity silent again.
  */
@@ -57,7 +57,7 @@ export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   connector: "connector.schema.json",
   authorizationConfig: "authorization-config.schema.json",
   retentionPolicyCatalog: "retention-policy-catalog.schema.json",
-  semanticTypeCatalog: "semantic-type-catalog.schema.json",
+  osfTypeCatalog: "osf-type-catalog.schema.json",
   transformCatalog: "transform-catalog.schema.json",
   settingsDefinition: "settings-definition.schema.json",
   settingsProvider: "settings-provider.schema.json",

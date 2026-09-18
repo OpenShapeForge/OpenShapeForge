@@ -198,9 +198,7 @@ export function buildAuthorization(
       const persistedField = allAuthoringFields.find(
         (f) => f.persisted?.column === col,
       );
-      const matchingRelationship = (coreEntity.relationships ?? []).find(
-        (r) => r.kind === "belongsTo" && r.foreignKey === col,
-      ) ?? allAuthoringFields.find((field) => field.persisted?.column === col &&
+      const matchingRelationship = allAuthoringFields.find((field) => field.persisted?.column === col &&
         field.relationship?.kind === "belongsTo" && field.relationship.target &&
         fieldSqlType(field) === "uuid")?.relationship;
       if (!persistedField && !matchingRelationship) {
@@ -220,7 +218,7 @@ export function buildAuthorization(
         throw new AuthorizationCompileError(
           coreEntity.entity,
           `authorization.rowAccess.${axis}.column "${col}" must reference a belongsTo foreignKey (auto-emitted as uuid) — ` +
-            `the persisted field "${col}" has valueType "${persistedField.valueType}". ` +
+            `the persisted field "${col}" has baseType "${persistedField.baseType}". ` +
             (axis === "owner"
               ? "A session owner may instead be a scalar string with validation.format: uuid."
               : "Model the group as a belongsTo relationship."),
@@ -262,7 +260,7 @@ export function buildAuthorization(
         );
       }
       if (
-        field.valueType !== "object" ||
+        field.baseType !== "object" ||
         isCollectionField(field) ||
         field.required !== true ||
         !field.persisted?.column

@@ -522,7 +522,7 @@ type CatalogField = {
   key: string;
   label?: string;
   description?: string;
-  valueType: string;
+  baseType: string;
   cardinality: string;
   required: boolean;
   readOnly: boolean;

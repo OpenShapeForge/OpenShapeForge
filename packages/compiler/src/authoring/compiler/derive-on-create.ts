@@ -82,7 +82,7 @@ export function resolveDerivedOnCreateBindings(input: {
         `Entity "${input.entityName}" field "${target.key}" cannot derive from itself.`,
       );
     }
-    if (target.valueType !== "string" || target.cardinality !== "single" || !target.required || !targetColumn) {
+    if (target.baseType !== "string" || target.cardinality !== "single" || !target.required || !targetColumn) {
       throw new Error(
         `Entity "${input.entityName}" field "${target.key}" with deriveOnCreate must be a required persisted single string.`,
       );
@@ -93,7 +93,7 @@ export function resolveDerivedOnCreateBindings(input: {
       );
     }
     if (
-      source.valueType !== "string" ||
+      source.baseType !== "string" ||
       source.cardinality !== "single" ||
       !source.required ||
       !sourceColumn ||

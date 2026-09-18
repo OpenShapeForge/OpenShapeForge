@@ -8,8 +8,8 @@ export type ContentCardinality =
 
 /** Resolved metadata, supplied by the compiler; semantic types are not re-registered here. */
 export type ContentValueShape = {
-  readonly semanticType?: string;
-  readonly valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  readonly osfType?: string;
+  readonly baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   readonly cardinality?: ContentCardinality;
   readonly required?: boolean;
   readonly nullable?: boolean;

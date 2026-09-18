@@ -46,7 +46,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Code
@@ -63,7 +63,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -81,8 +81,7 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
-    semanticType: multilineText
+    osfType: multilineText
     required: false
     label:
       en: Description
@@ -99,8 +98,7 @@ fields:
       column: description
       storageClass: core
   - key: documentType
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Document type
@@ -119,8 +117,7 @@ fields:
       source: DocumentType
       valueField: code
   - key: status
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: true
     label:
       en: Status
@@ -138,8 +135,7 @@ fields:
       type: referentiedata
       referentieGroep: DOCUMENTSTATUS
   - key: confidentiality
-    valueType: string
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
     required: false
     label:
       en: Confidentiality
@@ -157,7 +153,7 @@ fields:
       type: referentiedata
       referentieGroep: DOCUMENTCONFIDENTIALITY
   - key: source
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source
@@ -174,7 +170,7 @@ fields:
       column: source
       storageClass: core
   - key: author
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Author
@@ -191,7 +187,7 @@ fields:
       column: author
       storageClass: core
   - key: isExternal
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: External
@@ -207,7 +203,7 @@ fields:
       column: is_external
       storageClass: core
   - key: registeredAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Registered at
@@ -222,7 +218,7 @@ fields:
       column: registered_at
       storageClass: core
   - key: receivedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Received at
@@ -237,7 +233,7 @@ fields:
       column: received_at
       storageClass: core
   - key: publishedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Published at
@@ -266,7 +262,7 @@ fields:
     persisted:
       column: current_version_id
       storageClass: core
-    semanticType: DocumentVersion
+    osfType: DocumentVersion
     relationship:
       ownership: reference
   - key: currentRevisionId
@@ -283,7 +279,7 @@ fields:
     persisted:
       column: current_revision_id
       storageClass: core
-    semanticType: DocumentRevision
+    osfType: DocumentRevision
     relationship:
       ownership: reference
   - key: caseFileId
@@ -293,9 +289,13 @@ fields:
     persisted:
       column: case_file_id
       storageClass: core
-    semanticType: CaseFile
+    osfType: CaseFile
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
   - key: caseId
     label:
       en: Case
@@ -303,9 +303,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
   - key: relationId
     label:
       en: Relation
@@ -313,27 +317,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
-  - key: versions
-    label:
-      en: Versions
-      nl: Versies
-    semanticType: DocumentVersion
-    cardinality: collection
-    relationship:
-      inverse: documentId
-      ownership: reference
-  - key: revisions
-    label:
-      en: Revisions
-      nl: Revisies
-    semanticType: DocumentRevision
-    cardinality: collection
-    relationship:
-      inverse: document
-      ownership: owned
+      inverse:
+        label:
+          en: Documents
+          nl: Documenten
 operations:
   list:
     name: { en: List documents, nl: Documenten tonen }
@@ -500,7 +490,12 @@ operations:
             enum: [document, email, whatsapp]
             x-osf-i18n:
               title: { en: Channel, nl: Kanaal }
-              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
           locale:
             type: string
             pattern: "^[a-z]{2}(-[A-Z]{2})?$"
@@ -521,7 +516,11 @@ operations:
       - { status: 400, code: VALIDATION, description: The revision input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The document or template version is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The document or template version does not exist. }
-      - { status: 404, code: DEPENDENCY_UNRESOLVED, description: The template version has no variant for this channel and locale. }
+      - {
+          status: 404,
+          code: DEPENDENCY_UNRESOLVED,
+          description: The template version has no variant for this channel and locale.
+        }
     auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: write, external: none }
@@ -578,18 +577,18 @@ interfaces:
         actions: [startRevision]
         layout:
           context:
-            fields: [ documentType, confidentiality, author, registeredAt ]
-            relationships: [ relationId, caseFileId, caseId, currentVersionId, currentRevisionId ]
+            fields: [documentType, confidentiality, author, registeredAt]
+            relationships: [relationId, caseFileId, caseId, currentVersionId, currentRevisionId]
           tabs:
             - id: overview
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: Document, nl: Document }
-                  fields: [ code, title, description, documentType, status ]
+                  fields: [code, title, description, documentType, status]
                 - title: { en: Origin and access, nl: Herkomst en toegang }
-                  fields: [ author, source, isExternal, confidentiality ]
+                  fields: [author, source, isExternal, confidentiality]
                 - title: { en: Registration and publication, nl: Registratie en publicatie }
-                  fields: [ receivedAt, registeredAt, publishedAt ]
+                  fields: [receivedAt, registeredAt, publishedAt]
             - id: revisions
               label: { en: Revisions, nl: Revisies }
               relationship: revisions
@@ -601,4 +600,4 @@ interfaces:
             title: { en: Create document, nl: Document aanmaken }
             groups:
               - title: { en: Document, nl: Document }
-                fields: [ title, documentType, status ]
+                fields: [title, documentType, status]

@@ -19,9 +19,9 @@ export interface LocalizedLabel {
  */
 export interface ActionFormField {
   key: string;
-  valueType: Field["valueType"];
+  valueType: NonNullable<Field["baseType"]>;
   cardinality?: Field["cardinality"];
-  semanticType?: string;
+  osfType?: string;
   label: LocalizedLabel;
   required?: boolean;
   description?: LocalizedLabel | null;

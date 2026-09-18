@@ -42,8 +42,8 @@ implementation:
   license:
     spdx: LicenseRef-BatterAI-Commercial
     notice: >-
-      The implementation package ships separately under its own license and is
-      not covered by the BUSL-1.1 grant on this repository.
+      The implementation package ships separately under its own license and is not covered by the BUSL-1.1 grant on this
+      repository.
 
 availability:
   entitlement: connector.exact-online
@@ -59,7 +59,7 @@ configuration:
   verify: true
   fields:
     - key: region
-      valueType: string
+      osfType: string
       required: true
       defaultValue: nl
       label: { en: Country, nl: Land }
@@ -68,11 +68,11 @@ configuration:
         nl: Bepaalt met welke Exact Online-omgeving deze installatie praat.
       help:
         en: >-
-          Exact runs a separate instance per country, each with its own data and
-          its own login. This is the ending of the address you sign in at.
+          Exact runs a separate instance per country, each with its own data and its own login. This is the ending of
+          the address you sign in at.
         nl: >-
-          Exact draait per land een aparte omgeving, elk met eigen gegevens en
-          een eigen login. Dit is het einde van het adres waarop je inlogt.
+          Exact draait per land een aparte omgeving, elk met eigen gegevens en een eigen login. Dit is het einde van het
+          adres waarop je inlogt.
       options:
         type: static
         items:
@@ -85,7 +85,7 @@ configuration:
           - { value: com, label: { en: United States, nl: Verenigde Staten } }
 
     - key: clientId
-      valueType: string
+      osfType: string
       required: true
       label: { en: Client ID, nl: Client-ID }
       description:
@@ -93,7 +93,7 @@ configuration:
         nl: Van de app die je in het Exact App Center hebt geregistreerd.
 
     - key: clientSecret
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: Client secret, nl: Client secret }
@@ -102,20 +102,18 @@ configuration:
         nl: Het secret dat bij de client-ID hoort. Na opslaan niet meer op te vragen.
 
     - key: division
-      valueType: integer
+      osfType: integer
       label: { en: Division, nl: Administratie }
       description:
         en: The administration this installation works in. Left empty, the current one is used.
         nl: De administratie waarin deze installatie werkt. Leeg gelaten wordt de huidige gebruikt.
       help:
         en: >-
-          Every Exact call names a division. Leaving this empty costs one extra
-          request per operation to look the current one up, so fill it in once
-          the right administration is known — currentDivision reports it.
+          Every Exact call names a division. Leaving this empty costs one extra request per operation to look the
+          current one up, so fill it in once the right administration is known — currentDivision reports it.
         nl: >-
-          Elke Exact-aanroep noemt een administratie. Leeg laten kost één extra
-          aanroep per operatie om de huidige op te zoeken; vul hem in zodra de
-          juiste administratie bekend is — currentDivision toont die.
+          Elke Exact-aanroep noemt een administratie. Leeg laten kost één extra aanroep per operatie om de huidige op te
+          zoeken; vul hem in zodra de juiste administratie bekend is — currentDivision toont die.
 
 auth:
   type: oauth2
@@ -158,11 +156,11 @@ operations:
       cardinality: one
       fields:
         - key: division
-          valueType: integer
+          osfType: integer
           required: true
           label: { en: Division, nl: Administratie }
         - key: userName
-          valueType: string
+          osfType: string
           label: { en: User, nl: Gebruiker }
     reliability:
       timeouts:
@@ -182,7 +180,7 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: endpoint
-        valueType: string
+        osfType: string
         required: true
         label: { en: Endpoint, nl: Endpoint }
         description:
@@ -192,7 +190,7 @@ operations:
           minLength: 1
           maxLength: 256
       - key: select
-        valueType: string
+        osfType: string
         label: { en: Fields, nl: Velden }
         description:
           en: Comma-separated $select. Exact returns everything when omitted, which is slow.
@@ -200,7 +198,7 @@ operations:
         validation:
           maxLength: 2048
       - key: filter
-        valueType: string
+        osfType: string
         label: { en: Filter, nl: Filter }
         description:
           en: An OData $filter expression.
@@ -208,7 +206,7 @@ operations:
         validation:
           maxLength: 4096
       - key: top
-        valueType: integer
+        osfType: integer
         defaultValue: 60
         label: { en: Maximum records, nl: Maximum aantal records }
         validation:
@@ -217,7 +215,7 @@ operations:
       # Exact pages with an opaque continuation token rather than an offset, so
       # this is echoed back from a previous response, never computed.
       - key: skipToken
-        valueType: string
+        osfType: string
         label: { en: Continuation token, nl: Vervolgtoken }
         validation:
           maxLength: 2048
@@ -225,12 +223,12 @@ operations:
       cardinality: one
       fields:
         - key: records
-          valueType: object
+          osfType: object
           cardinality: collection
           required: true
           label: { en: Records, nl: Records }
         - key: nextSkipToken
-          valueType: string
+          osfType: string
           label: { en: Next continuation token, nl: Volgend vervolgtoken }
           description:
             en: Present when Exact has more records; pass it back as skipToken.
@@ -259,14 +257,14 @@ operations:
         invoke: [Connectors.All.ReadWrite]
     input:
       - key: endpoint
-        valueType: string
+        osfType: string
         required: true
         label: { en: Endpoint, nl: Endpoint }
         validation:
           minLength: 1
           maxLength: 256
       - key: payload
-        valueType: object
+        osfType: object
         required: true
         label: { en: Payload, nl: Payload }
         description:
@@ -276,7 +274,7 @@ operations:
       cardinality: one
       fields:
         - key: record
-          valueType: object
+          osfType: object
           required: true
           label: { en: Record, nl: Record }
     reliability:

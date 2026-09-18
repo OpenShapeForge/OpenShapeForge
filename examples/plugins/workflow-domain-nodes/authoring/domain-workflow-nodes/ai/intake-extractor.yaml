@@ -12,7 +12,7 @@ description:
   en: Analyzes free-form maintenance input and creates draft output.
 configFields:
   - key: promptProfile
-    valueType: string
+    osfType: string
     label:
       nl: Prompt profile
       en: Prompt profile
@@ -28,7 +28,7 @@ configFields:
     render:
       component: Select
   - key: outputMode
-    valueType: string
+    osfType: string
     label:
       nl: Output mode
       en: Output mode
@@ -49,7 +49,7 @@ configFields:
     render:
       component: Select
   - key: extractFields
-    valueType: string
+    osfType: string
     cardinality:
       min: 0
       max: "unbounded"
@@ -71,7 +71,7 @@ configFields:
       - categorie
     item:
       key: field
-      valueType: string
+      osfType: string
       label:
         nl: Veld
         en: Field
@@ -111,7 +111,7 @@ configFields:
       render:
         component: Select
   - key: includeReasoningSummary
-    valueType: boolean
+    osfType: boolean
     label:
       nl: Voeg reasoning summary toe
       en: Include reasoning summary
@@ -125,7 +125,7 @@ configFields:
     render:
       component: Switch
   - key: inputSources
-    valueType: object
+    osfType: object
     label:
       nl: Bronnen
       en: Sources
@@ -141,7 +141,7 @@ configFields:
         are added to the analysis as raw text.
     children:
       - key: messages
-        valueType: boolean
+        osfType: boolean
         label:
           nl: Berichttekst meenemen
           en: Include message text
@@ -157,7 +157,7 @@ configFields:
         render:
           component: Switch
       - key: attachments
-        valueType: boolean
+        osfType: boolean
         label:
           nl: Bijlagen en beschrijvingen meenemen
           en: Include attachments and descriptions
@@ -172,7 +172,7 @@ configFields:
         render:
           component: Switch
       - key: conversationContext
-        valueType: boolean
+        osfType: boolean
         label:
           nl: Volledige conversatiecontext ophalen
           en: Fetch full conversation context
@@ -186,7 +186,7 @@ configFields:
         render:
           component: Switch
       - key: knownEntityContext
-        valueType: boolean
+        osfType: boolean
         label:
           nl: Relatie / entiteit context meenemen
           en: Include relation / entity context
@@ -201,8 +201,7 @@ configFields:
         render:
           component: Switch
       - key: relationId
-        valueType: string
-        semanticType: relationId
+        osfType: relationId
         label:
           nl: Relatie ID
           en: Relation ID
@@ -225,7 +224,7 @@ configFields:
             valueMode: insertText
             expectedValueType: string
       - key: entityUri
-        valueType: string
+        osfType: string
         label:
           nl: Entiteit URI
           en: Entity URI
@@ -248,7 +247,7 @@ configFields:
             valueMode: insertText
             expectedValueType: string
   - key: outputParameters
-    valueType: object
+    osfType: object
     cardinality:
       min: 0
       max: "unbounded"
@@ -259,8 +258,10 @@ configFields:
       nl: Outputvelden die beschikbaar worden voor vervolgstappen.
       en: Output fields that become available to downstream steps.
     help:
-      nl: Deze parameters beschrijven de vaste output die vervolgstappen kunnen mappen, zoals samenvatting, suggesties en missing fields.
-      en: These parameters describe the stable output downstream steps can map, such as summary, suggestions, and missing fields.
+      nl: Deze parameters beschrijven de vaste output die vervolgstappen kunnen mappen, zoals samenvatting, suggesties en
+        missing fields.
+      en: These parameters describe the stable output downstream steps can map, such as summary, suggestions, and missing
+        fields.
     defaultValue:
       - id: extract-summary
         key: summary
@@ -270,7 +271,7 @@ configFields:
       - id: extract-concept-ledo
         key: conceptLedo
         label: Concept LEDO
-        valueType: object
+        osfType: object
         required: false
       - id: extract-category
         key: categorieSuggestie
@@ -285,12 +286,12 @@ configFields:
       - id: extract-confidence
         key: confidence
         label: Confidence
-        valueType: number
+        osfType: number
         required: false
       - id: extract-missing
         key: missingFields
         label: Ontbrekende velden
-        valueType: object
+        osfType: object
         cardinality:
           min: 0
           max: "unbounded"
@@ -298,7 +299,7 @@ configFields:
       - id: extract-signals
         key: signals
         label: Signalen
-        valueType: object
+        osfType: object
         cardinality:
           min: 0
           max: "unbounded"
@@ -310,7 +311,7 @@ configFields:
         required: false
     item:
       key: parameter
-      valueType: object
+      osfType: object
       description:
         nl: Eén outputparameter die door de intake extractor beschikbaar wordt gemaakt.
         en: One output parameter exposed by the intake extractor.
@@ -319,7 +320,7 @@ configFields:
         en: Change this list only when downstream steps need different output fields.
       children:
         - key: id
-          valueType: string
+          osfType: string
           label:
             nl: Interne ID
             en: Internal ID
@@ -332,7 +333,7 @@ configFields:
           render:
             component: Input
         - key: key
-          valueType: string
+          osfType: string
           label:
             nl: Sleutel
             en: Key
@@ -345,7 +346,7 @@ configFields:
           render:
             component: Input
         - key: label
-          valueType: string
+          osfType: string
           label:
             nl: Label
             en: Label
@@ -358,7 +359,7 @@ configFields:
           render:
             component: Input
         - key: type
-          valueType: string
+          osfType: string
           label:
             nl: Type
             en: Type
@@ -403,7 +404,7 @@ configFields:
           render:
             component: Select
         - key: required
-          valueType: boolean
+          osfType: boolean
           label:
             nl: Verplicht
             en: Required
@@ -416,11 +417,11 @@ configFields:
           defaultValue: false
           render:
             component: Switch
-        - key: semanticTypeKey
-          valueType: string
+        - key: osfTypeKey
+          osfType: string
           label:
-            nl: Semantisch type
-            en: Semantic type
+            nl: OSF-type
+            en: OSF type
           description:
             nl: Optioneel semantisch type voor variabele-compatibiliteit.
             en: Optional semantic type for variable compatibility.
@@ -430,7 +431,7 @@ configFields:
           render:
             component: Input
         - key: description
-          valueType: string
+          osfType: string
           label:
             nl: Beschrijving
             en: Description
@@ -445,7 +446,7 @@ configFields:
             props:
               rows: 2
         - key: placeholder
-          valueType: string
+          osfType: string
           label:
             nl: Placeholder
             en: Placeholder

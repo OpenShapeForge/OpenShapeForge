@@ -5,7 +5,7 @@ import type {
 } from "@/generated/compiler/field-contract";
 import { resolveReferentieGroepItems } from "@/lib/referentiedata";
 import {
-  getFieldSemanticTypeDefinition,
+  getFieldOsfTypeDefinition,
   resolveFieldInputRender,
 } from "@/lib/field-rendering/compiler-field-rendering";
 
@@ -35,7 +35,7 @@ export function resolveRendererReferenceItems(field: Field): StaticOption[] {
     return dedupeStaticOptions(direct);
   }
 
-  const semanticOptions = getFieldSemanticTypeDefinition(field)?.options;
+  const semanticOptions = getFieldOsfTypeDefinition(field)?.options;
   if (semanticOptions?.items?.length) {
     return dedupeStaticOptions(semanticOptions.items);
   }

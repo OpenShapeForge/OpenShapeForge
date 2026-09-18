@@ -70,8 +70,8 @@ function catalogued(nodeType: string, configFields: unknown[] = []): CatalogEntr
  * only the canonical key sees a decision with no branches at all.
  */
 const DECISION_CONFIG_FIELDS = [
-  { key: "branches", valueType: "object", runtime: { aliases: ["conditions"] } },
-  { key: "defaultEdgeId", valueType: "string" },
+  { key: "branches", osfType: "object", baseType: "object", runtime: { aliases: ["conditions"] } },
+  { key: "defaultEdgeId", osfType: "string", baseType: "string" },
 ];
 
 /**

@@ -97,14 +97,14 @@ export function useOptionVariablePicker({
     [onChange],
   );
 
-  const fieldSemanticType = field?.semanticType;
+  const fieldOsfType = field?.osfType;
   useEffect(() => {
     if (autoSelectAttemptedRef.current) return;
-    if (!fieldSemanticType) return;
+    if (!fieldOsfType) return;
     if (stringValue.trim().length > 0) return;
 
     const matches = suggestions.filter(
-      (suggestion) => suggestion.semanticType === fieldSemanticType,
+      (suggestion) => suggestion.osfType === fieldOsfType,
     );
     if (matches.length !== 1) return;
 
@@ -115,7 +115,7 @@ export function useOptionVariablePicker({
       kind: "variable",
       suggestion: match,
     });
-  }, [fieldSemanticType, suggestions, stringValue, valueMode, onChange]);
+  }, [fieldOsfType, suggestions, stringValue, valueMode, onChange]);
 
   const options = providedOptions ?? normalizeRemoteOptions(remoteData);
   const selectedRemoteOption = useMemo(

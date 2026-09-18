@@ -174,7 +174,7 @@ export const FIELD_AUTHORING_PROFILES: Record<
     }),
     createEmptyField: () => ({
       ...createBaseField(),
-      semanticType: "string",
+      osfType: "string",
     }),
   },
   templateParameter: {
@@ -211,7 +211,7 @@ export const FIELD_AUTHORING_PROFILES: Record<
     }),
     createEmptyField: () => ({
       ...createBaseField(),
-      semanticType: "string",
+      osfType: "string",
     }),
   },
   workflowOutputField: {

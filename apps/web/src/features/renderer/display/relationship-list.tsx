@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 import { Button } from "@openshapeforge/ui";
 import { DisplayLabel } from "@/features/renderer/display/label";
@@ -22,9 +23,9 @@ import type { ReactNode } from "react";
 export type FieldMeta = {
   key: string;
   label?: { en?: string; nl?: string } | string;
-  valueType?: Field["valueType"];
+  baseType?: Field["baseType"];
   cardinality?: Field["cardinality"];
-  semanticType?: string;
+  osfType?: string;
   layoutFraction?: number;
   render?: Field["render"];
   validation?: Field["validation"];

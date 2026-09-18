@@ -30,7 +30,7 @@ fields:
   - key: agreementId
     required: true
     immutable: true
-    semanticType: Agreement
+    osfType: Agreement
     label:
       en: Agreement
       nl: Overeenkomst
@@ -47,10 +47,15 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        key: parties
+        label:
+          en: Parties
+          nl: Partijen
   - key: relationId
     required: true
     immutable: true
-    semanticType: Relation
+    osfType: Relation
     label:
       en: Relation
       nl: Relatie
@@ -70,7 +75,7 @@ fields:
     relationship:
       ownership: reference
   - key: partyRole
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Party role
@@ -85,7 +90,7 @@ fields:
       type: referentiedata
       referentieGroep: AGREEMENTPARTYROLE
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -100,7 +105,7 @@ fields:
       type: referentiedata
       referentieGroep: ROLEASSIGNMENTSTATUS
   - key: name
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Name
@@ -114,7 +119,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -128,7 +133,7 @@ fields:
       column: description
       storageClass: core
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -140,7 +145,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -152,7 +157,7 @@ fields:
       column: end_date
       storageClass: core
   - key: sharePercentage
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Share percentage
@@ -171,7 +176,7 @@ fields:
       column: share_percentage
       storageClass: core
   - key: primaryPayer
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary payer
@@ -186,7 +191,7 @@ fields:
       column: primary_payer
       storageClass: core
   - key: paymentDay
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Payment day
@@ -201,7 +206,7 @@ fields:
       column: payment_day
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -221,7 +226,7 @@ fields:
     persisted:
       column: contract_address_id
       storageClass: core
-    semanticType: Address
+    osfType: Address
     relationship:
       ownership: reference
   - key: addressAssignmentId
@@ -231,7 +236,7 @@ fields:
     persisted:
       column: address_assignment_id
       storageClass: core
-    semanticType: AddressAssignment
+    osfType: AddressAssignment
     relationship:
       ownership: reference
   - key: paymentDetailId
@@ -241,7 +246,7 @@ fields:
     persisted:
       column: payment_detail_id
       storageClass: core
-    semanticType: PaymentDetail
+    osfType: PaymentDetail
     relationship:
       ownership: reference
   - key: preferredPaymentMethodId
@@ -251,7 +256,7 @@ fields:
     persisted:
       column: preferred_payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
 operations:

@@ -13,12 +13,12 @@ const carrier: RuntimeEntityValueCarrier = {
   valuesColumn: "values", definitionColumn: "definition_key",
   definitions: {
     TextBlock: {
-      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "text", valueType: "string", required: true }],
+      entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), fields: [{ key: "text", osfType: "string", baseType: "string", required: true }],
       valueSchema: { type: "object", properties: { text: { type: "string", minLength: 1 } }, required: ["text"], additionalProperties: false },
       references: [], materializeOperationId: "TextBlock.materialize",
     },
     IncludeBlock: {
-      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", valueType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", valueType: "object" }],
+      entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64), fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object" }],
       valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
     },
@@ -34,9 +34,9 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
     redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK" };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
-    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", valueType: "string", required: true,
+    TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", osfType: "string", baseType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
-      ...(withReference ? [{ key: "brand", valueType: "string", required: true, relationship: { target: "Chip" } }] : [])],
+      ...(withReference ? [{ key: "brand", osfType: "Chip", baseType: "string", required: true, relationship: { target: "Chip" } }] : [])],
       references: withReference ? [{ fieldKey: "brand", targetEntity: "Chip", column: "text_brand_id", schema: "erp", table: "chips", required: true,
         ...(withBinding ? { parameterColumn: "text_brand_parameter" } : {}) }] : [],
     },
@@ -87,7 +87,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
             const blockRow = { id: ids.block, tenant_id: data.tenant, variant_id: ids.variant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.text },
               ...(withReference ? (withBinding ? { text_brand_parameter: "brand", text_brand_id: null } : { text_brand_id: ids.chip, text_brand_parameter: null }) : {}) };
             const snapshot = { schemaVersion: 1, entity: "Template", head: { table: "templates",
-              row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", valueType: "string", defaultValue: "Reader" }] },
+              row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", osfType: "string", defaultValue: "Reader" }] },
               children: { template_variants: [
                 { table: "template_variants", row: { id: ids.variant, tenant_id: data.tenant, template_id: ids.template, channel: "document", locale: "en" }, children: { blocks: [{ table: "blocks", row: blockRow, children: {} }] } },
                 { table: "template_variants", row: { id: ids.chip, tenant_id: data.tenant, template_id: ids.template, channel: "email", locale: "en" }, children: { blocks: [] } },
@@ -211,6 +211,6 @@ describe("template materialization runtime adapter", () => {
     expect(f.executions).toHaveLength(0);
   });
   test("keeps resolved cardinality and nested fields in the snapshot projection", () => {
-    expect(contentFieldProjection({ valueType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", valueType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { valueType: "string", required: true } } });
+    expect(contentFieldProjection({ osfType: "object", baseType: "object", cardinality: "collection", cardinalityBounds: { min: 1, max: 3 }, children: [{ key: "title", osfType: "string", baseType: "string", required: true }] })).toMatchObject({ cardinality: { min: 1, max: 3 }, fields: { title: { baseType: "string", required: true } } });
   });
 });

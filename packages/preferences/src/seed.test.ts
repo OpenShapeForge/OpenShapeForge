@@ -18,7 +18,7 @@ test("tagged fixtures retain exact canonical fields, validate defaults and ignor
   const h = schemas();
   const result = loadPreferenceDefinitions([unrelated, fixture], h.fields);
   expect(result).toHaveLength(1);
-  expect(result[0]!.field).toMatchObject({ key: "columns", valueType: "string", cardinality: "collection", defaultValue: ["name"] });
+  expect(result[0]!.field).toMatchObject({ key: "columns", osfType: "string", cardinality: "collection", defaultValue: ["name"] });
   expect(h.calls).toEqual([[result[0]!.field], { definitions: [result[0]!.field], value: { columns: ["name"] } }]);
 });
 test("duplicate keys and invalid canonical field/default are rejected", () => {
@@ -42,7 +42,7 @@ test("managed seed executes composition atomically and requires canonical servic
   expect(statements[2]).toContain("delete from platform.preference_definitions");
   expect(statements[2]).toContain("jsonb_array_elements_text($1::text::jsonb)");
   expect(parameters[2]).toEqual(['["collection.example:columns"]']);
-  expect(JSON.parse(String(parameters[1]![2]))).toMatchObject({ key: "columns", valueType: "string" });
+  expect(JSON.parse(String(parameters[1]![2]))).toMatchObject({ key: "columns", osfType: "string" });
   await expect(preferenceDefinitionsSeed.apply(db)).rejects.toThrow("canonical");
   // Existing one-argument seed implementations remain compatible.
   const legacy: ModuleSeed = { name: "legacy", async apply(_db) { return { present: true, skipped: false }; } };

@@ -12,8 +12,7 @@ description:
   nl: Controleer of een conversatie een voldoende actueel identificatieniveau heeft.
 configFields:
   - key: conversationId
-    valueType: string
-    semanticType: conversationId
+    osfType: conversationId
     label:
       en: Conversation ID
       nl: Conversatie-ID
@@ -21,14 +20,16 @@ configFields:
       en: Conversation whose stored identity assurance should be checked.
       nl: Conversatie waarvan de opgeslagen identity assurance moet worden gecontroleerd.
     help:
-      en: When omitted, the bridge tries to inherit the conversation id from the current workflow context. That same conversation is also passed into the child identification workflow when extra assurance is needed.
-      nl: Als je dit leeg laat, probeert de bridge de conversatie-id uit de huidige workflowcontext over te nemen. Diezelfde conversatie wordt ook doorgegeven aan de child-identificatieworkflow wanneer extra assurance nodig is.
+      en: When omitted, the bridge tries to inherit the conversation id from the current workflow context. That same
+        conversation is also passed into the child identification workflow when extra assurance is needed.
+      nl: Als je dit leeg laat, probeert de bridge de conversatie-id uit de huidige workflowcontext over te nemen. Diezelfde
+        conversatie wordt ook doorgegeven aan de child-identificatieworkflow wanneer extra assurance nodig is.
     render:
       component: OptionVariablePicker
       props:
         valueMode: insertText
   - key: requiredLevel
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Required level
@@ -64,7 +65,7 @@ configFields:
       props:
         clearable: false
   - key: maxAgeMinutes
-    valueType: integer
+    osfType: integer
     label:
       en: Maximum age (minutes)
       nl: Maximale leeftijd (minuten)
@@ -72,8 +73,10 @@ configFields:
       en: How old a successful assurance may be before it is treated as expired.
       nl: Hoe oud een succesvolle assurance mag zijn voordat die als verlopen wordt behandeld.
     help:
-      en: If the assurance is older than this, missing `verifiedAt`, or already past its own `expiresAt`, the bridge triggers the identification-needed path even when the level itself would otherwise be sufficient.
-      nl: Als de assurance ouder is dan dit, geen `verifiedAt` heeft, of al voorbij zijn eigen `expiresAt` is, triggert de bridge alsnog het identificatie-nodig-pad, ook als het niveau op zichzelf voldoende zou zijn.
+      en: If the assurance is older than this, missing `verifiedAt`, or already past its own `expiresAt`, the bridge triggers
+        the identification-needed path even when the level itself would otherwise be sufficient.
+      nl: Als de assurance ouder is dan dit, geen `verifiedAt` heeft, of al voorbij zijn eigen `expiresAt` is, triggert de
+        bridge alsnog het identificatie-nodig-pad, ook als het niveau op zichzelf voldoende zou zijn.
     defaultValue: 1440
     validation:
       min: 0

@@ -65,6 +65,7 @@
 import type { CanvasEdge, CanvasNode } from "../graph/canvas-graph";
 import { isEntryNodeType } from "../../runtime/definition-types";
 import { flattenFieldDefinitionSources } from "../../runtime/field-definitions";
+import { compiledFieldAsDefinition } from "./compiled-field-definition";
 
 /**
  * One entry in a field's variable picker.
@@ -92,8 +93,8 @@ export type WorkflowVariableSuggestion = {
   /** Edges from the node being configured back to the source. Absent for `process.*`. */
   sourceNodeDistance?: number;
   valueType: "string" | "number" | "boolean" | "object" | "array";
-  semanticType?: string;
-  itemSemanticType?: string;
+  osfType?: string;
+  itemOsfType?: string;
 };
 
 export type BuildWorkflowVariableSuggestionsInput = {
@@ -425,7 +426,7 @@ function nodeOutputFields(
         ? config.mappingParameters
         : config.inputParameters
       : undefined,
-    resolveOutputFields?.(node.type),
+    asArray(resolveOutputFields?.(node.type)).map(compiledFieldAsDefinition),
   ];
 
   for (const candidate of candidates) {
@@ -492,7 +493,7 @@ function sameStartField(
     asString(left.key) === asString(right.key) &&
     asString(left.valueType) === asString(right.valueType) &&
     isCollection(left) === isCollection(right) &&
-    asString(left.semanticType) === asString(right.semanticType)
+    asString(left.osfType) === asString(right.osfType)
   );
 }
 
@@ -501,8 +502,8 @@ type FlattenedField = {
   label: string;
   displayLabel: string;
   valueType: WorkflowVariableSuggestion["valueType"];
-  semanticType?: string;
-  itemSemanticType?: string;
+  osfType?: string;
+  itemOsfType?: string;
 };
 
 function addFlattenedField(
@@ -537,9 +538,9 @@ function addFlattenedField(
         ? { sourceNodeDistance: input.sourceNodeDistance }
         : {}),
       valueType: flattened.valueType,
-      ...(flattened.semanticType ? { semanticType: flattened.semanticType } : {}),
-      ...(flattened.itemSemanticType
-        ? { itemSemanticType: flattened.itemSemanticType }
+      ...(flattened.osfType ? { osfType: flattened.osfType } : {}),
+      ...(flattened.itemOsfType
+        ? { itemOsfType: flattened.itemOsfType }
         : {}),
     });
   }
@@ -576,9 +577,9 @@ function flattenField(
       label,
       displayLabel,
       valueType: collection ? "array" : valueTypeOf(field.valueType),
-      ...(asString(field.semanticType) ? { semanticType: asString(field.semanticType)! } : {}),
-      ...(asString(item.semanticType)
-        ? { itemSemanticType: asString(item.semanticType)! }
+      ...(asString(field.osfType) ? { osfType: asString(field.osfType)! } : {}),
+      ...(asString(item.osfType)
+        ? { itemOsfType: asString(item.osfType)! }
         : {}),
     },
   ];
@@ -592,8 +593,8 @@ function flattenField(
       label: elementLabel,
       displayLabel: labelPrefix ? `${labelPrefix} > ${elementLabel}` : elementLabel,
       valueType: valueTypeOf(element.valueType),
-      ...(asString(element.semanticType)
-        ? { semanticType: asString(element.semanticType)! }
+      ...(asString(element.osfType)
+        ? { osfType: asString(element.osfType)! }
         : {}),
     });
     for (const child of asArray(element.children)) {

@@ -44,7 +44,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -59,7 +59,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -74,7 +74,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -87,9 +86,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: category
-    valueType: string
     required: false
     label:
       en: Category
@@ -103,9 +101,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASECATEGORY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: caseType
-    valueType: string
     required: true
     label:
       en: Case type
@@ -119,9 +116,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: caseSubType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Case subtype
@@ -135,7 +132,6 @@ fields:
       column: case_sub_type
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -149,9 +145,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: routingStatus
-    valueType: string
     required: false
     label:
       en: Routing status
@@ -165,9 +160,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEROUTINGSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: priority
-    valueType: string
     required: false
     label:
       en: Priority
@@ -181,9 +175,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEPRIORITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: originChannel
-    valueType: string
     required: false
     label:
       en: Origin channel
@@ -197,9 +190,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEORIGINCHANNEL
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: fieldDefinitions
-    valueType: object
     label:
       en: Case variables
       nl: Zaakvariabelen
@@ -213,11 +205,10 @@ fields:
     cardinality:
       min: 0
       max: unbounded
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     authoring:
       profile: workflowInputField
   - key: confidentiality
-    valueType: string
     required: false
     label:
       en: Confidentiality
@@ -231,9 +222,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASECONFIDENTIALITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: waitingReason
-    valueType: string
     required: false
     label:
       en: Waiting reason
@@ -247,9 +237,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEWAITINGREASON
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: breachState
-    valueType: string
     required: false
     label:
       en: Breach state
@@ -263,9 +252,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEBREACHSTATE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: registeredAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Registered at
@@ -277,7 +266,7 @@ fields:
       column: registered_at
       storageClass: core
   - key: startedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Started at
@@ -289,7 +278,7 @@ fields:
       column: started_at
       storageClass: core
   - key: routedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Routed at
@@ -301,7 +290,7 @@ fields:
       column: routed_at
       storageClass: core
   - key: lastCustomerContactAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Last customer contact at
@@ -313,7 +302,7 @@ fields:
       column: last_customer_contact_at
       storageClass: core
   - key: nextActionAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Next action at
@@ -325,7 +314,7 @@ fields:
       column: next_action_at
       storageClass: core
   - key: plannedEndAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Planned end at
@@ -337,7 +326,7 @@ fields:
       column: planned_end_at
       storageClass: core
   - key: dueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Due at
@@ -349,7 +338,7 @@ fields:
       column: due_at
       storageClass: core
   - key: firstResponseDueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: First response due at
@@ -361,7 +350,7 @@ fields:
       column: first_response_due_at
       storageClass: core
   - key: resolutionDueAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Resolution due at
@@ -373,7 +362,7 @@ fields:
       column: resolution_due_at
       storageClass: core
   - key: closedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -386,7 +375,7 @@ fields:
       column: closed_at
       storageClass: core
   - key: portalVisible
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Portal visible
@@ -399,7 +388,7 @@ fields:
       column: portal_visible
       storageClass: core
   - key: resultSummary
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Result summary
@@ -413,7 +402,6 @@ fields:
       column: result_summary
       storageClass: core
   - key: resultDetails
-    valueType: string
     required: false
     label:
       en: Result details
@@ -426,9 +414,8 @@ fields:
     persisted:
       column: result_details
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: aiSummary
-    valueType: string
     required: false
     readOnly: true
     label:
@@ -442,9 +429,9 @@ fields:
     persisted:
       column: ai_summary
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -464,9 +451,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Cases
+          nl: Zaken
   - key: caseFileId
     label:
       en: Case file
@@ -474,9 +465,13 @@ fields:
     persisted:
       column: case_file_id
       storageClass: core
-    semanticType: CaseFile
+    osfType: CaseFile
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Cases
+          nl: Zaken
   - key: currentQueueId
     label:
       en: Current queue
@@ -484,9 +479,13 @@ fields:
     persisted:
       column: work_queue_id
       storageClass: core
-    semanticType: WorkQueue
+    osfType: WorkQueue
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Cases
+          nl: Zaken
   - key: slaPolicyId
     label:
       en: SLA policy
@@ -494,9 +493,13 @@ fields:
     persisted:
       column: sla_policy_id
       storageClass: core
-    semanticType: SlaPolicy
+    osfType: SlaPolicy
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Cases
+          nl: Zaken
   - key: parentCaseId
     label:
       en: Parent case
@@ -504,117 +507,14 @@ fields:
     persisted:
       column: parent_case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
-  - key: childCases
-    label:
-      en: Child cases
-      nl: Deelzaken
-    semanticType: Case
-    cardinality: collection
-    relationship:
-      inverse: parentCaseId
-      ownership: reference
-  - key: tasks
-    label:
-      en: Tasks
-      nl: Taken
-    semanticType: Task
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: contactMoments
-    label:
-      en: Contact moments
-      nl: Contactmomenten
-    semanticType: ContactMoment
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: appointments
-    label:
-      en: Appointments
-      nl: Afspraken
-    semanticType: Appointment
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: agreements
-    label:
-      en: Agreements
-      nl: Overeenkomsten
-    semanticType: Agreement
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: statusEvents
-    label:
-      en: Status events
-      nl: Statusgebeurtenissen
-    semanticType: CaseStatusEvent
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: parties
-    label:
-      en: Parties
-      nl: Betrokkenen
-    semanticType: CaseParty
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: objectLinks
-    label:
-      en: Linked objects
-      nl: Gekoppelde objecten
-    semanticType: CaseObjectLink
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: documents
-    label:
-      en: Documents
-      nl: Documenten
-    semanticType: Document
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: processes
-    label:
-      en: Steps
-      nl: Stappen
-    semanticType: Process
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: assignments
-    label:
-      en: Assignments
-      nl: Toewijzingen
-    semanticType: Assignment
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
-  - key: milestones
-    label:
-      en: Milestones
-      nl: Mijlpalen
-    semanticType: Milestone
-    cardinality: collection
-    relationship:
-      inverse: caseId
-      ownership: reference
+      inverse:
+        key: childCases
+        label:
+          en: Child cases
+          nl: Deelzaken
 operations:
   list:
     name: List Case

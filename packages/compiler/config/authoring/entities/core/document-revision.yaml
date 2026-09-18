@@ -3,8 +3,8 @@ kind: coreEntity
 module: core
 entity: DocumentRevision
 title: Document revision
-description: An editable draft of a document's content, seeded from a published template version and
-  published to an immutable document version. See docs/document-revisions.md.
+description: An editable draft of a document's content, seeded from a published template version and published to an
+  immutable document version. See docs/document-revisions.md.
 language: en
 labels: { en: Document revision, nl: Documentrevisie }
 domains: [documents]
@@ -22,15 +22,22 @@ indexes:
 fields:
   - key: document
     label: { en: Document, nl: Document }
-    semanticType: Document
+    osfType: Document
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: revisions
+        label:
+          en: Revisions
+          nl: Revisies
+        ownership: owned
   - key: templateVersion
     label: { en: Template version, nl: Templateversie }
     description:
       en: The published template version this draft currently tracks; moves forward when the template is republished.
       nl: De gepubliceerde templateversie die dit concept volgt; schuift op als de template opnieuw wordt gepubliceerd.
-    semanticType: TemplateVersion
+    osfType: TemplateVersion
     required: false
     readOnly: true
     writtenBy: [Document.startRevision, Template.publish]
@@ -38,7 +45,7 @@ fields:
     relationship: { ownership: reference }
   - key: channel
     label: { en: Channel, nl: Kanaal }
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     options:
@@ -49,7 +56,7 @@ fields:
         - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
     persisted: { column: channel, storageClass: core }
   - key: locale
-    valueType: string
+    osfType: string
     required: true
     immutable: true
     defaultValue: nl
@@ -58,7 +65,7 @@ fields:
     persisted: { column: locale, storageClass: core }
   - key: status
     label: { en: Status, nl: Status }
-    valueType: string
+    osfType: string
     required: true
     defaultValue: draft
     options:
@@ -72,7 +79,7 @@ fields:
         - { value: superseded, label: { en: Superseded, nl: Vervangen } }
     persisted: { column: status, storageClass: core }
   - key: parameters
-    valueType: object
+    osfType: object
     required: false
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
@@ -82,7 +89,7 @@ fields:
     persisted: { column: parameters, storageClass: core }
   - key: publishedVersionId
     label: { en: Published document version, nl: Gepubliceerde documentversie }
-    semanticType: DocumentVersion
+    osfType: DocumentVersion
     required: false
     readOnly: true
     writtenBy: [DocumentRevision.publish]
@@ -93,25 +100,14 @@ fields:
     label: { en: Follow problem, nl: Volgprobleem }
     description:
       en: Why the last template republish could not be applied to this draft; cleared when a later republish succeeds.
-      nl: Waarom de laatste herpublicatie van de template niet op dit concept kon worden toegepast; gewist zodra een latere herpublicatie slaagt.
-    valueType: string
+      nl: Waarom de laatste herpublicatie van de template niet op dit concept kon worden toegepast; gewist zodra een latere
+        herpublicatie slaagt.
+    osfType: string
     required: false
     readOnly: true
     writtenBy: [Template.publish]
     validation: { maxLength: 2000 }
     persisted: { column: follow_error, storageClass: core }
-  - key: blocks
-    label: { en: Blocks, nl: Blokken }
-    semanticType: Block
-    cardinality: collection
-    sortable: true
-    relationship: { inverse: revision, ownership: owned }
-    # A document editor holds no Block role; the revision's collection
-    # Operations carry the document editor's authority to its blocks.
-    childAuthorization: owner
-    # Keep identical to TemplateVariant.blocks. A plugin entityPatch targets one
-    # entity, so a plugin adding a definition patches both files.
-    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }
@@ -176,7 +172,19 @@ operations:
       schema:
         type: object
         additionalProperties: false
-        required: [revisionId, documentId, documentVersionId, artifactId, artifactVersion, fileName, mediaType, checksum, byteSize, compositionHash]
+        required:
+          [
+            revisionId,
+            documentId,
+            documentVersionId,
+            artifactId,
+            artifactVersion,
+            fileName,
+            mediaType,
+            checksum,
+            byteSize,
+            compositionHash
+          ]
         properties:
           revisionId: { type: string, format: uuid, x-osf-i18n: { title: { en: Revision, nl: Revisie } } }
           documentId: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
@@ -187,7 +195,12 @@ operations:
           mediaType: { type: string, const: application/json, x-osf-i18n: { title: { en: Media type, nl: Bestandstype } } }
           checksum: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Checksum, nl: Controlesom } } }
           byteSize: { type: integer, minimum: 0, x-osf-i18n: { title: { en: File size, nl: Bestandsgrootte } } }
-          compositionHash: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } } }
+          compositionHash:
+            {
+              type: string,
+              pattern: "^[a-f0-9]{64}$",
+              x-osf-i18n: { title: { en: Content fingerprint, nl: Inhoudsvingerafdruk } }
+            }
     errors:
       - { status: 400, code: VALIDATION, description: The revision or version input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The revision or its document is not accessible. }
@@ -266,7 +279,13 @@ interfaces:
           tabs:
             - id: revision
               label: { en: Revision, nl: Revisie }
-              groups: [{ title: { en: Revision, nl: Revisie }, fields: [document, templateVersion, channel, locale, status, parameters, followError] }]
+              groups:
+                [
+                  {
+                      title: { en: Revision, nl: Revisie },
+                      fields: [document, templateVersion, channel, locale, status, parameters, followError]
+                    }
+                ]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks

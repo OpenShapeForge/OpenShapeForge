@@ -159,7 +159,7 @@ export interface FieldOptions {
   labelField?: string;
 }
 
-export interface SemanticTypeLookupDefinition {
+export interface OsfTypeLookupDefinition {
   provider: string;
   remoteUrl?: string;
   searchParam?: string;
@@ -246,7 +246,7 @@ export interface FormFieldDefinition {
   key: string;
   valueType: string;
   cardinality?: "single" | "collection";
-  semanticType?: string;
+  osfType?: string;
   label: LocalizedText;
   required?: boolean;
   description?: LocalizedText | null;

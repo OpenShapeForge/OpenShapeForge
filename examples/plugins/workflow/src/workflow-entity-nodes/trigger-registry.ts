@@ -7,7 +7,7 @@ import { getReferentieItemsForGroep } from "../../../../../packages/compiler/src
 import { getEntityActionConfigs } from "./entity-field-resolution.js";
 import { isCollectionCardinality, isWorkflowHiddenField, resolveLocalizedLabel, toKebabCase } from "./utils.js";
 
-const FILTERABLE_FIELD_VALUE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
+const FILTERABLE_FIELD_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
 
 type EntityTriggerRegistryEntry = {
   entity: string;
@@ -22,7 +22,7 @@ type EntityTriggerRegistryEntry = {
     description?: string;
     fieldType: string;
     inputKind: "text" | "number" | "boolean" | "select";
-    semanticType?: string;
+    osfType?: string;
     options?: Array<{ value: string; label: string }>;
   }>;
 };
@@ -52,24 +52,23 @@ export function resolveFieldOptions(field: Field): Array<{ value: string; label:
 
 export function resolveFilterInputKind(field: Field, hasOptions: boolean): "text" | "number" | "boolean" | "select" {
   if (hasOptions) return "select";
-  if (field.valueType === "boolean") return "boolean";
-  if (field.valueType === "integer" || field.valueType === "number") return "number";
+  if (field.baseType === "boolean") return "boolean";
+  if (field.baseType === "integer" || field.baseType === "number") return "number";
   return "text";
 }
 
 export function buildEntityTriggerRegistryEntry(
   entity: CoreEntity,
-  syntheticBelongsToIdFields: Field[] = [],
 ): EntityTriggerRegistryEntry | null {
   const enabledActions = getEntityActionConfigs(entity);
   if (enabledActions.length === 0) return null;
 
   const entityLabels = resolveLocalizedLabel(entity.labels, entity.title);
   const fieldKeys = new Set<string>();
-  const filterFields = [...entity.fields, ...syntheticBelongsToIdFields]
+  const filterFields = entity.fields
     .filter((field) =>
       !isCollectionCardinality(field.cardinality)
-      && FILTERABLE_FIELD_VALUE_TYPES.has(field.valueType)
+      && FILTERABLE_FIELD_BASE_TYPES.has(field.baseType)
       && field.key.trim().length > 0
       && !isWorkflowHiddenField(field)
     )
@@ -96,9 +95,9 @@ export function buildEntityTriggerRegistryEntry(
         key: field.key,
         label: fieldLabel,
         description: fieldDescription || undefined,
-        fieldType: field.valueType,
+        fieldType: field.baseType,
         inputKind: resolveFilterInputKind(field, options.length > 0),
-        ...(field.semanticType ? { semanticType: field.semanticType } : {}),
+        ...(field.osfType !== field.baseType ? { osfType: field.osfType } : {}),
         ...(options.length > 0 ? { options } : {}),
       };
     });

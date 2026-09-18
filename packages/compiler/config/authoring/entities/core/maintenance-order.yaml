@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -44,7 +44,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -57,9 +56,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -73,9 +71,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MAINTENANCEORDERSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: issueDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Issue date
@@ -87,7 +85,7 @@ fields:
       column: issue_date
       storageClass: core
   - key: plannedStartDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Planned start date
@@ -99,7 +97,7 @@ fields:
       column: planned_start_date
       storageClass: core
   - key: plannedEndDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Planned end date
@@ -111,7 +109,7 @@ fields:
       column: planned_end_date
       storageClass: core
   - key: actualStartDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Actual start date
@@ -123,7 +121,7 @@ fields:
       column: actual_start_date
       storageClass: core
   - key: actualEndDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Actual end date
@@ -135,7 +133,7 @@ fields:
       column: actual_end_date
       storageClass: core
   - key: currencyCode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Currency
@@ -151,7 +149,6 @@ fields:
       column: currency_code
       storageClass: core
   - key: estimatedAmount
-    valueType: number
     required: false
     label:
       en: Estimated amount
@@ -159,12 +156,11 @@ fields:
     description:
       en: Estimated total amount for the order.
       nl: Geraamd totaalbedrag voor de order.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: estimated_amount
       storageClass: core
   - key: actualAmount
-    valueType: number
     required: false
     label:
       en: Actual amount
@@ -172,12 +168,12 @@ fields:
     description:
       en: Actual total amount realized for the order.
       nl: Werkelijk gerealiseerd totaalbedrag voor de order.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: actual_amount
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -197,7 +193,7 @@ fields:
     persisted:
       column: maintenance_request_id
       storageClass: core
-    semanticType: MaintenanceRequest
+    osfType: MaintenanceRequest
     relationship:
       ownership: reference
   - key: agreementId
@@ -207,7 +203,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: assetId
@@ -217,7 +213,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

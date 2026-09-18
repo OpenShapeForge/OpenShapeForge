@@ -13,7 +13,8 @@ function field(
   const { key, ...rest } = overrides;
   return {
     key,
-    valueType: "string",
+    baseType: "string",
+    osfType: rest.baseType ?? "string",
     cardinality: "single",
     required: false,
     label: { en: key },
@@ -54,7 +55,7 @@ const contract = {
       }),
       field({
         key: "metadata",
-        valueType: "object",
+        baseType: "object",
         label: { en: "Metadata" },
         children: [
           field({
@@ -93,7 +94,7 @@ const contract = {
       field({ key: "statusIn", description: { en: "Status import marker." } }),
       field({
         key: "isOptedIn",
-        valueType: "boolean",
+        baseType: "boolean",
         description: { en: "Whether the relation opted in." },
       }),
     ],
@@ -1028,8 +1029,8 @@ describe("rich generated REST OpenAPI", () => {
     semanticContract.model.fields.push(
       field({
         key: "definition",
-        valueType: "object",
-        semanticType: "fieldDefinition",
+        baseType: "object",
+        osfType: "fieldDefinition",
       }),
     );
     const semanticManifest = structuredClone(manifest);

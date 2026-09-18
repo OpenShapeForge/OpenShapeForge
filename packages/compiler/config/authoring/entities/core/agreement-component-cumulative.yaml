@@ -16,7 +16,7 @@ domains:
   - contracts
 fields:
   - key: quantity
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Quantity
@@ -28,7 +28,7 @@ fields:
       column: quantity
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -42,7 +42,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: unitPrice
-    valueType: number
     required: false
     label:
       en: Unit price
@@ -50,12 +49,11 @@ fields:
     description:
       en: Effective unit price reflected in the projection row.
       nl: Effectieve eenheidsprijs die in de projectierij is vastgelegd.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
   - key: amountBase
-    valueType: number
     required: false
     label:
       en: Base amount
@@ -63,12 +61,11 @@ fields:
     description:
       en: Cumulative net amount excluding VAT.
       nl: Cumulatief nettobedrag exclusief BTW.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_base
       storageClass: core
   - key: amountVat
-    valueType: number
     required: false
     label:
       en: VAT amount
@@ -76,12 +73,11 @@ fields:
     description:
       en: Cumulative VAT amount.
       nl: Cumulatief BTW-bedrag.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_vat
       storageClass: core
   - key: amountTotal
-    valueType: number
     required: false
     label:
       en: Total amount
@@ -89,12 +85,12 @@ fields:
     description:
       en: Cumulative total amount including VAT.
       nl: Cumulatief totaalbedrag inclusief BTW.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount_total
       storageClass: core
   - key: postedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Posted at
@@ -112,7 +108,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
   - key: agreementComponentId
@@ -122,7 +118,7 @@ fields:
     persisted:
       column: agreement_component_id
       storageClass: core
-    semanticType: AgreementComponent
+    osfType: AgreementComponent
     relationship:
       ownership: reference
   - key: fiscalPeriodId
@@ -132,7 +128,7 @@ fields:
     persisted:
       column: fiscal_period_id
       storageClass: core
-    semanticType: FiscalPeriod
+    osfType: FiscalPeriod
     relationship:
       ownership: reference
   - key: invoiceId
@@ -142,7 +138,7 @@ fields:
     persisted:
       column: invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
   - key: vatRateId
@@ -152,7 +148,7 @@ fields:
     persisted:
       column: vat_rate_id
       storageClass: core
-    semanticType: VatRate
+    osfType: VatRate
     relationship:
       ownership: reference
   - key: ledgerAccountId
@@ -162,7 +158,7 @@ fields:
     persisted:
       column: ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: componentDimensionId
@@ -172,9 +168,10 @@ fields:
     persisted:
       column: component_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
   - key: dimension1Id
     label:
       en: Cost dimension 1
@@ -182,9 +179,10 @@ fields:
     persisted:
       column: dimension_1_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
   - key: dimension2Id
     label:
       en: Cost dimension 2
@@ -192,9 +190,10 @@ fields:
     persisted:
       column: dimension_2_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
   - key: vatDimensionId
     label:
       en: VAT dimension
@@ -202,9 +201,10 @@ fields:
     persisted:
       column: vat_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
+      inverse: false
 authorization:
   roles:
     read:

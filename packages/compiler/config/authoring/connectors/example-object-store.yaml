@@ -35,8 +35,8 @@ implementation:
   license:
     spdx: LicenseRef-BatterAI-Commercial
     notice: >-
-      Example contract. A real implementation package ships separately under its
-      own license and is not covered by the BUSL-1.1 grant on this repository.
+      Example contract. A real implementation package ships separately under its own license and is not covered by the
+      BUSL-1.1 grant on this repository.
 
 availability:
   entitlement: connector.example-object-store
@@ -46,14 +46,14 @@ configuration:
   verify: false
   fields:
     - key: endpoint
-      valueType: string
+      osfType: string
       required: true
       label: { en: Endpoint, nl: Endpoint }
       description:
         en: Base URL of the object store API.
         nl: Basis-URL van de objectopslag-API.
     - key: region
-      valueType: string
+      osfType: string
       label: { en: Region, nl: Regio }
       options:
         type: static
@@ -61,12 +61,12 @@ configuration:
           - { value: eu-west, label: { en: EU West, nl: EU West } }
           - { value: eu-central, label: { en: EU Central, nl: EU Centraal } }
     - key: accessKeyId
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: Access key ID, nl: Toegangssleutel-ID }
     - key: secretAccessKey
-      valueType: string
+      osfType: string
       required: true
       secret: true
       label: { en: Secret access key, nl: Geheime toegangssleutel }
@@ -87,12 +87,12 @@ operations:
         invoke: [Connectors.All.Read]
     input:
       - key: prefix
-        valueType: string
+        osfType: string
         label: { en: Prefix, nl: Prefix }
         validation:
           maxLength: 512
       - key: limit
-        valueType: integer
+        osfType: integer
         defaultValue: 50
         validation:
           min: 1
@@ -100,8 +100,8 @@ operations:
     output:
       cardinality: many
       fields:
-        - { key: key, valueType: string, required: true }
-        - { key: sizeBytes, valueType: integer }
+        - { key: key, osfType: string, required: true }
+        - { key: sizeBytes, osfType: integer }
     reliability:
       timeouts:
         attemptMs: 10000
@@ -116,13 +116,13 @@ operations:
         invoke: [Connectors.All.ReadWrite]
     input:
       - key: key
-        valueType: string
+        osfType: string
         required: true
         validation:
           minLength: 1
           maxLength: 1024
       - key: requestId
-        valueType: string
+        osfType: string
         label: { en: Request id, nl: Request-id }
         description:
           en: Stable id so a retried upload is not stored twice.
@@ -130,7 +130,7 @@ operations:
     output:
       cardinality: one
       fields:
-        - { key: key, valueType: string, required: true }
+        - { key: key, osfType: string, required: true }
     reliability:
       # Retry-eligible only because idempotency is declared — the compiler
       # refuses the combination without it.

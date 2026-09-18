@@ -6,7 +6,7 @@ const block = (id: string, position: number) => ({ table: "blocks", row: { id, v
 const snapshot = {
   schemaVersion: 1, entity: "Template",
   head: {
-    table: "templates", row: { id: "t1", parameters: [{ key: "name", valueType: "string" }] },
+    table: "templates", row: { id: "t1", parameters: [{ key: "name", osfType: "string" }] },
     children: {
       template_variants: [
         { table: "template_variants", row: { id: "v-nl", channel: "document", locale: "nl" }, children: { blocks: [block("b2", 1), block("b1", 0), block("b3", 2)] } },

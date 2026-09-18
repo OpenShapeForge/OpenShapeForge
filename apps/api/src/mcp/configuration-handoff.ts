@@ -48,6 +48,7 @@ import {
   readHandoff,
   readLatestHandoffForSession,
 } from "./handoff-store.js";
+import { storedFieldBaseType } from "./stored-field-base-type.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -59,7 +60,7 @@ const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 
 type StoredFieldDefinition = {
   key?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   required?: unknown;
   label?: unknown;
   description?: unknown;
@@ -207,8 +208,7 @@ function coerceValue(
   definition: StoredFieldDefinition,
   raw: string | null,
 ): { value?: unknown; error?: string } {
-  const valueType =
-    typeof definition.valueType === "string" ? definition.valueType : "string";
+  const valueType = storedFieldBaseType(definition);
   if (valueType === "boolean") return { value: raw !== null };
   if (raw === null || raw === "") {
     return definition.required === true

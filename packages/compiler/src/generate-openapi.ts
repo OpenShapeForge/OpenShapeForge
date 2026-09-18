@@ -412,7 +412,7 @@ function listParameters(
       isRestrictedField(compiled) ||
       column.type === "jsonb" ||
       compiled?.cardinality === "collection" ||
-      compiled?.valueType === "object"
+      compiled?.baseType === "object"
     ) {
       continue;
     }

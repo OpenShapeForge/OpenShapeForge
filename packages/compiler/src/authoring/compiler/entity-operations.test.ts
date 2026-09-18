@@ -90,12 +90,12 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "displayName",
-          valueType: "string",
+          osfType: "string", baseType: "string",
           persisted: { column: "display_name", storageClass: "core" },
         },
         {
           key: "updatedAt",
-          valueType: "datetime",
+          osfType: "datetime", baseType: "datetime",
           readOnly: true,
           persisted: { column: "updated_at", storageClass: "core" },
         },
@@ -295,12 +295,12 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "adapterId",
-          valueType: "string",
+          osfType: "string", baseType: "string",
           persisted: { column: "adapter_id", storageClass: "core" },
         },
         {
           key: "configurationValues",
-          valueType: "object",
+          osfType: "object", baseType: "object",
           persisted: { column: "configuration_values", storageClass: "core" },
         },
       ],
@@ -422,12 +422,12 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "displayName",
-          valueType: "string",
+          osfType: "string", baseType: "string",
           persisted: { column: "display_name", storageClass: "core" },
         },
         {
           key: "updatedAt",
-          valueType: "datetime",
+          osfType: "datetime", baseType: "datetime",
           readOnly: true,
           persisted: { column: "updated_at", storageClass: "core" },
         },
@@ -494,12 +494,12 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "displayName",
-          valueType: "string",
+          osfType: "string", baseType: "string",
           persisted: { column: "display_name", storageClass: "core" },
         },
         {
           key: "updatedAt",
-          valueType: "datetime",
+          osfType: "datetime", baseType: "datetime",
           readOnly: true,
           persisted: { column: "updated_at", storageClass: "core" },
         },
@@ -564,12 +564,12 @@ describe("canonical entity operations", () => {
 
     updateConfirmation.challenge.expiresAfter = "PT5M";
     const displayName = source.coreEntity.fields[0]!;
-    displayName.valueType = "object";
+    Object.assign(displayName, { osfType: "object", baseType: "object" });
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must be a single scalar field/,
     );
 
-    displayName.valueType = "string";
+    Object.assign(displayName, { osfType: "string", baseType: "string" });
     displayName.cardinality = "collection";
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must be a single scalar field/,
@@ -617,7 +617,7 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "updatedAt",
-          valueType: "datetime",
+          osfType: "datetime", baseType: "datetime",
           readOnly: true,
           persisted: { column: "updated_at", storageClass: "core" },
         },
@@ -699,7 +699,7 @@ describe("canonical entity operations", () => {
       "confirmationToken",
       "confirmationAnswer",
     ]) {
-      source.coreEntity.fields = [{ key, valueType: "string" }];
+      source.coreEntity.fields = [{ key, osfType: "string", baseType: "string" }];
       expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
         new RegExp(`field "${key}" uses a reserved platform mutation-control name`),
       );
@@ -767,7 +767,7 @@ describe("canonical entity operations", () => {
       fields: [
         {
           key: "updatedAt",
-          valueType: "datetime",
+          osfType: "datetime", baseType: "datetime",
           readOnly: true,
           persisted: { column: "updated_at", storageClass: "core" },
         },
@@ -865,7 +865,7 @@ describe("canonical entity operations", () => {
       language: "en",
       fields: [{
         key: "authorization",
-        valueType: "object",
+        osfType: "object", baseType: "object",
         required: true,
         defaultValue: {},
         persisted: { column: "authorization", storageClass: "core" },

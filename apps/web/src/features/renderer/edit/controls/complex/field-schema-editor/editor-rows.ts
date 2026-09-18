@@ -60,7 +60,7 @@ export function variableSuggestionFromStoredFieldDefinitionRow(
       typeof row.valueType === "string"
         ? row.valueType as VariableSuggestion["fieldType"]
         : "string",
-    ...(typeof row.semanticType === "string" ? { semanticType: row.semanticType } : {}),
+    ...(typeof row.osfType === "string" ? { osfType: row.osfType } : {}),
   };
 }
 

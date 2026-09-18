@@ -779,7 +779,7 @@ function compileCoreCandidate(
     effectiveFields: resolveModelFields(normalizeEntityFields({
       ...artifacts.coreEntity,
       fields: [...artifacts.coreEntity.fields, ...artifacts.profiles.flatMap((profile) => profile.fields ?? [])],
-    }, artifacts.semanticTypes).fields, artifacts.componentCatalog, artifacts.semanticTypes),
+    }, artifacts.osfTypes).fields, artifacts.componentCatalog, artifacts.osfTypes),
     // The compiled model also contains compiler-owned fields, such as the
     // lifecycle default added by published-snapshot versioning. SQL defaults
     // must follow that effective contract rather than only the authored YAML.
@@ -972,6 +972,15 @@ function compileFieldRelationStorage(
     for (const relationship of candidate.contract.model.relationships) {
       const target = byEntity.get(relationship.target);
       if (!target) {
+        // A derived inverse collection has no storage of its own: when the
+        // referencing entity is outside this manifest, the collection simply
+        // is not lowered. An authored single reference without its target is
+        // still a modelling error.
+        if (relationship.kind === "hasMany") {
+          const skipped = table.source?.relationshipStatus?.skippedReferences;
+          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity not allowlisted)`);
+          continue;
+        }
         throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} targets missing entity ${relationship.target}. Include its storage in the backend manifest.`);
       }
       if (relationship.kind === "belongsTo") {
@@ -979,6 +988,15 @@ function compileFieldRelationStorage(
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
         attachReference(table, column, target.table, relationship.unique);
       } else if (relationship.kind === "hasMany") {
+        // A derived collection never lowers a foreign key the referencing
+        // field's own compilation did not: a pre-v3 referencing entity keeps
+        // its legacy policy (cross-module references stay unregistered and
+        // are owned by hand-written SQL).
+        if (Number(target.candidate.contract.authoringVersion) !== 3) {
+          const skipped = table.source?.relationshipStatus?.skippedReferences;
+          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity keeps its own foreign-key policy)`);
+          continue;
+        }
         const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
         if (relationship.through) {
@@ -1002,41 +1020,6 @@ function compileFieldRelationStorage(
           target.table.columns.push({ name: positionName, type: "integer", required: true, default: "0" });
           addIndex(target.table, [...(target.table.tenantScoped ? ["tenant_id"] : []), column.name, positionName]);
         }
-      } else {
-        if (relationship.ownership === "owned") {
-          throw new Error(`Owned collection ${candidate.contract.entity.name}.${relationship.key} requires an inverse foreign key; junction storage supports references only.`);
-        }
-        const name = relationship.via ?? `${table.name}_${snakeCase(relationship.fieldKey ?? relationship.key)}`;
-        if (!/^[a-z][a-z0-9_]*$/.test(name) || Buffer.byteLength(name) > 63) {
-          throw new Error(`Field relationship junction requires a PostgreSQL identifier of at most 63 bytes: ${name}.`);
-        }
-        if (tables.some((candidate) => candidate.schema === table.schema && candidate.name === name)) {
-          throw new Error(`Field relationship junction collides with ${table.schema}.${name}.`);
-        }
-        const sourceColumn: ColumnDefinition = { name: "source_id", type: "uuid", required: true };
-        const targetColumn: ColumnDefinition = { name: "target_id", type: "uuid", required: true };
-        const junction: TableDefinition = {
-          schema: table.schema, name, tenantScoped: table.tenantScoped,
-          domainInternal: true, generatedCrudEligible: false, generatedCrud: false,
-          columns: [
-            { name: "id", type: "uuid", primaryKey: true, required: true, default: "gen_random_uuid()" },
-            ...(table.tenantScoped ? [{ name: "tenant_id", type: "uuid" as const, required: true }] : []),
-            sourceColumn, targetColumn,
-            ...(relationship.sortable ? [{ name: "position", type: "integer" as const, required: true, default: "0" }] : []),
-          ],
-          relationStorage: {
-            sourceEntity: candidate.contract.entity.name,
-            fieldKey: relationship.fieldKey ?? relationship.key,
-            targetEntity: relationship.target,
-            sourceColumn: sourceColumn.name, targetColumn: targetColumn.name,
-            ...(relationship.sortable ? { positionColumn: "position" } : {}),
-          },
-        };
-        attachReference(junction, sourceColumn, table, false, "CASCADE");
-        attachReference(junction, targetColumn, target.table, false, "CASCADE");
-        addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "target_id"], true);
-        if (relationship.sortable) addIndex(junction, [...(junction.tenantScoped ? ["tenant_id"] : []), "source_id", "position"]);
-        tables.push(junction);
       }
     }
   }
@@ -1356,7 +1339,7 @@ export function compileAuthoringBackendManifest(
           : {}),
         ...(() => {
           const computedFields = candidate.contract.model.fields
-            .filter((field) => field.semanticType === "labelSet")
+            .filter((field) => field.osfType === "labelSet")
             .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
           return computedFields.length > 0 ? { computedFields } : {};
         })(),
@@ -1371,7 +1354,7 @@ export function compileAuthoringBackendManifest(
             ? { operations: candidate.contract.graphql.operations }
             : {}),
           relationships: candidate.contract.graphql.relationships
-            .filter((relationship) => relationship.resolve !== "manyToMany" || candidate.contract.authoringVersion === 3)
+            .filter((relationship) => relationship.resolve !== "hasMany" || byEntityName.has(relationship.target))
             .map((relationship) => ({
               name: relationship.name,
               target: relationship.target,
@@ -1387,7 +1370,7 @@ export function compileAuthoringBackendManifest(
                   ...(normalized.through ? { through: normalized.through } : {}),
                   ...(normalized.ownership ? { ownership: normalized.ownership } : {}),
                   ...(normalized.cardinality ? { cardinality: normalized.cardinality } : {}),
-                  ...(normalized.sortable ? { sortable: true, positionColumn: normalized.kind === "manyToMany" ? "position" : `${normalized.foreignKey}_position` } : {}),
+                  ...(normalized.sortable ? { sortable: true, positionColumn: `${normalized.foreignKey}_position` } : {}),
                   ...(normalized.childAuthorization ? { childAuthorization: normalized.childAuthorization } : {}),
                   ...(normalized.via ? { via: normalized.via, viaSchema: schema } : {}),
                   ...(normalized.constraints ? { constraints: structuredClone(normalized.constraints) } : {}),

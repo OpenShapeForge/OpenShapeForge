@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,6 @@ fields:
       column: code
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -42,9 +41,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: startDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Start date
@@ -56,7 +55,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: End date
@@ -68,7 +67,7 @@ fields:
       column: end_date
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -88,7 +87,7 @@ fields:
     persisted:
       column: supplier_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: assetId
@@ -98,7 +97,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

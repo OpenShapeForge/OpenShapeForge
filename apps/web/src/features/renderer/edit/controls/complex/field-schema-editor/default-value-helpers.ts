@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field } from "@/generated/compiler/field-contract";
 import { getFieldAuthoringProfile } from "@/lib/field-authoring/profiles";
 import { isFieldCardinalityCollection, isRecord } from "./utils";
 
 export function isFieldDefinitionSemantic(field: Field) {
-  return field.valueType === "object" && field.semanticType === "fieldDefinition";
+  return fieldValueType(field) === "object" && field.osfType === "fieldDefinition";
 }
 
 export function isFieldDefinitionCollection(field: Field) {
@@ -24,9 +25,9 @@ export function createEmptyDefaultFieldDefinition(): Field {
 
 function defaultValueCompatibilityKey(field: Field) {
   return [
-    field.valueType,
+    fieldValueType(field),
     isFieldCardinalityCollection(field.cardinality) ? "collection" : "single",
-    field.semanticType === "fieldDefinition" ? "fieldDefinition" : field.semanticType ?? "",
+    field.osfType === "fieldDefinition" ? "fieldDefinition" : field.osfType ?? "",
   ].join(":");
 }
 
@@ -49,7 +50,7 @@ function getCompatibleDefaultValue(field: Field, value: unknown) {
     return Array.isArray(value) ? value : undefined;
   }
 
-  switch (field.valueType) {
+  switch (fieldValueType(field)) {
     case "string":
       return typeof value === "string" ? value : undefined;
     case "integer":

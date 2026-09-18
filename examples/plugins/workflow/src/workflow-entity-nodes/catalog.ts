@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
-import { listEntityFiles } from "../../../../../packages/compiler/src/authoring/loader.js";
-import type { ComponentCatalog, CoreEntity, EntityProfile, Field, SemanticTypeCatalog, SemanticTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
+import { inverseCollectionsFor, resolveBaseType, osfTypeDefinitionOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
+import { withInverseCollections } from "../../../../../packages/compiler/src/authoring/inverse-collections.js";
+import { listEntityFiles, loadOsfTypes } from "../../../../../packages/compiler/src/authoring/loader.js";
+import type { ComponentCatalog, CoreEntity, EntityProfile, Field, OsfTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
 import { pluralize, uncapitalize } from "../../../../../packages/compiler/src/authoring/compiler/helpers.js";
 import type { WorkflowEntityGenerationOptions } from "./types.js";
-import { cloneField, normalizeSemanticTypeKey, toKebabCase } from "./utils.js";
+import { cloneField, isCollectionCardinality, normalizeOsfTypeKey, toKebabCase } from "./utils.js";
 function loadYamlFile<T>(filePath: string): T {
   return parseYaml(readFileSync(filePath, "utf-8")) as T;
 }
@@ -19,42 +21,23 @@ function loadWorkflowNodeComponentCatalog(authoringDir: string): ComponentCatalo
   return loadYamlFile<ComponentCatalog>(componentCatalogPath);
 }
 
-export function loadWorkflowNodeSemanticTypes(authoringDir: string): Record<string, SemanticTypeDefinition> {
-  const semanticTypes: Record<string, SemanticTypeDefinition> = {};
-  const catalogsDir = join(authoringDir, "catalogs");
-  const contextsDir = join(authoringDir, "contexts");
-  const coreSemanticTypesPath = join(catalogsDir, "semantic-types.yaml");
+/**
+ * The compiler's derived catalog: the authored catalogs plus one entry per
+ * loaded entity, so an `osfType` naming an entity resolves like any other.
+ */
+export function loadWorkflowNodeOsfTypes(authoringDir: string): Record<string, OsfTypeDefinition> {
+  return loadOsfTypes(authoringDir);
+}
 
-  if (existsSync(coreSemanticTypesPath)) {
-    Object.assign(
-      semanticTypes,
-      loadYamlFile<SemanticTypeCatalog>(coreSemanticTypesPath).types ?? {},
-    );
-  }
-
-  if (existsSync(contextsDir)) {
-    for (const contextName of readdirSync(contextsDir).sort()) {
-      const contextSemanticTypesPath = join(
-        contextsDir,
-        contextName,
-        "semantic-types.yaml",
-      );
-      if (!existsSync(contextSemanticTypesPath)) {
-        continue;
-      }
-
-      Object.assign(
-        semanticTypes,
-        loadYamlFile<SemanticTypeCatalog>(contextSemanticTypesPath).types ?? {},
-      );
-    }
-  }
-
-  return semanticTypes;
+/** The one place a loaded field learns its base type; unresolvable types fail generation. */
+function withBaseType(field: Field, osfTypes: Record<string, OsfTypeDefinition>): Field {
+  const baseType = resolveBaseType(field.osfType, osfTypes);
+  if (!baseType) throw new Error(`Workflow field '${field.key}': unknown osfType ${field.osfType}.`);
+  return { ...field, baseType };
 }
 
 /**
- * Workflow-only field expansion. Sets `render` from the semantic-type catalog,
+ * Workflow-only field expansion. Sets `render` from the osf-type catalog,
  * recurses into nested shapes, and — for entity-ID semantic types — overrides
  * the render with the workflow-designer `OptionVariablePicker` and attaches
  * the catalog's `listUrl` as a remote-options source. This last branch is
@@ -67,21 +50,21 @@ export function loadWorkflowNodeSemanticTypes(authoringDir: string): Record<stri
  */
 function expandSemanticFieldShape(
   field: Field,
-  semanticTypes: Record<string, SemanticTypeDefinition>,
+  osfTypes: Record<string, OsfTypeDefinition>,
   componentCatalog: ComponentCatalog,
 ): Field {
-  const semanticType = field.semanticType ? semanticTypes[field.semanticType] : undefined;
-  const children = field.children ?? semanticType?.children;
-  const item = field.item ?? semanticType?.item;
+  const osfType = osfTypeDefinitionOf(field.osfType, osfTypes);
+  const children = field.children ?? osfType?.children;
+  const item = field.item ?? osfType?.item;
   const hasStructuredShape = Boolean(children || item);
-  const expanded = cloneField(field);
-  const isEntityId = semanticType?.kind === "entityId";
+  const expanded = withBaseType(cloneField(field), osfTypes);
+  const isEntityId = osfType?.kind === "entityId";
 
   if (isEntityId) {
-    if (!expanded.options && semanticType.listUrl) {
+    if (!expanded.options && osfType.listUrl) {
       expanded.options = {
         type: "remote" as const,
-        remoteUrl: semanticType.listUrl,
+        remoteUrl: osfType.listUrl,
       };
     }
     expanded.render = {
@@ -90,14 +73,17 @@ function expandSemanticFieldShape(
         valueMode: "insertText",
       },
     };
-  } else if (!expanded.render) {
-    if (semanticType?.render) {
+  } else if (!expanded.render && !(osfType?.kind === "entity" && isCollectionCardinality(expanded.cardinality))) {
+    // A single entity reference is a plain identifier input in a workflow
+    // form and a collection of them has no input at all; the derived entity
+    // catalog entry's render is for record screens.
+    if (osfType?.render && osfType.kind !== "entity") {
       expanded.render = {
-        component: expanded.readOnly ? semanticType.render.display : semanticType.render.input,
-        ...(semanticType.props ? { props: semanticType.props } : {}),
+        component: expanded.readOnly ? osfType.render.display : osfType.render.input,
+        ...(osfType.props ? { props: osfType.props } : {}),
       };
     } else if (!hasStructuredShape) {
-      const defaultComponent = componentCatalog.defaults[expanded.valueType];
+      const defaultComponent = componentCatalog.defaults[expanded.baseType];
       if (defaultComponent?.component) {
         expanded.render = {
           component: defaultComponent.component,
@@ -108,12 +94,12 @@ function expandSemanticFieldShape(
 
   if (children) {
     expanded.children = children.map((child) =>
-      expandSemanticFieldShape(child, semanticTypes, componentCatalog),
+      expandSemanticFieldShape(child, osfTypes, componentCatalog),
     );
   }
 
   if (item) {
-    expanded.item = expandSemanticFieldShape(item, semanticTypes, componentCatalog);
+    expanded.item = expandSemanticFieldShape(item, osfTypes, componentCatalog);
   }
 
   return expanded;
@@ -121,26 +107,26 @@ function expandSemanticFieldShape(
 
 function expandEntityFieldShapes(
   fields: Field[],
-  semanticTypes: Record<string, SemanticTypeDefinition>,
+  osfTypes: Record<string, OsfTypeDefinition>,
   componentCatalog: ComponentCatalog,
 ) {
   return fields.map((field) =>
-    expandSemanticFieldShape(field, semanticTypes, componentCatalog),
+    expandSemanticFieldShape(field, osfTypes, componentCatalog),
   );
 }
 
 /**
- * Returns the semantic-type key declared on the entity's `id` field. Throws
- * if missing — every entity is required to annotate its id field with
- * `semanticType: <entity>Id`, enforced by the validator. There is no
- * name-based fallback by design (see plan v3, blocker #1).
+ * Returns the identity type declared on the entity's `id` field. Throws if
+ * missing — every entity's id field carries `osfType: <entity>Id` (the base
+ * entity supplies it), enforced by the validator. There is no name-based
+ * fallback by design (see plan v3, blocker #1).
  */
-export function resolveEntityIdSemanticTypeKey(entityName: string, idField?: Field): string {
-  const declared = normalizeSemanticTypeKey(idField?.semanticType);
+export function resolveEntityIdOsfTypeKey(entityName: string, idField?: Field): string {
+  const declared = normalizeOsfTypeKey(idField?.osfType);
   if (!declared) {
     throw new Error(
-      `Entity '${entityName}' is missing semanticType on its id field. ` +
-        `Declare 'semanticType: <entity>Id' in the entity YAML.`,
+      `Entity '${entityName}' is missing osfType on its id field. ` +
+        `Declare 'osfType: <entity>Id' in the entity YAML.`,
     );
   }
   return declared;
@@ -160,7 +146,6 @@ export function toSyntheticCoreEntity(
     language: entityProfile.language,
     domains: [...(entityProfile.domains ?? [])],
     fields: entityProfile.fields ?? [],
-    relationships: entityProfile.relationships,
     crud: entityProfile.crud,
     workflow: entityProfile.workflow,
   };
@@ -220,31 +205,6 @@ function mergeWorkflowNodeFields(
   return Array.from(fieldsByKey.values());
 }
 
-function cloneWorkflowNodeRelationship<T>(relationship: T): T {
-  return JSON.parse(JSON.stringify(relationship)) as T;
-}
-
-function mergeWorkflowNodeRelationships(
-  coreRelationships: CoreEntity["relationships"],
-  profiles: EntityProfile[],
-): CoreEntity["relationships"] {
-  const relationshipsByKey = new Map<string, NonNullable<CoreEntity["relationships"]>[number]>();
-
-  for (const relationship of coreRelationships ?? []) {
-    relationshipsByKey.set(relationship.key, relationship);
-  }
-
-  for (const profile of profiles) {
-    for (const relationship of profile.relationships ?? []) {
-      if (!relationshipsByKey.has(relationship.key)) {
-        relationshipsByKey.set(relationship.key, relationship);
-      }
-    }
-  }
-
-  return Array.from(relationshipsByKey.values()).map(cloneWorkflowNodeRelationship);
-}
-
 function applyWorkflowNodeContextPartials(
   entity: CoreEntity,
   profiles: EntityProfile[],
@@ -256,13 +216,12 @@ function applyWorkflowNodeContextPartials(
   return {
     ...entity,
     fields: mergeWorkflowNodeFields(entity.fields, profiles),
-    relationships: mergeWorkflowNodeRelationships(entity.relationships, profiles),
   };
 }
 
 export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
   const entities: CoreEntity[] = [];
-  const semanticTypes = loadWorkflowNodeSemanticTypes(authoringDir);
+  const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   const componentCatalog = loadWorkflowNodeComponentCatalog(authoringDir);
   const contextsDir = join(authoringDir, "contexts");
   const baseEntity = loadBaseEntity(authoringDir);
@@ -282,13 +241,16 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
       entity,
       profiles,
     );
+    // The inverse collections the compiler derives for this entity are
+    // readable fields for workflow nodes, exactly like the authored ones.
+    const withCollections = withInverseCollections(
+      contextCompleteEntity.entity,
+      contextCompleteEntity.fields,
+      inverseCollectionsFor(contextCompleteEntity.entity, osfTypes),
+    );
     entities.push({
       ...contextCompleteEntity,
-      fields: expandEntityFieldShapes(
-        contextCompleteEntity.fields,
-        semanticTypes,
-        componentCatalog,
-      ),
+      fields: expandEntityFieldShapes(withCollections, osfTypes, componentCatalog),
     });
   }
 
@@ -312,7 +274,7 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
         });
         entities.push({
           ...entity,
-          fields: expandEntityFieldShapes(entity.fields, semanticTypes, componentCatalog),
+          fields: expandEntityFieldShapes(entity.fields, osfTypes, componentCatalog),
         });
       }
     }
@@ -353,30 +315,30 @@ export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
 /**
  * Public helper for other generators (e.g. `workflow-node-config.ts`) that need
  * to enrich authored `Field`s with the same entity-ID picker metadata the
- * CoreEntity generator applies. Walks the field tree and, for any field whose
- * `semanticType` resolves to a `kind: entityId` catalog entry, attaches the
+ * CoreEntity generator applies. Walks the field tree, derives every field's
+ * `baseType` and, for any field whose `osfType` resolves to a `kind: entityId` catalog entry, attaches the
  * catalog's `listUrl` as a remote-options source and forces the render to
  * `OptionVariablePicker`. Authoring-supplied `options` win over the catalog.
  */
 export function enrichFieldsWithEntityIdRemoteOptions(
-  semanticTypes: Record<string, SemanticTypeDefinition>,
+  osfTypes: Record<string, OsfTypeDefinition>,
   fields: Field[],
 ): Field[] {
-  return fields.map((field) => enrichFieldWithEntityIdRemoteOptions(field, semanticTypes));
+  return fields.map((field) => enrichFieldWithEntityIdRemoteOptions(field, osfTypes));
 }
 
 function enrichFieldWithEntityIdRemoteOptions(
   field: Field,
-  semanticTypes: Record<string, SemanticTypeDefinition>,
+  osfTypes: Record<string, OsfTypeDefinition>,
 ): Field {
-  const cloned = cloneField(field);
-  const semanticType = cloned.semanticType ? semanticTypes[cloned.semanticType] : undefined;
+  const cloned = withBaseType(cloneField(field), osfTypes);
+  const osfType = osfTypeDefinitionOf(cloned.osfType, osfTypes);
 
-  if (semanticType?.kind === "entityId" && semanticType.listUrl) {
+  if (osfType?.kind === "entityId" && osfType.listUrl) {
     if (!cloned.options) {
       cloned.options = {
         type: "remote" as const,
-        remoteUrl: semanticType.listUrl,
+        remoteUrl: osfType.listUrl,
       };
     }
     cloned.render = {
@@ -389,12 +351,12 @@ function enrichFieldWithEntityIdRemoteOptions(
 
   if (Array.isArray(cloned.children)) {
     cloned.children = cloned.children.map((child) =>
-      enrichFieldWithEntityIdRemoteOptions(child, semanticTypes),
+      enrichFieldWithEntityIdRemoteOptions(child, osfTypes),
     );
   }
 
   if (cloned.item) {
-    cloned.item = enrichFieldWithEntityIdRemoteOptions(cloned.item, semanticTypes);
+    cloned.item = enrichFieldWithEntityIdRemoteOptions(cloned.item, osfTypes);
   }
 
   return cloned;

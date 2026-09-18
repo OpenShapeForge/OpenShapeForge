@@ -29,7 +29,6 @@ authorization:
     empty: public
 fields:
   - key: type
-    valueType: string
     required: true
     label:
       en: Purpose
@@ -46,9 +45,8 @@ fields:
     persisted:
       column: type
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: scope
-    valueType: string
     required: true
     label:
       en: Scope
@@ -65,9 +63,8 @@ fields:
     persisted:
       column: scope
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: channel
-    valueType: string
     required: true
     label:
       en: Channel
@@ -84,9 +81,8 @@ fields:
     persisted:
       column: channel
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -103,9 +99,9 @@ fields:
     persisted:
       column: status
       storageClass: core
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: isOptedIn
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Opted in
@@ -117,7 +113,7 @@ fields:
       column: is_opted_in
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid from
@@ -129,7 +125,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validUntil
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -141,7 +137,7 @@ fields:
       column: valid_until
       storageClass: core
   - key: source
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Source
@@ -155,7 +151,6 @@ fields:
       column: source
       storageClass: core
   - key: notes
-    valueType: string
     required: false
     label:
       en: Notes
@@ -168,7 +163,7 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: relationId
     label:
       en: Relation
@@ -176,9 +171,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Communication preferences
+          nl: Communicatievoorkeuren
   - key: contactDetailId
     label:
       en: Contact detail
@@ -186,7 +185,7 @@ fields:
     persisted:
       column: contact_detail_id
       storageClass: core
-    semanticType: ContactDetail
+    osfType: ContactDetail
     relationship:
       ownership: reference
 operations:

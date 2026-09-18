@@ -37,7 +37,7 @@ export const LABEL_RULE_SOURCE_HINT = "labelRule";
 
 function labelRuleOutputTypeToFieldValueType(
   outputType: LabelRuleAutocompleteEntry["outputType"],
-): Field["valueType"] {
+): Field["baseType"] {
   switch (outputType) {
     case "boolean":
       return "boolean";
@@ -56,7 +56,8 @@ function labelRuleToField(rule: LabelRuleAutocompleteEntry): Field {
   };
   return {
     key: rule.key,
-    valueType: labelRuleOutputTypeToFieldValueType(rule.outputType),
+    osfType: labelRuleOutputTypeToFieldValueType(rule.outputType),
+    baseType: labelRuleOutputTypeToFieldValueType(rule.outputType),
     label: { nl: rule.key, en: rule.key },
     description: {
       nl: "Berekende waarde uit label_rules (runtime).",

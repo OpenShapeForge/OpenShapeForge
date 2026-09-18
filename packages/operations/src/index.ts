@@ -24,11 +24,12 @@ export {
   operationFailure,
 } from "./contract.js";
 export type {
+  OperationFieldBaseType,
   OperationFieldDefinition,
   OperationFieldOptions,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldSemanticType,
+  OperationFieldOsfType,
   OperationFieldValidation,
   OperationJsonSchema,
   OperationLocalizedText,

@@ -14,7 +14,6 @@ domains:
   - maintenance
 fields:
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -27,9 +26,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -37,12 +35,12 @@ fields:
     description:
       en: Settled amount.
       nl: Verrekend bedrag.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: settledAt
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Settled at
@@ -60,7 +58,7 @@ fields:
     persisted:
       column: maintenance_request_id
       storageClass: core
-    semanticType: MaintenanceRequest
+    osfType: MaintenanceRequest
     relationship:
       ownership: reference
   - key: relationId
@@ -70,7 +68,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: invoiceId
@@ -80,7 +78,7 @@ fields:
     persisted:
       column: invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
 authorization:

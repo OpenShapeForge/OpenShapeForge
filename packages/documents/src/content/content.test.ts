@@ -22,17 +22,17 @@ const metadata: CompiledContentBlockRegistry = {
   TextSection: {
     entityName: "TextSection",
     schemaVersion: 3,
-    fields: { body: { semanticType: "richText", valueType: "string", required: true } },
+    fields: { body: { osfType: "richText", baseType: "string", required: true } },
     renderers: { document: "richText", email: "emailText", whatsapp: "plainText" },
   },
   RecordSummary: {
     entityName: "RecordSummary",
     schemaVersion: 3,
     fields: {
-      heading: { valueType: "string", required: true },
+      heading: { baseType: "string", required: true },
       record: {
-        semanticType: "ExampleRecord",
-        valueType: "string",
+        osfType: "ExampleRecord",
+        baseType: "string",
         cardinality: { min: 1, max: 1 },
         relationship: { target: "ExampleRecord" },
       },
@@ -43,8 +43,8 @@ const metadata: CompiledContentBlockRegistry = {
     entityName: "TemplateSlot",
     schemaVersion: 3,
     fields: {
-      version: { valueType: "string", required: true, relationship: { target: "TemplateVersion" } },
-      parameters: { valueType: "object" },
+      version: { baseType: "string", required: true, relationship: { target: "TemplateVersion" } },
+      parameters: { baseType: "object" },
     },
     renderers: {},
     composition: { templateVersionField: "version", parametersField: "parameters" },
@@ -74,7 +74,7 @@ function version(id: string, blocks: readonly ContentBlock[]): ContentTemplateVe
     tenantId,
     templateId: `${id}-template`,
     versionNumber: 1,
-    parameters: { name: { valueType: "string", defaultValue: "Reader" } },
+    parameters: { name: { baseType: "string", defaultValue: "Reader" } },
     variants: ["document", "email", "whatsapp"].map((channel) => ({
       id: `${id}-${channel}`,
       channel,
@@ -142,19 +142,19 @@ describe("canonical content snapshots", () => {
   test("resolves typed symbolic entity arguments while preserving template provenance", async () => {
     const block: ContentBlock = { id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } };
     const f = fixture([block]);
-    f.versions.root = { ...f.versions.root!, parameters: { record: { valueType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    f.versions.root = { ...f.versions.root!, parameters: { record: { baseType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
     const run = () => materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, f.resolvers);
     const snapshot = await run();
     expect(f.calls.entity).toBe(1);
     expect(snapshot.templates[0]!.version.variants[0]!.blocks[0]!.references.record).toEqual({ parameter: "record" });
-    f.versions.root = { ...f.versions.root, parameters: { record: { valueType: "string", relationship: { target: "OtherRecord" } } } };
+    f.versions.root = { ...f.versions.root, parameters: { record: { baseType: "string", relationship: { target: "OtherRecord" } } } };
     await rejectsCode(run(), "DEPENDENCY_INVALID");
     expect(f.calls.entity).toBe(1);
   });
 
   test("rejects entity arguments whose target record is inaccessible", async () => {
     const f = fixture([{ id: "summary", definitionKey: "RecordSummary", schemaVersion: 3, values: { heading: "Summary" }, references: { record: { parameter: "record" } } }]);
-    f.versions.root = { ...f.versions.root!, parameters: { record: { valueType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
+    f.versions.root = { ...f.versions.root!, parameters: { record: { baseType: "string", required: true, relationship: { target: "ExampleRecord" } } } };
     await expect(materializeTemplateContent({ ...f.request, parameters: { record: "record-one" } }, f.registry, { ...f.resolvers, resolveEntity: () => null })).rejects.toBeInstanceOf(TemplateContentError);
   });
   test("canonicalization sorts objects but preserves collection order", async () => {
@@ -277,8 +277,8 @@ describe("template variants and local/global variables", () => {
 
   test("validates defaults, required parameters, unknown parameters and enum values", () => {
     const definitions = {
-      count: { valueType: "integer" as const, required: true },
-      tone: { valueType: "string" as const, enum: ["formal"], defaultValue: "formal" },
+      count: { baseType: "integer" as const, required: true },
+      tone: { baseType: "string" as const, enum: ["formal"], defaultValue: "formal" },
     };
     expect(resolveTemplateParameters(definitions, { count: 2 })).toEqual({
       count: 2,
@@ -308,16 +308,16 @@ describe("template variants and local/global variables", () => {
       entityName: "Numbers",
       schemaVersion: 3,
       fields: {
-        amount: { valueType: "number" },
-        counts: { valueType: "integer", cardinality: { min: 1, max: 3 } },
+        amount: { baseType: "number" },
+        counts: { baseType: "integer", cardinality: { min: 1, max: 3 } },
       },
       renderers: { document: "numbers" },
     };
     f.versions.root = {
       ...f.versions.root!,
       parameters: {
-        amount: { valueType: "number", defaultValue: 2.5 },
-        counts: { valueType: "integer", cardinality: "collection", defaultValue: [2, 1] },
+        amount: { baseType: "number", defaultValue: 2.5 },
+        counts: { baseType: "integer", cardinality: "collection", defaultValue: [2, 1] },
       },
     };
     const snapshot = await f.run();
@@ -601,13 +601,13 @@ describe("compiled entity block definitions and typed relationships", () => {
   });
 
   test("validates nested object metadata and single/collection cardinality defaults", () => {
-    const shape = { amount: { valueType: "integer" as const, cardinality: { min: 1 } } };
+    const shape = { amount: { baseType: "integer" as const, cardinality: { min: 1 } } };
     expect(resolveTemplateParameters(shape, { amount: 2 })).toEqual({ amount: 2 });
     expect(() => resolveTemplateParameters(shape, { amount: [2] })).toThrow("integer");
     const nested = {
       person: {
-        valueType: "object" as const,
-        fields: { age: { valueType: "integer" as const, required: true } },
+        baseType: "object" as const,
+        fields: { age: { baseType: "integer" as const, required: true } },
       },
     };
     expect(() => resolveTemplateParameters(nested, { person: { age: "2" } })).toThrow("integer");
@@ -615,7 +615,7 @@ describe("compiled entity block definitions and typed relationships", () => {
       "unsupported",
     );
     expect(() =>
-      resolveTemplateParameters({ date: { valueType: "date" } }, { date: "2026-02-30" }),
+      resolveTemplateParameters({ date: { baseType: "date" } }, { date: "2026-02-30" }),
     ).toThrow("date");
   });
 

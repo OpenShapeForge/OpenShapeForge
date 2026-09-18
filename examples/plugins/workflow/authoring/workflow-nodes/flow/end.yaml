@@ -12,8 +12,7 @@ description:
   en: Ends the workflow and publishes output fields.
 configFields:
   - key: fields
-    valueType: object
-    semanticType: fieldDefinition
+    osfType: fieldDefinition
     cardinality:
       min: 1
       max: "unbounded"
@@ -30,8 +29,7 @@ configFields:
       profile: workflowOutputField
     defaultValue:
       - key: status
-        valueType: string
-        semanticType: string
+        osfType: string
         cardinality:
           min: 1
           max: 1

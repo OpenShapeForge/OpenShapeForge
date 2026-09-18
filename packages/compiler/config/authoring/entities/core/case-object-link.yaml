@@ -28,7 +28,6 @@ authorization:
     empty: public
 fields:
   - key: objectType
-    valueType: string
     required: true
     label:
       en: Object type
@@ -39,9 +38,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEOBJECTTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: objectLabel
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Object label
@@ -52,7 +51,7 @@ fields:
       column: object_label
       storageClass: core
   - key: objectUri
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Object URI
@@ -63,7 +62,7 @@ fields:
       column: object_uri
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Primary
@@ -73,7 +72,6 @@ fields:
       column: is_primary
       storageClass: core
   - key: note
-    valueType: string
     required: false
     label:
       en: Note
@@ -83,7 +81,7 @@ fields:
     persisted:
       column: note
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: caseId
     label:
       en: Case
@@ -91,9 +89,14 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        key: objectLinks
+        label:
+          en: Linked objects
+          nl: Gekoppelde objecten
 operations:
   list:
     name: List Case Object Link

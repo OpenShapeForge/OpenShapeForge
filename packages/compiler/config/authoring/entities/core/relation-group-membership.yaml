@@ -46,7 +46,7 @@ fields:
   - key: relationId
     required: true
     immutable: true
-    semanticType: Relation
+    osfType: Relation
     label:
       en: Relation
       nl: Relatie
@@ -63,10 +63,15 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        key: groupMemberships
+        label:
+          en: Group memberships
+          nl: Groepslidmaatschappen
   - key: relationGroupId
     required: true
     immutable: true
-    semanticType: RelationGroup
+    osfType: RelationGroup
     label:
       en: Relation group
       nl: Relatiegroep
@@ -83,8 +88,13 @@ fields:
       category: workflow
     relationship:
       ownership: reference
+      inverse:
+        key: memberships
+        label:
+          en: Memberships
+          nl: Lidmaatschappen
   - key: status
-    valueType: string
+    osfType: string
     required: true
     defaultValue: active
     label:
@@ -100,7 +110,7 @@ fields:
       type: referentiedata
       referentieGroep: RELATIONGROUPSTATUS
   - key: role
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Role in group
@@ -114,7 +124,7 @@ fields:
       column: role
       storageClass: core
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -128,7 +138,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -140,7 +150,7 @@ fields:
       column: end_date
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: true
     defaultValue: false
     label:
@@ -154,7 +164,7 @@ fields:
       column: is_primary
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code

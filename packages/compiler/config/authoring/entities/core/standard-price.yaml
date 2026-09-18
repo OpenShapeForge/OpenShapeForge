@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +44,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -57,9 +56,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -73,7 +72,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -81,12 +79,12 @@ fields:
     description:
       en: Standard price amount.
       nl: Standaardprijsbedrag.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Valid from
@@ -98,7 +96,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid to
@@ -110,7 +108,7 @@ fields:
       column: valid_to
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code

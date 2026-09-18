@@ -30,7 +30,7 @@ authorization:
       expand: ancestors
 fields:
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -45,7 +45,7 @@ fields:
     persisted:
       column: org_unit_id
       storageClass: core
-    semanticType: RowAccessOwnerTarget
+    osfType: RowAccessOwnerTarget
     relationship:
       ownership: reference
 operations:

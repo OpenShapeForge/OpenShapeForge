@@ -37,12 +37,12 @@ import { RendererDefaultsProvider } from "@/features/renderer/components/rendere
 import { translateRendererText } from "@/features/renderer/runtime/field-utils";
 import { useFormVariableSuggestions } from "@/features/renderer/runtime/use-form-variable-suggestions";
 import { useEntityFieldSuggestionsVersion } from "@/features/renderer/runtime/use-entity-field-suggestions-version";
-import { isFieldCollection } from "@/lib/field-contract/field-v2";
+import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field as CompilerField } from "@/generated/compiler/field-contract";
 
 function fieldUsesImplicitChipVariableSource(field: CompilerField): boolean {
   if (
-    field.valueType === "string" &&
+    fieldValueType(field) === "string" &&
     !isFieldCollection(field) &&
     field.render?.props?.variableTokens === true &&
     field.render?.props?.type !== "password"
@@ -50,7 +50,7 @@ function fieldUsesImplicitChipVariableSource(field: CompilerField): boolean {
     return true;
   }
   return (
-    field.semanticType === "condition" ||
+    field.osfType === "condition" ||
     field.render?.component === "ConditionBuilder"
   );
 }

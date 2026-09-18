@@ -37,7 +37,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -52,7 +52,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Title
@@ -66,7 +66,6 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -79,9 +78,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: assignmentKind
-    valueType: string
     required: false
     label:
       en: Kind
@@ -95,9 +93,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: RESEARCHASSIGNMENTKIND
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -111,9 +108,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: RESEARCHSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: channel
-    valueType: string
     required: false
     label:
       en: Channel
@@ -127,9 +123,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: COMMUNICATIONCHANNEL
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: completedAt
-    valueType: datetime
+    osfType: datetime
     required: false
     readOnly: true
     label:
@@ -142,7 +138,7 @@ fields:
       column: completed_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -162,7 +158,7 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: surveyId
@@ -172,7 +168,7 @@ fields:
     persisted:
       column: survey_id
       storageClass: core
-    semanticType: Survey
+    osfType: Survey
     relationship:
       ownership: reference
   - key: researchResultId
@@ -182,17 +178,8 @@ fields:
     persisted:
       column: research_result_id
       storageClass: core
-    semanticType: ResearchResult
+    osfType: ResearchResult
     relationship:
-      ownership: reference
-  - key: measurementRequests
-    label:
-      en: Measurement requests
-      nl: Metingsverzoeken
-    semanticType: QualityMeasurementRequest
-    cardinality: collection
-    relationship:
-      inverse: researchAssignmentId
       ownership: reference
 operations:
   list:

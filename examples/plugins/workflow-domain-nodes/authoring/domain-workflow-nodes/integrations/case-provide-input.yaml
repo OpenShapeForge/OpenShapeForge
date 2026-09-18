@@ -12,7 +12,7 @@ description:
   en: Provides input to a waiting case workflow.
 configFields:
   - key: input
-    valueType: object
+    osfType: object
     label:
       nl: Inputpayload
       en: Input payload

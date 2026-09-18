@@ -15,7 +15,7 @@ domains:
   - quality
 fields:
   - key: assessedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Assessed at
@@ -27,7 +27,7 @@ fields:
       column: assessed_at
       storageClass: core
   - key: score
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Score
@@ -39,7 +39,6 @@ fields:
       column: score
       storageClass: core
   - key: scoreScale
-    valueType: string
     required: false
     label:
       en: Score scale
@@ -53,9 +52,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: ASSESSMENTSCALE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: notes
-    valueType: string
     required: false
     label:
       en: Notes
@@ -68,9 +66,9 @@ fields:
     persisted:
       column: notes
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -90,7 +88,7 @@ fields:
     persisted:
       column: assessed_by_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: inspectionReportId
@@ -100,7 +98,7 @@ fields:
     persisted:
       column: inspection_report_id
       storageClass: core
-    semanticType: InspectionReport
+    osfType: InspectionReport
     relationship:
       ownership: reference
   - key: assetId
@@ -110,7 +108,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

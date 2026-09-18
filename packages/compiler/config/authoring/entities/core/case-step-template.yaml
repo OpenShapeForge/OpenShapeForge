@@ -31,7 +31,7 @@ authorization:
     empty: public
 fields:
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Step key
@@ -46,7 +46,7 @@ fields:
       column: key
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -58,7 +58,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -68,9 +67,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: stepType
-    valueType: string
     required: true
     label:
       en: Step type
@@ -81,9 +79,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: PROCESSSTEPTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: sequenceNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Sequence number
@@ -92,7 +90,6 @@ fields:
       column: sequence_number
       storageClass: core
   - key: executionStyle
-    valueType: string
     required: true
     label:
       en: Execution style
@@ -107,9 +104,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTEPEXECUTIONSTYLE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: completionMode
-    valueType: string
     required: true
     label:
       en: Completion mode
@@ -126,9 +122,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASESTEPCOMPLETIONMODE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: isMilestone
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is milestone
@@ -138,7 +134,7 @@ fields:
       column: is_milestone
       storageClass: core
   - key: isBlocking
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Is blocking
@@ -148,7 +144,7 @@ fields:
       column: is_blocking
       storageClass: core
   - key: isDiscretionary
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Discretionary
@@ -163,7 +159,7 @@ fields:
       column: is_discretionary
       storageClass: core
   - key: assignedRole
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Assigned role
@@ -175,7 +171,7 @@ fields:
       storageClass: core
   - key: defaultWorkQueueId
     required: false
-    semanticType: WorkQueue
+    osfType: WorkQueue
     label:
       en: Default work queue
       nl: Standaard werkqueue
@@ -197,7 +193,7 @@ fields:
     relationship:
       ownership: reference
   - key: defaultDueOffsetHours
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Default due offset (hours)
@@ -209,7 +205,7 @@ fields:
       column: default_due_offset_hours
       storageClass: core
   - key: predecessorStepKey
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Predecessor step key
@@ -223,7 +219,6 @@ fields:
       column: predecessor_step_key
       storageClass: core
   - key: conditionExpression
-    valueType: string
     required: false
     label:
       en: Condition expression
@@ -237,9 +232,9 @@ fields:
     persisted:
       column: condition_expression
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: actions
-    valueType: object
+    osfType: object
     required: false
     label:
       en: Actions
@@ -258,22 +253,21 @@ fields:
       max: unbounded
     item:
       key: action
-      valueType: object
+      osfType: object
       children:
         - key: key
-          valueType: string
+          osfType: string
           required: true
           label:
             en: Action key
             nl: Actiesleutel
         - key: sequenceNumber
-          valueType: integer
+          osfType: integer
           required: true
           label:
             en: Sequence number
             nl: Volgnummer
         - key: kind
-          valueType: string
           required: true
           label:
             en: Kind
@@ -281,15 +275,14 @@ fields:
           options:
             type: referentiedata
             referentieGroep: CASESTEPACTIONKIND
-          semanticType: referenceDataCode
+          osfType: referenceDataCode
         - key: required
-          valueType: boolean
+          osfType: boolean
           required: true
           label:
             en: Required
             nl: Verplicht
         - key: startMode
-          valueType: string
           required: true
           label:
             en: Start mode
@@ -297,29 +290,27 @@ fields:
           options:
             type: referentiedata
             referentieGroep: CASESTEPACTIONSTARTMODE
-          semanticType: referenceDataCode
+          osfType: referenceDataCode
         - key: taskTemplate
-          valueType: object
+          osfType: object
           required: false
           label:
             en: Task template
             nl: Taaksjabloon
           children:
             - key: title
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Title
                 nl: Titel
             - key: description
-              valueType: string
               required: false
               label:
                 en: Description
                 nl: Beschrijving
-              semanticType: multilineText
+              osfType: multilineText
             - key: type
-              valueType: string
               required: false
               label:
                 en: Type
@@ -327,9 +318,8 @@ fields:
               options:
                 type: referentiedata
                 referentieGroep: TAAKTYPE
-              semanticType: referenceDataCode
+              osfType: referenceDataCode
             - key: priority
-              valueType: string
               required: false
               label:
                 en: Priority
@@ -337,23 +327,22 @@ fields:
               options:
                 type: referentiedata
                 referentieGroep: TAAKPRIORITEIT
-              semanticType: referenceDataCode
+              osfType: referenceDataCode
             - key: isBlocking
-              valueType: boolean
+              osfType: boolean
               required: false
               label:
                 en: Blocking
                 nl: Blokkerend
             - key: dueOffsetHours
-              valueType: integer
+              osfType: integer
               required: false
               label:
                 en: Due offset (hours)
                 nl: Doorlooptijd (uren)
             - key: defaultWorkQueueId
-              valueType: string
               required: false
-              semanticType: workQueueId
+              osfType: workQueueId
               label:
                 en: Work queue
                 nl: Werkqueue
@@ -361,34 +350,33 @@ fields:
                 type: remote
                 remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
             - key: assignedRole
-              valueType: string
+              osfType: string
               required: false
               label:
                 en: Assigned role
                 nl: Toegewezen rol
             - key: assignmentMetadata
-              valueType: object
+              osfType: object
               required: false
               label:
                 en: Assignment metadata
                 nl: Toewijzingsmetadata
             - key: formDefinition
-              valueType: object
+              osfType: object
               required: false
               label:
                 en: Form definition
                 nl: Formulierdefinitie
         - key: workflow
-          valueType: object
+          osfType: object
           required: false
           label:
             en: Workflow
             nl: Workflow
           children:
             - key: workflowDefinitionId
-              valueType: string
               required: false
-              semanticType: workflowDefinitionId
+              osfType: workflowDefinitionId
               label:
                 en: Workflow definition
                 nl: Workflowdefinitie
@@ -402,9 +390,14 @@ fields:
     persisted:
       column: case_template_id
       storageClass: core
-    semanticType: CaseTemplate
+    osfType: CaseTemplate
     relationship:
       ownership: reference
+      inverse:
+        key: steps
+        label:
+          en: Case step templates
+          nl: Zaakstapsjablonen
   - key: parentStepTemplateId
     label:
       en: Parent case step template
@@ -412,18 +405,14 @@ fields:
     persisted:
       column: parent_case_step_template_id
       storageClass: core
-    semanticType: CaseStepTemplate
+    osfType: CaseStepTemplate
     relationship:
       ownership: reference
-  - key: childStepTemplates
-    label:
-      en: Child case step templates
-      nl: Child-zaakstapsjablonen
-    semanticType: CaseStepTemplate
-    cardinality: collection
-    relationship:
-      inverse: parentStepTemplateId
-      ownership: reference
+      inverse:
+        key: childStepTemplates
+        label:
+          en: Child case step templates
+          nl: Child-zaakstapsjablonen
 operations:
   list:
     name: List Case Step Template
@@ -610,6 +599,6 @@ interfaces:
           component: OptionVariablePicker
           props:
             clearable: true
-            expectedSemanticType: workflowDefinitionId
+            expectedOsfType: workflowDefinitionId
             selectionSync: publishedWorkflow
             optionSectionLabel: Procesworkflows

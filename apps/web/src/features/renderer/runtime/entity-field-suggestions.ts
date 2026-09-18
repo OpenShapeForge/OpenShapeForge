@@ -20,7 +20,7 @@
 import type { Field } from "@/generated/compiler/field-contract";
 import type { AggregateFilterableField, VariableSuggestion, VariableSuggestionAggregate } from "@/features/renderer/runtime/variable-suggestions";
 import { resolveRendererReferenceItems } from "@/features/renderer/runtime/options-utils";
-import { fieldRuntimeKind, isFieldCollection, isFieldObject } from "@/lib/field-contract/field-v2";
+import { fieldRuntimeKind, isFieldCollection, isFieldObject, fieldValueType } from "@/lib/field-contract/field-v2";
 
 // ── Client cache + external store ──────────────────────────────────────────
 // Raw compiler Field[] per entity (PascalCase name), fetched from the route.
@@ -158,11 +158,11 @@ function flattenFieldsToSuggestions(
     const valueType =
       isFieldCollection(field)
         ? "array"
-        : field.valueType === "integer" || field.valueType === "number"
+        : fieldValueType(field) === "integer" || fieldValueType(field) === "number"
         ? "number"
-        : field.valueType === "boolean"
+        : fieldValueType(field) === "boolean"
           ? "boolean"
-          : field.valueType === "object"
+          : fieldValueType(field) === "object"
             ? "object"
             : "string";
 
@@ -199,9 +199,9 @@ function flattenFieldsToSuggestions(
       sourceNodeLabel: entityName,
       fieldType: fieldRuntimeKind(field),
       valueType,
-      semanticType:
-        typeof field.semanticType === "string" && field.semanticType.trim().length > 0
-          ? field.semanticType.trim()
+      osfType:
+        typeof field.osfType === "string" && field.osfType.trim().length > 0
+          ? field.osfType.trim()
           : undefined,
       options,
       aggregate,
@@ -300,7 +300,7 @@ export type EntityConditionFilterField = {
   description?: string;
   fieldType: string;
   inputKind: "text" | "number" | "boolean" | "select";
-  semanticType?: string;
+  osfType?: string;
   options?: Array<{ value: string; label: string }>;
 };
 
@@ -344,7 +344,7 @@ export function getEntityConditionFilterFields(
       label: suggestion.displayLabel ?? suggestion.label,
       fieldType: suggestion.fieldType ?? suggestion.valueType,
       inputKind: resolveInputKind(suggestion),
-      ...(suggestion.semanticType ? { semanticType: suggestion.semanticType } : {}),
+      ...(suggestion.osfType ? { osfType: suggestion.osfType } : {}),
       ...(suggestion.options?.length ? { options: suggestion.options } : {}),
     }));
 }

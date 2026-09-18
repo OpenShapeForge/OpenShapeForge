@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 import {
-  getFieldSemanticTypeDefinition,
+  getFieldOsfTypeDefinition,
   resolveFieldInputRender,
 } from "@/lib/field-rendering/compiler-field-rendering";
 import { translateRendererText } from "./text";
@@ -100,10 +100,10 @@ export function getRendererFieldLanguageHint(
       : undefined;
   if (explicit) return explicit;
 
-  const semanticType = getFieldSemanticTypeDefinition(field);
+  const osfType = getFieldOsfTypeDefinition(field);
   return (
     translateRendererText(field.label, lang) ||
-    translateRendererText(semanticType?.label, lang) ||
+    translateRendererText(osfType?.label, lang) ||
     field.key
   );
 }

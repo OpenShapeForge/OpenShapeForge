@@ -12,7 +12,7 @@
  *   2. Semantic type registry render (input/display variants)
  *   3. Component catalog defaults by value type/cardinality (lowest)
  *
- * Input:  Core entity Field[], ComponentCatalog, SemanticTypeDefinition registry.
+ * Input:  Core entity Field[], ComponentCatalog, OsfTypeDefinition registry.
  * Output: CompiledField[] — enriched field objects with resolved render, validation, etc.
  */
 import type {
@@ -21,23 +21,26 @@ import type {
   ComponentCatalog,
   CompiledField,
   CompiledRender,
-  SemanticTypeDefinition,
+  OsfTypeDefinition,
 } from "../types.js";
 import { fieldCardinality } from "./helpers.js";
+import { resolveBaseType, osfTypeDefinitionOf } from "../entity-fields.js";
 
 export function resolveModelFields(
   coreFields: Field[],
   componentCatalog: ComponentCatalog,
-  semanticTypes?: Record<string, SemanticTypeDefinition>
+  osfTypes?: Record<string, OsfTypeDefinition>
 ): CompiledField[] {
   return coreFields.map((field) => {
-    const semType = field.semanticType ? semanticTypes?.[field.semanticType] : undefined;
+    const semType = osfTypeDefinitionOf(field.osfType, osfTypes ?? {});
+    const baseType = field.baseType ?? resolveBaseType(field.osfType, osfTypes ?? {});
+    if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
     const authoredCardinality = field.cardinality ?? semType?.cardinality;
     const cardinality = fieldCardinality({ cardinality: authoredCardinality });
 
     const compiled: CompiledField = {
       key: field.key,
-      valueType: field.valueType ?? semType?.valueType,
+      baseType,
       cardinality,
       ...(authoredCardinality && typeof authoredCardinality === "object" &&
         cardinality === "collection"
@@ -46,7 +49,7 @@ export function resolveModelFields(
       required: field.required ?? false,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
-      semanticType: field.semanticType,
+      osfType: field.osfType,
     };
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
@@ -91,11 +94,11 @@ export function resolveModelFields(
       ? undefined
       : field.shape ?? field.children ?? semType?.shape ?? semType?.children;
     if (childFields) {
-      compiled.children = resolveModelFields(childFields, componentCatalog, semanticTypes);
+      compiled.children = resolveModelFields(childFields, componentCatalog, osfTypes);
     }
     const itemField = field.item ?? semType?.item;
     if (itemField) {
-      compiled.item = resolveModelFields([itemField], componentCatalog, semanticTypes)[0];
+      compiled.item = resolveModelFields([itemField], componentCatalog, osfTypes)[0];
     }
     return compiled;
   });
@@ -119,13 +122,13 @@ export function resolveFieldOptions(field: Pick<Field, "options" | "reference">)
 /**
  * Resolution order:
  * 1. field.render (explicit override — highest priority)
- * 2. field.semanticType → semantic type registry render
- * 3. field.valueType/cardinality → component catalog defaults (lowest)
+ * 2. field.osfType → semantic type registry render
+ * 3. field.baseType/cardinality → component catalog defaults (lowest)
  */
 export function resolveRender(
   field: Field,
   catalog: ComponentCatalog,
-  semType?: SemanticTypeDefinition
+  semType?: OsfTypeDefinition
 ): CompiledRender {
   // 1. Explicit field render override
   if (field.render) {
@@ -155,11 +158,11 @@ export function resolveRender(
 
   // 3. Default for field value shape
   const defaultKey = fieldCardinality(field) === "collection"
-    ? field.semanticType === "fieldDefinition"
+    ? field.osfType === "fieldDefinition"
       ? "fieldDefinitionCollection"
       : "collection"
-    : field.valueType;
-  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.valueType];
+    : field.baseType;
+  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   if (defaultEntry) {
     const componentName = defaultEntry.component;
     return {

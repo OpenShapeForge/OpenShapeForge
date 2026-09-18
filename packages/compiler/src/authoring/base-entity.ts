@@ -9,7 +9,7 @@
  * field raises a clear compile error (caller must remove the duplicate or set
  * `baseEntity: false` to opt out).
  *
- * Auto-derives the `id` field's `semanticType` per entity using the convention
+ * Auto-derives the `id` field's `osfType` per entity using the convention
  * `<entityCamelCase>Id` (e.g. entity `Assignment` -> `assignmentId`). This
  * means individual entities never declare their own `id` field just to attach
  * a semantic type catalog entry.
@@ -72,7 +72,7 @@ export function loadBaseEntity(authoringDir: string): BaseEntityDefinition | nul
  * to the camelCase id semantic type key (e.g. `assignmentId`,
  * `bankReconciliationId`).
  */
-export function entityIdSemanticType(entityName: string): string {
+export function entityIdOsfType(entityName: string): string {
   if (!entityName) return "id";
   const camel = entityName[0].toLowerCase() + entityName.slice(1);
   return `${camel}Id`;
@@ -86,8 +86,8 @@ export function entityIdSemanticType(entityName: string): string {
  * - If the entity has `baseEntity: false`, no merging happens (full opt-out).
  * - If the entity already declares a field with a key matching a base field,
  *   throws a clear error (strict-replace policy).
- * - For the `id` field, auto-derives `semanticType` from the entity's name
- *   using `entityIdSemanticType`.
+ * - For the `id` field, auto-derives `osfType` from the entity's name
+ *   using `entityIdOsfType`.
  *
  * Returns a new CoreEntity object; does not mutate the input.
  */
@@ -119,13 +119,13 @@ export function applyBaseEntityToCore(
     );
   }
 
-  const idSemanticType = entityIdSemanticType(coreEntity.entity);
+  const idOsfType = entityIdOsfType(coreEntity.entity);
   const baseFieldsWithSemantics = base.fields.map((baseField) => {
     const field = coreEntity.schemaVersion >= 2
       ? { ...baseField, render: undefined }
       : baseField;
     if (field.key !== "id") return field;
-    return { ...field, semanticType: idSemanticType };
+    return { ...field, osfType: idOsfType };
   });
 
   return {

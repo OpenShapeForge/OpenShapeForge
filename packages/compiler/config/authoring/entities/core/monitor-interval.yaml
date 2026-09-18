@@ -14,7 +14,7 @@ domains:
   - energy
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: intervalSeconds
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Interval (seconds)
@@ -43,7 +43,6 @@ fields:
       column: interval_seconds
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -56,7 +55,7 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
 authorization:
   roles:
     read:

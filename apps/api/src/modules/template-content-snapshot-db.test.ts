@@ -102,7 +102,7 @@ async function insertTemplateBlock(id: string, variantId: string, position: numb
 }
 async function insertTemplate(templateId: string, variantId: string, key: string, defaultName: string) {
   await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${templateId}::uuid, ${tenantId}::uuid, ${key}, ${key},
-    ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: defaultName }])})`.execute(privileged.db);
+    ${jsonbLiteral([{ key: "name", osfType: "string", defaultValue: defaultName }])})`.execute(privileged.db);
   await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${variantId}::uuid, ${tenantId}::uuid, ${templateId}::uuid, 'document', 'en')`.execute(privileged.db);
 }
 
@@ -140,7 +140,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "MUTATED first" })}, variant_id_position = 5 where id = ${ids.first}::uuid`.execute(privileged.db);
     await sql`delete from erp.blocks where id = ${ids.second}::uuid`.execute(privileged.db);
     await insertBlock(ids.late, 0, "MUTATED late insert");
-    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: "MUTATED" }])} where id = ${ids.template}::uuid`.execute(privileged.db);
+    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "string", defaultValue: "MUTATED" }])} where id = ${ids.template}::uuid`.execute(privileged.db);
 
     const pinned = await materialize(versionId);
     expect(pinned.blocks.map((block) => block.id)).toEqual([ids.first, ids.second]);
@@ -176,7 +176,7 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
 
     await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "MUTATED nested" })} where id = ${nested.block}::uuid`.execute(privileged.db);
     await sql`delete from erp.blocks where id = ${nested.include}::uuid`.execute(privileged.db);
-    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", valueType: "string", defaultValue: "MUTATED" }])} where id = ${nested.template}::uuid`.execute(privileged.db);
+    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "string", defaultValue: "MUTATED" }])} where id = ${nested.template}::uuid`.execute(privileged.db);
 
     const result = await materialize(outerVersionId);
     expect(result.compositions).toHaveLength(1);

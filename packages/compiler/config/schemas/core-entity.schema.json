@@ -124,17 +124,12 @@
     "fields": {
       "type": "array",
       "minItems": 1,
-      "description": "Authored field definitions use the canonical recursive FieldDefinition contract (`valueType`, not the superseded `type`).",
+      "description": "Authored field definitions use the canonical recursive FieldDefinition contract (`osfType`, not the superseded `type`).",
       "items": {
         "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
       }
     },
-    "relationships": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/relationship"
-      }
-    },
+    "relationships": false,
     "hooks": {
       "type": "object",
       "description": "Lifecycle hooks for custom business logic.",
@@ -637,12 +632,11 @@
       "if": { "properties": { "schemaVersion": { "const": 3 } }, "required": ["schemaVersion"] },
       "then": {
         "properties": {
-          "relationships": false,
           "fields": {
             "items": {
               "properties": {
                 "relationship": {
-                  "properties": { "kind": false, "entity": false, "foreignKey": false, "displayField": false }
+                  "properties": { "displayField": false }
                 }
               }
             }
@@ -1786,7 +1780,7 @@
         "help": {
           "$ref": "#/$defs/localizedText"
         },
-        "semanticType": {
+        "osfType": {
           "type": "string"
         },
         "unit": {
@@ -1848,12 +1842,12 @@
             "filter": {
               "type": "object",
               "properties": {
-                "semanticType": { "type": "string" },
+                "osfType": { "type": "string" },
                 "valueType": {
                   "type": "string",
                   "enum": ["string", "number", "boolean", "object", "array"]
                 },
-                "itemSemanticType": { "type": "string" },
+                "itemOsfType": { "type": "string" },
                 "fieldType": { "type": "string" }
               }
             }
@@ -2138,6 +2132,7 @@
       }
     },
     "relationship": {
+      "description": "A compiled relationship (model.relationships of a compiled contract). Relationships are never authored at the entity level: a single reference is a field with an entity osfType and its inverse collection is derived.",
       "type": "object",
       "additionalProperties": false,
       "required": ["key", "kind", "target"],
@@ -2147,7 +2142,7 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["belongsTo", "hasMany", "manyToMany"]
+          "enum": ["belongsTo", "hasMany"]
         },
         "target": {
           "type": "string",

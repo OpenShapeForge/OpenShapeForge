@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: valueDate
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Value date
@@ -26,7 +26,6 @@ fields:
       column: value_date
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -34,12 +33,11 @@ fields:
     description:
       en: Amount of the movement (always positive; sign is determined by direction).
       nl: Bedrag van de mutatie (altijd positief; teken volgt uit richting).
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: direction
-    valueType: string
     required: true
     label:
       en: Direction
@@ -53,9 +51,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: LEDGERSIDE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: counterpartyName
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Counterparty name
@@ -69,7 +67,7 @@ fields:
       column: counterparty_name
       storageClass: core
   - key: counterpartyIban
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Counterparty IBAN
@@ -83,7 +81,6 @@ fields:
       column: counterparty_iban
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -96,9 +93,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: endToEndId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: End-to-end ID
@@ -112,7 +109,6 @@ fields:
       column: end_to_end_id
       storageClass: core
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -126,7 +122,7 @@ fields:
     options:
       type: referentiedata
       referentieGroep: BANKSTATEMENTLINESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: bankStatementId
     label:
       en: Bank statement
@@ -134,7 +130,7 @@ fields:
     persisted:
       column: bank_statement_id
       storageClass: core
-    semanticType: BankStatement
+    osfType: BankStatement
     relationship:
       ownership: reference
 authorization:

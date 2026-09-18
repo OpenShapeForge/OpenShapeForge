@@ -57,7 +57,7 @@ const OPERATION: Row = {
   id: "op-1",
   key: "search",
   providerId: "prov-1",
-  inputFields: [{ key: "version", valueType: "string" }],
+  inputFields: [{ key: "version", osfType: "string" }],
 };
 const CONNECTION: Row = {
   id: "conn-1",
@@ -100,7 +100,7 @@ describe("validateVisibleDefinition", () => {
   it("accepts a presence selector and refuses malformed or ambiguous selectors", async () => {
     const row = {
       ...ROW,
-      inputFields: [{ key: "dealId", valueType: "string" }],
+      inputFields: [{ key: "dealId", osfType: "string" }],
       bindings: [
         { operationId: "op-1", order: 1, when: { field: "dealId", present: true } },
       ],

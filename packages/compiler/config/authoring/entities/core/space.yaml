@@ -14,7 +14,7 @@ domains:
   - asset
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -44,7 +44,7 @@ fields:
       column: name
       storageClass: core
   - key: spaceKind
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Space kind
@@ -58,7 +58,7 @@ fields:
       column: space_kind
       storageClass: core
   - key: area
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Area
@@ -70,7 +70,7 @@ fields:
       column: area
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -90,7 +90,7 @@ fields:
     persisted:
       column: building_id
       storageClass: core
-    semanticType: Building
+    osfType: Building
     relationship:
       ownership: reference
   - key: parentSpaceId
@@ -100,18 +100,14 @@ fields:
     persisted:
       column: parent_space_id
       storageClass: core
-    semanticType: Space
+    osfType: Space
     relationship:
       ownership: reference
-  - key: childSpaces
-    label:
-      en: Child spaces
-      nl: Onderliggende ruimten
-    semanticType: Space
-    cardinality: collection
-    relationship:
-      inverse: parentSpaceId
-      ownership: reference
+      inverse:
+        key: childSpaces
+        label:
+          en: Child spaces
+          nl: Onderliggende ruimten
 authorization:
   roles:
     read:

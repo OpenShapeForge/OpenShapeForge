@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: lineNumber
-    valueType: integer
+    osfType: integer
     required: true
     label:
       en: Line number
@@ -28,7 +28,6 @@ fields:
       column: line_number
       storageClass: core
   - key: description
-    valueType: string
     required: true
     label:
       en: Description
@@ -42,9 +41,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -58,9 +56,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MAINTENANCETASKSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: quantity
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Quantity
@@ -72,7 +70,7 @@ fields:
       column: quantity
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -86,7 +84,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: unitPrice
-    valueType: number
     required: false
     label:
       en: Unit price
@@ -94,12 +91,11 @@ fields:
     description:
       en: Price per unit for this task.
       nl: Prijs per eenheid voor deze taak.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
   - key: amount
-    valueType: number
     required: false
     label:
       en: Amount
@@ -107,7 +103,7 @@ fields:
     description:
       en: Total amount for this task.
       nl: Totaalbedrag voor deze taak.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
@@ -118,7 +114,7 @@ fields:
     persisted:
       column: maintenance_order_id
       storageClass: core
-    semanticType: MaintenanceOrder
+    osfType: MaintenanceOrder
     relationship:
       ownership: reference
 authorization:

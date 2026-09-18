@@ -14,7 +14,7 @@ domains:
   - asset
 fields:
   - key: value
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Value
@@ -26,7 +26,7 @@ fields:
       column: value
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Unit
@@ -42,7 +42,7 @@ fields:
       column: unit_id
       storageClass: core
   - key: measuredAt
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Measured at
@@ -54,7 +54,7 @@ fields:
       column: measured_at
       storageClass: core
   - key: methodCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Method code
@@ -68,7 +68,7 @@ fields:
       column: method_code
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -88,7 +88,7 @@ fields:
     persisted:
       column: asset_id
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
   - key: buildingId
@@ -98,7 +98,7 @@ fields:
     persisted:
       column: building_id
       storageClass: core
-    semanticType: Building
+    osfType: Building
     relationship:
       ownership: reference
   - key: spaceId
@@ -108,7 +108,7 @@ fields:
     persisted:
       column: space_id
       storageClass: core
-    semanticType: Space
+    osfType: Space
     relationship:
       ownership: reference
 authorization:

@@ -27,7 +27,7 @@ test("platform tenancy and authored tenant references keep distinct storage cont
   expect(sql).toContain('ADD CONSTRAINT "tenant_settings_tenant_id_fkey" FOREIGN KEY ("tenant_id")\n      REFERENCES "erp"."tenants"("id")');
   expect(active.entities.find(entity => entity.contract.storage.table === "tenant_settings")!
     .contract.model.fields.find(field => field.key === "tenantId"))
-    .toMatchObject({ semanticType: "Tenant", readOnly: true, required: false });
+    .toMatchObject({ osfType: "Tenant", readOnly: true, required: false });
 
   expect(sql).not.toContain('FOREIGN KEY ("tenant_id", "tenant_id")');
   expect(active.manifest.tables.filter(table => table.name === "tenants").map(table => table.schema).sort()).toEqual(["erp", "platform"]);

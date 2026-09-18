@@ -82,9 +82,9 @@ export type DetailGroup = {
 
 export type DetailFieldConfig = Pick<
   EntityFieldConfig,
-  "key" | "label" | "render" | "options" | "semanticType"
+  "key" | "label" | "render" | "options" | "osfType"
 > & {
-  valueType?: Field["valueType"];
+  baseType?: Field["baseType"];
   cardinality?: Field["cardinality"];
   /** Omit label row in detail/workspace panes (merged into {@link RendererFieldConfig.hideLabel}). */
   hideLabel?: boolean;
@@ -142,7 +142,7 @@ type DetailRendererDefinitionOptions = {
   metadata?: Record<string, unknown>;
 };
 
-function inferRendererFieldValueType(field: DetailFieldConfig | undefined): Field["valueType"] {
+function inferRendererFieldValueType(field: DetailFieldConfig | undefined): NonNullable<Field["baseType"]> {
   switch (field?.render?.component) {
     case "DatePicker":
       return "date";
@@ -289,12 +289,13 @@ function createRendererDefinitionFromDetailGroups(
 }
 
 function mapDetailFieldToRendererField(field: DetailFieldConfig): Field {
+  const baseType = field.baseType ?? inferRendererFieldValueType(field);
   return {
     key: field.key,
-    valueType: field.valueType ?? inferRendererFieldValueType(field),
+    osfType: field.osfType ?? baseType,
+    baseType,
     cardinality: field.cardinality,
     label: field.label,
-    semanticType: field.semanticType,
     layoutFraction: field.layoutFraction,
     render: field.render?.component ? {
       component: field.render.component,

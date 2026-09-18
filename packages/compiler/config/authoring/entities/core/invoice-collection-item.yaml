@@ -15,7 +15,7 @@ domains:
   - finance
 fields:
   - key: iban
-    valueType: string
+    osfType: string
     required: true
     label:
       en: IBAN
@@ -29,7 +29,6 @@ fields:
       column: iban
       storageClass: core
   - key: amount
-    valueType: number
     required: true
     label:
       en: Amount
@@ -37,12 +36,12 @@ fields:
     description:
       en: Amount allocated to this payer under this collection item.
       nl: Bedrag dat onder deze incasso-regel aan deze betaler is toegewezen.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
   - key: paymentDay
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Payment day
@@ -63,7 +62,7 @@ fields:
     persisted:
       column: invoice_id
       storageClass: core
-    semanticType: Invoice
+    osfType: Invoice
     relationship:
       ownership: reference
   - key: agreementPartyId
@@ -73,7 +72,7 @@ fields:
     persisted:
       column: agreement_party_id
       storageClass: core
-    semanticType: AgreementParty
+    osfType: AgreementParty
     relationship:
       ownership: reference
   - key: mandateId
@@ -83,7 +82,7 @@ fields:
     persisted:
       column: mandate_id
       storageClass: core
-    semanticType: DirectDebitMandate
+    osfType: DirectDebitMandate
     relationship:
       ownership: reference
   - key: paymentMethodId
@@ -93,7 +92,7 @@ fields:
     persisted:
       column: payment_method_id
       storageClass: core
-    semanticType: PaymentMethod
+    osfType: PaymentMethod
     relationship:
       ownership: reference
 authorization:

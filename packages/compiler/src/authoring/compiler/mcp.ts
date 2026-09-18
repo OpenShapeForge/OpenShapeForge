@@ -228,7 +228,7 @@ export function buildMcp(
       const field = coreEntity.fields?.find(
         (candidate) => candidate.key === authored.internalOnlyField,
       );
-      if (!field || field.valueType !== "boolean") {
+      if (!field || field.baseType !== "boolean") {
         throw new Error(
           `mcp derivedTools.internalOnlyField ${JSON.stringify(authored.internalOnlyField)} ` +
             `on entity "${coreEntity.entity}" must name an authored boolean field.`,
@@ -247,7 +247,7 @@ export function buildMcp(
       if (
         !authored.versionField ||
         !versionField ||
-        versionField.valueType !== "integer" ||
+        versionField.baseType !== "integer" ||
         versionField.cardinality === "collection"
       ) {
         throw new Error(

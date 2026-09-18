@@ -203,14 +203,14 @@ describe("composed mutation Service on the native provider", () => {
         const disconnectedProviderId = randomUUID();
         const nativeConnectionId = randomUUID();
         const inputFields = JSON.stringify([
-          { key: "displayName", valueType: "string" },
-          { key: "relationType", valueType: "string" },
-          { key: "contactType", valueType: "string" },
-          { key: "contactValue", valueType: "string" },
+          { key: "displayName", osfType: "string" },
+          { key: "relationType", osfType: "string" },
+          { key: "contactType", osfType: "string" },
+          { key: "contactValue", osfType: "string" },
         ]);
         const outputFields = JSON.stringify([
-          { key: "relationId", valueType: "string" },
-          { key: "contactDetailId", valueType: "string" },
+          { key: "relationId", osfType: "string" },
+          { key: "contactDetailId", osfType: "string" },
         ]);
         const relationBinding = (order: number) => ({
           order,

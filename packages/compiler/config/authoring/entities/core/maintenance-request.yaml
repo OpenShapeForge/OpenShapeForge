@@ -14,7 +14,7 @@ domains:
   - maintenance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,7 @@ fields:
       column: code
       storageClass: core
   - key: title
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Title
@@ -44,7 +44,7 @@ fields:
       column: title
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -58,7 +58,6 @@ fields:
       column: description
       storageClass: core
   - key: priority
-    valueType: string
     required: false
     label:
       en: Priority
@@ -72,9 +71,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MAINTENANCEPRIORITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -88,9 +86,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: MAINTENANCEREQUESTSTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: reportedAt
-    valueType: datetime
+    osfType: datetime
     required: true
     label:
       en: Reported at
@@ -102,7 +100,7 @@ fields:
       column: reported_at
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -122,7 +120,7 @@ fields:
     persisted:
       column: reported_by_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
   - key: assetId
@@ -132,7 +130,7 @@ fields:
     persisted:
       column: asset_reference
       storageClass: core
-    semanticType: Asset
+    osfType: Asset
     relationship:
       ownership: reference
 authorization:

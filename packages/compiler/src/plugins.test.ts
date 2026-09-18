@@ -61,21 +61,21 @@ describe("compiler plugins", () => {
     )!.contents) as {
       version: number;
       fieldDefinitionSchema: { $ref: string };
-      semanticTypes: Record<string, unknown>;
+      osfTypes: Record<string, unknown>;
       referentiedata: Record<string, unknown>;
     };
     expect(runtimeFieldSchemas).toMatchObject({
       version: 1,
       fieldDefinitionSchema: { $ref: "#/$defs/fieldDefinition" },
     });
-    expect(runtimeFieldSchemas.semanticTypes).toHaveProperty("fieldDefinition");
+    expect(runtimeFieldSchemas.osfTypes).toHaveProperty("fieldDefinition");
     expect(Object.keys(runtimeFieldSchemas.referentiedata).length).toBeGreaterThan(0);
     const fieldAuthoringRegistry = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path === "apps/api/src/generated/compiler/field-authoring-registry.json",
     )!.contents) as {
       version: number;
       fieldAuthoringProfiles: Record<string, Record<string, unknown>>;
-      semanticTypes: Record<string, Record<string, unknown>>;
+      osfTypes: Record<string, Record<string, unknown>>;
       referentiedata: Record<string, {
         description?: string;
         items?: Array<{ label?: Record<string, string> }>;
@@ -86,7 +86,7 @@ describe("compiler plugins", () => {
       keyBehavior: "hiddenGeneratedStable",
       typePickerUsage: "requestInput",
     });
-    expect(fieldAuthoringRegistry.semanticTypes.email).toMatchObject({
+    expect(fieldAuthoringRegistry.osfTypes.email).toMatchObject({
       valueType: "string",
       classification: { sensitivity: "pii" },
     });

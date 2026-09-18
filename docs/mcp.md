@@ -380,7 +380,7 @@ SQL needs and almost nothing a model needs.
 
 | Authored                                       | Becomes                                                  |
 | ---------------------------------------------- | -------------------------------------------------------- |
-| `valueType`, `cardinality`                     | JSON Schema `type`; `array` + `items` for collections    |
+| `osfType` (via its base type), `cardinality`   | JSON Schema `type`; `array` + `items` for collections    |
 | `cardinality.{min,max}`, `validation.minItems` | `minItems` / `maxItems`                                  |
 | `validation.minLength` / `maxLength`           | `minLength` / `maxLength`                                |
 | `validation.min` / `max`                       | `minimum` / `maximum`                                    |

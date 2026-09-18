@@ -66,7 +66,7 @@ export type RuntimeJsonSchemaValidator = {
 export type RuntimeFieldSchemaCompiler = {
   /**
    * Validate canonical stored FieldDefinitions and project their value object
-   * through the host's active semantic-type and reference-data registries.
+   * through the host's active osf-type and reference-data registries.
    */
   object(
     fields: readonly Readonly<Record<string, unknown>>[],

@@ -15,7 +15,7 @@ authoring/
       contact-detail.yaml
   catalogs/
     components.yaml       render-component catalog + per-type defaults
-    semantic-types.yaml   reusable field semantics (email, phone, iban, …)
+    osf-types.yaml   reusable field semantics (email, phone, iban, …)
     core-referentiedata.yaml   code tables ("groepen") -> JSON snapshot
     transforms.yaml       mapping transforms (enumMap/cast/fallbackChain)
     retention-policies.yaml    named retention policies
@@ -66,8 +66,8 @@ authorization:               # presence makes the entity TENANT-SCOPED:
 
 fields:
   - key: displayName         # camelCase field key
-    valueType: string        # string|integer|number|boolean|date|datetime|object
-    required: true
+    osfType: string          # the ONE type axis: a base type, a osf-type
+    required: true           # catalog key, or an entity name (see below)
     label: { en: Display name, nl: Weergavenaam }
     description: { en: ..., nl: ... }
     validation:
@@ -77,19 +77,19 @@ fields:
       column: display_name
       storageClass: core
   - key: relationType
-    valueType: string
+    osfType: referenceDataCode   # a catalog entry: its valueType is the base
     required: true
     persisted: { column: relation_type, storageClass: core }
-    render:                  # render component + props (see components.yaml)
-      component: ReferenceSelect
-      props: { referentieGroep: RELATIESOORT, clearable: false }
-
-relationships:
-  - key: relationGroup
-    kind: belongsTo          # belongsTo | hasMany
-    target: RelationGroup    # PascalCase entity name
-    foreignKey: relation_group_id
+    options: { type: referentiedata, referentieGroep: RELATIESOORT }
+  - key: relationGroupId     # a single entity reference: the FK field itself
+    osfType: RelationGroup   # PascalCase entity name; base type is string/uuid
     label: { en: Relation group, nl: Relatiegroep }
+    persisted: { column: relation_group_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse:               # optional: shapes the collection the compiler
+        key: relations       # derives on RelationGroup (default: lower-camel
+        label: { en: Relations, nl: Relaties }   # plural of this entity)
 
 ui:
   routes:                    # localized route templates per action
@@ -150,7 +150,7 @@ authorization:
 
 fields:
   - key: authorization
-    valueType: object
+    osfType: object
     required: true
     defaultValue: {}
     persisted: { column: authorization, storageClass: core }
@@ -283,15 +283,31 @@ What the compiler does with it:
 
 ### Relationships
 
-- `belongsTo` needs a `foreignKey` column (a persisted uuid column on this
-  entity). If the **target entity is compiled in this repo**, the compiler
-  emits a real foreign-key constraint; targets that are not present are
-  recorded under `relationshipStatus.skippedReferences` in the manifest and
-  no FK is emitted. Cross-module references additionally require an entry in
-  the `relationshipRegister` (see `config/platform-schema.yaml`).
-- `hasMany` is the inverse side: `foreignKey` names the column **on the
-  target** that points back at this entity. The API resolves it as an
-  embedded list plus a `<name>Aggregate { count }` field.
+Relationships are fields; there is no entity-level `relationships:` block
+(one is refused by name).
+
+- A **single reference** is a field whose `osfType` is an entity name. Its
+  `persisted.column` (default `<key>_id`) is the foreign key. If the target
+  entity is compiled in this repo, the compiler emits a real foreign-key
+  constraint; targets that are not present are recorded under
+  `relationshipStatus.skippedReferences` in the manifest and no FK is
+  emitted. Cross-module references additionally require an entry in the
+  `relationshipRegister` (see `config/platform-schema.yaml`).
+- The **inverse collection is derived**, never authored. Every single
+  reference gives its target entity a collection of the referencing records:
+  key = lower-camel plural of the referencing entity (`AgreementParty` →
+  `agreementParties`), label = that entity's `labels`. The API resolves it as
+  an embedded list plus a `<name>Aggregate { count }` field. The referencing
+  field shapes the collection with `relationship.inverse`:
+  `{ key, label, ownership: owned, sortable, childAuthorization: owner,
+  allowedDefinitions }` — all optional — or `false` for no collection.
+- When several fields of one entity reference the same target, no default
+  is derived: each of them declares `inverse` (`{ key }` or `false`), so a
+  collection never silently follows the wrong foreign key.
+- A read-only traversal through a local single reference (`cardinality:
+  collection` + `relationship: { inverse: <field on target>, via: <local
+  reference> }`) is the one collection that stays authored: it has no
+  foreign key of its own to derive from.
 
 ## `_base.yaml` — shared meta fields
 
@@ -324,13 +340,16 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   `packages/compiler/config/referentiedata/core-by-groep.json` (and a copy
   under `apps/web/src/lib/` only when `apps/web` exists). Fields reference a
   group via `render.props.referentieGroep`.
-- **`semantic-types.yaml`** — reusable field semantics: validation pattern,
+- **`osf-types.yaml`** — reusable field semantics: validation pattern,
   render components, data classification (`pii`, `confidential`, …),
-  retention, icon. A field opts in with `semanticType: email`. Resolution
+  retention, icon. Every entry declares the base `valueType` it resolves to.
+  A field opts in with `osfType: email`; the compiler derives the field's
+  `baseType` from the entry. Keys are camelCase — PascalCase names are
+  entities, and the seven base types are not catalog entries. Resolution
   priority for render/validation: explicit field config → semantic type →
-  field-type default → fallback.
+  base-type default → fallback.
 - **`components.yaml`** — the render-component catalog: default component per
-  `valueType` (string → `Input`, boolean → `Switch`, …), view defaults, and
+  base type (string → `Input`, boolean → `Switch`, …), view defaults, and
   component definitions with their allowed props.
 - **`transforms.yaml`** — named mapping transforms (`enumMap`, `cast`,
   `fallbackChain`) used by entity mappings.
@@ -463,7 +482,7 @@ use (no `contexts/` directory exists in the base layer):
 - `contexts/<ctx>/full/<entity>.yaml` — standalone entities that exist only
   in one context; compiled into synthetic core entities (origin
   `contextFull`).
-- `contexts/<ctx>/semantic-types.yaml` — context-scoped semantic-type
+- `contexts/<ctx>/osf-types.yaml` — context-scoped osf-type
   catalogs merged over the core catalog.
 - `mappings/<ctx>/<entity>.mapping.yaml` — field mappings between source and
   target entities using the transform catalog.

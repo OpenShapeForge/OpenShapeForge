@@ -12,8 +12,7 @@ description:
   nl: Genereer een kort vrij tekstantwoord voor de klant op basis van een systeemprompt en gebruikersprompt.
 configFields:
   - key: systemPrompt
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label:
       en: System prompt
       nl: Systeemprompt
@@ -21,8 +20,10 @@ configFields:
       en: Persona and tone instructions for the AI.
       nl: Persona- en tooninstructies voor de AI.
     help:
-      en: Use this for stable instructions such as role, tone, language, and constraints. Variables may be inserted with template syntax.
-      nl: Gebruik dit voor vaste instructies zoals rol, toon, taal en randvoorwaarden. Variabelen kunnen met templatesyntax worden ingevoegd.
+      en: Use this for stable instructions such as role, tone, language, and constraints. Variables may be inserted with
+        template syntax.
+      nl: Gebruik dit voor vaste instructies zoals rol, toon, taal en randvoorwaarden. Variabelen kunnen met templatesyntax
+        worden ingevoegd.
     validation:
       required: true
       maxLength: 8000
@@ -32,8 +33,7 @@ configFields:
         rows: 6
         maxLength: 8000
   - key: userPrompt
-    valueType: string
-    semanticType: variableTemplate
+    osfType: variableTemplate
     label:
       en: User prompt
       nl: Gebruikersprompt
@@ -41,8 +41,10 @@ configFields:
       en: The concrete request and context for this run.
       nl: De concrete opdracht en context voor deze run.
     help:
-      en: This prompt must contain the actual message or workflow context the reply should be based on. The runtime also accepts the legacy alias `prompt`.
-      nl: Deze prompt moet het actuele bericht of de workflowcontext bevatten waarop het antwoord gebaseerd is. De runtime accepteert ook de legacy alias `prompt`.
+      en: This prompt must contain the actual message or workflow context the reply should be based on. The runtime also
+        accepts the legacy alias `prompt`.
+      nl: Deze prompt moet het actuele bericht of de workflowcontext bevatten waarop het antwoord gebaseerd is. De runtime
+        accepteert ook de legacy alias `prompt`.
     validation:
       required: true
       maxLength: 8000
@@ -55,7 +57,7 @@ configFields:
       aliases:
         - prompt
   - key: temperature
-    valueType: number
+    osfType: number
     label:
       en: Temperature
       nl: Temperatuur
@@ -71,7 +73,7 @@ configFields:
       min: 0
       max: 1
   - key: maxTokens
-    valueType: number
+    osfType: number
     label:
       en: Max tokens
       nl: Maximaal aantal tokens
@@ -86,7 +88,7 @@ configFields:
       required: true
       min: 50
   - key: timeoutMs
-    valueType: number
+    osfType: number
     label:
       en: Timeout (ms)
       nl: Timeout (ms)

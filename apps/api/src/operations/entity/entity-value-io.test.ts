@@ -7,30 +7,30 @@ import type { GeneratedCrudTable } from "./types.js";
 for (const [policy, value] of Object.entries({ classification: { sensitivity: "pii" }, authorization: { roles: ["Fixture.Read"] }, permissions: { read: ["Fixture.Read"] }, writtenBy: ["fixture"], secureInput: {}, immutable: true })) {
   for (const shape of ["own", "children", "item", "shape"] as const) {
     test(`entityValue rejects ${policy} on ${shape} fields`, () => {
-      const leaf = { key: "protected", valueType: "string", [policy]: value };
-      const field = shape === "own" ? leaf : { key: "container", valueType: "object", [shape]: shape === "item" ? leaf : [leaf] };
+      const leaf = { key: "protected", osfType: "string", [policy]: value };
+      const field = shape === "own" ? leaf : { key: "container", osfType: "object", [shape]: shape === "item" ? leaf : [leaf] };
       expect(() => assertEntityValueFieldPolicy(field, {})).toThrow("Guarded or malformed");
     });
   }
   test(`entityValue rejects inherited ${policy} even when the field tries to override it`, () => {
-    expect(() => assertEntityValueFieldPolicy({ key: "value", valueType: "string", semanticType: "protectedText", [policy]: false }, { protectedText: { valueType: "string", [policy]: value } })).toThrow("Guarded or malformed");
-    expect(() => assertEntityValueFieldPolicy({ key: "container", semanticType: "nested" }, { nested: { kind: "scalar", valueType: "object", item: { key: "leaf", valueType: "string", [policy]: value } } })).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "value", osfType: "protectedText", [policy]: false }, { protectedText: { valueType: "string", [policy]: value } })).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "container", osfType: "nested" }, { nested: { kind: "scalar", valueType: "object", item: { key: "leaf", osfType: "string", [policy]: value } } })).toThrow("Guarded or malformed");
   });
 }
 test("entityValue permits immutable:false, but never false-valued authorization or permission policies", () => {
-  expect(() => assertEntityValueFieldPolicy({ key: "text", valueType: "string", immutable: false }, {})).not.toThrow();
+  expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "string", immutable: false }, {})).not.toThrow();
   for (const key of ["authorization", "permissions", "classification", "writtenBy", "secureInput"]) {
-    expect(() => assertEntityValueFieldPolicy({ key: "text", valueType: "string", [key]: false }, {})).toThrow();
+    expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "string", [key]: false }, {})).toThrow();
   }
 });
 test("entityValue rejects malformed/deep field shapes without treating JSON defaults as metadata", () => {
-  for (const field of [{ key: "bad", children: {} }, { key: "bad", item: [] }, { key: "bad", semanticType: {} }, { key: "bad", semanticType: "Missing" }]) {
+  for (const field of [{ key: "bad", osfType: "object", children: {} }, { key: "bad", osfType: "object", item: [] }, { key: "bad", osfType: {} }, { key: "bad", osfType: "Missing" }, { key: "bad" }]) {
     expect(() => assertEntityValueFieldPolicy(field, {})).toThrow();
   }
-  expect(() => assertEntityValueFieldPolicy({ key: "text", valueType: "object", defaultValue: { permissions: "content" } }, {})).not.toThrow();
-  expect(() => assertEntityValueFieldPolicy({ key: "target", semanticType: "Target" }, { Target: { kind: "entity", shape: [{ key: "guarded", permissions: {} }] } })).not.toThrow();
-  expect(() => assertEntityValueFieldPolicy({ key: "nested", children: [{ key: "target", semanticType: "Target" }] }, { Target: { kind: "entity" } })).toThrow();
-  expect(() => assertEntityValueFieldPolicy({ key: "root", semanticType: "Recursive" }, { Recursive: { item: { key: "nested", semanticType: "Recursive" } } })).toThrow();
+  expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "object", defaultValue: { permissions: "content" } }, {})).not.toThrow();
+  expect(() => assertEntityValueFieldPolicy({ key: "target", osfType: "Target" }, { Target: { kind: "entity", shape: [{ key: "guarded", permissions: {} }] } })).not.toThrow();
+  expect(() => assertEntityValueFieldPolicy({ key: "nested", osfType: "object", children: [{ key: "target", osfType: "Target" }] }, { Target: { kind: "entity" } })).toThrow();
+  expect(() => assertEntityValueFieldPolicy({ key: "root", osfType: "Recursive" }, { Recursive: { item: { key: "nested", osfType: "Recursive" } } })).toThrow();
 });
 
 test("entityValue reads preserve persisted fields from an older definition while validating references", () => {
@@ -40,7 +40,7 @@ test("entityValue reads preserve persisted fields from an older definition while
     schema: "erp", table: "placements", valuesColumn: "payload", definitionColumn: "definition_key",
     definitions: { Copy: {
       entityName: "Copy", schemaVersion: 1, definitionHash: "a".repeat(64),
-      fields: [{ key: "current", valueType: "string", required: true }],
+      fields: [{ key: "current", osfType: "string", baseType: "string", required: true }],
       valueSchema: { type: "object", required: ["current"], properties: { current: { type: "string" } }, additionalProperties: false },
       references: [{ fieldKey: "source", targetEntity: "Resource", schema: "erp", table: "resources", column: "ev_source_id", required: true }],
     } },

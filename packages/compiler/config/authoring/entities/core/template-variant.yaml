@@ -18,12 +18,16 @@ indexes:
 fields:
   - key: template
     label: { en: Template, nl: Template }
-    semanticType: Template
+    osfType: Template
     required: true
     immutable: true
+    relationship:
+      inverse:
+        key: variants
+        ownership: owned
   - key: channel
     label: { en: Channel, nl: Kanaal }
-    valueType: string
+    osfType: string
     required: true
     options:
       type: static
@@ -33,19 +37,12 @@ fields:
         - { value: whatsapp, label: { en: WhatsApp, nl: WhatsApp } }
     persisted: { column: channel, storageClass: core }
   - key: locale
-    valueType: string
+    osfType: string
     required: true
     defaultValue: nl
     validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
     label: { en: Content language, nl: Inhoudstaal }
     persisted: { column: locale, storageClass: core }
-  - key: blocks
-    label: { en: Blocks, nl: Blokken }
-    semanticType: Block
-    cardinality: collection
-    sortable: true
-    relationship: { inverse: variant, ownership: owned }
-    allowedDefinitions: [TextBlock, YouTubeEmbed, TemplateBlock]
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }

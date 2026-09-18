@@ -21,7 +21,7 @@ description:
     completed/partial/noWork/tenantLocked/configError/failed.
 configFields:
   - key: mode
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Mode
@@ -30,8 +30,10 @@ configFields:
       en: Operating mode — prolongation (default), void (storneren), or reissue for TWK corrections.
       nl: Modus — prolongatie (standaard), storneren, of hercreatie voor TWK-correcties.
     help:
-      en: The bridge only accepts `prolongation`, `void`, or `reissue`; anything else falls back to `prolongation`. Pick `reissue` for correction flows rather than trying to mutate existing financial artifacts.
-      nl: De bridge accepteert alleen `prolongation`, `void` of `reissue`; alles daarbuiten valt terug op `prolongation`. Kies `reissue` voor correctieflows in plaats van bestaande financiële artefacten te proberen muteren.
+      en: The bridge only accepts `prolongation`, `void`, or `reissue`; anything else falls back to `prolongation`. Pick
+        `reissue` for correction flows rather than trying to mutate existing financial artifacts.
+      nl: De bridge accepteert alleen `prolongation`, `void` of `reissue`; alles daarbuiten valt terug op `prolongation`. Kies
+        `reissue` voor correctieflows in plaats van bestaande financiële artefacten te proberen muteren.
     defaultValue: prolongation
     render:
       component: ReferenceSelect
@@ -39,7 +41,6 @@ configFields:
         referentieGroep: BILLINGRUNMODE
         clearable: false
   - key: billUpToDate
-    valueType: string
     required: true
     label:
       en: Bill up to date
@@ -50,13 +51,14 @@ configFields:
       nl: ISO-datum of {{variabele}}. Inclusieve bovengrens — overeenkomsten waarvan schema.volgendeProlongatiedatum op of
         voor deze datum ligt komen in aanmerking.
     help:
-      en: This is required by the bridge and is usually supplied from a trigger field such as `{{input.billUpToDate}}` in the synthetic billing seed. Missing it routes the node to `configError`.
-      nl: Dit is verplicht voor de bridge en wordt meestal geleverd vanuit een triggerveld zoals `{{input.billUpToDate}}` in de synthetic billing-seed. Ontbreekt dit, dan routeert de node naar `configError`.
-    semanticType: variableTemplate
+      en: This is required by the bridge and is usually supplied from a trigger field such as `{{input.billUpToDate}}` in the
+        synthetic billing seed. Missing it routes the node to `configError`.
+      nl: Dit is verplicht voor de bridge en wordt meestal geleverd vanuit een triggerveld zoals `{{input.billUpToDate}}` in
+        de synthetic billing-seed. Ontbreekt dit, dan routeert de node naar `configError`.
+    osfType: variableTemplate
     runtime:
       required: true
   - key: agreementFilter
-    valueType: object
     required: false
     label:
       en: Agreement filter
@@ -67,11 +69,13 @@ configFields:
       nl: Optionele condition-builder-expressie die de in aanmerking komende subovereenkomsten verder beperkt
         (master-overeenkomsten worden altijd uitgesloten). Leeg selecteert alle vervallen subovereenkomsten.
     help:
-      en: This filter is passed straight into the billing engine as `agreementFilter`. In the synthetic seed it is used to keep the run on active rent agreements only.
-      nl: Dit filter wordt rechtstreeks als `agreementFilter` aan de billing-engine doorgegeven. In de synthetic seed wordt het gebruikt om de run te beperken tot actieve huurovereenkomsten.
-    semanticType: condition
+      en: This filter is passed straight into the billing engine as `agreementFilter`. In the synthetic seed it is used to
+        keep the run on active rent agreements only.
+      nl: Dit filter wordt rechtstreeks als `agreementFilter` aan de billing-engine doorgegeven. In de synthetic seed wordt
+        het gebruikt om de run te beperken tot actieve huurovereenkomsten.
+    osfType: condition
   - key: dryRun
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Dry run
@@ -90,7 +94,7 @@ configFields:
         met `dryRun: true` omdat er geen financiële write-side-effects zijn vastgelegd.
     defaultValue: false
   - key: onItemFailure
-    valueType: string
+    osfType: string
     required: false
     label:
       en: On item failure
@@ -101,8 +105,10 @@ configFields:
       nl: Hoe te reageren op mislukking per overeenkomst — "continue" (standaard; verwerk overige overeenkomsten en routeer op
         partial/completed) of "halt" (stop de run bij de eerste mislukking en routeer op failed).
     help:
-      en: The bridge forwards this straight into the run request as `continue` or `halt`. Use `halt` only when a single failing agreement should block the entire billing run.
-      nl: De bridge geeft dit direct door in de run-request als `continue` of `halt`. Gebruik `halt` alleen wanneer één falende overeenkomst de hele billing-run moet blokkeren.
+      en: The bridge forwards this straight into the run request as `continue` or `halt`. Use `halt` only when a single
+        failing agreement should block the entire billing run.
+      nl: De bridge geeft dit direct door in de run-request als `continue` of `halt`. Gebruik `halt` alleen wanneer één
+        falende overeenkomst de hele billing-run moet blokkeren.
     defaultValue: continue
     render:
       component: ReferenceSelect
@@ -118,7 +124,7 @@ configFields:
               en: Halt
               nl: Stoppen
   - key: maxAgreementsPerWorker
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Max agreements per worker
@@ -134,7 +140,6 @@ configFields:
       min: 1
       max: 10000
   - key: idempotencyKey
-    valueType: string
     required: false
     label:
       en: Idempotency key (override)
@@ -145,6 +150,8 @@ configFields:
       nl: Optionele override. Bij weglaten leidt de engine een stabiele sleutel af uit (workflowInstance, nodeId, modus,
         bill-up-to datum, agreementFilter-snapshot). Herhalingen met dezelfde sleutel vinden dezelfde BillingRun terug.
     help:
-      en: Leave this empty unless you need multiple workflow instances to intentionally collapse onto the same billing run identity. Normally the derived key is what protects replays and retries from duplicating runs.
-      nl: Laat dit leeg tenzij meerdere workflow-instances expres op dezelfde billing-run-identiteit moeten uitkomen. Normaal gesproken is juist de afgeleide sleutel wat replays en retries tegen duplicatie beschermt.
-    semanticType: variableTemplate
+      en: Leave this empty unless you need multiple workflow instances to intentionally collapse onto the same billing run
+        identity. Normally the derived key is what protects replays and retries from duplicating runs.
+      nl: Laat dit leeg tenzij meerdere workflow-instances expres op dezelfde billing-run-identiteit moeten uitkomen. Normaal
+        gesproken is juist de afgeleide sleutel wat replays en retries tegen duplicatie beschermt.
+    osfType: variableTemplate

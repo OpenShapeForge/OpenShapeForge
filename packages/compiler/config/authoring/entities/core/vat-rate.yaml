@@ -14,7 +14,7 @@ domains:
   - finance
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -29,7 +29,6 @@ fields:
       column: code
       storageClass: core
   - key: vatType
-    valueType: string
     required: true
     label:
       en: VAT type
@@ -43,9 +42,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: VATTYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: percentage
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Percentage
@@ -60,7 +59,7 @@ fields:
       column: percentage
       storageClass: core
   - key: validFrom
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Valid from
@@ -72,7 +71,7 @@ fields:
       column: valid_from
       storageClass: core
   - key: validTo
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Valid until
@@ -84,7 +83,6 @@ fields:
       column: valid_to
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -97,9 +95,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -119,7 +117,7 @@ fields:
     persisted:
       column: ledger_account_id
       storageClass: core
-    semanticType: LedgerAccount
+    osfType: LedgerAccount
     relationship:
       ownership: reference
   - key: costDimensionId
@@ -129,7 +127,7 @@ fields:
     persisted:
       column: cost_dimension_id
       storageClass: core
-    semanticType: CostDimension
+    osfType: CostDimension
     relationship:
       ownership: reference
 authorization:

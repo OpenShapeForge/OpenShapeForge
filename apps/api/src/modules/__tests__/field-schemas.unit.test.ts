@@ -7,17 +7,16 @@ const compiler = createRuntimeFieldSchemaCompiler({
   version: 1,
   fieldDefinitionSchema: {
     type: "object",
-    required: ["key", "valueType"],
+    required: ["key", "osfType"],
     additionalProperties: false,
     properties: {
       key: { type: "string", minLength: 1 },
-      valueType: { enum: ["string", "integer", "object"] },
-      semanticType: { type: "string" },
+      osfType: { enum: ["string", "integer", "object", "code", "fieldDefinition"] },
       required: { type: "boolean" },
       cardinality: { enum: ["single", "collection"] },
     },
   },
-  semanticTypes: {
+  osfTypes: {
     code: {
       valueType: "string",
       label: { en: "Code" },
@@ -27,10 +26,10 @@ const compiler = createRuntimeFieldSchemaCompiler({
   },
   fieldDefinitionDefinitions: {
     fieldDefinition: {
-      type: "object", required: ["key", "valueType"], additionalProperties: false,
+      type: "object", required: ["key", "osfType"], additionalProperties: false,
       properties: {
         key: { type: "string", minLength: 1 },
-        valueType: { enum: ["string", "object"] },
+        osfType: { enum: ["string", "object"] },
         children: { type: "array", items: { $ref: "#/$defs/fieldDefinition" } },
       },
     },
@@ -38,7 +37,7 @@ const compiler = createRuntimeFieldSchemaCompiler({
 });
 
 test("stored field values use semantic validation and retain invalid input untouched", () => {
-  const fields = [{ key: "code", valueType: "string", semanticType: "code", required: true }];
+  const fields = [{ key: "code", osfType: "code", required: true }];
   expect(compiler.validateObject(fields, { code: "OK" })).toEqual({ valid: true });
   for (const values of [{}, { code: "X" }, { code: { secret: "PRIVATE_VALUE" } }, { code: 123 }, { code: "OK", extra: true }]) {
     const before = structuredClone(values);
@@ -47,7 +46,7 @@ test("stored field values use semantic validation and retain invalid input untou
     expect(JSON.stringify(result)).not.toContain("PRIVATE_VALUE");
     expect(values).toEqual(before);
   }
-  expect(compiler.validateObject([{ key: "code", valueType: "unknown" }], {}))
+  expect(compiler.validateObject([{ key: "code", osfType: "unknown" }], {}))
     .toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
 });
 
@@ -99,15 +98,15 @@ test("presentation keyword support remains strict and preserves local reference 
 
 test("host-projected FieldDefinition values retain recursive local references", () => {
   const fields = [{
-    key: "formFields", valueType: "object", semanticType: "fieldDefinition",
+    key: "formFields", osfType: "fieldDefinition",
     cardinality: "collection", required: true,
   }];
   const values = { formFields: [{
-    key: "address", valueType: "object",
-    children: [{ key: "street", valueType: "string" }],
+    key: "address", osfType: "object",
+    children: [{ key: "street", osfType: "string" }],
   }] };
   expect(compiler.validateObject(fields, values)).toEqual({ valid: true });
-  expect(compiler.validateObject(fields, { formFields: [{ key: "address", valueType: "object", children: [{ key: "street" }] }] }))
+  expect(compiler.validateObject(fields, { formFields: [{ key: "address", osfType: "object", children: [{ key: "street" }] }] }))
     .toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
 });
 
@@ -133,8 +132,7 @@ test("JSON validation neither fills defaults nor loads external refs or asynchro
 test("the host validates stored fields before using its active schema registry", () => {
   expect(compiler.object([{
     key: "code",
-    valueType: "string",
-    semanticType: "code",
+    osfType: "code",
     required: true,
   }])).toMatchObject({
     required: ["code"],
@@ -145,11 +143,11 @@ test("the host validates stored fields before using its active schema registry",
 
   expect(() => compiler.object([{
     key: "code",
-    valueType: "unknown",
+    osfType: "unknown",
   }])).toThrow(/does not match the active authoring schema/);
 
   expect(() => compiler.object([
-    { key: "code", valueType: "string" },
-    { key: "code", valueType: "string" },
+    { key: "code", osfType: "string" },
+    { key: "code", osfType: "string" },
   ])).toThrow(/key "code" is duplicated/);
 });

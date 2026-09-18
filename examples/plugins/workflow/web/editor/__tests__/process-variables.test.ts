@@ -9,7 +9,7 @@
  *    `graph-history.ts` treats reference inequality as "something happened", so
  *    a no-op that allocated would cost an undo entry and mark a draft dirty.
  * 2. **An operation that changes one entry spreads the stored one.** A
- *    declaration carries `semanticType`, `hints` and `authoring` that this
+ *    declaration carries `osfType`, `hints` and `authoring` that this
  *    editor does not model and `runtime/field-definitions.ts` does read.
  *
  * The engine's own rules are the third theme: the declared set is closed, order
@@ -143,7 +143,7 @@ describe("editing one declaration", () => {
   const stored = {
     key: "total",
     valueType: "number",
-    semanticType: "amount",
+    osfType: "amount",
     hints: { sourceHint: "x" },
     label: { nl: "Totaal", en: "Total" },
   };

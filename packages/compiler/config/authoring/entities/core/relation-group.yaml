@@ -8,7 +8,7 @@ language: en
 displayTemplate: "{{name}}"
 filterField: name
 blueprint:
-  fields: [name, description, groupType, status]
+  fields: [ name, description, groupType, status ]
 labels:
   en: Relation Group
   nl: Relatiegroep
@@ -31,7 +31,7 @@ authorization:
     empty: public
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -46,7 +46,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Description
@@ -60,7 +60,7 @@ fields:
       column: description
       storageClass: core
   - key: groupType
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Group type
@@ -75,7 +75,7 @@ fields:
       type: referentiedata
       referentieGroep: RELATIONGROUPTYPE
   - key: status
-    valueType: string
+    osfType: string
     required: true
     defaultValue: active
     label:
@@ -91,7 +91,7 @@ fields:
       type: referentiedata
       referentieGroep: RELATIONGROUPSTATUS
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -111,17 +111,8 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
-      ownership: reference
-  - key: memberships
-    label:
-      en: Memberships
-      nl: Lidmaatschappen
-    semanticType: RelationGroupMembership
-    cardinality: collection
-    relationship:
-      inverse: relationGroupId
       ownership: reference
   - key: orgUnitId
     label:
@@ -130,9 +121,13 @@ fields:
     persisted:
       column: org_unit_id
       storageClass: core
-    semanticType: OrgUnit
+    osfType: OrgUnit
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Relation groups
+          nl: Relatiegroepen
 operations:
   list:
     name: { en: List relation groups, nl: Relatiegroepen tonen }

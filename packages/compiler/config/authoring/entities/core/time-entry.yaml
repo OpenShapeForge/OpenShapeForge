@@ -14,7 +14,7 @@ domains:
   - hr
 fields:
   - key: workedAt
-    valueType: date
+    osfType: date
     required: true
     label:
       en: Worked at
@@ -26,7 +26,7 @@ fields:
       column: worked_at
       storageClass: core
   - key: hours
-    valueType: number
+    osfType: number
     required: true
     label:
       en: Hours
@@ -41,7 +41,6 @@ fields:
       column: hours
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -54,9 +53,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: billable
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Billable
@@ -68,7 +67,7 @@ fields:
       column: billable
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -88,7 +87,7 @@ fields:
     persisted:
       column: employee_id
       storageClass: core
-    semanticType: Employee
+    osfType: Employee
     relationship:
       ownership: reference
   - key: agreementId
@@ -98,7 +97,7 @@ fields:
     persisted:
       column: agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
 authorization:

@@ -26,7 +26,7 @@ describe("typed RelationGroups and many-relation memberships", () => {
     const legacy = relation.model.fields.find(({ key }) => key === "relationGroupId");
     expect(legacy).toMatchObject({
       key: "relationGroupId",
-      semanticType: "RelationGroup",
+      osfType: "RelationGroup",
       readOnly: true,
       immutable: true,
       relationship: {

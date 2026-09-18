@@ -7,17 +7,6 @@ import type {
   ViewActionDefinition,
   ViewRowAction,
 } from "./common.js";
-import type { FieldDefinitionRelationshipConstraints } from "./field-definition.js";
-
-export interface Relationship {
-  key: string;
-  kind: "belongsTo" | "hasMany" | "manyToMany";
-  target: string;
-  foreignKey?: string;
-  via?: string;
-  label?: LocalizedText;
-  constraints?: FieldDefinitionRelationshipConstraints;
-}
 
 export interface ListColumn {
   key: string;

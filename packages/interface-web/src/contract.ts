@@ -125,7 +125,7 @@ export type WebFieldOptionSource =
 
 /**
  * Semantic field projection. A renderer registry resolves presentation from
- * semanticType, valueType, cardinality, surface and mode; fields never name a
+ * osfType, baseType, cardinality, surface and mode; fields never name a
  * component or renderer as their default behaviour.
  */
 export type WebFieldProjection = {
@@ -135,8 +135,12 @@ export type WebFieldProjection = {
   key: string;
   label: LocalizedText;
   description: LocalizedText;
-  valueType: string;
-  semanticType?: string;
+  /**
+   * The one type axis: a base type, a osf-type key or an entity name.
+   * The renderer registry keys on it; `baseType` is its structural base.
+   */
+  osfType: string;
+  baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   allowedDefinitions?: string[];
@@ -191,7 +195,7 @@ export type WebRelationshipProjection = {
   id: string;
   key: string;
   label: LocalizedText;
-  kind: string;
+  kind: "belongsTo" | "hasMany";
   targetEntityId: string;
   targetRoute: string;
   foreignKey?: string;

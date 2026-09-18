@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
 import { assertV2Authoring } from "./entity-v2.js";
-import { deriveEntitySemanticTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import type {
   CoreEntity,
   EntityProfile,
@@ -28,8 +28,8 @@ import type {
   ComponentCatalog,
   AppShell,
   ViewDefinition,
-  SemanticTypeCatalog,
-  SemanticTypeDefinition,
+  OsfTypeCatalog,
+  OsfTypeDefinition,
   RetentionPolicyCatalog,
   RetentionPolicy,
   AuthorizationConfig,
@@ -41,7 +41,7 @@ export interface LoadedArtifacts {
   mappings: EntityMapping[];
   transformCatalog: TransformCatalog;
   componentCatalog: ComponentCatalog;
-  semanticTypes: Record<string, SemanticTypeDefinition>;
+  osfTypes: Record<string, OsfTypeDefinition>;
   retentionPolicies: Record<string, RetentionPolicy>;
   appShell: AppShell | null;
   viewDefinition: ViewDefinition | null;
@@ -92,13 +92,13 @@ export function loadFieldAuthoringProfiles(
 /** Catalogs that bind the public build-time FieldDefinition schema compiler. */
 export function loadFieldCompilationCatalogs(authoringDir: string): {
   componentCatalog: ComponentCatalog;
-  semanticTypes: Record<string, SemanticTypeDefinition>;
+  osfTypes: Record<string, OsfTypeDefinition>;
 } {
   return {
     componentCatalog: loadYaml<ComponentCatalog>(
       join(authoringDir, "catalogs", "components.yaml"),
     ),
-    semanticTypes: loadSemanticTypes(authoringDir),
+    osfTypes: loadOsfTypes(authoringDir),
   };
 }
 
@@ -171,19 +171,31 @@ function validateFieldKeys(
 }
 
 /**
- * Validates the entity name, every field key, and relationship key/target of a
- * fully-merged core entity (after base-entity application) before it is returned
- * to the compilers. Fails closed on any identifier that could break out of a
+ * Relationships live on fields: a single reference is `osfType: <Entity>` and
+ * its inverse collection is derived. An entity-level `relationships:` block
+ * is refused by name so the author knows which entries to move.
+ */
+export function assertNoRelationshipsBlock(entity: { entity: string; relationships?: unknown }, origin: string): void {
+  if (entity.relationships === undefined) return;
+  const keys = Array.isArray(entity.relationships)
+    ? entity.relationships.map((entry) => (entry && typeof entry === "object" ? String((entry as { key?: unknown }).key ?? "?") : "?"))
+    : [];
+  throw new Error(
+    `${origin}: ${entity.entity} declares relationships${keys.length ? ` (${keys.join(", ")})` : ""}; ` +
+      `relationships are fields — set osfType: <Entity> on the referencing field and let the compiler derive the inverse collection.`,
+  );
+}
+
+/**
+ * Validates the entity name and every field key of a fully-merged core
+ * entity (after base-entity application) before it is returned to the
+ * compilers. Fails closed on any identifier that could break out of a
  * generated code position. Exported for unit testing.
  */
 export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin: string): void {
   validateContentIdentifier(coreEntity.entity, ENTITY_NAME_PATTERN, "entity name", origin);
   validateFieldKeys(coreEntity.fields, origin);
-  for (const rel of coreEntity.relationships ?? []) {
-    if (!rel || typeof rel !== "object") continue;
-    validateContentIdentifier((rel as { key?: unknown }).key, FIELD_KEY_PATTERN, "relationship key", origin);
-    validateContentIdentifier((rel as { target?: unknown }).target, ENTITY_NAME_PATTERN, "relationship target", origin);
-  }
+  assertNoRelationshipsBlock(coreEntity, origin);
   if (
     typeof coreEntity.rest === "object" &&
     coreEntity.rest !== null &&
@@ -310,8 +322,14 @@ export function loadEntity(
     kind: "core",
     path: corePath,
   });
-  assertV2Authoring(coreEntity, corePath);
   validateEntityContentIdentifiers(coreEntity, corePath);
+
+  // Semantic types (core + context catalogs merged). Normalization resolves
+  // every field's base type and derives the inverse collections, which the
+  // v2 authoring checks below read.
+  const osfTypes = loadOsfTypes(authoringDir);
+  coreEntity = normalizeEntityFields(coreEntity, osfTypes);
+  assertV2Authoring(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];
@@ -348,16 +366,13 @@ export function loadEntity(
   const shellPath = join(authoringDir, "menu.yaml");
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
-  // Semantic types (core + context catalogs merged)
-  const semanticTypes = loadSemanticTypes(authoringDir);
-  coreEntity = normalizeEntityFields(coreEntity, semanticTypes);
   const retentionPolicies = loadRetentionPolicies(authoringDir);
 
   // View definition (optional)
   const viewPath = join(authoringDir, "views", `${entityFileName}.view.yaml`);
   const viewDefinition = existsSync(viewPath) ? loadYaml<ViewDefinition>(viewPath) : null;
 
-  return { coreEntity, profiles, mappings, transformCatalog, componentCatalog, semanticTypes, retentionPolicies, appShell, viewDefinition };
+  return { coreEntity, profiles, mappings, transformCatalog, componentCatalog, osfTypes, retentionPolicies, appShell, viewDefinition };
 }
 
 export function assertPartialProfileHasNoCrud(
@@ -403,7 +418,6 @@ export function loadContextEntity(
     filterField: contextEntity.filterField,
     indexes: (contextEntity as { indexes?: CoreEntity["indexes"] }).indexes,
     fields: contextEntity.fields ?? [],
-    relationships: contextEntity.relationships,
     workflow: contextEntity.workflow,
     crud: contextEntity.crud,
     rest: (contextEntity as { rest?: CoreEntity["rest"] }).rest,
@@ -434,7 +448,7 @@ export function loadContextEntity(
   const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
 
   // Semantic types
-  const semanticTypes = loadSemanticTypes(authoringDir);
+  const osfTypes = loadOsfTypes(authoringDir);
   const retentionPolicies = loadRetentionPolicies(authoringDir);
 
   // View definition
@@ -447,7 +461,7 @@ export function loadContextEntity(
     mappings: [],
     transformCatalog,
     componentCatalog,
-    semanticTypes,
+    osfTypes,
     retentionPolicies,
     appShell,
     viewDefinition,
@@ -479,44 +493,44 @@ export function discoverContextEntities(authoringDir: string): { context: string
  * Load and merge all semantic type catalogs (core + context-specific). Returns
  * the same merged object as before. Collision detection between core and
  * context catalogs is performed at the orchestrator level via
- * `loadSemanticTypeCatalogSources` + `checkSemanticTypeCatalogCollisions`.
+ * `loadOsfTypeCatalogSources` + `checkOsfTypeCatalogCollisions`.
  */
-export function loadSemanticTypes(authoringDir: string): Record<string, SemanticTypeDefinition> {
-  const merged: Record<string, SemanticTypeDefinition> = {};
-  for (const { types } of loadSemanticTypeCatalogSources(authoringDir)) {
+export function loadOsfTypes(authoringDir: string): Record<string, OsfTypeDefinition> {
+  const merged: Record<string, OsfTypeDefinition> = {};
+  for (const { types } of loadOsfTypeCatalogSources(authoringDir)) {
     Object.assign(merged, types);
   }
   const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
-  return deriveEntitySemanticTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
+  return deriveEntityOsfTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
 }
 
-export interface SemanticTypeCatalogSource {
+export interface OsfTypeCatalogSource {
   /** Human-readable origin label, e.g. `core` or `contexts/<profile>`. */
   source: string;
-  types: Record<string, SemanticTypeDefinition>;
+  types: Record<string, OsfTypeDefinition>;
 }
 
 /**
- * Returns each semantic-type catalog file as its own entry, in load order
+ * Returns each osf-type catalog file as its own entry, in load order
  * (core first, then each context). Used by the orchestrator to detect when a
  * context catalog silently overwrites a core key.
  */
-export function loadSemanticTypeCatalogSources(
+export function loadOsfTypeCatalogSources(
   authoringDir: string,
-): SemanticTypeCatalogSource[] {
-  const sources: SemanticTypeCatalogSource[] = [];
+): OsfTypeCatalogSource[] {
+  const sources: OsfTypeCatalogSource[] = [];
 
-  const corePath = join(authoringDir, "catalogs", "semantic-types.yaml");
+  const corePath = join(authoringDir, "catalogs", "osf-types.yaml");
   if (existsSync(corePath)) {
-    const catalog = loadYaml<SemanticTypeCatalog>(corePath);
+    const catalog = loadYaml<OsfTypeCatalog>(corePath);
     sources.push({ source: "core", types: catalog.types ?? {} });
   }
 
   const contextsDir = join(authoringDir, "contexts");
   for (const contextName of listDirs(contextsDir)) {
-    const contextPath = join(contextsDir, contextName, "semantic-types.yaml");
+    const contextPath = join(contextsDir, contextName, "osf-types.yaml");
     if (existsSync(contextPath)) {
-      const catalog = loadYaml<SemanticTypeCatalog>(contextPath);
+      const catalog = loadYaml<OsfTypeCatalog>(contextPath);
       sources.push({
         source: `contexts/${contextName}`,
         types: catalog.types ?? {},
@@ -540,7 +554,7 @@ function loadRetentionPolicies(authoringDir: string): Record<string, RetentionPo
 function listDirs(dirPath: string): string[] {
   if (!existsSync(dirPath)) return [];
   // Sort so directory iteration (and thus catalog merge precedence in
-  // loadSemanticTypes / loadSemanticTypeCatalogSources) is deterministic
+  // loadOsfTypes / loadOsfTypeCatalogSources) is deterministic
   // regardless of filesystem readdir order across machines or rebuilt trees.
   return readdirSync(dirPath, { withFileTypes: true })
     .filter((d) => d.isDirectory())

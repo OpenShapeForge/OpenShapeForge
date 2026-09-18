@@ -12,7 +12,7 @@ description:
   en: Lets AI formulate a knowledge-base answer.
 configFields:
   - key: knowledgeProfile
-    valueType: string
+    osfType: string
     label:
       nl: Kennisbank
       en: Knowledge base
@@ -21,7 +21,8 @@ configFields:
       en: Which knowledge base should be searched.
     help:
       nl: Kies de publieke huurderkennisbank voor klantantwoorden en de interne medewerkerskennisbank voor medewerkercontext.
-      en: Choose the public tenant knowledge base for customer replies and the internal employee knowledge base for employee context.
+      en: Choose the public tenant knowledge base for customer replies and the internal employee knowledge base for employee
+        context.
     options:
       type: static
       items:
@@ -38,7 +39,7 @@ configFields:
     render:
       component: Select
   - key: context
-    valueType: string
+    osfType: string
     label:
       nl: Context
       en: Context
@@ -48,7 +49,8 @@ configFields:
       en: What the AI should use as background. Typically a variable with messages (e.g. from 'Get conversation context') or a
         piece of text.
     help:
-      nl: Voeg de vraag en relevante conversatiecontext toe. Dit veld bepaalt waar het kennisbankantwoord inhoudelijk over gaat.
+      nl: Voeg de vraag en relevante conversatiecontext toe. Dit veld bepaalt waar het kennisbankantwoord inhoudelijk over
+        gaat.
       en: Add the question and relevant conversation context. This field determines what the knowledge-base answer is about.
     placeholder:
       nl: Typ vrije tekst en/of voeg variabelen toe met {{...}}
@@ -60,7 +62,7 @@ configFields:
       props:
         rows: 5
   - key: maxSearches
-    valueType: number
+    osfType: number
     label:
       nl: Max KB-zoekpogingen
       en: Max KB searches
@@ -76,7 +78,7 @@ configFields:
       min:
         value: 1
   - key: timeoutMs
-    valueType: number
+    osfType: number
     label:
       nl: Timeout (ms)
       en: Timeout (ms)

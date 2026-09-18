@@ -32,7 +32,7 @@ export function toPascalCase(value: string) {
   return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
 }
 
-const LEGACY_FIELD_TYPE_TO_VALUE_TYPE: Record<string, Field["valueType"]> = {
+const LEGACY_FIELD_TYPE_TO_BASE_TYPE: Record<string, Field["baseType"]> = {
   uuid: "string",
   string: "string",
   integer: "integer",
@@ -58,17 +58,17 @@ export function normalizeFieldContractValueForJson(value: unknown): unknown {
   const isLegacyField =
     typeof record.key === "string" &&
     typeof record.type === "string" &&
-    record.type in LEGACY_FIELD_TYPE_TO_VALUE_TYPE;
+    record.type in LEGACY_FIELD_TYPE_TO_BASE_TYPE;
 
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(record)) {
     if (isLegacyField && key === "type") {
-      next.valueType = LEGACY_FIELD_TYPE_TO_VALUE_TYPE[entry as string];
+      next.baseType = LEGACY_FIELD_TYPE_TO_BASE_TYPE[entry as string];
+      next.osfType = entry === "fieldArray" && typeof record.osfType !== "string"
+        ? "fieldDefinition"
+        : typeof record.osfType === "string" ? record.osfType : next.baseType;
       if (entry === "array" || entry === "fieldArray") {
         next.cardinality = "collection";
-      }
-      if (entry === "fieldArray" && typeof record.semanticType !== "string") {
-        next.semanticType = "fieldDefinition";
       }
       continue;
     }
@@ -117,12 +117,13 @@ export function cloneField(field: Field): Field {
 export function toRendererEntitySuggestionField(field: Field): Field {
   const result: Field = {
     key: field.key,
-    valueType: field.valueType,
+    osfType: field.osfType,
+    baseType: field.baseType,
     ...(field.cardinality ? { cardinality: field.cardinality } : {}),
     label: field.label,
   };
 
-  if (field.semanticType) result.semanticType = field.semanticType;
+
   if (field.validation) result.validation = cloneField(field).validation;
   if (field.options) result.options = cloneField(field).options;
   if (field.render?.props?.referentieGroep) {
@@ -175,7 +176,7 @@ export function validateWorkflowFieldReferentieGroepen(
     );
   }
 
-  if (field.valueType === "object" && field.children?.length) {
+  if (field.baseType === "object" && field.children?.length) {
     for (const child of field.children) {
       validateWorkflowFieldReferentieGroepen(child, {
         entityKey: context.entityKey,
@@ -201,7 +202,7 @@ export function validateWorkflowReferentieGroepen(fields: Field[], entityKey: st
   }
 }
 
-export function normalizeSemanticTypeKey(value: unknown) {
+export function normalizeOsfTypeKey(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined;
@@ -236,7 +237,7 @@ const WORKFLOW_HIDDEN_FIELD_KEYS = new Set([
 export function isWorkflowHiddenField(field: Field) {
   return (
     WORKFLOW_HIDDEN_FIELD_KEYS.has(field.key)
-    || field.semanticType === "tenantId"
+    || field.osfType === "tenantId"
   );
 }
 

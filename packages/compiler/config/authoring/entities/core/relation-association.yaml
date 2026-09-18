@@ -28,7 +28,7 @@ authorization:
     empty: public
 fields:
   - key: type
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Type
@@ -43,7 +43,7 @@ fields:
       column: type
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -57,7 +57,6 @@ fields:
       column: status
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -70,9 +69,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -84,7 +83,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -96,7 +95,7 @@ fields:
       column: end_date
       storageClass: core
   - key: isPrimary
-    valueType: boolean
+    osfType: boolean
     required: false
     label:
       en: Primary
@@ -114,9 +113,14 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        key: associations
+        label:
+          en: Associations
+          nl: Koppelingen
   - key: relatedRelationId
     label:
       en: Related relation
@@ -124,9 +128,14 @@ fields:
     persisted:
       column: related_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        key: relatedAssociations
+        label:
+          en: Related associations
+          nl: Gerelateerde koppelingen
   - key: contextRelationId
     label:
       en: Context relation
@@ -134,9 +143,14 @@ fields:
     persisted:
       column: context_relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        key: contextAssociations
+        label:
+          en: Context associations
+          nl: Contextkoppelingen
 operations:
   list:
     name: List Relation Association

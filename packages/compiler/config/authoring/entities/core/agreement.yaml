@@ -30,7 +30,7 @@ authorization:
     empty: public
 fields:
   - key: code
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Code
@@ -45,7 +45,7 @@ fields:
       column: code
       storageClass: core
   - key: role
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Hierarchy role
@@ -62,7 +62,7 @@ fields:
       type: referentiedata
       referentieGroep: AGREEMENTROLE
   - key: agreementType
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Agreement type
@@ -77,7 +77,7 @@ fields:
       type: referentiedata
       referentieGroep: AGREEMENTTYPE
   - key: agreementSubType
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Agreement subtype
@@ -91,7 +91,7 @@ fields:
       column: agreement_sub_type
       storageClass: core
   - key: status
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Status
@@ -106,7 +106,7 @@ fields:
       type: referentiedata
       referentieGroep: AGREEMENTSTATUS
   - key: startDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Start date
@@ -118,7 +118,7 @@ fields:
       column: start_date
       storageClass: core
   - key: endDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: End date
@@ -130,7 +130,7 @@ fields:
       column: end_date
       storageClass: core
   - key: billingStartDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Billing start date
@@ -142,7 +142,7 @@ fields:
       column: billing_start_date
       storageClass: core
   - key: billingEndDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Billing end date
@@ -154,7 +154,7 @@ fields:
       column: billing_end_date
       storageClass: core
   - key: conceptSentAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Concept sent at
@@ -166,7 +166,7 @@ fields:
       column: concept_sent_at
       storageClass: core
   - key: sentAt
-    valueType: datetime
+    osfType: datetime
     required: false
     label:
       en: Sent at
@@ -178,7 +178,7 @@ fields:
       column: sent_at
       storageClass: core
   - key: dispatchStatus
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Dispatch status
@@ -192,7 +192,7 @@ fields:
       column: dispatch_status
       storageClass: core
   - key: noticeDate
-    valueType: date
+    osfType: date
     required: false
     label:
       en: Notice date
@@ -204,7 +204,7 @@ fields:
       column: notice_date
       storageClass: core
   - key: noticeTerm
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Notice term
@@ -218,7 +218,7 @@ fields:
       column: notice_term
       storageClass: core
   - key: terminationReason
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Termination reason
@@ -232,7 +232,7 @@ fields:
       column: termination_reason
       storageClass: core
   - key: terminationReasonDetail
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Termination reason detail
@@ -246,7 +246,7 @@ fields:
       column: termination_reason_detail
       storageClass: core
   - key: sequenceNumber
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Sequence number
@@ -260,7 +260,7 @@ fields:
       column: sequence_number
       storageClass: core
   - key: externalCode
-    valueType: string
+    osfType: string
     required: false
     label:
       en: External code
@@ -280,9 +280,13 @@ fields:
     persisted:
       column: relation_id
       storageClass: core
-    semanticType: Relation
+    osfType: Relation
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Agreements
+          nl: Overeenkomsten
   - key: caseId
     label:
       en: Case
@@ -290,9 +294,13 @@ fields:
     persisted:
       column: case_id
       storageClass: core
-    semanticType: Case
+    osfType: Case
     relationship:
       ownership: reference
+      inverse:
+        label:
+          en: Agreements
+          nl: Overeenkomsten
   - key: parentAgreementId
     label:
       en: Parent agreement
@@ -300,9 +308,14 @@ fields:
     persisted:
       column: parent_agreement_id
       storageClass: core
-    semanticType: Agreement
+    osfType: Agreement
     relationship:
       ownership: reference
+      inverse:
+        key: childAgreements
+        label:
+          en: Child agreements
+          nl: Onderliggende overeenkomsten
   - key: document
     label:
       en: Document
@@ -313,26 +326,8 @@ fields:
     persisted:
       column: document_id
       storageClass: core
-    semanticType: Document
+    osfType: Document
     relationship:
-      ownership: reference
-  - key: childAgreements
-    label:
-      en: Child agreements
-      nl: Onderliggende overeenkomsten
-    semanticType: Agreement
-    cardinality: collection
-    relationship:
-      inverse: parentAgreementId
-      ownership: reference
-  - key: parties
-    label:
-      en: Parties
-      nl: Partijen
-    semanticType: AgreementParty
-    cardinality: collection
-    relationship:
-      inverse: agreementId
       ownership: reference
 operations:
   list:

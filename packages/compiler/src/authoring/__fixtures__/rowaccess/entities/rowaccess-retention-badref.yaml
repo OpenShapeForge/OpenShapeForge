@@ -32,7 +32,7 @@ retention:
     field: createdAt
 fields:
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name

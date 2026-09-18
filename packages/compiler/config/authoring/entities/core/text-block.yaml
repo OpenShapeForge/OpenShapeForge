@@ -14,7 +14,7 @@ authorization:
     read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite]
 fields:
   - key: text
-    semanticType: multilineText
+    osfType: multilineText
     required: true
     variables: template
     label: { en: Text, nl: Tekst }

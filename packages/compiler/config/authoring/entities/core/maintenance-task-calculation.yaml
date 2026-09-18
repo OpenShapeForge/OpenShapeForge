@@ -14,7 +14,6 @@ domains:
   - maintenance
 fields:
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -27,9 +26,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: quantity
-    valueType: number
+    osfType: number
     required: false
     label:
       en: Quantity
@@ -41,7 +40,7 @@ fields:
       column: quantity
       storageClass: core
   - key: unitId
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Unit
@@ -55,7 +54,6 @@ fields:
       column: unit_id
       storageClass: core
   - key: unitPrice
-    valueType: number
     required: false
     label:
       en: Unit price
@@ -63,12 +61,11 @@ fields:
     description:
       en: Price per unit for this calculation line.
       nl: Prijs per eenheid voor deze calculatieregel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: unit_price
       storageClass: core
   - key: amount
-    valueType: number
     required: false
     label:
       en: Amount
@@ -76,7 +73,7 @@ fields:
     description:
       en: Total amount for this calculation line.
       nl: Totaalbedrag voor deze calculatieregel.
-    semanticType: currency
+    osfType: currency
     persisted:
       column: amount
       storageClass: core
@@ -87,7 +84,7 @@ fields:
     persisted:
       column: maintenance_task_id
       storageClass: core
-    semanticType: MaintenanceTask
+    osfType: MaintenanceTask
     relationship:
       ownership: reference
   - key: standardPriceId
@@ -97,7 +94,7 @@ fields:
     persisted:
       column: standard_price_id
       storageClass: core
-    semanticType: StandardPrice
+    osfType: StandardPrice
     relationship:
       ownership: reference
 authorization:

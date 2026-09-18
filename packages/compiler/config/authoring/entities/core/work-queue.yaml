@@ -29,7 +29,7 @@ authorization:
     empty: public
 fields:
   - key: key
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Key
@@ -41,7 +41,7 @@ fields:
       column: key
       storageClass: core
   - key: name
-    valueType: string
+    osfType: string
     required: true
     label:
       en: Name
@@ -53,7 +53,6 @@ fields:
       column: name
       storageClass: core
   - key: description
-    valueType: string
     required: false
     label:
       en: Description
@@ -63,9 +62,8 @@ fields:
     persisted:
       column: description
       storageClass: core
-    semanticType: multilineText
+    osfType: multilineText
   - key: queueType
-    valueType: string
     required: true
     label:
       en: Queue type
@@ -76,9 +74,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: WORKQUEUETYPE
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: status
-    valueType: string
     required: true
     label:
       en: Status
@@ -89,9 +86,8 @@ fields:
     options:
       type: referentiedata
       referentieGroep: WORKQUEUESTATUS
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: assignmentStrategy
-    valueType: string
     required: true
     label:
       en: Assignment strategy
@@ -102,9 +98,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: WORKQUEUESTRATEGY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: workingHoursProfile
-    valueType: string
+    osfType: string
     required: false
     label:
       en: Working hours profile
@@ -115,7 +111,6 @@ fields:
       column: working_hours_profile
       storageClass: core
   - key: defaultPriority
-    valueType: string
     required: false
     label:
       en: Default priority
@@ -126,9 +121,9 @@ fields:
     options:
       type: referentiedata
       referentieGroep: CASEPRIORITY
-    semanticType: referenceDataCode
+    osfType: referenceDataCode
   - key: autoAssignEnabled
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Auto-assign enabled
@@ -147,7 +142,7 @@ fields:
         rollout; create and update APIs require this value.
       nl: Relatiegroep waarvan leden gesprekken in deze queue kunnen zien. Bestaande queues mogen tijdens rollout leeg zijn;
         create- en update-APIs vereisen deze waarde.
-    semanticType: RelationGroup
+    osfType: RelationGroup
     options:
       type: remote
       remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
@@ -162,7 +157,7 @@ fields:
     relationship:
       ownership: reference
   - key: targetFirstResponseMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Target first response minutes
@@ -171,7 +166,7 @@ fields:
       column: target_first_response_minutes
       storageClass: core
   - key: targetResolutionMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Target resolution minutes
@@ -180,7 +175,7 @@ fields:
       column: target_resolution_minutes
       storageClass: core
   - key: escalationAfterMinutes
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Escalation after minutes
@@ -189,7 +184,7 @@ fields:
       column: escalation_after_minutes
       storageClass: core
   - key: maxActiveAssignments
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Max active assignments
@@ -198,7 +193,7 @@ fields:
       column: max_active_assignments
       storageClass: core
   - key: maxBacklogSize
-    valueType: integer
+    osfType: integer
     required: false
     label:
       en: Max backlog size
@@ -207,7 +202,7 @@ fields:
       column: max_backlog_size
       storageClass: core
   - key: supportsEscalation
-    valueType: boolean
+    osfType: boolean
     required: true
     label:
       en: Supports escalation
@@ -223,9 +218,14 @@ fields:
     persisted:
       column: escalation_queue_id
       storageClass: core
-    semanticType: WorkQueue
+    osfType: WorkQueue
     relationship:
       ownership: reference
+      inverse:
+        key: incomingEscalations
+        label:
+          en: Incoming escalations
+          nl: Inkomende escalaties
   - key: overflowQueueId
     label:
       en: Overflow queue
@@ -233,45 +233,14 @@ fields:
     persisted:
       column: overflow_queue_id
       storageClass: core
-    semanticType: WorkQueue
+    osfType: WorkQueue
     relationship:
       ownership: reference
-  - key: cases
-    label:
-      en: Cases
-      nl: Zaken
-    semanticType: Case
-    cardinality: collection
-    relationship:
-      inverse: currentQueueId
-      ownership: reference
-  - key: assignments
-    label:
-      en: Assignments
-      nl: Toewijzingen
-    semanticType: Assignment
-    cardinality: collection
-    relationship:
-      inverse: queueId
-      ownership: reference
-  - key: incomingEscalations
-    label:
-      en: Incoming escalations
-      nl: Inkomende escalaties
-    semanticType: WorkQueue
-    cardinality: collection
-    relationship:
-      inverse: escalationQueueId
-      ownership: reference
-  - key: incomingOverflows
-    label:
-      en: Inkomende overflows
-      nl: Inkomende overflows
-    semanticType: WorkQueue
-    cardinality: collection
-    relationship:
-      inverse: overflowQueueId
-      ownership: reference
+      inverse:
+        key: incomingOverflows
+        label:
+          en: Inkomende overflows
+          nl: Inkomende overflows
 operations:
   list:
     name: List Work Queue

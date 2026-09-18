@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 import { Button } from "@openshapeforge/ui";
 import { Input } from "@/components/ui/forms/input";

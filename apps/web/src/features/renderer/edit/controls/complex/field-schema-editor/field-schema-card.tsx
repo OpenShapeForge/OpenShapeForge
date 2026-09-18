@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 import { ChevronDown, ChevronUp, Copy, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";

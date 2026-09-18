@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { fieldValueType } from "@/lib/field-contract/field-v2";
 "use client";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 import { Field as FieldFrame } from "@/features/renderer/components/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/features/renderer/edit/controls/basic/select";

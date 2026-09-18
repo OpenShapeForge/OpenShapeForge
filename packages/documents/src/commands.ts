@@ -67,7 +67,10 @@ const FINALIZE_ARTIFACT_BINDING_SQL = `
 
 const READ_DOCUMENT_SQL = `
   select
-    id, tenant_id as "tenantId", created_at as "createdAt", updated_at as "updatedAt",
+    id, tenant_id as "tenantId",
+    -- Microsecond text, as the generic engine serializes them: updatedAt is
+    -- the version token the update Operation compares against the column.
+    to_jsonb(created_at) #>> '{}' as "createdAt", to_jsonb(updated_at) #>> '{}' as "updatedAt",
     external_id as "externalId", source_authority as "sourceAuthority",
     source_organization as "sourceOrganization", source_administration as "sourceAdministration",
     code, title, description, document_type as "documentType", status, confidentiality,
@@ -81,7 +84,10 @@ const READ_DOCUMENT_SQL = `
 
 const READ_DOCUMENT_VERSION_SQL = `
   select
-    id, tenant_id as "tenantId", created_at as "createdAt", updated_at as "updatedAt",
+    id, tenant_id as "tenantId",
+    -- Microsecond text, as the generic engine serializes them: updatedAt is
+    -- the version token the update Operation compares against the column.
+    to_jsonb(created_at) #>> '{}' as "createdAt", to_jsonb(updated_at) #>> '{}' as "updatedAt",
     external_id as "externalId", source_authority as "sourceAuthority",
     source_organization as "sourceOrganization", source_administration as "sourceAdministration",
     version_label as "versionLabel", status, created_by as "createdBy",

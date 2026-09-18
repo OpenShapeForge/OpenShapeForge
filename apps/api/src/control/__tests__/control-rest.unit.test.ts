@@ -140,7 +140,7 @@ describe("one round trip per page group", () => {
   test("tenants: the registry read under the Operation's own output shape", async () => {
     const tenants = await call("GET", "/api/control/v1/tenants", token([PLATFORM_OPERATOR_ROLE]));
     expect(tenants.status).toBe(200);
-    expect(tenants.body).toEqual({ tenants: [] });
+    expect(tenants.body).toEqual({ tenants: [], totalCount: 0, nextCursor: null });
     // A write needs the acknowledgement before the handler is reached at all...
     const unconfirmed = await call("PATCH", "/api/control/v1/tenants/acme", token([PLATFORM_OPERATOR_ROLE]), { status: "suspended" });
     expect(unconfirmed.status).toBe(428);

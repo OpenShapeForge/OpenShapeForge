@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "./collection-policy.js";
+import { collectionManagedFields, collectionMutationError, ownedCollectionsOf, withoutCollectionInputs } from "./collection-policy.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 const columns = (keys: string[]) => keys.map((name) => ({ name, type: "uuid", primaryKey: name === "id", required: false, generated: null }));
@@ -30,7 +30,9 @@ describe("unsupported collection mutation boundary", () => {
   });
   test("required collections cannot be created empty and collection-affecting deletes are refused", () => {
     expect(collectionMutationError(parent, "create", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
-    expect(collectionMutationError(parent, "delete", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    // An owner's delete is decided per row (owned children present or not); an owned child's never is.
+    expect(collectionMutationError(parent, "delete", [parent, child])).toBeUndefined();
+    expect(ownedCollectionsOf(parent, [parent, child]).map((owned) => [owned.key, owned.child.table, owned.column])).toEqual([["blocks", child.table, "page_id"]]);
     expect(collectionMutationError(child, "delete", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     expect(collectionMutationError(parent, "update", [parent, child], { title: "Safe scalar update" })).toBeUndefined();
     expect(collectionMutationError(parent, "get", [parent, child])).toBeUndefined();

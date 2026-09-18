@@ -68,15 +68,15 @@ export function deriveEntityOsfTypes(
 ): Record<string, OsfTypeDefinition> {
   const result = { ...catalog };
   for (const key of Object.keys(catalog)) {
-    if (isBaseType(key)) throw new Error(`Semantic type ${key} shadows a base type.`);
-    if (!/^[a-z][A-Za-z0-9]*$/.test(key)) throw new Error(`Semantic type ${key} must be camelCase; PascalCase names are entities.`);
+    if (isBaseType(key)) throw new Error(`Osf type ${key} shadows a base type.`);
+    if (!/^[a-z][A-Za-z0-9]*$/.test(key)) throw new Error(`Osf type ${key} must be camelCase; PascalCase names are entities.`);
   }
   const names = new Set(entities.map((entity) => entity.entity));
   const isEntityType = (osfType: string) => names.has(osfType);
   const sources = entities.map(inverseSource);
   for (const entity of entities) {
-    if (!/^[A-Z][A-Za-z0-9]*$/.test(entity.entity)) throw new Error(`Invalid entity semantic type name: ${entity.entity}.`);
-    if (result[entity.entity]) throw new Error(`Semantic type ${entity.entity} duplicates a loaded entity.`);
+    if (!/^[A-Z][A-Za-z0-9]*$/.test(entity.entity)) throw new Error(`Invalid entity osf type name: ${entity.entity}.`);
+    if (result[entity.entity]) throw new Error(`Osf type ${entity.entity} duplicates a loaded entity.`);
     assertNoAuthoredCollections(entity, isEntityType);
     result[entity.entity] = {
       kind: "entity",
@@ -160,7 +160,7 @@ export function normalizeEntityFields(
     const inlineShape = field.shape ?? field.children ?? (semantic?.kind !== "entity" ? semantic?.shape ?? semantic?.children : undefined);
     const item = field.item ?? semantic?.item;
     if (inlineShape || item) {
-      if (semantic && ancestry.includes(field.osfType)) throw new Error(`${path}: cyclic inline semantic type ${field.osfType}.`);
+      if (semantic && ancestry.includes(field.osfType)) throw new Error(`${path}: cyclic inline osf type ${field.osfType}.`);
       const nextAncestry = semantic ? [...ancestry, field.osfType] : ancestry;
       if (inlineShape) result.children = inlineShape.map((child) => normalize(child, true, nextAncestry));
       if (field.shape && result.children) result.shape = result.children;

@@ -450,7 +450,6 @@ function projectField(
     required: field.required,
     ...(presentation ? { presentation } : {}),
     ...projectedTextLength(field),
-    ...(field.osfType ? { osfType: field.osfType } : {}),
     ...(field.relationship?.target ? { relationship: {
       targetEntityId: field.relationship.target,
       ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),

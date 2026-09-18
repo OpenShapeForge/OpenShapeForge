@@ -243,14 +243,33 @@ function fieldKeys(
   });
 }
 
+/**
+ * Presentation-renderer overrides authored on a FieldRef entry, keyed by
+ * field key. Still in development: nothing prunes this yet, so a FieldRef's
+ * `render` survives compilation instead of being silently dropped alongside
+ * the key-only projection in fieldKeys().
+ */
+function fieldOverrides(
+  group: CompiledViewGroup,
+  excluded: ReadonlySet<string> = new Set(),
+): Record<string, { render: { component: string } }> | undefined {
+  const entries = (group.fields ?? []).flatMap((entry) => {
+    if (typeof entry === "string" || !entry.renderOverride) return [];
+    if (entry.fieldDisplayMode === "hidden" || excluded.has(entry.key)) return [];
+    return [[entry.key, { render: entry.renderOverride }] as const];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function projectGroups(
   groups: readonly CompiledViewGroup[] | undefined,
   excluded: ReadonlySet<string> = new Set(),
 ): WebFieldGroup[] {
   return (groups ?? []).flatMap((group) => {
     const keys = fieldKeys(group, excluded);
+    const overrides = fieldOverrides(group, excluded);
     const projected = keys.length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys }]
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys, ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : [];
     return [...projected, ...projectGroups(group.groups, excluded)];
   });
@@ -258,9 +277,10 @@ function projectGroups(
 
 function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
   const ownFields = fieldKeys(tab);
+  const overrides = fieldOverrides(tab);
   return [
     ...(ownFields.length > 0
-      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields }]
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields, ...(overrides ? { fieldOverrides: overrides } : {}) }]
       : []),
     ...projectGroups(tab.groups),
   ];

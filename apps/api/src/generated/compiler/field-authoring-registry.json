@@ -5847,6 +5847,7 @@
         },
         {
           "key": "invoiceId",
+          "readOnly": true,
           "label": {
             "en": "Invoice",
             "nl": "Factuur"
@@ -7679,6 +7680,7 @@
         },
         {
           "key": "appointmentId",
+          "readOnly": true,
           "label": {
             "en": "Appointment",
             "nl": "Afspraak"
@@ -9961,6 +9963,7 @@
         },
         {
           "key": "producedInvoiceId",
+          "readOnly": true,
           "label": {
             "en": "Produced invoice",
             "nl": "Geproduceerde factuur"
@@ -14413,6 +14416,7 @@
         },
         {
           "key": "authorId",
+          "readOnly": true,
           "label": {
             "en": "Author",
             "nl": "Auteur"
@@ -20546,6 +20550,7 @@
         },
         {
           "key": "bankStatementLineId",
+          "readOnly": true,
           "label": {
             "en": "Bank statement line",
             "nl": "Bankafschriftregel"
@@ -21676,6 +21681,7 @@
         },
         {
           "key": "reversalOfId",
+          "readOnly": true,
           "label": {
             "en": "Reversal of",
             "nl": "Tegenboeking van"
@@ -22861,6 +22867,7 @@
         },
         {
           "key": "reportedById",
+          "readOnly": true,
           "label": {
             "en": "Reported by",
             "nl": "Gemeld door"
@@ -25909,6 +25916,7 @@
         },
         {
           "key": "invoicePaymentId",
+          "readOnly": true,
           "label": {
             "en": "Invoice payment",
             "nl": "Factuurbetaling"
@@ -29069,6 +29077,7 @@
         },
         {
           "key": "decidedById",
+          "readOnly": true,
           "label": {
             "en": "Decided by",
             "nl": "Besloten door"
@@ -34770,6 +34779,7 @@
         },
         {
           "key": "reporterId",
+          "readOnly": true,
           "label": {
             "en": "Reporter",
             "nl": "Melder"

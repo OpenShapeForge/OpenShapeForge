@@ -5,6 +5,11 @@ import type { CompiledEntityContract, CompiledField, CompiledViewContext, Operat
 import { collectAuthoredModulePluginOperations } from "../generate-operations.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 import { buildEntityOperations } from "./compiler/entity-operations.js";
+import { compile } from "./compiler/index.js";
+import { loadEntity } from "./loader.js";
+import { join } from "node:path";
+
+const authoringDir = join(import.meta.dir, "../../config/authoring");
 
 const text = (en: string, nl = en) => ({ en, nl });
 
@@ -243,6 +248,34 @@ describe("web manifest projection", () => {
     expect(owned.entities.Child!.fields.parentId?.supports.create).toBe(false);
     expect(owned.entities.Parent!.relationships.children?.operations.create).toBeUndefined();
     expect(owned.entities.Parent!.relationships.children?.collection?.operations.create).toBeUndefined();
+  });
+  test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
+    // Comment.authorId is authored readOnly (attribution, not an input); the
+    // derived Relation.comments collection therefore cannot pre-fill it.
+    const entries = ["comment", "relation"].map((slug) => ({
+      slug, path: `entities/core/${slug}.yaml`, origin: "core" as const, contract: compile(loadEntity(authoringDir, slug)),
+    }));
+    const authorId = entries[0]!.contract.model.fields.find(({ key }) => key === "authorId")!;
+    expect(authorId.readOnly).toBe(true);
+    const web = buildWebManifest(entries);
+    expect(web.entities.Comment!.fields.authorId?.supports).toEqual({ read: true, create: false, update: false });
+    expect(web.entities.Relation!.relationships.comments).toMatchObject({ kind: "hasMany", recordField: "authorId" });
+    expect(web.entities.Relation!.relationships.comments?.operations.create).toBeUndefined();
+    expect(web.entities.Relation!.relationships.comments?.collection?.operations.create).toBeUndefined();
+    // The invariant over every projected entity: a readOnly model field is
+    // never create-writable, and no collection offers create on such a key.
+    for (const entry of entries) {
+      const projected = web.entities[entry.contract.entity.name]!;
+      for (const field of entry.contract.model.fields) {
+        if (field.readOnly) expect(projected.fields[field.key]?.supports.create ?? false).toBe(false);
+      }
+      for (const relationship of Object.values(projected.relationships)) {
+        if (relationship.kind !== "hasMany" || !relationship.recordField) continue;
+        const target = entries.find((candidate) => candidate.contract.entity.name === relationship.targetEntityId);
+        const key = target?.contract.model.fields.find(({ key }) => key === relationship.recordField);
+        if (key?.readOnly) expect(relationship.operations.create).toBeUndefined();
+      }
+    }
   });
   test("does not invent a context summary by copying the first detail group", () => {
     const example = entity("Example", "example", [field("displayName")], coreView());

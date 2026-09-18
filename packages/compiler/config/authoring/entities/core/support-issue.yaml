@@ -216,7 +216,9 @@ fields:
     persisted:
       column: triaged_at
       storageClass: core
+  # System-written attribution: the reporting user, not an input.
   - key: reporterId
+    readOnly: true
     label:
       en: Reporter
       nl: Melder

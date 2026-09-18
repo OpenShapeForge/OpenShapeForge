@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@/components/ui/display/card";
 import { getCachedSession } from "@/lib/cached-session";
+import { type FieldValueType, fieldValueType } from "@/lib/field-contract/field-v2";
 import { buildGatewayUrl } from "@/lib/server/gateway";
 import { submitPendingConfiguration } from "./actions";
 
@@ -17,7 +18,7 @@ type FieldDefinition = {
   key?: unknown;
   label?: unknown;
   description?: unknown;
-  valueType?: unknown;
+  osfType?: unknown;
   required?: unknown;
   classification?: { sensitivity?: unknown };
   options?: { items?: { value?: unknown; label?: unknown }[] };
@@ -44,7 +45,15 @@ function text(value: unknown): string {
   return "";
 }
 
-function inputType(field: FieldDefinition): string {
+/**
+ * Stored definitions name their type as `osfType`; the input control follows
+ * its base type, the way the runtime's own configuration form does.
+ */
+function baseType(field: FieldDefinition): FieldValueType {
+  return fieldValueType({ osfType: typeof field.osfType === "string" ? field.osfType : "string" });
+}
+
+function inputType(field: FieldDefinition, base: FieldValueType): string {
   if (
     field.classification?.sensitivity === "confidential" ||
     field.classification?.sensitivity === "pii" ||
@@ -52,7 +61,7 @@ function inputType(field: FieldDefinition): string {
   ) {
     return "password";
   }
-  if (field.valueType === "integer" || field.valueType === "number") {
+  if (base === "integer" || base === "number") {
     return "number";
   }
   return "text";
@@ -129,7 +138,8 @@ export default async function ConfigurationPage({
                 const description = text(field.description);
                 const options = field.options?.items ?? [];
                 const required = field.required === true;
-                if (field.valueType === "boolean") {
+                const base = baseType(field);
+                if (base === "boolean") {
                   return (
                     <label key={key} className="flex items-start gap-3 text-sm">
                       <input type="checkbox" name={key} className="mt-1" />
@@ -151,10 +161,10 @@ export default async function ConfigurationPage({
                       </select>
                     ) : (
                       <input
-                        type={inputType(field)}
+                        type={inputType(field, base)}
                         name={key}
                         required={required}
-                        step={field.valueType === "integer" ? "1" : field.valueType === "number" ? "any" : undefined}
+                        step={base === "integer" ? "1" : base === "number" ? "any" : undefined}
                         autoComplete="off"
                         className="w-full rounded-lg border bg-background px-3 py-2"
                       />

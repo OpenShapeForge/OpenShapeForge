@@ -227,7 +227,7 @@ describe("the workflow-worker role", () => {
                 {
                   id: "trigger-1",
                   type: "triggerSchedule",
-                  config: { cron: "0 9 * * *", timezone: "UTC" },
+                  config: { cron: "0 9 29 2 *", timezone: "UTC" },
                 },
                 { id: "end-1", type: "end", config: {} },
               ],
@@ -245,6 +245,10 @@ describe("the workflow-worker role", () => {
             `.execute(conn);
             const versionId = version.rows[0]!.id;
 
+            // The seeded next_fire_at is already due; after the fire the next
+            // occurrence must lie far ahead, or a run near the cron's own
+            // minute (a daily 09:00 schedule at 09:00 UTC) fires twice. A
+            // Feb 29 schedule is next due years away.
             // The schedule row the sync helper would have written, with its
             // fire already due — the worker's job here is to notice, not to
             // wait out a cron boundary the test would have to sleep through.
@@ -256,7 +260,7 @@ describe("the workflow-worker role", () => {
               )
               values (
                 ${tenant}::uuid, ${definitionId}::uuid, ${versionId}::uuid, ${"trigger-1"},
-                ${"0 9 * * *"}, ${"UTC"}, ${author}::uuid, ${"active"}, 1,
+                ${"0 9 29 2 *"}, ${"UTC"}, ${author}::uuid, ${"active"}, 1,
                 now() - interval '1 minute', 1
               )
             `.execute(conn);

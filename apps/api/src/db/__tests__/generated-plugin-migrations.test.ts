@@ -81,7 +81,9 @@ describe("generated plugin schema migrations", () => {
         await runtime.close();
       }
     });
-  });
+  // Creates and migrates a scratch database; the db job runs many of those
+  // at once, and 1.3-2 s here becomes 5 s under that load.
+  }, 60_000);
 
   test(
     "applies after generated tables, refuses edits, and tolerates rollback extras",

@@ -4,7 +4,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { operationFailure } from "@openshapeforge/operations";
-import { collectionMutationError } from "./collection-policy.js";
+import { collectionMutationError, ownedCollectionsOf } from "./collection-policy.js";
 import { entityValueCarriers, prepareEntityValueWriteInTransaction, type EntityValueIOContext } from "./entity-value-io.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
@@ -439,6 +439,32 @@ async function applyGeneratedRowUpdate(
   });
 }
 
+/**
+ * An owner's generic delete never reaches its owned children: while any
+ * exist, removal is the owned-collection Operations' job (the FK would
+ * otherwise cascade silently). With none, the owner is an ordinary row.
+ */
+async function assertNoOwnedChildrenInTransaction(
+  trx: Transaction<DB>,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<void> {
+  for (const owned of ownedCollectionsOf(table, getGeneratedCrudTables())) {
+    const result = await sql<{ exists: boolean }>`
+      select exists(
+        select 1 from ${sql.id(owned.child.schema, owned.child.table)}
+        where ${sql.id(owned.column)}::text = ${id}
+      ) as exists
+    `.execute(trx);
+    if (result.rows[0]?.exists) {
+      throw generatedCrudError(
+        `Collection mutation of ${owned.key} is not supported by generic delete; an atomic collection Operation is required.`,
+        "RELATION_COLLECTION_MUTATION_UNSUPPORTED",
+      );
+    }
+  }
+}
+
 export async function deleteGeneratedEntity(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -462,6 +488,7 @@ export async function deleteGeneratedEntity(
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
     }
+    await assertNoOwnedChildrenInTransaction(trx, table, input.id);
     if (input.guard?.operation.concurrency?.editLease) {
       if (!input.guard.leaseToken) {
         throw generatedCrudError(

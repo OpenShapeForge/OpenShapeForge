@@ -90,7 +90,12 @@ const AUTHORED: readonly Authored[] = [
     id: "control.list-tenants", handler: "listTenants", title: "List tenants",
     description: "Every tenant of the deployment: slug, display name, lifecycle status, Keycloak organization alias, and how many catalog entries it has installed, overridden and pending. Never returns tenant data.",
     roles: BOTH, effects: READ, idempotency: "natural",
-    output: { type: "object", additionalProperties: false, properties: { tenants: { type: "array", items: anyObject } }, required: ["tenants"] },
+    // Mirrors control.yaml: the listing is a page with its total and cursor.
+    output: {
+      type: "object", additionalProperties: false,
+      properties: { tenants: { type: "array", items: anyObject }, totalCount: { type: "integer", minimum: 0 }, nextCursor: { type: ["string", "null"] } },
+      required: ["tenants", "totalCount", "nextCursor"],
+    },
     rest: { method: "GET", path: "/api/control/v1/tenants", status: 200 }, mcp: "list_tenants",
   },
   {

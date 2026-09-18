@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Shared fixture for the document revision scratch-database tests: one
+ * Shared fixture for the document content scratch-database tests: one
  * throwaway database built by the real migration chain, an app-role
  * connection, and platform services that are real where the schema owns
  * them (record access, field schemas, JSON validation, entity-value
@@ -45,7 +45,7 @@ export const documentReader = session(["CaseFile.All.Read"]);
 export const documentVersion = async (id: string) => (await sql<{ v: string }>`select updated_at::text as v from erp.documents where id = ${id}::uuid`.execute(privileged())).rows[0]!.v;
 export const dbInput = (who: Session): DbSessionInput => ({ tenantId: who.tenantId, userId: who.userId, roles: who.roles, groups: [], scope: "tenant" });
 
-export const scratch: { name: string; admin?: SQL; privileged?: DatabaseRuntime; restricted?: DatabaseRuntime } = { name: `doc_revisions_${randomUUID().replaceAll("-", "")}` };
+export const scratch: { name: string; admin?: SQL; privileged?: DatabaseRuntime; restricted?: DatabaseRuntime } = { name: `doc_content_${randomUUID().replaceAll("-", "")}` };
 function databaseUrl(app = false) {
   const url = new URL(adminUrl);
   if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.pathname !== "/postgres") throw new Error("Scratch tests require a local postgres admin database, never an application database.");
@@ -169,13 +169,28 @@ export async function createDocument() {
       ${jsonbLiteral({ title: "Welcome letter", documentType: "outgoing_mail", status: "draft", isExternal: false })},
       ${jsonbLiteral({ versionLabel: "0", status: "draft", isMajorVersion: false })})`.execute(trx)).rows[0]!.document_id);
 }
-export async function revisionBlocks(revisionId: string) {
-  return (await sql<{ id: string; origin: string; template_block_id: string | null; diverged: boolean; text: string; updated_at: string }>`select id, origin, template_block_id, diverged, "values"->>'text' as text, updated_at::text as updated_at
-    from erp.blocks where revision_id = ${revisionId}::uuid order by revision_id_position, id`.execute(privileged())).rows;
+export type VariantBlock = { id: string; origin: string; template_block_id: string | null; diverged: boolean; locked: boolean; text: string; updated_at: string };
+export async function variantBlocks(variantId: string): Promise<VariantBlock[]> {
+  return (await sql<VariantBlock>`select id, origin, template_block_id, diverged, locked, "values"->>'text' as text, updated_at::text as updated_at
+    from erp.blocks where document_variant_id = ${variantId}::uuid order by document_variant_id_position, id`.execute(privileged())).rows;
 }
-export async function revision(id: string) {
-  return (await sql<{ status: string; template_version_id: string | null; published_version_id: string | null; follow_error: string | null; updated_at: string }>`select status, template_version_id, published_version_id, follow_error, updated_at::text as updated_at from erp.document_revisions where id = ${id}::uuid`.execute(privileged())).rows[0]!;
+export type Variant = { id: string; channel: string; locale: string; updated_at: string };
+export async function variants(documentId: string): Promise<Variant[]> {
+  return (await sql<Variant>`select id, channel, locale, updated_at::text as updated_at from erp.document_variants where document_id = ${documentId}::uuid order by channel, locale`.execute(privileged())).rows;
+}
+export async function variant(documentId: string, channel: string, locale: string): Promise<Variant> {
+  const found = (await variants(documentId)).find((entry) => entry.channel === channel && entry.locale === locale);
+  if (!found) throw new Error(`No ${channel}/${locale} variant on ${documentId}`);
+  return found;
+}
+export async function document(id: string) {
+  return (await sql<{ template_version_id: string | null; follow_error: string | null; lifecycle_status: string; published_version_id: string | null; latest_version: number | null; parameters: Record<string, unknown>; updated_at: string }>`
+    select template_version_id, follow_error, lifecycle_status, published_version_id, latest_version, parameters, updated_at::text as updated_at from erp.documents where id = ${id}::uuid`.execute(privileged())).rows[0]!;
 }
 export const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejects.toMatchObject({ operationError: { code } });
-export const startedRevision = async (handlers: Handlers, context: ModuleOperationContext, input: Record<string, unknown>) =>
-  (await handlers.startRevision!(input, context)).value as { id: string; status: string; templateVersion: string | null; parameters: Record<string, unknown>; document: string };
+export const linked = async (handlers: Handlers, context: ModuleOperationContext, input: Record<string, unknown>) =>
+  (await handlers.linkTemplate!(input, context)).value as { id: string; templateVersionId: string | null; followError: string | null; parameters: Record<string, unknown>; lifecycleStatus: string };
+export async function publishDocument(context: ModuleOperationContext, documentId: string) {
+  const handler = (versioning.operationHandlers as Record<string, (input: Record<string, unknown>, context: ModuleOperationContext) => Promise<{ value: Record<string, unknown> }>>).publishDocumentToDocumentVersion!;
+  return (await handler({ id: documentId }, context)).value;
+}

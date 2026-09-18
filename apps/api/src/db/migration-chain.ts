@@ -77,7 +77,7 @@ import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applyCoreInvariants } from "./migrations/core-invariants.js";
-import { applyDocumentRevisionGuards, prepareRevisionOwnedBlocks } from "./migrations/document-revisions.js";
+import { applyDocumentContentGuards, prepareDocumentOwnedBlocks } from "./migrations/document-content.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
@@ -132,12 +132,13 @@ export async function runMigrationChain(
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
-  // A database from before document revisions carries a NOT NULL the
-  // manifest no longer declares; relax it before the roll-forward compares.
-  await prepareRevisionOwnedBlocks(db);
+  // A database from before document-owned blocks carries a NOT NULL, and one
+  // from the unreleased revision slice carries columns, the manifest no
+  // longer declares; reshape before the roll-forward compares.
+  await prepareDocumentOwnedBlocks(db);
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
   await applyCoreInvariants(db);
-  await applyDocumentRevisionGuards(db);
+  await applyDocumentContentGuards(db);
   // The identity-link invariants (app.identity_subject() above all) may be
   // referenced by a plugin's invariant DDL, so they land before the plugin
   // migrations run.

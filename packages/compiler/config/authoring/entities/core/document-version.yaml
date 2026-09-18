@@ -3,7 +3,8 @@ kind: coreEntity
 module: core
 entity: DocumentVersion
 title: Document Version
-description: An immutable binary or logical revision that is owned by exactly one document.
+description: An immutable version owned by exactly one document, either an uploaded file or a frozen snapshot of the
+  document's editable content published through Document.publish. See docs/document-content.md.
 language: en
 displayTemplate: "{{versionLabel}}"
 filterField: versionLabel
@@ -25,6 +26,12 @@ indexes:
       - tenantId
       - documentId
       - id
+    unique: true
+  - name: document_versions_tenant_document_number_uidx
+    fields:
+      - tenantId
+      - documentId
+      - versionNumber
     unique: true
 authorization:
   roles:
@@ -193,6 +200,52 @@ fields:
     persisted:
       column: change_summary
       storageClass: core
+  # Snapshot columns, written only by Document.publish (packages/versioning);
+  # null on an uploaded version. Names follow TemplateVersion so the generic
+  # publish stores both the same way.
+  - key: versionNumber
+    valueType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { min: 1 }
+    label: { en: Version number, nl: Versienummer }
+    persisted: { column: version_number, storageClass: core }
+  - key: snapshot
+    valueType: object
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+  - key: contentHash
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { pattern: "^[a-f0-9]{64}$" }
+    label: { en: Content checksum, nl: Inhoudschecksum }
+    persisted: { column: content_hash, storageClass: core }
+  - key: publishedBy
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    validation: { format: uuid }
+    label: { en: Published by, nl: Gepubliceerd door }
+    persisted: { column: published_by, storageClass: core }
+  - key: publishedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [Document.publish]
+    label: { en: Published at, nl: Gepubliceerd op }
+    persisted: { column: published_at, storageClass: core }
   - key: documentId
     required: true
     readOnly: true
@@ -391,6 +444,8 @@ interfaces:
                   fields: [ fileName, mimeType, byteSize ]
                 - title: { en: File integrity, nl: Bestandsintegriteit }
                   fields: [ checksum ]
+                - title: { en: Published content, nl: Gepubliceerde inhoud }
+                  fields: [ versionNumber, publishedAt, publishedBy, contentHash ]
         modes:
           create:
             title: { en: Add document version, nl: Documentversie toevoegen }

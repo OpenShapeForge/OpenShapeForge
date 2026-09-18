@@ -8,23 +8,24 @@ labels: { en: Block, nl: Block }
 domains: [documents]
 authorization:
   roles:
-    # Document roles read revision-owned blocks only; the restrictive database
-    # policy blocks_owner_read separates the owners. Writes stay template-only.
+    # Document roles read document-owned blocks only; the restrictive database
+    # policy blocks_owner_read separates the owners. Writes stay template-only:
+    # a document editor writes through DocumentVariant.*Block.
     read: [Templates.Read, Organization.All.ReadWrite, General.All.Read, General.All.ReadWrite, CaseFile.All.Read, CaseFile.All.ReadWrite]
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
 displayTemplate: "{{definitionKey}}"
 fields:
-  # Exactly one owner is set; the compiler emits num_nonnulls(revision_id, variant_id) = 1.
+  # Exactly one owner is set; the compiler emits num_nonnulls(document_variant_id, variant_id) = 1.
   - key: variant
     label: { en: Template variant, nl: Templatevariant }
     semanticType: TemplateVariant
     required: false
     immutable: true
-  - key: revision
-    label: { en: Document revision, nl: Documentrevisie }
-    semanticType: DocumentRevision
+  - key: documentVariant
+    label: { en: Document variant, nl: Documentvariant }
+    semanticType: DocumentVariant
     required: false
     immutable: true
   - key: definitionKey
@@ -49,12 +50,12 @@ fields:
   - key: origin
     label: { en: Origin, nl: Herkomst }
     description:
-      en: Whether a revision block was seeded from its template or added locally. Always local on a template variant.
-      nl: Of een revisieblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal.
+      en: Whether a document block was seeded from its template or added locally. Always local on a template variant.
+      nl: Of een documentblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal.
     valueType: string
     required: true
     readOnly: true
-    writtenBy: [Document.startRevision, Template.publish]
+    writtenBy: [Document.linkTemplate, Template.publish]
     defaultValue: local
     options:
       type: static
@@ -65,12 +66,12 @@ fields:
   - key: templateBlockId
     label: { en: Template block, nl: Templateblok }
     description:
-      en: Id of the block inside the template snapshot this revision block was seeded from.
-      nl: Id van het blok in de templatesnapshot waaruit dit revisieblok is overgenomen.
+      en: Id of the block inside the template snapshot this document block was seeded from.
+      nl: Id van het blok in de templatesnapshot waaruit dit documentblok is overgenomen.
     valueType: string
     required: false
     readOnly: true
-    writtenBy: [Document.startRevision, Template.publish]
+    writtenBy: [Document.linkTemplate, Template.publish]
     validation: { format: uuid }
     persisted: { column: template_block_id, storageClass: core }
   - key: diverged
@@ -84,6 +85,15 @@ fields:
     readOnly: true
     writtenBy: [Template.publish]
     persisted: { column: diverged, storageClass: core }
+  - key: locked
+    label: { en: Locked, nl: Vergrendeld }
+    description:
+      en: Authored on a template block. A document block copied from a locked template block cannot be edited, moved or removed and always follows the template.
+      nl: Ingesteld op een templateblok. Een documentblok dat uit een vergrendeld templateblok is overgenomen kan niet worden bewerkt, verplaatst of verwijderd en volgt altijd de template.
+    valueType: boolean
+    required: true
+    defaultValue: false
+    persisted: { column: locked, storageClass: core }
 operations:
   list:
     name: List block
@@ -131,11 +141,11 @@ interfaces:
           tabs:
             - id: values
               label: { en: Content, nl: Inhoud }
-              groups: [{ title: { en: Block, nl: Blok }, fields: [variant, revision, definitionKey, values, origin, diverged] }]
+              groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, origin, diverged, locked] }]
         modes:
           create:
             title: { en: Add block, nl: Blok toevoegen }
-            groups: [{ title: { en: Block, nl: Blok }, fields: [variant, revision, definitionKey, values] }]
+            groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, locked] }]
           update:
             title: { en: Edit block, nl: Blok bewerken }
-            groups: [{ title: { en: Content, nl: Inhoud }, fields: [values] }]
+            groups: [{ title: { en: Content, nl: Inhoud }, fields: [values, locked] }]

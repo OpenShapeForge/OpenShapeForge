@@ -9527,12 +9527,12 @@
           "immutable": true
         },
         {
-          "key": "revision",
+          "key": "documentVariant",
           "label": {
-            "en": "Document revision",
-            "nl": "Documentrevisie"
+            "en": "Document variant",
+            "nl": "Documentvariant"
           },
-          "semanticType": "DocumentRevision",
+          "semanticType": "DocumentVariant",
           "required": false,
           "immutable": true
         },
@@ -9589,14 +9589,14 @@
             "nl": "Herkomst"
           },
           "description": {
-            "en": "Whether a revision block was seeded from its template or added locally. Always local on a template variant.",
-            "nl": "Of een revisieblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal."
+            "en": "Whether a document block was seeded from its template or added locally. Always local on a template variant.",
+            "nl": "Of een documentblok uit de template komt of lokaal is toegevoegd. Op een templatevariant altijd lokaal."
           },
           "valueType": "string",
           "required": true,
           "readOnly": true,
           "writtenBy": [
-            "Document.startRevision",
+            "Document.linkTemplate",
             "Template.publish"
           ],
           "defaultValue": "local",
@@ -9631,14 +9631,14 @@
             "nl": "Templateblok"
           },
           "description": {
-            "en": "Id of the block inside the template snapshot this revision block was seeded from.",
-            "nl": "Id van het blok in de templatesnapshot waaruit dit revisieblok is overgenomen."
+            "en": "Id of the block inside the template snapshot this document block was seeded from.",
+            "nl": "Id van het blok in de templatesnapshot waaruit dit documentblok is overgenomen."
           },
           "valueType": "string",
           "required": false,
           "readOnly": true,
           "writtenBy": [
-            "Document.startRevision",
+            "Document.linkTemplate",
             "Template.publish"
           ],
           "validation": {
@@ -9668,6 +9668,24 @@
           ],
           "persisted": {
             "column": "diverged",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "locked",
+          "label": {
+            "en": "Locked",
+            "nl": "Vergrendeld"
+          },
+          "description": {
+            "en": "Authored on a template block. A document block copied from a locked template block cannot be edited, moved or removed and always follows the template.",
+            "nl": "Ingesteld op een templateblok. Een documentblok dat uit een vergrendeld templateblok is overgenomen kan niet worden bewerkt, verplaatst of verwijderd en volgt altijd de template."
+          },
+          "valueType": "boolean",
+          "required": true,
+          "defaultValue": false,
+          "persisted": {
+            "column": "locked",
             "storageClass": "core"
           }
         }
@@ -15934,27 +15952,74 @@
           }
         },
         {
-          "key": "currentRevisionId",
-          "required": false,
-          "readOnly": true,
+          "key": "templateVersionId",
           "label": {
-            "en": "Current revision ID",
-            "nl": "Huidige revisie-ID"
+            "en": "Template version",
+            "nl": "Templateversie"
           },
           "description": {
-            "en": "Server-managed pointer to the revision that was published last.",
-            "nl": "Door de server beheerde verwijzing naar de laatst gepubliceerde revisie."
+            "en": "The published template version this document's content is seeded from. Pinned; moves only through Link template or when the template is republished.",
+            "nl": "De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd."
           },
+          "required": false,
+          "readOnly": true,
+          "writtenBy": [
+            "Document.linkTemplate",
+            "Template.publish"
+          ],
           "validation": {
             "format": "uuid"
           },
           "persisted": {
-            "column": "current_revision_id",
+            "column": "template_version_id",
             "storageClass": "core"
           },
-          "semanticType": "DocumentRevision",
+          "semanticType": "TemplateVersion",
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "version": "pinned"
+          }
+        },
+        {
+          "key": "parameters",
+          "valueType": "object",
+          "required": false,
+          "defaultValue": {},
+          "label": {
+            "en": "Local values",
+            "nl": "Lokale waarden"
+          },
+          "description": {
+            "en": "Values for the linked template's local variables, resolved when the content is materialized.",
+            "nl": "Waarden voor de lokale variabelen van de gekoppelde template, ingevuld bij het samenstellen van de inhoud."
+          },
+          "persisted": {
+            "column": "parameters",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "followError",
+          "label": {
+            "en": "Follow problem",
+            "nl": "Volgprobleem"
+          },
+          "description": {
+            "en": "Why the last template republish could not be applied to this document; cleared when a later republish succeeds.",
+            "nl": "Waarom de laatste herpublicatie van de template niet op dit document kon worden toegepast; gewist zodra een latere herpublicatie slaagt."
+          },
+          "valueType": "string",
+          "required": false,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "validation": {
+            "maxLength": 2000
+          },
+          "persisted": {
+            "column": "follow_error",
+            "storageClass": "core"
           }
         },
         {
@@ -16016,12 +16081,12 @@
           }
         },
         {
-          "key": "revisions",
+          "key": "variants",
           "label": {
-            "en": "Revisions",
-            "nl": "Revisies"
+            "en": "Content",
+            "nl": "Inhoud"
           },
-          "semanticType": "DocumentRevision",
+          "semanticType": "DocumentVariant",
           "cardinality": "collection",
           "relationship": {
             "inverse": "document",
@@ -16029,284 +16094,6 @@
           }
         }
       ],
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
-    "DocumentRevision": {
-      "kind": "entity",
-      "entity": "DocumentRevision",
-      "entityIdentity": true,
-      "valueType": "string",
-      "validation": {
-        "format": "uuid"
-      },
-      "label": {
-        "en": "Document revision",
-        "nl": "Documentrevisie"
-      },
-      "shape": [
-        {
-          "key": "document",
-          "label": {
-            "en": "Document",
-            "nl": "Document"
-          },
-          "semanticType": "Document",
-          "required": true,
-          "immutable": true
-        },
-        {
-          "key": "templateVersion",
-          "label": {
-            "en": "Template version",
-            "nl": "Templateversie"
-          },
-          "description": {
-            "en": "The published template version this draft currently tracks; moves forward when the template is republished.",
-            "nl": "De gepubliceerde templateversie die dit concept volgt; schuift op als de template opnieuw wordt gepubliceerd."
-          },
-          "semanticType": "TemplateVersion",
-          "required": false,
-          "readOnly": true,
-          "writtenBy": [
-            "Document.startRevision",
-            "Template.publish"
-          ],
-          "persisted": {
-            "column": "template_version_id",
-            "storageClass": "core"
-          },
-          "relationship": {
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "channel",
-          "label": {
-            "en": "Channel",
-            "nl": "Kanaal"
-          },
-          "valueType": "string",
-          "required": true,
-          "immutable": true,
-          "options": {
-            "type": "static",
-            "items": [
-              {
-                "value": "document",
-                "label": {
-                  "en": "Document",
-                  "nl": "Document"
-                }
-              },
-              {
-                "value": "email",
-                "label": {
-                  "en": "Email",
-                  "nl": "E-mail"
-                }
-              },
-              {
-                "value": "whatsapp",
-                "label": {
-                  "en": "WhatsApp",
-                  "nl": "WhatsApp"
-                }
-              }
-            ]
-          },
-          "persisted": {
-            "column": "channel",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "locale",
-          "valueType": "string",
-          "required": true,
-          "immutable": true,
-          "defaultValue": "nl",
-          "validation": {
-            "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
-          },
-          "label": {
-            "en": "Content language",
-            "nl": "Inhoudstaal"
-          },
-          "persisted": {
-            "column": "locale",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "status",
-          "label": {
-            "en": "Status",
-            "nl": "Status"
-          },
-          "valueType": "string",
-          "required": true,
-          "defaultValue": "draft",
-          "options": {
-            "type": "static",
-            "items": [
-              {
-                "value": "draft",
-                "label": {
-                  "en": "Draft",
-                  "nl": "Concept"
-                }
-              },
-              {
-                "value": "submitted",
-                "label": {
-                  "en": "Submitted",
-                  "nl": "Ingediend"
-                }
-              },
-              {
-                "value": "approved",
-                "label": {
-                  "en": "Approved",
-                  "nl": "Goedgekeurd"
-                }
-              },
-              {
-                "value": "rejected",
-                "label": {
-                  "en": "Rejected",
-                  "nl": "Afgekeurd"
-                }
-              },
-              {
-                "value": "published",
-                "label": {
-                  "en": "Published",
-                  "nl": "Gepubliceerd"
-                }
-              },
-              {
-                "value": "superseded",
-                "label": {
-                  "en": "Superseded",
-                  "nl": "Vervangen"
-                }
-              }
-            ]
-          },
-          "persisted": {
-            "column": "status",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "parameters",
-          "valueType": "object",
-          "required": false,
-          "defaultValue": {},
-          "label": {
-            "en": "Local values",
-            "nl": "Lokale waarden"
-          },
-          "description": {
-            "en": "Values for the template's local variables, used when the revision is published.",
-            "nl": "Waarden voor de lokale variabelen van de template, gebruikt bij publiceren van de revisie."
-          },
-          "persisted": {
-            "column": "parameters",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "publishedVersionId",
-          "label": {
-            "en": "Published document version",
-            "nl": "Gepubliceerde documentversie"
-          },
-          "semanticType": "DocumentVersion",
-          "required": false,
-          "readOnly": true,
-          "writtenBy": [
-            "DocumentRevision.publish"
-          ],
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "published_version_id",
-            "storageClass": "core"
-          },
-          "relationship": {
-            "ownership": "reference"
-          }
-        },
-        {
-          "key": "followError",
-          "label": {
-            "en": "Follow problem",
-            "nl": "Volgprobleem"
-          },
-          "description": {
-            "en": "Why the last template republish could not be applied to this draft; cleared when a later republish succeeds.",
-            "nl": "Waarom de laatste herpublicatie van de template niet op dit concept kon worden toegepast; gewist zodra een latere herpublicatie slaagt."
-          },
-          "valueType": "string",
-          "required": false,
-          "readOnly": true,
-          "writtenBy": [
-            "Template.publish"
-          ],
-          "validation": {
-            "maxLength": 2000
-          },
-          "persisted": {
-            "column": "follow_error",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "blocks",
-          "label": {
-            "en": "Blocks",
-            "nl": "Blokken"
-          },
-          "semanticType": "Block",
-          "cardinality": "collection",
-          "sortable": true,
-          "relationship": {
-            "inverse": "revision",
-            "ownership": "owned"
-          },
-          "childAuthorization": "owner",
-          "allowedDefinitions": [
-            "TextBlock",
-            "YouTubeEmbed",
-            "TemplateBlock"
-          ]
-        }
-      ],
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
-    "documentRevisionId": {
-      "kind": "entityId",
-      "entity": "document-revision",
-      "valueType": "string",
-      "label": {
-        "en": "Document revision",
-        "nl": "Documentrevisie"
-      },
-      "validation": {
-        "format": "uuid"
-      },
-      "listUrl": "/document-revisions",
-      "displayTemplate": "{{channel}} · {{locale}} · {{status}}",
-      "filterField": "id",
-      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -16423,6 +16210,134 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "DocumentVariant": {
+      "kind": "entity",
+      "entity": "DocumentVariant",
+      "entityIdentity": true,
+      "valueType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Document variant",
+        "nl": "Documentvariant"
+      },
+      "shape": [
+        {
+          "key": "document",
+          "label": {
+            "en": "Document",
+            "nl": "Document"
+          },
+          "semanticType": "Document",
+          "required": true,
+          "immutable": true
+        },
+        {
+          "key": "channel",
+          "label": {
+            "en": "Channel",
+            "nl": "Kanaal"
+          },
+          "valueType": "string",
+          "required": true,
+          "immutable": true,
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "document",
+                "label": {
+                  "en": "Document",
+                  "nl": "Document"
+                }
+              },
+              {
+                "value": "email",
+                "label": {
+                  "en": "Email",
+                  "nl": "E-mail"
+                }
+              },
+              {
+                "value": "whatsapp",
+                "label": {
+                  "en": "WhatsApp",
+                  "nl": "WhatsApp"
+                }
+              }
+            ]
+          },
+          "persisted": {
+            "column": "channel",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "locale",
+          "valueType": "string",
+          "required": true,
+          "immutable": true,
+          "defaultValue": "nl",
+          "validation": {
+            "pattern": "^[a-z]{2}(-[A-Z]{2})?$"
+          },
+          "label": {
+            "en": "Content language",
+            "nl": "Inhoudstaal"
+          },
+          "persisted": {
+            "column": "locale",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "blocks",
+          "label": {
+            "en": "Blocks",
+            "nl": "Blokken"
+          },
+          "semanticType": "Block",
+          "cardinality": "collection",
+          "sortable": true,
+          "relationship": {
+            "inverse": "documentVariant",
+            "ownership": "owned"
+          },
+          "childAuthorization": "owner",
+          "childLock": "locked",
+          "allowedDefinitions": [
+            "TextBlock",
+            "YouTubeEmbed",
+            "TemplateBlock"
+          ]
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "documentVariantId": {
+      "kind": "entityId",
+      "entity": "document-variant",
+      "valueType": "string",
+      "label": {
+        "en": "Document variant",
+        "nl": "Documentvariant"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/document-variants",
+      "displayTemplate": "{{channel}} · {{locale}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -16650,6 +16565,105 @@
           },
           "persisted": {
             "column": "change_summary",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "versionNumber",
+          "valueType": "integer",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "Document.publish"
+          ],
+          "validation": {
+            "min": 1
+          },
+          "label": {
+            "en": "Version number",
+            "nl": "Versienummer"
+          },
+          "persisted": {
+            "column": "version_number",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "snapshot",
+          "valueType": "object",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "Document.publish"
+          ],
+          "label": {
+            "en": "Frozen content",
+            "nl": "Vastgelegde inhoud"
+          },
+          "persisted": {
+            "column": "snapshot",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "contentHash",
+          "valueType": "string",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "Document.publish"
+          ],
+          "validation": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "label": {
+            "en": "Content checksum",
+            "nl": "Inhoudschecksum"
+          },
+          "persisted": {
+            "column": "content_hash",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedBy",
+          "valueType": "string",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "Document.publish"
+          ],
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Published by",
+            "nl": "Gepubliceerd door"
+          },
+          "persisted": {
+            "column": "published_by",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedAt",
+          "valueType": "datetime",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "Document.publish"
+          ],
+          "label": {
+            "en": "Published at",
+            "nl": "Gepubliceerd op"
+          },
+          "persisted": {
+            "column": "published_at",
             "storageClass": "core"
           }
         },
@@ -38548,6 +38562,14 @@
             "nl": "Definitief",
             "en": "Final",
             "fr": "Définitif"
+          }
+        },
+        {
+          "value": "published",
+          "label": {
+            "nl": "Gepubliceerd",
+            "en": "Published",
+            "fr": "Publié"
           }
         },
         {

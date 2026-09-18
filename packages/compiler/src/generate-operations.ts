@@ -45,13 +45,15 @@ export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf
 
 /**
  * Platform-owned mutation controls are derived from the canonical Operation
- * policy. Authors describe business input only; every adapter receives this
- * one augmented schema and therefore asks for the same lease/version or
- * confirmation values that the shared executor enforces.
+ * policy. Authors describe business input only; every adapter — REST, GraphQL,
+ * MCP and the Web manifest alike — receives this one augmented schema and
+ * therefore asks for the same lease/version or confirmation values that the
+ * shared executor enforces. Every control carries both interface languages so
+ * a host that requires complete UI translations accepts the projected schema.
  */
-function withOperationControls(
+export function withOperationControls(
   inputSchema: JsonSchema,
-  definition: EntityOperationDefinition,
+  definition: Pick<EntityOperationDefinition, "concurrency" | "confirmation">,
 ): JsonSchema {
   const properties = {
     ...((inputSchema.properties ?? {}) as Record<string, unknown>),
@@ -62,41 +64,44 @@ function withOperationControls(
   const dependentRequired = {
     ...((inputSchema.dependentRequired ?? {}) as Record<string, string[]>),
   };
+  const titled = (schema: Record<string, unknown>, en: string, nl: string) => ({
+    ...schema,
+    "x-osf-i18n": { title: { en, nl } },
+  });
 
   if (definition.concurrency?.version) {
-    properties.expectedVersion = {
+    properties.expectedVersion = titled({
       type: "string",
       format: "date-time",
-      "x-osf-i18n": { title: { en: "Expected version", nl: "Verwachte versie" } },
       description: `Version from the record's ${definition.concurrency.version.field} field.`,
-    };
+    }, "Expected version", "Verwachte versie");
     required.add("expectedVersion");
   }
   if (definition.concurrency?.editLease) {
-    properties.leaseToken = {
+    properties.leaseToken = titled({
       type: "string",
       minLength: 1,
       description: "Opaque edit-lease token issued by the server for this Operation and record.",
-    };
+    }, "Edit lease", "Bewerkingslease");
     required.add("leaseToken");
   }
   if (definition.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
+    properties.confirmed = titled({
       type: "boolean",
       description: "Set to true after the user explicitly acknowledges this Operation.",
-    };
+    }, "Confirmed", "Bevestigd");
   }
   if (definition.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
+    properties.confirmationToken = titled({
       type: "string",
       minLength: 1,
       description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
+    }, "Confirmation token", "Bevestigingstoken");
+    properties.confirmationAnswer = titled({
       type: "string",
       minLength: 1,
       description: `Exact current value requested for ${definition.confirmation.challenge.field}.`,
-    };
+    }, "Confirmation answer", "Bevestigingsantwoord");
     dependentRequired.confirmationToken = ["confirmationAnswer"];
     dependentRequired.confirmationAnswer = ["confirmationToken"];
   }

@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
-  closeScratch, collections, createDocument, dbInput, document, editor, fails, linked, openScratch, platformFor, privileged, publishDocument, publisher, publishTemplate,
+  asUser, closeScratch, collections, createDocument, dbInput, document, editor, fails, linked, openScratch, platformFor, privileged, publishDocument, publisher, publishTemplate,
   restricted, seedTemplate, tenant, variant, variantBlocks, variants,
 } from "./document-content-fixture.js";
 
@@ -88,9 +88,12 @@ describe("document content against PostgreSQL", () => {
     expect((await variantBlocks(nl.id)).find((block) => block.template_block_id === ids.first)!.updated_at).toBe(before);
     expect((await document(documentId)).template_version_id).toBe(thirdVersion);
 
-    // Publish through the generic snapshot versioning: the head is frozen into a DocumentVersion beside the uploaded one.
+    // Publish through the generic snapshot versioning: the head is frozen into a DocumentVersion beside the uploaded
+    // ones; an upload labelled v1 cannot collide because snapshot labels use their own reserved prefix.
+    await asUser(editor, (trx) => sql`select document_internal.append_version(${documentId}::uuid, ${jsonbLiteral({ versionLabel: "v1", status: "draft", isMajorVersion: false })})`.execute(trx));
+    await expect(asUser(editor, (trx) => sql`select document_internal.append_version(${documentId}::uuid, ${jsonbLiteral({ versionLabel: "snapshot-1", status: "draft", isMajorVersion: false })})`.execute(trx))).rejects.toThrow("reserved");
     const published = await publishDocument(context, documentId);
-    expect(published).toMatchObject({ document_id: documentId, version_number: 1, status: "published", version_label: "v1" });
+    expect(published).toMatchObject({ document_id: documentId, version_number: 1, status: "published", version_label: "snapshot-1" });
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", published_version_id: published.id, latest_version: 1 });
     const snapshot = published.snapshot as { entity: string; head: { row: { id: string }; children: Record<string, { row: { channel: string }; children: Record<string, { row: { values: { text: string } } }[]> }[]> } };
     expect(snapshot.entity).toBe("Document");
@@ -98,7 +101,7 @@ describe("document content against PostgreSQL", () => {
     const frozen = snapshot.head.children.document_variants!.find((entry) => entry.row.channel === "document")!;
     expect(frozen.children.blocks!.map((block) => block.row.values.text)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
     const stored = (await sql<{ n: number }>`select count(*)::int as n from erp.document_versions where document_id = ${documentId}::uuid`.execute(privileged())).rows[0]!;
-    expect(stored.n).toBe(2);
+    expect(stored.n).toBe(3);
     // The head stays editable and a further republish moves it back to draft.
     await sql`update erp.blocks set "values" = ${jsonbLiteral({ text: "Fourth" })} where id = ${third}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
@@ -130,10 +133,10 @@ describe("document content against PostgreSQL", () => {
     const fresh = await variant(documentId, "document", "nl");
     expect(fresh.id).not.toBe(nl.id);
     expect(shape(await variantBlocks(fresh.id))).toEqual([["template", other.first, false, "Hello {{local.name}}"], ["template", other.second, false, "Second"]]);
-    // Only a published version links; record access refuses an unknown one before the handler can report it missing.
+    // Only a published version links; an unknown one is reported missing.
     await sql`update erp.template_versions set status = 'draft' where id = ${firstVersion}::uuid`.execute(privileged());
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: firstVersion, replace: true }, context), "INVALID_STATE");
-    await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: randomUUID() }, context), "FORBIDDEN");
+    await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: randomUUID() }, context), "NOT_FOUND");
   }, 60_000);
 
   test("one document that cannot follow records the problem and never vetoes the template publication", async () => {

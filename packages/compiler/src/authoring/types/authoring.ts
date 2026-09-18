@@ -76,6 +76,10 @@ export interface ComponentCatalog {
 export interface SemanticTypeDefinition {
   /** Derived from the entity corpus, never authored in the semantic-type catalog. */
   entityIdentity?: boolean;
+  /** Derived: the entity declares `versioning`, so a reference to it may say `version: current`. */
+  versioned?: boolean;
+  /** Derived: this entity is the immutable version entity of the named versioned entity, so a reference to it may be `version: pinned`. */
+  versionEntityOf?: string;
   /**
    * Discriminator for entity-ID semantic types. When set to `"entityId"`,
    * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,

@@ -16097,7 +16097,8 @@
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
-      }
+      },
+      "versioned": true
     },
     "DocumentType": {
       "kind": "entity",
@@ -16715,7 +16716,8 @@
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
-      }
+      },
+      "versionEntityOf": "Document"
     },
     "Employee": {
       "kind": "entity",
@@ -33634,7 +33636,8 @@
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
-      }
+      },
+      "versioned": true
     },
     "TemplateBlock": {
       "kind": "entity",
@@ -33902,7 +33905,8 @@
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
-      }
+      },
+      "versionEntityOf": "Template"
     },
     "templateVersionId": {
       "kind": "entityId",

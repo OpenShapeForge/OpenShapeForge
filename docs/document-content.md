@@ -42,8 +42,10 @@ Document ──publish──▶ DocumentVersion (generic publishedSnapshot; an u
   `mimeType`, …) nullable and gains the snapshot fields (`versionNumber`,
   `snapshot`, `contentHash`, `publishedBy`, `publishedAt`, also nullable), so
   an uploaded file and a published snapshot share the entity and
-  `Document.versions`. A snapshot version's `versionLabel` is `v<number>`
-  and its `status` is `published` (added to `DOCUMENTVERSIONSTATUS`).
+  `Document.versions`. A snapshot version's `versionLabel` is
+  `snapshot-<number>`, a prefix an upload may never use (the write guard
+  refuses it), so the per-document label uniqueness cannot collide; its
+  `status` is `published` (added to `DOCUMENTVERSIONSTATUS`).
 
 ### Reference version: pinned or current
 
@@ -65,7 +67,10 @@ collection authored with `childLock: <booleanField>` makes the owner's
 `update`, `move` and `remove` collection Operations refuse a child whose flag
 is set with `INVALID_STATE` (`apps/api/src/operations/entity/collection-mutations.ts`);
 `insert` is unaffected. `DocumentVariant.blocks` sets it, `TemplateVariant.blocks`
-does not. The database keeps `locked` server-managed on a document block (an
+does not. The compiler also drops the lock field and every owning foreign key of
+the child from the owner-scoped `insertBlock`/`updateBlock` values contracts
+(`packages/compiler/src/authoring/collection-operations.ts`), so the schema
+promises no more than the storage guards admit. The database keeps `locked` server-managed on a document block (an
 editor cannot unlock one), and the follow rule always overwrites a locked
 block from the new snapshot, whatever happened to it locally.
 
@@ -87,7 +92,7 @@ restates them at the database.
 | `Templates.Read`, `General.All.Read/ReadWrite` | read | no access |
 | `Organization.All.ReadWrite` | read, generic `Block.create/update`, `TemplateVariant.*Block` | no access |
 | `CaseFile.All.Read` | no access | read (`DocumentVariant.get/list`, `Block.get/list`; the policy hides template-owned rows) |
-| `CaseFile.All.ReadWrite` | no access | read, and write only through `DocumentVariant.insertBlock/updateBlock/moveBlock/removeBlock` |
+| `CaseFile.All.ReadWrite` | no access (may link a published version through `Document.linkTemplate`) | read, and write only through `DocumentVariant.insertBlock/updateBlock/moveBlock/removeBlock` |
 
 - `Block` **read** roles include `CaseFile.All.Read/ReadWrite` so the web can
   list a variant's blocks through the generic `Block.list`; the restrictive
@@ -106,13 +111,17 @@ restates them at the database.
   The same setting admits the server-managed writes: `Document.templateVersionId`,
   `Document.followError` and, on a document block, `origin`, `templateBlockId`,
   `diverged` and `locked` (triggers `documents_content_guard`, `blocks_document_guard`).
-- `DocumentVariant` carries the `Document` roles. `Document.linkTemplate` also
-  needs `Templates.Read` (record access on the TemplateVersion).
+- `DocumentVariant` carries the `Document` roles. `Document.linkTemplate`
+  needs the document's update access and a *published* target version, nothing
+  more: a document editor picks a published template without a template role;
+  the command reads the version's frozen snapshot server-side.
 - The generic `Document.publish` inserts the snapshot version as the runtime
   role under the transaction-local marker `app.publishing_entity = 'Document'`
   (set by `packages/versioning`); the `document_versions_write_guard` trigger
-  in `core-invariants.ts` admits only that insert beside the SECURITY DEFINER
-  document commands, and derives the label from the version number.
+  in `core-invariants.ts` admits only such an insert — marker set and
+  `versionNumber`, `snapshot` and `contentHash` all present — beside the
+  SECURITY DEFINER document commands, and derives the label from the version
+  number.
 - Open point: `Document.rowAccess` is not yet propagated to variants or blocks.
 
 ## Lifecycle
@@ -127,7 +136,7 @@ state and requires the head's `updatedAt` as `expectedVersion`. `Document.status
 
 | Operation | What it does |
 |---|---|
-| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Seeds one `DocumentVariant` per variant of the published template version, blocks copied from the snapshot (`origin = template`, `templateBlockId`, `locked`), validates `parameters` against the template's local variables and stores them. Linking another version of the **same** template behaves like the follow rule (local edits survive). Linking a **different** template is refused with `INVALID_STATE` while local or diverged blocks exist, unless `replace: true`, which discards every variant first. REST `POST /api/document-content/:id/link-template`. |
+| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Needs the document's update roles only. Seeds one `DocumentVariant` per variant of the published template version, blocks copied from the snapshot (`origin = template`, `templateBlockId`, `locked`), validates `parameters` against the template's local variables and stores them. Linking another version of the **same** template behaves like the follow rule (local edits survive). Linking a **different** template is refused with `INVALID_STATE` while local or diverged blocks exist, unless `replace: true`, which discards every variant first. REST `POST /api/document-content/:id/link-template`. |
 | `DocumentVariant.insertBlock` `{ id, expectedVersion, values, beforeId? }` | Core collection machinery; inserted blocks are `origin = local`; `beforeId` places the block before another one. |
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |

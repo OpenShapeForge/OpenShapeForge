@@ -39,11 +39,11 @@ describe("document content authorization against PostgreSQL", () => {
     const ids = await seedTemplate();
     const templateVersion = await publishTemplate(setup.context, ids.template);
     const documentId = await createDocument();
-    // Real record access: a template reader may not link; linking needs Templates.Read on the version, so the full
-    // editor links and the template-less document editor takes over from there.
+    // Real record access: a template reader may not link (no document update access); a document editor without any
+    // template role links a published version, read server-side from its snapshot.
     await fails(platformFor(templateUser).handlers.linkTemplate!({ id: documentId, templateVersionId: templateVersion }, platformFor(templateUser).context), "FORBIDDEN");
-    await fails(platformFor(caseUser).handlers.linkTemplate!({ id: documentId, templateVersionId: templateVersion }, platformFor(caseUser).context), "FORBIDDEN");
-    await linked(setup.handlers, setup.context, { id: documentId, templateVersionId: templateVersion, parameters: { name: "Reader" } });
+    const caseSetup = platformFor(caseUser);
+    await linked(caseSetup.handlers, caseSetup.context, { id: documentId, templateVersionId: templateVersion, parameters: { name: "Reader" } });
     const nl = await variant(documentId, "document", "nl");
     const version = async () => (await variant(documentId, "document", "nl")).updated_at;
     const [first] = await variantBlocks(nl.id);
@@ -114,5 +114,11 @@ describe("document content authorization against PostgreSQL", () => {
       values (${session.tenantId}::uuid, ${nl.id}::uuid, 9, 'TextBlock', ${jsonbLiteral({ text: "forged" })}, 'template', ${ids.first}::uuid)`.execute(trx)), /FORBIDDEN/);
     await refused(asUser(editor, (trx) => sql`insert into erp.document_versions (tenant_id, document_id, version_label, status, version_number)
       values (${session.tenantId}::uuid, ${documentId}::uuid, 'forged', 'published', 9)`.execute(trx)), /immutable|permission denied/);
+    // The publish marker alone does not open the table: a row without a frozen snapshot is still a direct write.
+    await refused(asUser(editor, async (trx) => {
+      await sql`select set_config('app.publishing_entity', 'Document', true)`.execute(trx);
+      await sql`insert into erp.document_versions (tenant_id, document_id, version_label, status, version_number)
+        values (${session.tenantId}::uuid, ${documentId}::uuid, 'forged', 'published', 9)`.execute(trx);
+    }), /immutable|permission denied/);
   }, 60_000);
 });

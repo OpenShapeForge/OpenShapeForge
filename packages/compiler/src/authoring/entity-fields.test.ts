@@ -124,3 +124,46 @@ describe("one relational field contract", () => {
     expect(() => normalizeEntityFields(left, deriveEntitySemanticTypes([left, right], {}))).toThrow("one-to-one");
   });
 });
+
+describe("collection locks and reference versions", () => {
+  const versioned = (): CoreEntity => ({ ...entity("Template", [
+    { key: "variants", semanticType: "Variant", cardinality: "collection", relationship: { inverse: "template", ownership: "owned" } },
+  ]), versioning: { strategy: "publishedSnapshot", versionEntity: "TemplateVersion", versionsField: "versions" } });
+  const version = entity("TemplateVersion", [{ key: "template", semanticType: "Template", required: true }]);
+  const variant = entity("Variant", [
+    { key: "template", semanticType: "Template", required: true },
+    { key: "locked", valueType: "boolean", required: true },
+    { key: "note", valueType: "string" },
+    { key: "blocks", semanticType: "Block", cardinality: "collection", sortable: true, relationship: { inverse: "page", ownership: "owned" } },
+  ]);
+  const corpus = () => deriveEntitySemanticTypes([versioned(), version, variant, block, page], {});
+
+  test("derives which entities are versioned and which are version entities", () => {
+    expect(corpus().Template).toMatchObject({ versioned: true });
+    expect(corpus().TemplateVersion).toMatchObject({ versionEntityOf: "Template" });
+    expect(corpus().Variant!.versioned).toBeUndefined();
+    expect(() => deriveEntitySemanticTypes([{ ...versioned(), versioning: { strategy: "publishedSnapshot", versionEntity: "Missing", versionsField: "versions" } }], {})).toThrow("not a loaded entity");
+  });
+  test("childLock names a single boolean field of the owned child and carries into the compiled field and relationship", () => {
+    const owner = { ...versioned(), fields: [{ ...versioned().fields[0]!, childLock: "locked" }] };
+    const normalized = normalizeEntityFields(owner, corpus());
+    expect(normalized.fields[0]?.childLock).toBe("locked");
+    expect(resolveRelationships({ coreEntity: normalized, profiles: [] } as unknown as LoadedArtifacts)[0]).toMatchObject({ key: "variants", childLock: "locked" });
+    for (const key of ["note", "missing"]) {
+      expect(() => normalizeEntityFields({ ...owner, fields: [{ ...owner.fields[0]!, childLock: key }] }, corpus())).toThrow("single boolean");
+    }
+    expect(() => normalizeEntityFields({ ...owner, fields: [{ key: "variant", semanticType: "Variant", childLock: "locked" }] }, corpus())).toThrow("owned collection");
+    expect(() => normalizeEntityFields({ ...owner, fields: [{ ...owner.fields[0]!, relationship: { inverse: "template", ownership: "reference" } }] }, corpus())).toThrow("owned collection");
+  });
+  test("version: pinned needs a version entity as target, version: current a versioned one, and nothing else is accepted", () => {
+    const reference = (target: string, version: string) => entity("Document", [{ key: "ref", semanticType: target, relationship: { ownership: "reference", version: version as "pinned" } }]);
+    expect(normalizeEntityFields(reference("TemplateVersion", "pinned"), corpus()).fields[0]?.relationship).toMatchObject({ version: "pinned", ownership: "reference" });
+    expect(normalizeEntityFields(reference("Template", "current"), corpus()).fields[0]?.relationship).toMatchObject({ version: "current" });
+    expect(normalizeEntityFields(reference("Variant", "" as "pinned"), corpus()).fields[0]?.relationship?.version).toBeUndefined();
+    expect(() => normalizeEntityFields(reference("Variant", "pinned"), corpus())).toThrow("version entity of a versioned entity");
+    expect(() => normalizeEntityFields(reference("Template", "pinned"), corpus())).toThrow("version entity of a versioned entity");
+    expect(() => normalizeEntityFields(reference("TemplateVersion", "current"), corpus())).toThrow("declares versioning");
+    expect(() => normalizeEntityFields(reference("TemplateVersion", "latest"), corpus())).toThrow("pinned or current");
+    expect(() => normalizeEntityFields(entity("Document", [{ key: "versions", semanticType: "TemplateVersion", cardinality: "collection", relationship: { inverse: "template", version: "pinned" } }]), corpus())).toThrow("single reference only");
+  });
+});

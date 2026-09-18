@@ -228,17 +228,23 @@ async function applyDocumentAuthority(db: OpenShapeForgeDatabase): Promise<void>
     -- The generic snapshot publish (packages/versioning) is the second write
     -- path beside the document commands: it inserts the frozen content under
     -- the transaction-local marker app.publishing_entity = 'Document' and
-    -- supplies no label, so the version number doubles as the label.
+    -- supplies no label. Snapshot labels live in a reserved namespace,
+    -- snapshot-<version number>, that an upload may never use, so the
+    -- per-document label uniqueness never collides between the two kinds.
     create or replace function app.reject_direct_document_version_write()
     returns trigger
     language plpgsql
     set search_path = pg_catalog, pg_temp
     as $function$
     begin
-      if tg_op = 'INSERT' and app.publishing_entity() = 'Document' and new.version_number is not null then
-        new.version_label := coalesce(new.version_label, 'v' || new.version_number::text);
+      if tg_op = 'INSERT' and app.publishing_entity() = 'Document'
+        and new.version_number is not null and new.snapshot is not null and new.content_hash is not null then
+        new.version_label := coalesce(new.version_label, 'snapshot-' || new.version_number::text);
         new.created_by := coalesce(new.created_by, new.published_by::text);
         return new;
+      end if;
+      if new.version_label like 'snapshot-%' and (tg_op = 'INSERT' or new.version_label is distinct from old.version_label) then
+        raise exception 'VALIDATION: The version label prefix snapshot- is reserved for published document snapshots.';
       end if;
       if current_user = ${sql.lit(APP_ROLE)} then
         raise exception 'DocumentVersion is immutable and may only be created through a document version command';

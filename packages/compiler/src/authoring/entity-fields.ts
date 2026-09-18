@@ -34,6 +34,7 @@ export function deriveEntitySemanticTypes(
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       shape: entity.fields,
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
+      ...(entity.versioning ? { versioned: true } : {}),
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
     if (result[entity.entity]!.entityIdentity === false) continue;
@@ -50,6 +51,13 @@ export function deriveEntitySemanticTypes(
       icon: "file",
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     };
+  }
+  for (const entity of entities) {
+    const versionEntity = entity.versioning?.versionEntity;
+    if (!versionEntity) continue;
+    const target = result[versionEntity];
+    if (target?.kind !== "entity") throw new Error(`${entity.entity}: versioning.versionEntity ${versionEntity} is not a loaded entity.`);
+    target.versionEntityOf = entity.entity;
   }
   return result;
 }
@@ -140,7 +148,12 @@ export function normalizeEntityFields(
       const lock = semantic?.shape?.find((candidate) => candidate.key === field.childLock);
       if (!lock || lock.valueType !== "boolean" || fieldCardinality(lock) !== "single") throw new Error(`${entity.entity}.${field.key}: childLock must name a single boolean field of ${semantic?.entity ?? field.semanticType}.`);
     }
-    if (field.relationship?.version && (collection || field.relationship.ownership === "owned")) throw new Error(`${entity.entity}.${field.key}: version applies to a single reference only.`);
+    if (field.relationship?.version) {
+      if (collection || field.relationship.ownership === "owned") throw new Error(`${entity.entity}.${field.key}: version applies to a single reference only.`);
+      if (!["pinned", "current"].includes(field.relationship.version)) throw new Error(`${entity.entity}.${field.key}: version must be pinned or current.`);
+      if (field.relationship.version === "pinned" && !semantic?.versionEntityOf) throw new Error(`${entity.entity}.${field.key}: version: pinned requires a target that is the version entity of a versioned entity.`);
+      if (field.relationship.version === "current" && !semantic?.versioned) throw new Error(`${entity.entity}.${field.key}: version: current requires a target that declares versioning.`);
+    }
     if (semantic?.kind !== "entity") {
       if (field.relationship) {
         throw new Error(`${entity.entity}.${field.key}: relationship requires a loaded entity semanticType.`);

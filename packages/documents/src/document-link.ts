@@ -41,8 +41,10 @@ export const linkTemplate: ModuleOperationHandler = async (input, context) => {
   const replace = input.replace === true;
 
   const value = await platform.db.withSession(session, async (trx) => {
+    // A document editor picks a published template without holding a template
+    // role: the Operation's own roles and the document's update access decide,
+    // and the version is read here, server-side, from its frozen snapshot.
     await platform.records.assertAccess(session, { entityName: "Document", id: documentId, intent: "update" });
-    await platform.records.assertAccess(session, { entityName: "TemplateVersion", id: templateVersionId, intent: "get" });
     const document = (await rows<DocumentRow>(trx,
       "select id, template_version_id, updated_at, follow_error from erp.documents where tenant_id = app.current_tenant() and id = $1::uuid for update", [documentId]))[0];
     if (!document) refuse("NOT_FOUND", "The document does not exist.");

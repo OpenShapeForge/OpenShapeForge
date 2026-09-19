@@ -314,6 +314,66 @@ describe("generated schema migration", () => {
   );
 
   test(
+    "a database with no generated-schema row but leftover tables is refused, and no checksum is written",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.legacy_relations (id uuid primary key)`.execute(db);
+        });
+
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("no generated-schema record but is not empty");
+        expect(message).toContain("  - table  erp.legacy_relations");
+        expect(message).toContain("`bun run db:reset`");
+
+        await withDb(url, async (db) => {
+          expect(await tableExists(db, "platform", "schema_migrations")).toBe(false);
+          expect(await tableExists(db, "erp", "relations")).toBe(false);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a declared table left behind without a generated-schema row is refused too",
+    async () => {
+      // CREATE IF NOT EXISTS would silently adopt it and stamp the checksum
+      // onto a table nobody verified.
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.relations (id uuid primary key)`.execute(db);
+        });
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("  - table  erp.relations");
+        await withDb(url, async (db) => {
+          expect(await tableExists(db, "platform", "schema_migrations")).toBe(false);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a built database with a matching checksum is still refused when it carries undeclared schema",
+    async () => {
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          await sql`alter table erp.relations add column legacy_extra text`.execute(db);
+        });
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("schema the manifest does not declare");
+        expect(message).toContain("  - column erp.relations.legacy_extra");
+        expect(message).toContain("`bun run db:reset`");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "a table the manifest does not declare is reported as foreign, with no exemption",
     async () => {
       await withScratchDb(async (url) => {

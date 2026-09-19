@@ -138,6 +138,32 @@ export type UndeclaredSchemaManifestTable = {
  * tests can exercise the classification against a purpose-built schema.
  * Production callers never pass it.
  */
+/**
+ * Every base table in a manifest-covered schema, declared or not, sorted.
+ * "Empty" for the build path means this list is empty: a declared table
+ * without a generated-schema row is a leftover of a build the chain cannot
+ * vouch for, and `CREATE IF NOT EXISTS` over it would stamp a checksum onto
+ * a database nobody has verified.
+ */
+export async function findLiveManifestSchemaTables(
+  db: OpenShapeForgeDatabase,
+  declaredTables: readonly UndeclaredSchemaManifestTable[] = manifest.tables as
+    UndeclaredSchemaManifestTable[],
+): Promise<string[]> {
+  const schemas = [...new Set(declaredTables.map((table) => table.schema))];
+  if (schemas.length === 0) return [];
+  const rows = (
+    await sql<{ table_schema: string; table_name: string }>`
+      select table_schema, table_name
+      from information_schema.tables
+      where table_type = 'BASE TABLE'
+        and table_schema in (${sql.join(schemas)})
+      order by table_schema, table_name
+    `.execute(db)
+  ).rows;
+  return rows.map((row) => `${row.table_schema}.${row.table_name}`);
+}
+
 export async function findUndeclaredDatabaseSchema(
   db: OpenShapeForgeDatabase,
   declaredTables: readonly UndeclaredSchemaManifestTable[] = manifest.tables as
@@ -288,8 +314,8 @@ export function describeGeneratedSchemaDrift(
         ...listUndeclared("table", undeclared.tables),
         ...listUndeclared("column", undeclared.columns),
         "",
-        "`bun run db:migrate` cannot fix this and will refuse: a built database is",
-        "never changed in place. This is what a database shared between git worktrees",
+        "`bun run db:migrate` cannot fix this and refuses it whatever the checksum",
+        "says: nothing is dropped or altered in place. This is what a database shared between git worktrees",
         "looks like once another branch — one that declares more than this one — has",
         "built it. It is not a regression in the branch under test.",
         "",

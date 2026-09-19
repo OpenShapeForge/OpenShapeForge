@@ -132,10 +132,10 @@ the paired systems with it, or expect identities to re-link on next sign-in.
 ## The empty-database bootstrap
 
 `bootstrapIfEmpty` (`apps/api/src/db/bootstrap.ts`) runs the chain if, and
-only if, the database has no generated-schema record **and** nothing in a
-manifest-covered schema that the manifest does not declare. A database that
-is *behind* is left for `db:migrate`; one carrying *foreign* schema —
-another branch's, a legacy layout — is left for `db:reset`. Both probes run
+only if, the database has no generated-schema record **and** no table at all
+in a manifest-covered schema. A database that was built from another
+manifest, and one carrying tables without a record — another branch's, a
+legacy layout — are both left for `db:reset`. Both probes run
 again under the lock, so a second replica finds the database built rather
 than building it twice.
 
@@ -151,16 +151,26 @@ to serve; the schema is the deploy's responsibility there.
 manifest checksum in `platform.schema_migrations` under
 `0001_generated_platform_schema`. On every run:
 
-- **No record** → build: apply `schema.sql`, record the checksum.
-- **Checksum equal** → no-op for the generated step; the invariants, grants
-  and seeds that follow still run, because they are the idempotent parts.
+- **No record, and no table in any manifest-covered schema** → build: apply
+  `schema.sql`, record the checksum.
+- **No record, but tables in a covered schema** → refuse, listing them.
+  `schema.sql` is `CREATE … IF NOT EXISTS` throughout, so applying it over
+  leftovers — a legacy layout, another branch's build, a declared table
+  someone created by hand — would stamp the checksum onto a database nobody
+  verified, and the mismatch refusal would never fire again.
+- **Checksum equal, nothing undeclared** → no-op for the generated step; the
+  invariants, grants and seeds that follow still run, because they are the
+  idempotent parts.
+- **Checksum equal, but a table or column the manifest does not declare** →
+  refuse, listing it. One declared source of truth per table, whatever the
+  checksum says.
 - **Checksum differs** → refuse, before touching anything, with both
   checksums and the remediation: `bun run db:reset`.
 
-That is the whole rule. The chain never asks *what* differs, whether the
-difference would have been safe to add, or whether a table has rows — a
-database is built from the manifest, and one built from another manifest is
-rebuilt. Nothing in the chain can `ALTER` a built database toward the
+That is the whole rule. The chain never asks *what* differs between a built
+database and the manifest, whether the difference would have been safe to
+add, or whether a table has rows — a database is built from the manifest on
+an empty database, and one built from another manifest is rebuilt. Nothing in the chain can `ALTER` a built database toward the
 manifest, and nothing needs to: the cost of a rebuild is a disposable
 database's rows, and the alternative was a migrator that could add columns
 but not change an index, a foreign key's column set or a `CHECK`
@@ -213,10 +223,14 @@ another branch's?
   every migrate. A bare `CREATE FUNCTION` or `ADD CONSTRAINT` fails on the
   second run, is rolled back, and is named in the error; write
   `CREATE OR REPLACE`, `IF NOT EXISTS`, or a guarded DO block.
-- **The checksum is the only gate.** A hand edit that keeps the recorded
-  checksum — a column added with `psql` — is not caught by the chain; the
-  drift probe (`findUndeclaredDatabaseSchema`) and the e2e preflight report
-  it, the chain does not look.
+- **A matching checksum is not the whole story.** A column added with
+  `psql` keeps the recorded checksum; the chain, the e2e preflight and the
+  API's bootstrap all run the undeclared-schema probe
+  (`findUndeclaredDatabaseSchema`) as well, so it is refused or reported
+  rather than carried along. What none of them see is a *declared* object
+  altered in place — a retyped column, a rewritten generated index — because
+  nothing compares a built database's shape to the manifest; that is what
+  the checksum stands for, and a `db:reset` is the only way to be sure.
 
 `(cd apps/api && bun test src/db)` exercises the chain — build, no-op, the
 checksum refusal, the one-source-of-truth invariant, the hand-written

@@ -99,7 +99,7 @@ describe("describeGeneratedSchemaDrift — database ahead of the branch", () => 
     );
     expect(remediation.message).toContain("- table  platform.api_keys");
     // The whole point: it must say migrate cannot help, and offer a real step.
-    expect(remediation.message).toContain("`bun run db:migrate` cannot fix this and will refuse");
+    expect(remediation.message).toContain("`bun run db:migrate` cannot fix this and refuses it whatever the checksum");
     expect(remediation.message).toContain("create database openshapeforge_e2e");
     expect(remediation.message).toContain(
       'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',

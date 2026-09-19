@@ -30,8 +30,10 @@ describe("schema drift preflight", () => {
   test("database generated schema matches the bundled manifest", async () => {
     const db = getRuntime().db;
     const drift = await checkGeneratedSchemaDrift(db);
-    if (drift.status !== "ok") {
-      const undeclared = await findUndeclaredDatabaseSchema(db);
+    // A matching checksum does not rule out a table or column added beside
+    // the manifest, so the undeclared probe runs in every status.
+    const undeclared = await findUndeclaredDatabaseSchema(db);
+    if (drift.status !== "ok" || undeclared.tables.length > 0 || undeclared.columns.length > 0) {
       throw new Error(
         describeGeneratedSchemaDrift(drift, undeclared, {
           databaseName: databaseNameFromUrl(process.env.DATABASE_URL),

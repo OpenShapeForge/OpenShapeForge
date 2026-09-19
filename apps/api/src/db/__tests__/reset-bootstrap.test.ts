@@ -152,6 +152,24 @@ describe("bootstrapIfEmpty", () => {
           expect(await tableExists(db, "erp.relations")).toBe(false);
         });
       });
+
+      await withScratchDb(async (url) => {
+        // A DECLARED table with no generated-schema record is a build nobody
+        // verified; it is refused the same way rather than adopted.
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.relations (id uuid primary key)`.execute(db);
+        });
+        const partial = await withDb(url, (db) => bootstrapIfEmpty(db));
+        expect(partial).toMatchObject({
+          bootstrapped: false,
+          reason: "foreign-schema",
+          undeclared: { tables: ["erp.relations"], columns: [] },
+        });
+        await withDb(url, async (db) => {
+          expect(await recordedChecksum(db)).toBeNull();
+        });
+      });
     },
     TEST_TIMEOUT,
   );

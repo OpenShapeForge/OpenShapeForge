@@ -4831,38 +4831,31 @@ function buildServer(
             'Argument "tool" is required.',
           );
         }
-        // Only a PROJECTED row can start a connection: projection already
-        // enforces publication and audience, so an unpublished or invisible
-        // definition answers exactly like a nonexistent one. Callers often
-        // hold the defining row's KEY rather than the derived name, so the
-        // input is normalized through the same derivation.
+        // Only a row the session could call can start a connection: the
+        // same publication and audience rules the projection applies, so an
+        // unpublished or invisible definition answers exactly like a
+        // nonexistent one. Resolved by key snapshot rather than through
+        // derivedToolsForSession, which leaves compatibility entries — the
+        // ones the Operation runtime lists and executes — out on purpose;
+        // going through it made every personal sign-in on such a deployment
+        // answer NOT_FOUND for a tool the person had just called. Callers
+        // often hold the defining row's KEY rather than the derived name, so
+        // the input is normalized through the same derivation.
         const wantedName = deriveToolName(toolArg) ?? toolArg;
-        const projectedTools = await derivedToolsForSession(
-          db,
-          session,
-          tables,
-          locale,
+        const candidates = await withDbSession(db, session, (trx) =>
+          snapshotDefinitionsByToolName(trx, connectEntry, wantedName),
         );
-        const target = projectedTools.find(
-          (tool) =>
-            tool.name === wantedName && tool.table === connectEntry.table,
-        );
-        if (!target) {
-          throw new HttpError(
-            404,
-            "NOT_FOUND",
-            `No connectable tool "${toolArg}".`,
-          );
-        }
-        const definitionRow = await runtimeRowByFilter(
-          db,
-          session,
-          tables,
-          target.table,
-          {
-            id: target.rowId,
-          },
-        );
+        const definitionRow =
+          candidates.length === 1 &&
+          derivedToolsFromRows(
+            connectEntry,
+            candidates,
+            new Set<string>(),
+            session.roles ?? [],
+            locale,
+          ).some((tool) => tool.name === wantedName)
+            ? candidates[0]!
+            : undefined;
         if (!definitionRow)
           throw new HttpError(
             404,
@@ -4950,19 +4943,33 @@ function buildServer(
           );
         }
 
-        // Resolve every projected definition once, then reuse the per-provider
-        // scope union below. Keeping this outside the provider loop avoids a
+        // Resolve every definition the session may call once — the same
+        // rows the projection would list, read directly so compatibility
+        // entries count too — then reuse the per-provider scope union
+        // below. Keeping this outside the provider loop avoids a
         // providers × definitions × bindings query multiplier on connect.
         const requiredScopesByProvider = new Map<string, Set<string>>();
-        for (const projected of projectedTools) {
-          if (projected.table !== connectEntry.table) continue;
-          const row =
-            projected.rowId === target.rowId
-              ? definitionRow
-              : await runtimeRowByFilter(db, session, tables, projected.table, {
-                  id: projected.rowId,
-                });
-          if (!row) continue;
+        const definitionTable = tables.get(connectEntry.table);
+        const callableRows: Record<string, unknown>[] = [];
+        if (definitionTable) {
+          const allRows = (
+            await listGeneratedEntitiesForTable(db, session, definitionTable, {
+              limit: DERIVED_TOOLS_ROW_LIMIT,
+            })
+          ).rows.map((row) => serializeRow(definitionTable, row));
+          const rowsById = new Map(allRows.map((row) => [String(row.id), row]));
+          for (const tool of derivedToolsFromRows(
+            connectEntry,
+            allRows,
+            new Set<string>(),
+            session.roles ?? [],
+            locale,
+          )) {
+            const row = rowsById.get(tool.rowId);
+            if (row) callableRows.push(row);
+          }
+        }
+        for (const row of callableRows) {
           try {
             const rowProviders = new Set<string>();
             const rowScopes: string[] = [];

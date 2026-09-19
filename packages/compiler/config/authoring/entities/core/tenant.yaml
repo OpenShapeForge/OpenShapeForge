@@ -20,11 +20,7 @@ authorization:
     read:
       - Organization.All.Read
       - Organization.All.ReadWrite
-    create:
-      - Organization.All.ReadWrite
     update:
-      - Organization.All.ReadWrite
-    delete:
       - Organization.All.ReadWrite
 fields:
   - key: slug

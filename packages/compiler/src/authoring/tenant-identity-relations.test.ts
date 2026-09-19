@@ -41,3 +41,30 @@ test("platform tenancy and authored tenant references keep distinct storage cont
   const owner = active.entities.find(entity => entity.contract.entity.name === "Tenant")!.contract;
   expect(owner.model.relationships.find(relationship => relationship.key === "tenantSettings")).toMatchObject({ target: "TenantSetting", kind: "hasMany", inverse: "tenantId", ownership: "reference", foreignKey: "tenant_id" });
 }, 30_000);
+
+test("the Tenant registry row is provisioned, never created or deleted through a generated surface", async () => {
+  const root = join(import.meta.dir, "../../../..");
+  const active = await loadActivePlatformCompile(root);
+  const artifacts = await collectAllArtifacts(root);
+  const tenants = active.manifest.tables.find(table => table.schema === "erp" && table.name === "tenants")!;
+
+  // The contract itself: no create, no delete, and no role that could grant either.
+  expect(tenants.source?.crud?.operations).toEqual({ list: true, get: true, create: false, update: true, delete: false });
+  expect(tenants.source?.graphql?.operations).toMatchObject({ create: false, delete: false });
+  expect(tenants.source?.authorization?.roles).toMatchObject({ create: [], delete: [] });
+
+  // GraphQL, MCP and REST all gate an entity's operations on those flags
+  // (graphql/generated-entity-schema.ts, mcp/generated-mcp-server.ts,
+  // rest/generated-rest-routes.ts); the runtime manifest carries them.
+  const manifest = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("manifest.json"))!.contents);
+  const runtimeTable = manifest.tables.find((table: { name: string }) => table.name === "erp.tenants");
+  expect(runtimeTable.source.crud.operations).toMatchObject({ create: false, delete: false });
+  expect(runtimeTable.constraints).toContainEqual(expect.objectContaining({ expression: "id = tenant_id" }));
+  const openapi = artifacts.groups.db.find(artifact => artifact.path.endsWith("openapi.json"))!.contents;
+  expect(openapi).not.toMatch(/"operationId": "(create|delete)Tenant"/);
+
+  // Web: no generated page or action shard, and no role list that would light a create or delete control.
+  expect(artifacts.groups.ui.some(artifact => /\/(tenant)\.tsx?$|\/tenant\//.test(artifact.path))).toBe(false);
+  const webManifest = artifacts.groups.ui.find(artifact => artifact.path.endsWith("compiler/entity-manifest.ts"))!.contents;
+  expect(webManifest).toContain('"tenant": {\n    "slug": "tenant",\n    "entity": "Tenant",\n    "required": {\n      "read": [\n        "Organization.All.Read",\n        "Organization.All.ReadWrite"\n      ],\n      "create": [],');
+}, 30_000);

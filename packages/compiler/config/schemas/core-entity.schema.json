@@ -1756,6 +1756,16 @@
         "unique": {
           "type": "boolean",
           "description": "Emits CREATE UNIQUE INDEX instead of CREATE INDEX."
+        },
+        "where": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["field", "equals"],
+          "description": "Makes the index partial: only rows whose field equals the value take part, so a unique index enforces at most one such row per key (`{ field: isDefault, equals: true }`).",
+          "properties": {
+            "field": { "$ref": "#/$defs/fieldKey" },
+            "equals": { "type": ["boolean", "string", "number"] }
+          }
         }
       }
     },

@@ -16,6 +16,8 @@ authorization:
 displayTemplate: "{{channel}} · {{locale}}"
 indexes:
   - { name: template_variants_tenant_channel_locale_uidx, fields: [tenantId, template, channel, locale], unique: true }
+  # At most one default variant per channel of a template.
+  - { name: template_variants_tenant_channel_default_uidx, fields: [tenantId, template, channel], unique: true, where: { field: isDefault, equals: true } }
 fields:
   - key: template
     label: { en: Template, nl: Template }

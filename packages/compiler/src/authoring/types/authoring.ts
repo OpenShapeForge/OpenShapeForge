@@ -184,6 +184,12 @@ export interface AuthoredEntityIndex {
    * when `tenantId` is not among the fields: uniqueness is per tenant.
    */
   unique?: boolean;
+  /**
+   * Partial index: only rows whose field equals the value take part, so a
+   * unique index enforces at most one such row per key
+   * (`{ field: isDefault, equals: true }`).
+   */
+  where?: { field: string; equals: boolean | string | number };
 }
 
 export type CrudOperationKey = "list" | "get" | "create" | "update" | "delete";

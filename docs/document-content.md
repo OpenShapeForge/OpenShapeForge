@@ -91,7 +91,8 @@ Materialization asks for a channel and a locale. The channel is exact; the
 locale is served by language: the variant with the exact locale, else one of
 the same language subtag (`nl-NL` is served by `nl`; the bare language wins
 over another region), else the variant the template authors as the channel's
-default (`TemplateVariant.isDefault`, at most one per channel). A channel with
+default (`TemplateVariant.isDefault`, at most one per channel: a partial unique
+index, authored as `indexes[].where: { field: isDefault, equals: true }`). A channel with
 none of those refuses with `UNSUPPORTED_LOCALE`; another channel is never
 substituted (`packages/documents/src/content/validation.ts`,
 `selectContentTemplateVariant`). The result keeps the requested `locale`; the

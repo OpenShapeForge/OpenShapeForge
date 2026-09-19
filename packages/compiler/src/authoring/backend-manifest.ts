@@ -565,9 +565,17 @@ function compileEntityIndexes(
   candidate: CompiledCandidate,
   tenantScoped: boolean,
   columnsByField: Map<string, ColumnDefinition>,
-): Array<{ name: string; columns: string[]; unique?: boolean }> {
+): Array<{ name: string; columns: string[]; unique?: boolean; where?: string }> {
   const authored = candidate.contract.entity.indexes ?? [];
-  const compiled: Array<{ name: string; columns: string[]; unique?: boolean }> = [];
+  const compiled: Array<{ name: string; columns: string[]; unique?: boolean; where?: string }> = [];
+  const literal = (value: boolean | string | number): string => {
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) throw new Error(`Entity "${candidate.contract.entity.name}" index predicate value must be finite.`);
+      return String(value);
+    }
+    return `'${value.replace(/'/g, "''")}'`;
+  };
   for (const index of authored) {
     const resolvedColumns: string[] = [];
     for (const fieldKey of index.fields) {
@@ -586,10 +594,27 @@ function compileEntityIndexes(
     if (index.unique && tenantScoped && !resolvedColumns.includes("tenant_id")) {
       resolvedColumns.unshift("tenant_id");
     }
+    let where: string | undefined;
+    if (index.where) {
+      const column = columnsByField.get(index.where.field);
+      if (!column) {
+        throw new Error(
+          `Entity "${candidate.contract.entity.name}" index "${index.name}" predicate references unknown field "${index.where.field}".`,
+        );
+      }
+      const expected = column.type === "boolean" ? "boolean" : ["integer", "bigint", "numeric"].includes(column.type) ? "number" : "string";
+      if (typeof index.where.equals !== expected) {
+        throw new Error(
+          `Entity "${candidate.contract.entity.name}" index "${index.name}" predicate value must be a ${expected} for field "${index.where.field}".`,
+        );
+      }
+      where = `"${column.name}" = ${literal(index.where.equals)}`;
+    }
     compiled.push({
       name: index.name,
       columns: resolvedColumns,
       ...(index.unique ? { unique: true } : {}),
+      ...(where ? { where } : {}),
     });
   }
   return compiled;

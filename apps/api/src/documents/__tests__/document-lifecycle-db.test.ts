@@ -133,6 +133,15 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     expect((await template(ids.template)).lifecycle_status).toBe("draft");
   }, 60_000);
 
+  test("a template has at most one default variant per channel", async () => {
+    const ids = await seedTemplate();
+    await sql`update erp.template_variants set is_default = true where id = ${ids.variant}::uuid`.execute(privileged());
+    await sql`insert into erp.template_variants (tenant_id, template_id, channel, locale, is_default) values (${tenant}::uuid, ${ids.template}::uuid, 'email', 'nl', true)`.execute(privileged());
+    await expect(sql`insert into erp.template_variants (tenant_id, template_id, channel, locale, is_default) values (${tenant}::uuid, ${ids.template}::uuid, 'document', 'en', true)`.execute(privileged()))
+      .rejects.toThrow(/template_variants_tenant_channel_default_uidx/);
+    await sql`insert into erp.template_variants (tenant_id, template_id, channel, locale, is_default) values (${tenant}::uuid, ${ids.template}::uuid, 'document', 'en', false)`.execute(privileged());
+  }, 60_000);
+
   test("a snapshot walks the authored ownership tree, never a cascading bookkeeping table", async () => {
     const { context } = platformFor(editor);
     const ids = await seedTemplate();

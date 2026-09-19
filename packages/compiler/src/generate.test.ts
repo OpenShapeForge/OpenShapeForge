@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest } from "./load-manifest.js";
+import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
 const manifest: PlatformSchemaManifest = {
@@ -112,9 +113,13 @@ describe("platform schema generator", () => {
             {
               name: "primary_group_id",
               type: "uuid",
-              references: { schema: "erp", table: "relation_groups", column: "id" },
+              references: {
+                schema: "erp", table: "relation_groups", column: "id",
+                localColumns: ["tenant_id", "primary_group_id"], targetColumns: ["tenant_id", "id"],
+              },
             },
           ],
+          indexes: [{ name: "relations_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true }],
         },
         {
           schema: "erp",
@@ -126,9 +131,13 @@ describe("platform schema generator", () => {
             {
               name: "relation_id",
               type: "uuid",
-              references: { schema: "erp", table: "relations", column: "id" },
+              references: {
+                schema: "erp", table: "relations", column: "id",
+                localColumns: ["tenant_id", "relation_id"], targetColumns: ["tenant_id", "id"],
+              },
             },
           ],
+          indexes: [{ name: "relation_groups_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true }],
         },
       ],
     };
@@ -140,8 +149,8 @@ describe("platform schema generator", () => {
     expect(sql.indexOf('CREATE TABLE IF NOT EXISTS "erp"."relation_groups"')).toBeLessThan(
       sql.indexOf("-- OpenShapeForge generated foreign keys"),
     );
-    expect(sql).toContain('ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("primary_group_id")');
-    expect(sql).toContain('ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("relation_id")');
+    expect(sql).toContain('ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("tenant_id", "primary_group_id")');
+    expect(sql).toContain('ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("tenant_id", "relation_id")');
   });
 
   it("emits multi-axis rowScope policy with OR-combined predicates and supporting indexes", () => {
@@ -2163,9 +2172,18 @@ tables:
   - schema: platform
     name: tenants
     tenantScoped: false
+    tenantIdentityColumn: id
     columns:
       - { name: id, type: uuid, primaryKey: true }
-      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          localColumns: [id, relation_id]
+          targetColumns: [tenant_id, id]
 `,
       "utf8",
     );
@@ -2185,13 +2203,18 @@ tables:
           { name: "tenant_id", type: "uuid", required: true },
         ],
       };
-      const sql = generateArtifacts({ ...loaded, tables: [...loaded.tables, relations] }).find(
+      const merged = { ...loaded, tables: [...loaded.tables, relations] };
+      ensureCompositeReferenceKeys(merged);
+      expect(relations.indexes).toEqual([
+        { name: "relations_tenant_id_id_key", columns: ["tenant_id", "id"], unique: true },
+      ]);
+      const sql = generateArtifacts(merged).find(
         (artifact) => artifact.path.endsWith("schema.sql"),
       )!.contents;
       expect(sql).toContain(
-        'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("relation_id")',
+        'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("id", "relation_id")',
       );
-      expect(sql).toContain('REFERENCES "erp"."relations"("id") ON DELETE SET NULL;');
+      expect(sql).toContain('REFERENCES "erp"."relations"("tenant_id", "id") ON DELETE SET NULL;');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

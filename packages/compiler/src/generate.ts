@@ -11,6 +11,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { assertTenantBoundReferences } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
@@ -936,35 +937,11 @@ function renderManifestJson(
  * a build failure that names the column rather than a foreign key Postgres
  * refuses at migrate time.
  */
-function assertReferenceTargets(manifest: PlatformSchemaManifest): void {
-  const tables = new Map(
-    manifest.tables.map((table) => [`${table.schema}.${table.name}`, table]),
-  );
-  for (const table of manifest.tables) {
-    for (const column of table.columns) {
-      const reference = column.references;
-      if (!reference) continue;
-      const targetName = `${reference.schema}.${reference.table}`;
-      const target = tables.get(targetName);
-      if (!target) {
-        throw new Error(
-          `${table.schema}.${table.name}.${column.name} references unknown table ${targetName}.`,
-        );
-      }
-      if (!target.columns.some((candidate) => candidate.name === reference.column)) {
-        throw new Error(
-          `${table.schema}.${table.name}.${column.name} references unknown column ${targetName}.${reference.column}.`,
-        );
-      }
-    }
-  }
-}
-
 export function generateArtifacts(
   manifest: PlatformSchemaManifest,
   options: GenerateArtifactsOptions = {},
 ): GeneratedArtifact[] {
-  assertReferenceTargets(manifest);
+  assertTenantBoundReferences(manifest);
   const source = options.source ?? defaultSource;
   const sql = `${sqlGeneratedHeader(source)}
 

@@ -243,13 +243,13 @@ describe("schema-3 field relationship storage", () => {
   it("refuses malformed composite reference metadata and missing unique targets", () => {
     const missingColumns = compileRelations();
     source(missingColumns).columns.find((column) => column.name === "owner_id")!.references!.localColumns = ["missing", "owner_id"];
-    expect(() => sql(missingColumns)).toThrow("Invalid composite foreign key target");
+    expect(() => sql(missingColumns)).toThrow("must reuse its own tenant_id");
     const missingUnique = compileRelations();
     target(missingUnique).indexes = [];
     expect(() => sql(missingUnique)).toThrow("requires a matching unique index");
     const unpaired = compileRelations();
     delete source(unpaired).columns.find((column) => column.name === "owner_id")!.references!.targetColumns;
-    expect(() => sql(unpaired)).toThrow("Invalid composite foreign key");
+    expect(() => sql(unpaired)).toThrow("by (owner_id) alone");
   });
 
   it("migrated fixtures cannot retain the legacy missing-target fallback", () => {

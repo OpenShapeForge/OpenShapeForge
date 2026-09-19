@@ -160,6 +160,8 @@ export {
   buildRoleComposites,
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
+  type RealmRoleComposites,
+  type RoleCompositeMember,
   type RoleCompositesByRealm,
 } from "./authoring/role-composites.js";
 export type {

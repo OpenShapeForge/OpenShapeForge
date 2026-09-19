@@ -214,10 +214,36 @@ keycloak:
   #           user.attribute: department
   #           syncMode: FORCE
 
-# Product personas, groups and users are intentionally absent from this reusable
-# base. A host owns those and can add audience-scoped `clientRoleComposites`,
-# while development identities belong in a test-only authoring layer.
-#
+# Groups and users are intentionally absent from this reusable base; development
+# identities belong in a test-only authoring layer. The two organization
+# personas below are the exception: `org_admin` and `org_employee` are the
+# names an invitation admits a person as (apps/api/src/auth/employee-invitations.ts)
+# and are recorded on the person's membership row for that organization. The
+# API expands them through this realm's composites (the generated
+# role-composites artifact) exactly as Keycloak would have expanded them into
+# a token, so what an administrator or an employee may do is declared here —
+# and a host widens either list with an `authorizationPatch` (role lists union).
+clientRoleComposites:
+  erp-provider:
+    org_admin:
+      description: Organization administrator — invited or assigned per organization
+      composites:
+        erp-provider:
+          - Organization.All.ReadWrite
+          - Organization.All.Read
+          - General.All.ReadWrite
+          - General.All.Read
+          - Relations.All.ReadWrite
+          - Relations.All.Read
+          - Platform.ApiKeys.Manage
+          - Platform.Jobs.Manage
+    org_employee:
+      description: Organization employee — invited or assigned per organization
+      composites:
+        erp-provider:
+          - General.All.Read
+          - Relations.All.Read
+
 # Hand-authored client roles below complement roles derived from entity YAML.
 clientRoles:
   erp-provider:

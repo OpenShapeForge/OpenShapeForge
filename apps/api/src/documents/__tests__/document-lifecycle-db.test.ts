@@ -148,6 +148,31 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     expect((await template(ids.template)).lifecycle_status).toBe("draft");
   }, 60_000);
 
+  test("a block drafts the head of the tree it sits in: a template block the Template, a document block the Document", async () => {
+    const { context, handlers } = platformFor(editor);
+    const ids = await seedTemplate();
+    const first = await publishTemplate(context, ids.template);
+    const documentId = await createDocument();
+    await linked(handlers, context, { id: documentId, templateVersionId: first, parameters: { name: "Reader" } });
+    await publishDocument(context, documentId);
+    expect((await template(ids.template)).lifecycle_status).toBe("published");
+    expect((await document(documentId)).lifecycle_status).toBe("published");
+    const session = dbInput(editor);
+    const blocks = tableName("Block");
+
+    // The template block's row has variant_id set and document_variant_id null: only the Template is drafted.
+    await updateGeneratedEntity(restricted(), session, { table: blocks, id: ids.first, values: { values: { text: "Template edit" } } });
+    expect((await template(ids.template)).lifecycle_status).toBe("draft");
+    expect((await document(documentId)).lifecycle_status).toBe("published");
+
+    // The document block's row has the other owner set: only the Document is drafted.
+    await sql`update erp.templates set lifecycle_status = 'published' where id = ${ids.template}::uuid`.execute(privileged());
+    const documentBlock = (await variantBlocks((await variant(documentId, "document", "nl")).id))[1]!;
+    await updateGeneratedEntity(restricted(), session, { table: blocks, id: documentBlock.id, values: { values: { text: "Document edit" } } });
+    expect((await document(documentId)).lifecycle_status).toBe("draft");
+    expect((await template(ids.template)).lifecycle_status).toBe("published");
+  }, 60_000);
+
   test("a template has at most one default variant per channel", async () => {
     const ids = await seedTemplate();
     await sql`update erp.template_variants set is_default = true where id = ${ids.variant}::uuid`.execute(privileged());

@@ -240,6 +240,15 @@ relationships:
     expect(report.legacy.hasManyRemoved).toEqual(["Parent.kids"]);
   });
 
+  test("a hasMany label equal to the child's derived plural folds to nothing, one equal to the owner's does not", () => {
+    const matchingChild = legacyParent.replace("label: { en: Kids, nl: Kinderen }", "label: { en: Childs, nl: Kind }");
+    const matchingOwner = legacyParent.replace("label: { en: Kids, nl: Kinderen }", "label: { en: Parents, nl: Ouder }");
+    const folded = migrated({ "a/entities/child.yaml": legacyChild, "a/entities/parent.yaml": matchingChild });
+    expect(folded.parsed["a/entities/child.yaml"].fields[1].relationship).toEqual({ inverse: { key: "kids" } });
+    const kept = migrated({ "a/entities/child.yaml": legacyChild, "a/entities/parent.yaml": matchingOwner });
+    expect(kept.parsed["a/entities/child.yaml"].fields[1].relationship).toEqual({ inverse: { key: "kids", label: { en: "Parents", nl: "Ouder" } } });
+  });
+
   test("without a baseline the created field is optional and reported as unknown", () => {
     const { report } = migrated({ "a/entities/child.yaml": legacyChild, "a/entities/parent.yaml": legacyParent });
     expect(report.legacy.fieldsCreated[0]).toMatchObject({ required: false, provenance: "unknown" });

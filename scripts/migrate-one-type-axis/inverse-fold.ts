@@ -49,12 +49,6 @@ export function isValueDefinition(root: YAMLMap): boolean {
   return yaml.isScalar(base) && base.value === false && !findFieldByKey(root, "id");
 }
 
-export function entityLabels(entity: EntityRef): unknown {
-  const labels = entity.root.get("labels", true);
-  if (labels) return toPlain(labels);
-  return { en: getString(entity.root, "title") ?? entity.name };
-}
-
 /** The label a derived inverse collection would carry: the child's plural labels. */
 export function derivedCollectionLabel(entity: EntityRef): unknown {
   const labels = entity.root.get("labels", true);

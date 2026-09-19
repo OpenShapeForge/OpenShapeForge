@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import Ajv2020 from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { operationI18nKeyword, operationInputFieldsKeyword, operationReferenceKeyword } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
@@ -15,6 +12,7 @@ import { collectionManagedFields } from "./collection-policy.js";
 import { createGeneratedEntityInTransaction } from "./mutations.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
+import { createOperationAjv } from "../operation-ajv.js";
 import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInTransaction } from "./entity-value-io.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
@@ -30,13 +28,7 @@ export type CollectionMutationRequest = {
 };
 export type CollectionMutationResult = { parent: GeneratedEntityRow; childId: string; orderedIds: string[] };
 
-const ajv = new Ajv2020.default({ strict: true, allErrors: true });
-(addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
-ajv.addKeyword(operationI18nKeyword);
-ajv.addKeyword(operationInputFieldsKeyword);
-ajv.addKeyword(operationReferenceKeyword);
-ajv.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
-ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
+const ajv = createOperationAjv();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const unsupported = (message: string): never => { throw generatedCrudError(message, "RELATION_COLLECTION_MUTATION_UNSUPPORTED"); };
 const invalid = (message: string): never => { throw generatedCrudError(message, "BAD_USER_INPUT"); };

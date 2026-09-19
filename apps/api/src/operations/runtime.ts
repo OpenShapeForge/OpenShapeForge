@@ -7,9 +7,7 @@ import {
   controlSessionHttpError,
   resolveControlSession,
 } from "../control/control-session.js";
-import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
-import addFormats from "ajv-formats";
-import { operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword } from "@openshapeforge/operations";
+import { type ValidateFunction } from "ajv/dist/2020.js";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Transaction } from "kysely";
@@ -71,6 +69,7 @@ import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
+import { createOperationAjv } from "./operation-ajv.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
@@ -148,21 +147,8 @@ const catalog = rawCatalog as unknown as {
   operations: OperationContract[];
   entityOperations?: EntityOperationContract[];
 };
-function operationAjv(coerceTypes = false) {
-  const instance = new Ajv2020.default({ strict: true, allErrors: true, coerceTypes });
-  (addFormats as unknown as (target: typeof instance) => unknown)(instance);
-  // Presentation-only binding used by generated forms. It does not validate
-  // or authorize a value, but strict AJV must recognize the canonical keyword.
-  instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
-  instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
-  instance.addKeyword(operationReferenceKeyword);
-  instance.addKeyword(operationI18nKeyword);
-  instance.addKeyword(operationInputFieldsKeyword);
-  return instance;
-}
-
-const ajv = operationAjv();
-const queryAjv = operationAjv(true);
+const ajv = createOperationAjv();
+const queryAjv = createOperationAjv(true);
 const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
 const defaultErrorSchema = {
   type: "object",

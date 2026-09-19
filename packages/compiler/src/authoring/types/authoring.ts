@@ -175,11 +175,14 @@ export interface AuthoredEntityIndex {
   name: string;
   /**
    * Entity field keys (camelCase) that compose the index. The compiler
-   * resolves each to the corresponding persisted column name. For
-   * tenant-scoped uniqueness include `tenantId` first.
+   * resolves each to the corresponding persisted column name.
    */
   fields: string[];
-  /** When true, generates `CREATE UNIQUE INDEX` instead of `CREATE INDEX`. */
+  /**
+   * When true, generates `CREATE UNIQUE INDEX` instead of `CREATE INDEX`.
+   * On a tenant-scoped entity the compiler leads the index with `tenant_id`
+   * when `tenantId` is not among the fields: uniqueness is per tenant.
+   */
   unique?: boolean;
 }
 
@@ -746,7 +749,7 @@ export interface CoreEntity {
   description?: string | LocalizedText;
   language: string;
   labels?: LocalizedText;
-  /** Plural labels; a derived inverse collection carries these, or the pluralised `labels` when absent. */
+  /** Plural labels carried by derived inverse collections; absent, the English label is pluralised and other locales keep their singular. */
   pluralLabels?: LocalizedText;
   domains?: string[];
   retention?: RetentionPolicy;

@@ -272,6 +272,12 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   [api.md](api.md#the-worker-axis). The manifest loader validates the field
   for YAML-authored tables; the emitter repeats both checks, because
   `contributePlatformTables` never passes through the loader.
+- A column `references` into a **tenant-scoped** table must bind the tenant:
+  `references: { schema, table, column: "id", localColumns: ["tenant_id",
+  "<column>"], targetColumns: ["tenant_id", "id"] }`. A global table names
+  its own tenant column in `localColumns` instead. The emitter refuses the
+  single-column form and provisions the `(tenant_id, id)` unique key on the
+  target; the workflow plugin's `tenantBound()` helper shows the shape.
 - A contributed table must declare **`workerDml: true`** if a worker touches it
   at all, even inside a single tenant's session. A worker connects as its own
   PostgreSQL role, and that role gets an enumerated grant rather than the app

@@ -76,7 +76,7 @@
       "$ref": "#/$defs/localizedText"
     },
     "pluralLabels": {
-      "description": "Plural form of labels; carried by derived inverse collections. Absent: each label is pluralised.",
+      "description": "Plural form of labels; carried by derived inverse collections. Absent: the English label is pluralised and other locales keep their singular.",
       "$ref": "#/$defs/localizedText"
     },
     "domains": {

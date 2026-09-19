@@ -98,7 +98,17 @@ tables:
       # db/migrations/organization-relation-link.ts adds the permissive UPDATE
       # policy the generated registry policy (WITH CHECK app.bypass_rls() only)
       # would otherwise refuse.
-      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          # The Relation must belong to this very tenant: the registry's own
+          # id is the tenant the referenced row is fenced by.
+          localColumns: [id, relation_id]
+          targetColumns: [tenant_id, id]
     indexes:
       - name: tenants_slug_uidx
         columns: [slug]
@@ -260,7 +270,15 @@ tables:
       # so a parent cannot be deleted while children reference it (the closure
       # trigger relies on reparent/remove-first — see
       # apps/api/src/db/migrations/core-invariants.ts).
-      - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
+      - name: parent_id
+        type: uuid
+        references:
+          schema: platform
+          table: org_unit
+          column: id
+          onDelete: RESTRICT
+          localColumns: [tenant_id, parent_id]
+          targetColumns: [tenant_id, id]
       - { name: name, type: text, required: true }
       # This unit's segment of the Keycloak Organization path: the SPI's
       # `organizationPath` (packages/keycloak-spi/.../OpenShapeForgeResource.java)
@@ -403,7 +421,16 @@ tables:
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
-      - { name: installation_id, type: uuid, required: true, references: { schema: platform, table: connector_installations, column: id, onDelete: CASCADE } }
+      - name: installation_id
+        type: uuid
+        required: true
+        references:
+          schema: platform
+          table: connector_installations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, installation_id]
+          targetColumns: [tenant_id, id]
       - { name: field_key, type: text, required: true }
       - { name: ciphertext, type: text, required: true }
       - { name: key_id, type: text, required: true }
@@ -499,7 +526,18 @@ tables:
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
-      - { name: integration_id, type: uuid, required: true, references: { schema: platform, table: api_key_integrations, column: id, onDelete: CASCADE } }
+      # Bound to the tenant this credential authenticates into: a key can
+      # never resolve to another tenant's integration.
+      - name: integration_id
+        type: uuid
+        required: true
+        references:
+          schema: platform
+          table: api_key_integrations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, integration_id]
+          targetColumns: [tenant_id, id]
       # The public half of the credential, carried in the token itself and the
       # only column the authentication path searches on.
       - { name: lookup_id, type: text, required: true }
@@ -798,9 +836,25 @@ tables:
     columns:
       - { name: identity_id, type: uuid, primaryKey: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
-      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: CASCADE } }
+      - name: relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, relation_id]
+          targetColumns: [tenant_id, id]
       - { name: status, type: text, required: true }
-      - { name: candidate_relation_id, type: uuid, references: { schema: erp, table: relations, column: id, onDelete: SET NULL } }
+      - name: candidate_relation_id
+        type: uuid
+        references:
+          schema: erp
+          table: relations
+          column: id
+          onDelete: SET NULL
+          localColumns: [tenant_id, candidate_relation_id]
+          targetColumns: [tenant_id, id]
       - { name: linked_at, type: timestamptz }
       # 'jit' for the just-in-time path, otherwise the platform.identities id
       # of whoever linked: the person (confirm_my_link) or an administrator.
@@ -943,7 +997,7 @@ tables:
     workerAccess: job-worker
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
-      - { name: tenant_id, type: uuid, required: true }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: kind, type: text, required: true }
       # The verified user who enqueued the job. The worker runs the handler
       # under a tenant session for this user, so every row the handler touches
@@ -1058,9 +1112,10 @@ tables:
       - { name: created_at, type: timestamptz, required: true, default: now() }
 
   # blueprint_copies: provenance of a record a tenant created from a
-  # blueprint — which version, from which blueprint tenant. The composite
+  # blueprint — which version, from which blueprint tenant. The four-column
   # reference into blueprint_versions and the two-tenants-differ check are
-  # in blueprints.ts; the manifest expresses single-column references only.
+  # in blueprints.ts: the manifest's column references pair a column with a
+  # tenant, and this key spans three business columns beside the tenant.
   - schema: platform
     name: blueprint_copies
     tenantScoped: false

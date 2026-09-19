@@ -19,7 +19,7 @@ The runtime-owned platform bookkeeping (`platform.identities`,
 `platform.update_notices`, `platform.operation_execution_receipts`, the
 blueprint tables, `platform.system_bypass_audit`, …) is declared in
 `platform-schema.yaml` like every other table. What the manifest cannot
-express — check constraints, compound and cross-module foreign keys,
+express — check constraints, foreign keys over anything but a tenant pair,
 expression indexes, functions, triggers, `SECURITY DEFINER` ownership and
 every bespoke row-level policy — lives in idempotent DDL under
 `apps/api/src/db/migrations/`, applied after the generated step on every run.
@@ -45,8 +45,10 @@ the DDL itself:
 1. **App helpers** — the `app` schema and the RLS helper functions every
    policy references.
 2. **Generated schema** — `schema.sql`: every table, index, generated policy
-   and single-column foreign key, from the one declaration. On a built
-   database this is the checksum no-op, or the refusal (below).
+   and foreign key, from the one declaration. A key into a tenant-scoped
+   table is always `(tenant, column) -> (tenant_id, id)`; the compiler
+   refuses any other shape (`packages/compiler/src/tenant-bound-references.ts`).
+   On a built database this is the checksum no-op, or the refusal (below).
 3. **Invariants** — plain idempotent DDL, no ledger, no version:
    - `core-invariants.ts`: the org-unit closure trigger, the document
      authority guards and tenant-qualified compound keys, the logical

@@ -23,6 +23,7 @@ import {
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
 import { buildCoreReferentiedataSnapshot, loadCoreReferentiedataCatalog } from "./core-referentiedata-artifacts.js";
 import { materializeEntityInputSources } from "./entity-input-sources.js";
+import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
 export const activeManifestSource =
   "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
@@ -73,7 +74,7 @@ export function mergePromotedTables(
     ]),
   );
 
-  return {
+  const merged: PlatformSchemaManifest = {
     ...baseManifest,
     ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
     description:
@@ -85,6 +86,11 @@ export function mergePromotedTables(
       ...retainedTables.slice(insertAt),
     ],
   };
+  // Platform and plugin tables declare their compound references in YAML or
+  // TypeScript; the unique target key such a reference needs is provisioned
+  // here, once every table is in one manifest.
+  ensureCompositeReferenceKeys(merged);
+  return merged;
 }
 
 export type ActivePlatformCompile = {

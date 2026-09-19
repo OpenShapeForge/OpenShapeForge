@@ -261,6 +261,32 @@ describe("tenant provisioning", () => {
           },
         ]);
 
+        // The ERP registry row is the same tenant: id = tenant_id = the
+        // platform id, which is what CHECK (id = tenant_id) and every key
+        // into erp.tenants rely on.
+        const erp = await sql<{ id: string; tenant_id: string; slug: string; name: string }>`
+          select id::text as id, tenant_id::text as tenant_id, slug, name from erp.tenants
+        `.execute(db);
+        expect(erp.rows).toEqual([
+          { id: result.tenant.id, tenant_id: result.tenant.id, slug: "acme", name: "Acme Corporation" },
+        ]);
+
+        // A tenant session that creates a registry row without naming an id
+        // gets its own tenant as the id: the default is the session tenant,
+        // not a random UUID, so the check holds without the caller knowing.
+        await db.connection().execute(async (conn) => {
+          const other = randomUUID();
+          await sql`select set_config('app.tenant_id', ${other}, false)`.execute(conn);
+          await sql`insert into erp.tenants (tenant_id, slug, name) values (${other}, 'derived', 'Derived')`.execute(conn);
+          const derived = await sql<{ id: string; tenant_id: string }>`
+            select id::text as id, tenant_id::text as tenant_id from erp.tenants where slug = 'derived'
+          `.execute(conn);
+          expect(derived.rows).toEqual([{ id: other, tenant_id: other }]);
+          await expect(
+            sql`insert into erp.tenants (id, tenant_id, slug, name) values (${randomUUID()}, ${other}, 'foreign', 'Foreign')`.execute(conn),
+          ).rejects.toThrow(/tenants_tenant_identity_check/);
+        });
+
         // Two bypass sessions, both completed: the row write and the link.
         expect(await completedAuditReasons(db)).toEqual([
           'control-plane: create tenant slug="acme"',

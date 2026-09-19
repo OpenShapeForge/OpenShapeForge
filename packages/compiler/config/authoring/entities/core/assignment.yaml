@@ -113,10 +113,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Assignments
-          nl: Toewijzingen
   - key: queueId
     label:
       en: Queue
@@ -127,10 +123,6 @@ fields:
     osfType: WorkQueue
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Assignments
-          nl: Toewijzingen
   - key: assigneeId
     label:
       en: Assignee

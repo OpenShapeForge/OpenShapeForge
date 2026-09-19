@@ -132,25 +132,28 @@ describe("plugin schema migrations", () => {
   });
 
   test("renders deferred compound foreign keys explicitly", () => {
+    const tenantColumn = { name: "tenant_id", type: "uuid", required: true } as const;
     const result = registry([
       table("requests", {
+        columns: [idColumn, tenantColumn],
         constraints: [
           {
             version: "0001_request-key",
-            name: "requests_id_key",
+            name: "requests_tenant_id_key",
             kind: "unique",
-            columns: ["id"],
+            columns: ["tenant_id", "id"],
           },
         ],
       }),
       table("lines", {
+        columns: [idColumn, tenantColumn, { name: "request_id", type: "uuid" }],
         constraints: [
           {
             version: "0002_request-fk",
             name: "lines_request_fk",
             kind: "foreignKey",
-            columns: ["id"],
-            references: { schema: "cpq", table: "requests", columns: ["id"] },
+            columns: ["tenant_id", "request_id"],
+            references: { schema: "cpq", table: "requests", columns: ["tenant_id", "id"] },
             deferrable: true,
             initiallyDeferred: true,
           },
@@ -158,8 +161,23 @@ describe("plugin schema migrations", () => {
       }),
     ]);
     expect(result.migrations[1]!.sql).toContain(
-      'REFERENCES "cpq"."requests" ("id") DEFERRABLE INITIALLY DEFERRED',
+      'REFERENCES "cpq"."requests" ("tenant_id", "id") DEFERRABLE INITIALLY DEFERRED',
     );
+
+    // A tenant-scoped row referencing another by id alone is refused here as
+    // it is for column references: the registry is the other foreign-key surface.
+    expect(() =>
+      registry([
+        table("requests", { columns: [{ ...idColumn, primaryKey: true }, tenantColumn] }),
+        table("lines", {
+          columns: [idColumn, tenantColumn, { name: "request_id", type: "uuid" }],
+          constraints: [{
+            version: "0002_request-fk", name: "lines_request_fk", kind: "foreignKey",
+            columns: ["request_id"], references: { schema: "cpq", table: "requests", columns: ["id"] },
+          }],
+        }),
+      ]),
+    ).toThrow("set columns: [tenant_id, request_id] and references.columns: [tenant_id, id]");
   });
 
   test("rejects duplicate versions across constraints and raw DDL", () => {
@@ -349,7 +367,10 @@ describe("composite column-level keys", () => {
     expect(() =>
       registry([
         versionTable,
+        // Provenance across tenants: a global table naming the blueprint's
+        // tenant explicitly, as platform.blueprint_copies does.
         table("copies", {
+          tenantScoped: false,
           columns: [
             idColumn,
             { name: "blueprint_tenant_id", type: "uuid", required: true },
@@ -378,6 +399,7 @@ describe("composite column-level keys", () => {
       registry([
         versionTable,
         table("copies", {
+          tenantScoped: false,
           columns: [idColumn, { name: "blueprint_id", type: "text", required: true }],
           constraints: [
             {

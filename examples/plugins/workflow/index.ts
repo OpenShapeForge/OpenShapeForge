@@ -35,7 +35,7 @@
  * is the source repo's, preserved here so the ported imports resolve unchanged.
  */
 import type { CompilerPlugin } from "../../../packages/compiler/src/plugins.js";
-import type { GeneratedArtifact, TableDefinition } from "../../../packages/compiler/src/schema.js";
+import type { GeneratedArtifact, ReferenceDefinition, TableDefinition } from "../../../packages/compiler/src/schema.js";
 import { generateWorkflowContractArtifacts } from "./src/workflow-contract.js";
 import { WORKFLOW_WRITER_ROLES } from "./authorization.js";
 import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
@@ -296,6 +296,22 @@ function workflowPlatformTables(): TableDefinition[] {
  * versions it, validates it against the node catalog, and respects an edit
  * lock. The plugin's own resolvers own those invariants.
  */
+/**
+ * A reference between two of these tenant-scoped tables carries the tenant on
+ * both sides, so a row can only ever point at a row of its own tenant; the
+ * compiler refuses the single-column form.
+ */
+function tenantBound(
+  column: string,
+  table: string,
+  onDelete: NonNullable<ReferenceDefinition["onDelete"]>,
+): ReferenceDefinition {
+  return {
+    schema: "workflow", table, column: "id", onDelete,
+    localColumns: ["tenant_id", column], targetColumns: ["tenant_id", "id"],
+  };
+}
+
 function workflowDataTables(): TableDefinition[] {
   return [
     {
@@ -319,7 +335,12 @@ function workflowDataTables(): TableDefinition[] {
         // node types the designer offers, and adding one must not be a migration.
         { name: "category", type: "text", required: true, default: "'process'::text" },
         // Subflow parentage: which node of which definition invokes this one.
-        { name: "parent_definition_id", type: "uuid" },
+        // Deleting the parent leaves the subflow standing on its own.
+        {
+          name: "parent_definition_id",
+          type: "uuid",
+          references: tenantBound("parent_definition_id", "definitions", "SET NULL"),
+        },
         { name: "parent_node_id", type: "text" },
         // Stable identifier for a definition that arrived from outside this
         // deployment, so re-importing updates rather than duplicates.
@@ -359,7 +380,7 @@ function workflowDataTables(): TableDefinition[] {
           name: "definition_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("definition_id", "definitions", "CASCADE"),
         },
         { name: "version", type: "integer", required: true },
         { name: "definition", type: "jsonb", required: true },
@@ -402,17 +423,12 @@ function workflowDataTables(): TableDefinition[] {
           name: "definition_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "RESTRICT" },
+          references: tenantBound("definition_id", "definitions", "RESTRICT"),
         },
         {
           name: "version_id",
           type: "uuid",
-          references: {
-            schema: "workflow",
-            table: "definition_versions",
-            column: "id",
-            onDelete: "SET NULL",
-          },
+          references: tenantBound("version_id", "definition_versions", "SET NULL"),
         },
         // 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
         { name: "status", type: "text", required: true, default: "'pending'::text" },
@@ -431,7 +447,7 @@ function workflowDataTables(): TableDefinition[] {
         {
           name: "parent_instance_id",
           type: "uuid",
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+          references: tenantBound("parent_instance_id", "instances", "SET NULL"),
         },
         { name: "parent_node_id", type: "text" },
         // Snapshot of what was published when the run started. Denormalised on
@@ -469,7 +485,7 @@ function workflowDataTables(): TableDefinition[] {
           name: "instance_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("instance_id", "instances", "CASCADE"),
         },
         { name: "node_id", type: "text", required: true },
         { name: "node_type", type: "text", required: true },
@@ -518,7 +534,7 @@ function workflowDataTables(): TableDefinition[] {
           name: "definition_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("definition_id", "definitions", "CASCADE"),
         },
         // Held by the acquirer and required to release, so a stale browser tab
         // cannot release a lock someone else has since taken over.
@@ -605,7 +621,7 @@ function workflowExecutionTables(): TableDefinition[] {
         {
           name: "workflow_instance_id",
           type: "uuid",
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("workflow_instance_id", "instances", "CASCADE"),
         },
         { name: "payload", type: "jsonb", required: true, default: "'{}'::jsonb" },
         // Deduplicates a retried enqueue: two commands cannot hold one key, so
@@ -683,7 +699,7 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "instance_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("instance_id", "instances", "CASCADE"),
         },
         { name: "node_id", type: "text", required: true },
         { name: "node_label", type: "text" },
@@ -747,7 +763,7 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "instance_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("instance_id", "instances", "CASCADE"),
         },
         { name: "node_id", type: "text", required: true },
         { name: "wait_token", type: "text", required: true },
@@ -794,17 +810,12 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "definition_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("definition_id", "definitions", "CASCADE"),
         },
         {
           name: "version_id",
           type: "uuid",
-          references: {
-            schema: "workflow",
-            table: "definition_versions",
-            column: "id",
-            onDelete: "SET NULL",
-          },
+          references: tenantBound("version_id", "definition_versions", "SET NULL"),
         },
         { name: "trigger_node_id", type: "text" },
         { name: "cron", type: "text" },
@@ -854,13 +865,13 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "schedule_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "schedules", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("schedule_id", "schedules", "CASCADE"),
         },
         {
           name: "definition_id",
           type: "uuid",
           required: true,
-          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+          references: tenantBound("definition_id", "definitions", "CASCADE"),
         },
         // Which published graph this fire ran. A fire is a ledger entry, and
         // without this it cannot say what it started — `definition_id` names the
@@ -868,12 +879,7 @@ function workflowExecutionTables(): TableDefinition[] {
         {
           name: "version_id",
           type: "uuid",
-          references: {
-            schema: "workflow",
-            table: "definition_versions",
-            column: "id",
-            onDelete: "SET NULL",
-          },
+          references: tenantBound("version_id", "definition_versions", "SET NULL"),
         },
         { name: "trigger_node_id", type: "text", required: true },
         { name: "scheduled_at", type: "timestamptz", required: true },
@@ -882,7 +888,7 @@ function workflowExecutionTables(): TableDefinition[] {
         {
           name: "workflow_instance_id",
           type: "uuid",
-          references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+          references: tenantBound("workflow_instance_id", "instances", "SET NULL"),
         },
         // The start command this fire enqueued. Written after the insert, by the
         // same claim: the row is the fire's record that the start was queued, so
@@ -892,12 +898,7 @@ function workflowExecutionTables(): TableDefinition[] {
         {
           name: "command_id",
           type: "uuid",
-          references: {
-            schema: "workflow",
-            table: "control_commands",
-            column: "id",
-            onDelete: "SET NULL",
-          },
+          references: tenantBound("command_id", "control_commands", "SET NULL"),
         },
         { name: "status", type: "text", required: true, default: "'started'::text" },
         { name: "created_at", type: "timestamptz", required: true, default: "now()" },

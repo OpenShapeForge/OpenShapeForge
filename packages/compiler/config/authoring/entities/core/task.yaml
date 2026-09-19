@@ -588,10 +588,6 @@ fields:
       category: workflow
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Tasks
-          nl: Taken
   - key: caseStepActionId
     osfType: string
     required: false
@@ -617,10 +613,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Tasks
-          nl: Taken
   - key: assigneeId
     label:
       en: Assignee
@@ -653,10 +645,6 @@ fields:
     osfType: Appointment
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Tasks
-          nl: Taken
   - key: contactMomentId
     label:
       en: Contact moment
@@ -667,10 +655,6 @@ fields:
     osfType: ContactMoment
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Tasks
-          nl: Taken
   - key: caseId
     label:
       en: Case
@@ -681,10 +665,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Tasks
-          nl: Taken
   - key: parentTaskId
     label:
       en: Parent task

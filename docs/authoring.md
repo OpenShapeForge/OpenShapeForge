@@ -287,12 +287,14 @@ Relationships are fields; there is no entity-level `relationships:` block
 (one is refused by name).
 
 - A **single reference** is a field whose `osfType` is an entity name. Its
-  `persisted.column` (default `<key>_id`) is the foreign key. If the target
-  entity is compiled in this repo, the compiler emits a real foreign-key
-  constraint; targets that are not present are recorded under
-  `relationshipStatus.skippedReferences` in the manifest and no FK is
-  emitted. Cross-module references additionally require an entry in the
-  `relationshipRegister` (see `config/platform-schema.yaml`).
+  `persisted.column` (default `<key>_id`) is the foreign key. The target
+  entity must be compiled in the same manifest — a reference to an absent
+  entity fails the build. Between two tenant-scoped entities the constraint
+  is `(tenant_id, <column>) -> target(tenant_id, id)`: a row can only ever
+  point at a row of its own tenant, whatever its `schemaVersion`. A
+  cross-module reference is registered in the manifest's
+  `relationshipRegister` by the compiler; only references declared directly
+  in `config/platform-schema.yaml` list theirs by hand.
 - The **inverse collection is derived**, never authored. Every single
   reference gives its target entity a collection of the referencing records:
   key = lower-camel plural of the referencing entity (`AgreementParty` →

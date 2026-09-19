@@ -179,6 +179,15 @@ export async function provisionTenant(
       // Never repoint another realm's registry entry, including during replay.
       // The conflict predicate is atomic with the upsert, not a racy preflight.
       if (!result.rows[0]) throw tenantNotFound(slug);
+      // The ERP registry row that every tenant-scoped table keys into
+      // (erp.tenants, CHECK (id = tenant_id)): its id is the platform
+      // tenant's id, written here so the two registries can never name a
+      // tenant differently. Idempotent on replay, as the platform row is.
+      await sql`
+        insert into erp.tenants (id, tenant_id, slug, name)
+        values (${result.rows[0].id}, ${result.rows[0].id}, ${slug}, ${name})
+        on conflict (id) do update set name = excluded.name
+      `.execute(trx);
       return result.rows[0];
     },
   );

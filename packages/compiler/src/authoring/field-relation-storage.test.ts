@@ -42,7 +42,7 @@ function sql(manifest: PlatformSchemaManifest) {
   return generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
 }
 describe("schema-3 field relationship storage", () => {
-  it("retains a nullable authoritative tenant column as a single FK and refuses uniqueness", () => {
+  it("keeps an authored tenant column required, as a single FK proven by the registry check, and refuses uniqueness", () => {
     const bindTenant = (contract: CompiledEntityContract) => {
       // The derived inverse collection on the target follows the renamed key.
       if (contract.entity.name === targetName) contract.model.relationships.find((relationship) => relationship.key === "rowAccessOwners")!.foreignKey = "tenant_id";
@@ -53,8 +53,11 @@ describe("schema-3 field relationship storage", () => {
     };
     const manifest = compileRelations(bindTenant);
     const column = source(manifest).columns.find(column => column.name === "tenant_id")!;
-    expect(column.required).not.toBe(true);
+    // Authored nullable, compiled required: a NULL tenant would pass the key unchecked.
+    expect(column.required).toBe(true);
     expect(column.references).toEqual({ schema: "erp", table: target(manifest).name, column: "id" });
+    expect(target(manifest).constraints).toContainEqual(expect.objectContaining({ kind: "check", expression: "id = tenant_id" }));
+    expect(target(manifest).columns.find(column => column.name === "id")!.default).toBe("app.current_tenant()");
     expect(sql(manifest)).toContain('FOREIGN KEY ("tenant_id")');
     expect(sql(manifest)).not.toContain('FOREIGN KEY ("tenant_id", "tenant_id")');
     expect(() => compileRelations(contract => {
@@ -95,28 +98,27 @@ describe("schema-3 field relationship storage", () => {
     expect(sql(manifest)).toContain(`REFERENCES "directory"."${target(manifest).name}"`);
   });
 
-  it("never lowers a foreign key the referencing entity's own compilation did not register", () => {
-    // A plugin entity (pre-v3, another module) references a base entity; the
-    // base entity's derived collection must not add the cross-module FK the
-    // referencing side reports as unregistered.
-    const plugin = (contract: CompiledEntityContract) => {
+  it("lowers the same tenant-bound key for a schema-2 referencing entity, across modules", () => {
+    // A plugin entity still on schemaVersion 2 references a base entity in
+    // another module. There is one relationship path: the composite key and
+    // the register entry, exactly as for a schema-3 entity.
+    const manifest = compileRelations((contract) => {
       if (contract.entity.name === sourceName) {
         Object.assign(contract, { authoringVersion: 2 });
         contract.entity.module = "plugin";
       }
-    };
-    const derived = compileRelations(plugin);
-    const belongsToOnly = compileRelations((contract) => {
-      plugin(contract);
-      if (contract.entity.name === targetName) {
-        contract.model.relationships = contract.model.relationships.filter((relationship) => relationship.kind === "belongsTo");
-        contract.graphql.relationships = contract.graphql.relationships.filter((relationship) => relationship.resolve === "belongsTo");
-      }
     });
-    expect(sql(derived)).toBe(sql(belongsToOnly));
-    expect(sql(derived)).not.toContain(`REFERENCES "erp"."${target(derived).name}"`);
-    expect(source(derived).source?.relationshipStatus?.skippedReferences).toContainEqual(expect.stringContaining("cross-module unregistered"));
-    expect(target(derived).source?.relationshipStatus?.skippedReferences).toContainEqual("rowAccessOwners<-RowAccessOwner (referencing entity keeps its own foreign-key policy)");
+    expect(source(manifest).columns.find((column) => column.name === "owner_id")?.references).toMatchObject({
+      schema: "erp", table: target(manifest).name, column: "id",
+      localColumns: ["tenant_id", "owner_id"], targetColumns: ["tenant_id", "id"],
+    });
+    expect(manifest.relationshipRegister).toContainEqual({
+      from: { schema: "plugin", table: source(manifest).name, column: "owner_id" },
+      to: { schema: "erp", table: target(manifest).name, column: "id" },
+    });
+    expect(source(manifest).source?.relationshipStatus?.skippedReferences).toEqual([]);
+    expect(target(manifest).source?.relationshipStatus?.skippedReferences).not.toContainEqual(expect.stringContaining(`<-${sourceName} (`));
+    expect(sql(manifest)).toContain(`REFERENCES "erp"."${target(manifest).name}"("tenant_id", "id")`);
   });
 
   it("fails closed for an absent target or absent foreign-key column", () => {
@@ -243,7 +245,7 @@ describe("schema-3 field relationship storage", () => {
   it("refuses malformed composite reference metadata and missing unique targets", () => {
     const missingColumns = compileRelations();
     source(missingColumns).columns.find((column) => column.name === "owner_id")!.references!.localColumns = ["missing", "owner_id"];
-    expect(() => sql(missingColumns)).toThrow("Invalid composite foreign key target");
+    expect(() => sql(missingColumns)).toThrow("names unknown local column missing");
     const missingUnique = compileRelations();
     target(missingUnique).indexes = [];
     expect(() => sql(missingUnique)).toThrow("requires a matching unique index");

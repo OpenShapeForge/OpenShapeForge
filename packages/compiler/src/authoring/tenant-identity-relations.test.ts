@@ -19,12 +19,19 @@ test("platform tenancy and authored tenant references keep distinct storage cont
 
   const tenantSettings = active.manifest.tables.find(table => table.schema === "erp" && table.name === "tenant_settings")!;
   const authoredTenant = tenantSettings.columns.find(column => column.name === "tenant_id")!;
-  expect(authoredTenant.required).not.toBe(true);
+  expect(authoredTenant.required).toBe(true);
   expect(authoredTenant.references).toEqual({ schema: "erp", table: "tenants", column: "id" });
   expect(tenantSettings.columns.filter(column => column.name === "tenant_id")).toHaveLength(1);
   expect(tenantSettings.indexes!.some(index => index.columns.length === 1 && index.columns[0] === "tenant_id")).toBe(true);
   expect(tenantSettings.indexes!.every(index => new Set(index.columns).size === index.columns.length)).toBe(true);
   expect(sql).toContain('ADD CONSTRAINT "tenant_settings_tenant_id_fkey" FOREIGN KEY ("tenant_id")\n      REFERENCES "erp"."tenants"("id")');
+  // The single-column key is bound because the registry proves its rows ARE
+  // their tenant; the compiler stamps that check on erp.tenants.
+  const tenants = active.manifest.tables.find(table => table.schema === "erp" && table.name === "tenants")!;
+  expect(tenants.constraints).toContainEqual(expect.objectContaining({
+    compilerOwned: true, name: "tenants_tenant_identity_check", kind: "check", expression: "id = tenant_id",
+  }));
+  expect(sql).toContain('CREATE TABLE IF NOT EXISTS "erp"."tenants" (\n  "id" uuid PRIMARY KEY NOT NULL DEFAULT app.current_tenant(),');
   expect(active.entities.find(entity => entity.contract.storage.table === "tenant_settings")!
     .contract.model.fields.find(field => field.key === "tenantId"))
     .toMatchObject({ osfType: "Tenant", readOnly: true, required: false });

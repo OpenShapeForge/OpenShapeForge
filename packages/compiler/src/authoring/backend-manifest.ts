@@ -993,6 +993,15 @@ function bindOwnerAxes(candidates: CompiledCandidate[], tables: TableDefinition[
       axes.push({ column: column.name, roles: [...new Set(roles)].sort() });
     }
     table.ownerAxis = { axes, ...(ownerAxis.command ? { command: { setting: ownerAxis.command.setting, values: [...ownerAxis.command.values] } } : {}) };
+    // Exactly one owner: the policy above admits a row through the one owner
+    // column that is set, so a row with none or two would slip between axes.
+    const expression = `num_nonnulls(${axes.map((axis) => `"${axis.column}"`).sort().join(", ")}) = 1`;
+    const constraints = table.constraints ??= [];
+    if (!constraints.some((constraint) => constraint.kind === "check" && constraint.expression === expression)) {
+      const name = `${table.name}_owner_axis_check`;
+      if (constraints.some((constraint) => constraint.name === name)) throw new Error(`${entity}: owner axis constraint collides with ${name}.`);
+      constraints.push({ compilerOwned: true, version: `0001_owner-axis-${table.name.replaceAll("_", "-")}`, name, kind: "check", expression });
+    }
   }
 }
 

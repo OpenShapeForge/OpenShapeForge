@@ -63,6 +63,9 @@ test("each owning reference lends its owner entity's read roles, and the policy 
     axes: [{ column: "left_id", roles: ["Left.Read", "Shared.Read"] }, { column: "right_id", roles: ["Right.Read"] }],
     command: { setting: "app.item_command", values: ["reseed"] },
   });
+  // Exactly one owner per row, as a compiler-owned check beside the policy (columns sorted, so an
+  // identical check another lowering already emitted is not repeated).
+  expect(item.constraints).toContainEqual({ compilerOwned: true, version: "0001_owner-axis-items", name: "items_owner_axis_check", kind: "check", expression: 'num_nonnulls("left_id", "right_id") = 1' });
   const sql = generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
   expect(sql).toContain(`CREATE POLICY "items_owner_read" ON "erp"."items" AS RESTRICTIVE FOR SELECT
   USING (app.bypass_rls() OR nullif(current_setting('app.item_command', true), '') IN ('reseed') OR ("left_id" IS NOT NULL AND app.has_any_role(ARRAY['Left.Read', 'Shared.Read'])) OR ("right_id" IS NOT NULL AND app.has_any_role(ARRAY['Right.Read'])));`);

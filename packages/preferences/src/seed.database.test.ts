@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { SQL } from "bun";
-import { catalogMigration } from "./index.js";
+import { catalogPolicies } from "./index.js";
 import { preferenceDefinitionsSeed } from "./seed.js";
 import type { ModuleSeedContext } from "@openshapeforge/plugin-runtime";
 
@@ -23,7 +23,10 @@ test.skipIf(process.env.PREFERENCES_SEED_DATABASE_TEST !== "1")("managed seed wo
       await sql.raw(`create schema app; create schema platform;
         create function app.bypass_rls() returns boolean language sql stable as $$
           select coalesce(current_setting('app.bypass_rls',true)='true',false) $$;
-        ${catalogMigration}
+        create table platform.preference_definitions (
+          namespace text not null, key text not null, definition jsonb not null,
+          primary key (namespace, key));
+        ${catalogPolicies}
         alter table platform.preference_definitions owner to "${role}";
         grant usage on schema app,platform to "${role}";`).execute(db);
       await sql.raw(`set role "${role}"`).execute(db);

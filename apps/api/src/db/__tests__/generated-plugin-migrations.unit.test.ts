@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   loadGeneratedPluginMigrations,
-  pluginMigrationLedgerVersion,
+  pluginMigrationIdentity,
 } from "../migrations/generated-plugin-migrations.js";
 
 describe("generated plugin migration registry", () => {
@@ -15,35 +14,29 @@ describe("generated plugin migration registry", () => {
     expect(await loadGeneratedPluginMigrations(join(dir, "missing.json"))).toEqual([]);
   });
 
-  test("loads a valid registry and derives a collision-free ledger key", async () => {
+  test("loads a valid registry and derives a collision-free identity", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
-    const sql = "SELECT 1;\n";
     const migration = {
       plugin: "cpq",
       version: "0001_install-trigger",
-      checksum: createHash("sha256").update(sql).digest("hex"),
-      sql,
+      sql: "SELECT 1;\n",
     };
     const path = join(dir, "registry.json");
     await writeFile(path, JSON.stringify({ version: 1, migrations: [migration] }));
 
     expect(await loadGeneratedPluginMigrations(path)).toEqual([migration]);
-    expect(pluginMigrationLedgerVersion(migration)).toBe(
+    expect(pluginMigrationIdentity(migration)).toBe(
       "plugin:cpq:0001_install-trigger",
     );
   });
 
   test("accepts the compiler tuple order when one plugin name prefixes another", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
-    const migrations = ["cpq", "cpq-extra"].map((plugin) => {
-      const sql = `SELECT '${plugin}';\n`;
-      return {
-        plugin,
-        version: "0001_install-trigger",
-        checksum: createHash("sha256").update(sql).digest("hex"),
-        sql,
-      };
-    });
+    const migrations = ["cpq", "cpq-extra"].map((plugin) => ({
+      plugin,
+      version: "0001_install-trigger",
+      sql: `SELECT '${plugin}';\n`,
+    }));
     const path = join(dir, "registry.json");
     await writeFile(path, JSON.stringify({ version: 1, migrations }));
     expect(await loadGeneratedPluginMigrations(path)).toEqual(migrations);
@@ -56,7 +49,7 @@ describe("generated plugin migration registry", () => {
     await expect(loadGeneratedPluginMigrations(path)).rejects.toThrow(path);
   });
 
-  test("rejects edited SQL whose generated checksum is stale", async () => {
+  test("rejects an out-of-order registry", async () => {
     const dir = await mkdtemp(join(tmpdir(), "osf-plugin-registry-"));
     const path = join(dir, "registry.json");
     await writeFile(
@@ -64,16 +57,12 @@ describe("generated plugin migration registry", () => {
       JSON.stringify({
         version: 1,
         migrations: [
-          {
-            plugin: "cpq",
-            version: "0001_install-trigger",
-            checksum: "0".repeat(64),
-            sql: "SELECT 1;\n",
-          },
+          { plugin: "cpq", version: "0002_second", sql: "SELECT 2;\n" },
+          { plugin: "cpq", version: "0001_first", sql: "SELECT 1;\n" },
         ],
       }),
     );
 
-    await expect(loadGeneratedPluginMigrations(path)).rejects.toThrow(/Regenerate artifacts/);
+    await expect(loadGeneratedPluginMigrations(path)).rejects.toThrow(/not strictly ordered/);
   });
 });

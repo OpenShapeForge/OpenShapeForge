@@ -47,7 +47,6 @@ import { createControlRuntime } from "../control/runtime.js";
 import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
-import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
 import {
   createRuntimeDeclarativeServiceExecutor,
@@ -563,7 +562,6 @@ export function createApiApp(options: {
     registerEntityChangeStream(routes, dbOptions);
     registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
-    registerDocumentRestRoutes(routes, dbOptions);
     if (modulePlatform) {
       registerArtifactRestRoutes(routes, {
         ...dbOptions,

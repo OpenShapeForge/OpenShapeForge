@@ -25,8 +25,9 @@
  *      every policy references.
  *   2.  generated schema      — schema.sql from the ONE declaration of every
  *      table (platform-schema.yaml + the authoring layers), the runtime-owned
- *      platform bookkeeping included; on a built database, the checksum
- *      no-op or an additive roll-forward (migrations/generated-schema.ts).
+ *      platform bookkeeping included; on a built database, a checksum no-op —
+ *      or a refusal when the checksum differs, because a database is rebuilt
+ *      with db:reset rather than migrated (migrations/generated-schema.ts).
  *   3.  core invariants       — what the manifest cannot express on manifest
  *      tables and the core owns: the org-unit closure trigger, the document
  *      authority guards and compound keys, the logical document commands,
@@ -36,10 +37,10 @@
  *      platform.identity_relations: checks, an expression index,
  *      app.identity_subject() and the bespoke policies. Before the plugin
  *      invariants because plugin DDL may reference the function.
- *   3b. plugin invariants     — immutable compiler-plugin constraints,
- *      functions, triggers and other DDL, ledgered per plugin and version
- *      (migrations/generated-plugin-migrations.ts), after contributed tables
- *      exist.
+ *   3b. plugin invariants     — compiler-plugin constraints, functions,
+ *      triggers and other DDL, idempotent and applied on every run with no
+ *      ledger (migrations/generated-plugin-migrations.ts), after contributed
+ *      tables exist.
  *   3c–3f. the other runtime invariants the manifest cannot express, one file
  *      per table family, each idempotent on every run: employee invitations
  *      (checks, the one-pending-per-address partial expression index,
@@ -146,7 +147,6 @@ export async function runMigrationChain(
   const pluginMigrations = await applyGeneratedPluginMigrations(
     db,
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
-    options.appliedBy,
   );
   await applyEmployeeInvitationsMigration(db);
   await applyCapabilityGrantsMigration(db);

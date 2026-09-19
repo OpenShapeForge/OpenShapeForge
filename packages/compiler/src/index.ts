@@ -112,6 +112,7 @@ export type {
   PluginSchemaMigration,
   StaticOperationCatalog,
 } from "./plugins.js";
+export type { TableDefinition } from "./schema.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";

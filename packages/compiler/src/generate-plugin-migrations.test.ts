@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import type { CompilerPlugin } from "./plugins.js";
 import {
   collectPluginMigrationRegistry,
@@ -72,16 +71,15 @@ describe("plugin schema migrations", () => {
     expect(result.migrations[0]!.sql).toContain(
       'ADD CONSTRAINT "requests_id_revision_key" UNIQUE ("id", "revision")',
     );
-    expect(result.migrations.every((migration) => /^[0-9a-f]{64}$/.test(migration.checksum))).toBe(true);
+    expect(Object.keys(result.migrations[0]!).sort()).toEqual(["plugin", "sql", "version"]);
     expect(JSON.parse(renderPluginMigrationRegistry(result))).toEqual(result);
   });
 
-  test("reconciles content-addressed compiler CHECK constraints", () => {
+  test("renders every constraint as a name-guarded, repeatable DO block", () => {
     const result = registry([
       table("values", {
         constraints: [{
           compilerOwned: true,
-          replaceExisting: true,
           version: "0001_entity-value-values-kind-acde1234",
           name: "values_kind_check",
           kind: "check",
@@ -90,17 +88,29 @@ describe("plugin schema migrations", () => {
       }),
     ], []);
 
+    expect(result.migrations[0]!.plugin).toBe("osf-compiler");
     expect(result.migrations[0]!.sql).toBe(
-      'ALTER TABLE "cpq"."values" DROP CONSTRAINT IF EXISTS "values_kind_check";\n' +
-      'ALTER TABLE "cpq"."values"\n  ADD CONSTRAINT "values_kind_check" CHECK ("kind" IN (\'Copy\', \'Link\'));\n',
+      [
+        "DO $osf$",
+        "BEGIN",
+        "  IF NOT EXISTS (",
+        "    SELECT 1 FROM pg_constraint",
+        `    WHERE conrelid = '"cpq"."values"'::regclass AND conname = 'values_kind_check'`,
+        "  ) THEN",
+        '    ALTER TABLE "cpq"."values"',
+        `      ADD CONSTRAINT "values_kind_check" CHECK ("kind" IN ('Copy', 'Link'));`,
+        "  END IF;",
+        "END",
+        "$osf$;",
+        "",
+      ].join("\n"),
     );
     expect(() => registry([table("values", { constraints: [{
-      replaceExisting: true,
-      version: "0001_unsafe-replacement",
-      name: "values_id_key",
-      kind: "unique",
-      columns: ["id"],
-    }] })])).toThrow("only replace an existing compiler-owned CHECK");
+      version: "0001_tagged",
+      name: "values_tag_check",
+      kind: "check",
+      expression: "id::text <> $osf$x$osf$",
+    }] })])).toThrow("must not contain the $osf$ quote tag");
   });
 
   test("validates foreign-key targets before emitting SQL", () => {

@@ -113,9 +113,10 @@ describe("checkGeneratedSchemaDrift", () => {
 });
 
 describe("findUndeclaredDatabaseSchema", () => {
-  // Dedicated runtime migrations are declarations too; readiness exempts
-  // precisely those known tables while still reporting an unknown table.
-  test("exempts migration-owned platform tables but reports unknown tables", async () => {
+  // Every table in a manifest-covered schema is manifest-declared, so there
+  // is no exemption list: a runtime bookkeeping table or another
+  // repository's plugin table left behind is reported like any other.
+  test("reports every table the manifest does not declare", async () => {
     await sql`create table platform.operation_execution_receipts (id uuid primary key)`.execute(runtime.db);
     await sql`create table platform.preference_definitions (namespace text, key text, definition jsonb, primary key (namespace, key))`.execute(runtime.db);
     await sql`create table platform.unknown_receipts (id uuid primary key)`.execute(runtime.db);
@@ -124,26 +125,23 @@ describe("findUndeclaredDatabaseSchema", () => {
       schema: "platform",
       columns: [{ name: "version" }, { name: "checksum" }, { name: "applied_at" }, { name: "applied_by" }],
     }]);
-    expect(result.tables).toEqual(["platform.unknown_receipts"]);
+    expect(result.tables).toEqual([
+      "platform.operation_execution_receipts",
+      "platform.preference_definitions",
+      "platform.unknown_receipts",
+    ]);
     expect(result.columns).toEqual([]);
     await sql`drop table platform.unknown_receipts`.execute(runtime.db);
     await sql`drop table platform.operation_execution_receipts`.execute(runtime.db);
     await sql`drop table platform.preference_definitions`.execute(runtime.db);
   });
-  // Mirrors the roll-forward diff's exemption (migrations.test.ts,
-  // "plugin-migration-owned columns"): readiness must not report a column a
-  // plugin schema migration added to a generated table as foreign schema,
-  // and must still report one nobody declared.
-  test("exempts plugin-migration-owned columns but not a foreign one", async () => {
+
+  test("reports every column on a declared table the manifest does not declare", async () => {
     await sql`create schema integration`.execute(runtime.db);
     await sql`
       create table integration.services (
         id uuid primary key default gen_random_uuid(),
         catalog_entry_id uuid,
-        installed_version integer,
-        overridden boolean not null default false,
-        override_fields text[] not null default '{}',
-        update_available_version integer,
         rogue text
       )
     `.execute(runtime.db);
@@ -167,16 +165,18 @@ describe("findUndeclaredDatabaseSchema", () => {
 
     const undeclared = await findUndeclaredDatabaseSchema(runtime.db, [services]);
     expect(undeclared.tables).toEqual(["integration.unrelated"]);
-    expect(undeclared.columns).toEqual(["integration.services.rogue"]);
+    expect(undeclared.columns).toEqual([
+      "integration.services.catalog_entry_id",
+      "integration.services.rogue",
+    ]);
 
-    // The exemption is keyed schema.table.column: the same column NAME on a
-    // table the plugin migration does not touch is foreign.
     const bothDeclared = await findUndeclaredDatabaseSchema(runtime.db, [
       services,
       unrelated,
     ]);
     expect(bothDeclared.tables).toEqual([]);
     expect(bothDeclared.columns).toEqual([
+      "integration.services.catalog_entry_id",
       "integration.services.rogue",
       "integration.unrelated.catalog_entry_id",
     ]);

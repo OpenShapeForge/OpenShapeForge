@@ -198,11 +198,15 @@ repo bundling this package needs to do the same.
   [retention.md](retention.md); building the enforcement job and the erasure
   primitive are tracked as follow-up issues.
 - **A host that does not use the reference API migrator must consume the
-  plugin migration registry itself.** Apply its ordered SQL after generated
-  tables exist, transactionally record the exact checksums under the emitted
-  plugin/version identities, fail on changed applied entries, and report but
-  tolerate ledger entries absent from an older registry so image rollback
-  remains possible.
+  plugin migration registry itself.** Apply every entry, in registry order,
+  after the generated tables exist, on every run — each in its own
+  transaction, with no ledger: the entries are idempotent SQL by contract
+  (the compiler renders constraints as name-guarded DO blocks; a plugin's
+  free-form `schemaMigrations` must repeat safely), and an entry that fails
+  is rolled back and named. Do not record checksums or skip entries that
+  were "already applied"; a changed constraint moves the manifest checksum,
+  and the host's generated-schema step must refuse a built database whose
+  recorded checksum differs (the reset model, [migrations.md](migrations.md)).
   The reference implementation is
   `apps/api/src/db/migrations/generated-plugin-migrations.ts`.
 - The host repo owns everything downstream of the artifacts: the API

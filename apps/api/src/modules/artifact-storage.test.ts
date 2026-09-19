@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { operationErrorOf } from "@openshapeforge/operations";
+import { operationErrorOf, operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeArtifactDescriptor,
   RuntimeArtifactSessionContext,
   RuntimeArtifactStorageContribution,
+  RuntimeRecordAccessRequest,
 } from "@openshapeforge/plugin-runtime";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 
@@ -13,7 +14,7 @@ type Transaction = { readonly id: string };
 
 const artifactId = "10000000-0000-4000-8000-000000000001";
 const otherArtifactId = "10000000-0000-4000-8000-000000000002";
-const documentVersionId = "20000000-0000-4000-8000-000000000001";
+const documentId = "20000000-0000-4000-8000-000000000001";
 const providerId = "test-provider";
 const descriptor: RuntimeArtifactDescriptor = {
   artifactId,
@@ -45,16 +46,23 @@ function provider(
     providerId,
     stage: async () => descriptor,
     bind: async () => descriptor,
-    read: async () => ({ descriptor, bytes: Uint8Array.of(1, 2, 3) }),
+    read: async (_context, input) => ({ descriptor, bytes: Uint8Array.of(1, 2, 3), owner: input.owner }),
     ...overrides,
   };
 }
 
-function harness() {
+function harness(options: { refuse?: boolean } = {}) {
   const live = new Set<Session>();
   let active: { session: Session; transaction: Transaction } | undefined;
   let transactionCalls = 0;
+  const access: { session: Session; request: RuntimeRecordAccessRequest }[] = [];
   const runtime = new ArtifactStorageRuntime<Session, Transaction>({
+    records: {
+      async assertAccess(session, request) {
+        access.push({ session, request });
+        if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });
+      },
+    },
     acceptsSession: session => live.has(session),
     currentTransaction: session => active?.session === session ? active.transaction : undefined,
     withTransaction: async (session, work) => {
@@ -72,6 +80,7 @@ function harness() {
   return {
     runtime,
     live,
+    access,
     transactionCalls: () => transactionCalls,
   };
 }
@@ -81,7 +90,7 @@ const stageInput = {
   fileName: "evidence.pdf",
   source: (async function* () { yield Uint8Array.of(1, 2, 3); })(),
 };
-const ownerInput = { artifactId, documentVersionId };
+const ownerInput = { artifactId, owner: { entity: "Document", id: documentId } };
 const bindInput = { ...ownerInput, expectedArtifactVersion: descriptor.version };
 
 describe("ArtifactStorageRuntime", () => {
@@ -271,12 +280,46 @@ describe("ArtifactStorageRuntime", () => {
     }
   });
 
+  test("read asks the record oracle for `get` on the owner before the provider, whatever the entity", async () => {
+    const session = { id: "session-a" };
+    const allowed = harness();
+    allowed.live.add(session);
+    let reads = 0;
+    // The provider is what proves the association: it answers with the record it found the artifact bound to.
+    const relation = { artifactId, owner: { entity: "Relation", id: documentId } };
+    allowed.runtime.configure([{ name: "storage", artifactStorage: provider({
+      read: async () => { reads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: relation.owner }; },
+    }) }], [providerId]);
+    await expect(allowed.runtime.services.read(session, relation)).resolves.toMatchObject({ descriptor, owner: relation.owner });
+    expect(allowed.access).toEqual([{ session, request: { entityName: "Relation", id: documentId, intent: "get" } }]);
+    expect(reads).toBe(1);
+
+    const refused = harness({ refuse: true });
+    refused.live.add(session);
+    let refusedReads = 0;
+    refused.runtime.configure([{ name: "storage", artifactStorage: provider({
+      read: async () => { refusedReads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: ownerInput.owner }; },
+    }) }], [providerId]);
+    await expectFailure(refused.runtime.services.read(session, ownerInput), "FORBIDDEN");
+    expect(refusedReads).toBe(0);
+
+    for (const owner of [
+      { entity: "", id: documentId },
+      { entity: " Document", id: documentId },
+      { entity: "Document", id: "not-a-uuid" },
+      undefined,
+    ]) {
+      await expectFailure(allowed.runtime.services.read(session, { artifactId, owner } as never), "VALIDATION");
+    }
+    expect(allowed.access).toHaveLength(1);
+  });
+
   test("read rejects mismatched identity, non-byte contents, and descriptor length drift", async () => {
     const session = { id: "session-a" };
     const cases = [
-      { descriptor: { ...descriptor, artifactId: otherArtifactId }, bytes: Uint8Array.of(1, 2, 3) },
-      { descriptor, bytes: [1, 2, 3] as unknown as Uint8Array },
-      { descriptor, bytes: Uint8Array.of(1, 2) },
+      { descriptor: { ...descriptor, artifactId: otherArtifactId }, bytes: Uint8Array.of(1, 2, 3), owner: ownerInput.owner },
+      { descriptor, bytes: [1, 2, 3] as unknown as Uint8Array, owner: ownerInput.owner },
+      { descriptor, bytes: Uint8Array.of(1, 2), owner: ownerInput.owner },
     ];
     for (const contents of cases) {
       const current = harness();
@@ -287,6 +330,25 @@ describe("ArtifactStorageRuntime", () => {
       await expectFailure(
         current.runtime.services.read(session, ownerInput),
         "HANDLER_CONTRACT_VIOLATION",
+      );
+    }
+  });
+
+  test("read is refused unless the provider confirms the named owner as the bound record", async () => {
+    const session = { id: "session-a" };
+    // A session that reaches a Relation and knows a Document's artifact id opens nothing through the Relation.
+    const elsewhere = [
+      { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Document", id: documentId } },
+      { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Relation", id: otherArtifactId } },
+      { descriptor, bytes: Uint8Array.of(1, 2, 3) } as never,
+    ];
+    for (const contents of elsewhere) {
+      const current = harness();
+      current.live.add(session);
+      current.runtime.configure([{ name: "storage", artifactStorage: provider({ read: async () => contents }) }], [providerId]);
+      await expectFailure(
+        current.runtime.services.read(session, { artifactId, owner: { entity: "Relation", id: documentId } }),
+        "FORBIDDEN",
       );
     }
   });

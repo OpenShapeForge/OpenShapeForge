@@ -77,7 +77,7 @@ function fixture() {
         },
         async bind(received: unknown, binding: unknown) {
           expect(received).toBe(context.session); expect(active).toBe(true);
-          expect(binding).toEqual({ artifactId: ids.artifact, documentVersionId: ids.version, expectedArtifactVersion: 1 });
+          expect(binding).toEqual({ artifactId: ids.artifact, owner: { entity: "Document", id: ids.document }, expectedArtifactVersion: 1 });
           events.push("bind"); return { ...descriptor, version: 2 };
         },
       },

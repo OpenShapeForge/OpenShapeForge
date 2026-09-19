@@ -11,6 +11,7 @@ import {
   consumeConfiguration,
   findExistingConfiguration,
   handoffFailureCode,
+  handoffModelValues,
   mergeConfigurationValues,
   mintConfiguration,
   parseSubmission,
@@ -279,5 +280,37 @@ describe("handoffFailureCode", () => {
     for (const error of [new HttpError(400, "VALIDATION", "jane@example.com"), Object.assign(new Error("jane@example.com"), { code: "23505" })]) {
       expect(handoffFailureCode(error)).not.toContain("jane");
     }
+  });
+});
+
+describe("handoffModelValues", () => {
+  const elicit = {
+    sourceField: "adapterId",
+    sourceEntity: "Adapter",
+    sourceTable: "integration.adapters",
+    definitionsField: "configurationFields",
+    into: "configurationValues",
+  };
+  const required = ["key", "name", "adapterId", "configurationValues"];
+  const sourceRow = { id: "adapter-1", key: "google-gmail", name: "Google" };
+
+  it("fills the key and name a model left out from the source row", () => {
+    expect(handoffModelValues({ required, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({
+      adapterId: "adapter-1",
+      key: "google-gmail",
+      name: "Google",
+    });
+  });
+
+  it("keeps what the model did send", () => {
+    const modelValues = { adapterId: "adapter-1", key: "gmail-hans", name: "Hans' Gmail" };
+    expect(handoffModelValues({ required, elicit, modelValues, sourceRow })).toEqual(modelValues);
+  });
+
+  it("refuses a handoff whose other required arguments are still missing, naming them", () => {
+    expect(() => handoffModelValues({ required: [...required, "tenantSlug"], elicit, modelValues: { adapterId: "adapter-1" }, sourceRow }))
+      .toThrow(/Provide tenantSlug in the call/);
+    expect(() => handoffModelValues({ required, elicit, modelValues: {}, sourceRow: {} }))
+      .toThrow(/Provide key, name, adapterId in the call/);
   });
 });

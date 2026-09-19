@@ -50,11 +50,15 @@ export type NullMailProviderOptions = {
   sent?: MailMessage[];
 };
 
+export const MAIL_NOT_CONFIGURED = "MAIL_NOT_CONFIGURED";
+
 /**
- * The provider a deployment without OPENSHAPEFORGE_SMTP_URL gets: it logs the
- * envelope and reports success. Loud on purpose — a deployment that enqueues
- * mail and never configured a transport should see every message it dropped
- * in its log, not a quietly `done` job.
+ * The development stand-in for a transport (`OPENSHAPEFORGE_MAIL_PROVIDER=null`):
+ * it logs the envelope and refuses the message as undeliverable, so the job
+ * ends `failed` with the reason on it. It never reports success — a message
+ * nobody received is not delivered, and a `done` job would say it was. The
+ * log line is loud on purpose: a developer sees every message dropped, and
+ * the queue keeps the truth for an operator to retry once a transport exists.
  */
 export function createNullMailProvider(options: NullMailProviderOptions = {}): MailProvider {
   const log = options.log ?? ((payload, message) => console.log(JSON.stringify({ level: "warn", ...payload, msg: message })));
@@ -62,12 +66,11 @@ export function createNullMailProvider(options: NullMailProviderOptions = {}): M
     name: "null",
     async send(message) {
       options.sent?.push(message);
-      const providerMessageId = `null-${crypto.randomUUID()}`;
       log(
-        { provider: "null", to: [...message.to], subject: message.subject, providerMessageId },
-        "No mail transport is configured (OPENSHAPEFORGE_SMTP_URL); the message was logged and not sent.",
+        { provider: "null", to: [...message.to], subject: message.subject },
+        "No mail transport is configured (OPENSHAPEFORGE_MAIL_PROVIDER=null); the message was logged and not sent.",
       );
-      return { providerMessageId };
+      throw new MailDeliveryError("rejected", "No mail transport is configured; the message was logged and not sent.", { code: MAIL_NOT_CONFIGURED });
     },
   };
 }

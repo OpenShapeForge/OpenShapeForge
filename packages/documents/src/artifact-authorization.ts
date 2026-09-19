@@ -23,15 +23,22 @@ export type DocumentArtifactSqlExecutor = Readonly<{
   ): Promise<{ rows: readonly Record<string, unknown>[] }>;
 }>;
 
-export type DocumentVersionArtifactOwner = Readonly<{
-  entity: "DocumentVersion";
-  recordId: string;
+/**
+ * A Document owns the files of its versions: the owner the artifact port
+ * carries is the Document, and the version is the association row that names
+ * the artifact. This is what lets a session — a capability grant included —
+ * read a version created after it was issued: what it reaches is the
+ * Document, and a version is the Document's content.
+ */
+export type DocumentArtifactOwner = Readonly<{
+  entity: "Document";
+  id: string;
 }>;
 
 export type DocumentArtifactAccessInput<ArtifactId extends string> = Readonly<{
   action: "bind" | "open";
   artifactId: ArtifactId;
-  owner: DocumentVersionArtifactOwner;
+  owner: DocumentArtifactOwner;
   /** Optional stronger association-version proof. The current storage contribution does not supply it. */
   expectedArtifactVersion?: number;
 }>;
@@ -39,11 +46,13 @@ export type DocumentArtifactAccessInput<ArtifactId extends string> = Readonly<{
 export type ResolvedDocumentArtifactAccess<ArtifactId extends string> = Readonly<{
   tenantId: string;
   artifactId: ArtifactId;
-  owner: DocumentVersionArtifactOwner;
+  owner: DocumentArtifactOwner;
+  /** The version row that names the artifact — the association the access was proven against. */
+  documentVersionId: string;
 }>;
 
 export type DocumentArtifactAuthorization = Readonly<{
-  resolveDocumentVersionArtifactAccess<ArtifactId extends string>(
+  resolveDocumentArtifactAccess<ArtifactId extends string>(
     transaction: DocumentArtifactSqlExecutor,
     input: DocumentArtifactAccessInput<ArtifactId>,
   ): Promise<ResolvedDocumentArtifactAccess<ArtifactId> | undefined>;
@@ -57,7 +66,7 @@ export type DocumentArtifactAuthorization = Readonly<{
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const BIND_ACCESS_SQL = `
-  select 1 as present
+  select document_version.id::text as "documentVersionId"
   from erp.document_versions document_version
   join erp.documents document
     on document.tenant_id = document_version.tenant_id
@@ -65,7 +74,7 @@ const BIND_ACCESS_SQL = `
   where document_version.tenant_id = app.current_tenant()
     and app.current_tenant() = $1::uuid
     and app.current_user_id() = $2::uuid
-    and document_version.id = $3::uuid
+    and document.id = $3::uuid
     and document_version.artifact_id = $4::uuid
     and document_version.created_by = $2::text
     and document_version.artifact_version between 1 and 9007199254740991
@@ -79,7 +88,7 @@ const BIND_ACCESS_SQL = `
 `;
 
 const OPEN_ACCESS_SQL = `
-  select document.id::text as "documentId"
+  select document_version.id::text as "documentVersionId"
   from erp.document_versions document_version
   join erp.documents document
     on document.tenant_id = document_version.tenant_id
@@ -87,7 +96,7 @@ const OPEN_ACCESS_SQL = `
   where document_version.tenant_id = app.current_tenant()
     and app.current_tenant() = $1::uuid
     and app.current_user_id() = $2::uuid
-    and document_version.id = $3::uuid
+    and document.id = $3::uuid
     and document_version.artifact_id = $4::uuid
     and document_version.artifact_version between 1 and 9007199254740991
     and ($5::bigint is null or document_version.artifact_version = $5::bigint)
@@ -132,9 +141,9 @@ function validInput<ArtifactId extends string>(
       (input.action === "bind" || input.action === "open") &&
       typeof input.artifactId === "string" &&
       UUID.test(input.artifactId) &&
-      input.owner?.entity === "DocumentVersion" &&
-      typeof input.owner.recordId === "string" &&
-      UUID.test(input.owner.recordId) &&
+      input.owner?.entity === "Document" &&
+      typeof input.owner.id === "string" &&
+      UUID.test(input.owner.id) &&
       (input.expectedArtifactVersion === undefined ||
         (Number.isSafeInteger(input.expectedArtifactVersion) &&
           input.expectedArtifactVersion > 0)),
@@ -148,7 +157,9 @@ function validInput<ArtifactId extends string>(
  * Document create/append transaction. It deliberately does not require a
  * Document read or update permission: first-create authority may be narrower,
  * while append has already checked Document.update before creating the row.
- * Open requires both immutable-version and parent-document read access.
+ * Open proves the artifact is one of the Document's stored versions and
+ * requires the Document's `get` — the same check core makes before the
+ * provider is asked; storage repeats it so the port cannot be the only fence.
  */
 export function createDocumentArtifactAuthorization(
   context: Readonly<{
@@ -157,57 +168,37 @@ export function createDocumentArtifactAuthorization(
   }>,
 ): DocumentArtifactAuthorization {
   return Object.freeze({
-    async resolveDocumentVersionArtifactAccess<ArtifactId extends string>(
+    async resolveDocumentArtifactAccess<ArtifactId extends string>(
       transaction: DocumentArtifactSqlExecutor,
       input: DocumentArtifactAccessInput<ArtifactId>,
     ): Promise<ResolvedDocumentArtifactAccess<ArtifactId> | undefined> {
       const session = exactSession(context.session);
       if (!session || !validInput(input)) return undefined;
 
-      if (input.action === "bind") {
-        const result = await transaction.executeQuery(
-          query(BIND_ACCESS_SQL, [
-            session.tenantId,
-            session.userId,
-            input.owner.recordId,
-            input.artifactId,
-            input.expectedArtifactVersion ?? null,
-          ]),
-        );
-        if (result.rows.length !== 1 || result.rows[0]?.present !== 1) {
-          return undefined;
-        }
-      } else {
-        const result = await transaction.executeQuery(
-          query(OPEN_ACCESS_SQL, [
-            session.tenantId,
-            session.userId,
-            input.owner.recordId,
-            input.artifactId,
-            input.expectedArtifactVersion ?? null,
-          ]),
-        );
-        const documentId = result.rows.length === 1
-          ? result.rows[0]?.documentId
-          : undefined;
-        if (typeof documentId !== "string" || !UUID.test(documentId)) {
-          return undefined;
-        }
-        // A version's bytes are the document's content, so reading them is
-        // the Document's `get` plus the version's own. A capability grant
-        // names the records it reaches when it is issued, and a version
+      const result = await transaction.executeQuery(
+        query(input.action === "bind" ? BIND_ACCESS_SQL : OPEN_ACCESS_SQL, [
+          session.tenantId,
+          session.userId,
+          input.owner.id,
+          input.artifactId,
+          input.expectedArtifactVersion ?? null,
+        ]),
+      );
+      const documentVersionId = result.rows.length === 1
+        ? result.rows[0]?.documentVersionId
+        : undefined;
+      if (typeof documentVersionId !== "string" || !UUID.test(documentVersionId)) {
+        return undefined;
+      }
+      if (input.action === "open") {
+        // A version's bytes are the Document's content: the Document's `get`
+        // decides, for a bearer session and for a capability grant alike. A
+        // grant names the records it reaches when it is issued; a version
         // created afterwards — a signed copy, a certificate — is on no such
-        // list; the Document is. Under a grant the parent decides alone.
-        if (context.session.credential !== "grant") {
-          await context.records.assertAccess(context.session, {
-            entityName: "DocumentVersion",
-            id: input.owner.recordId,
-            intent: "get",
-          });
-        }
+        // list, and does not need to be, because the Document is.
         await context.records.assertAccess(context.session, {
           entityName: "Document",
-          id: documentId,
+          id: input.owner.id,
           intent: "get",
         });
       }
@@ -216,6 +207,7 @@ export function createDocumentArtifactAuthorization(
         tenantId: session.tenantId,
         artifactId: input.artifactId,
         owner: Object.freeze({ ...input.owner }),
+        documentVersionId,
       });
     },
     async resolvePhysicalDeleteDecision(): Promise<undefined> {

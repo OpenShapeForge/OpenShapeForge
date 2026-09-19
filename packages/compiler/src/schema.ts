@@ -11,11 +11,10 @@ export type ScalarType =
   | "jsonb"
   /**
    * A text array, spelled the way Postgres spells it because the manifest
-   * type doubles as the SQL type token (the roll-forward migrator renders
-   * `ADD COLUMN` from it verbatim). Platform bookkeeping only: no authoring
-   * field maps onto it, so no generated CRUD, GraphQL or MCP surface has to
-   * render one — the runtime tables that hold a role list or a read-guides
-   * list are the reason it exists.
+   * type doubles as the SQL type token in the generated schema.sql. Platform
+   * bookkeeping only: no authoring field maps onto it, so no generated CRUD,
+   * GraphQL or MCP surface has to render one — the runtime tables that hold a
+   * role list or a read-guides list are the reason it exists.
    */
   | "text[]";
 
@@ -50,22 +49,16 @@ export type IndexDefinition = {
 /**
  * A table-level invariant contributed by a compiler plugin.
  *
- * Each constraint is a versioned schema change rather than inline `CREATE
- * TABLE` text. The generated runtime applies it after every contributed table
- * exists and records the SQL checksum in `platform.schema_migrations`. Editing
- * an applied definition therefore fails loudly; evolve it with a new plugin
- * schema migration instead.
+ * Rendered as idempotent DDL (added when absent by name) that the migrate
+ * chain applies after every contributed table exists, on every run. The
+ * constraint is part of the manifest, so editing one moves the manifest
+ * checksum and a built database is refused until it is rebuilt with
+ * `db:reset` — there is no in-place evolution.
  */
 export type TableConstraintDefinition = {
-  /** Compiler invariants use the existing migration ledger without impersonating a plugin. */
+  /** Compiler invariants are registered under `osf-compiler` rather than a plugin. */
   compilerOwned?: boolean;
-  /**
-   * Reconcile a compiler-owned CHECK whose expression is content-addressed in
-   * its version. The generated migration drops the previous same-name
-   * constraint before adding the current definition.
-   */
-  replaceExisting?: boolean;
-  /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
+  /** Plugin-local ordering key, e.g. `0001_request-pkey`; unique per plugin. */
   version: string;
   /** Explicit PostgreSQL constraint name. */
   name: string;

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { operationFailure } from "@openshapeforge/operations";
-import type { RuntimeArtifactDescriptor, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "@openshapeforge/plugin-runtime";
+import type {
+  RuntimeArtifactDescriptor, RuntimeArtifactOwnerInput, RuntimeArtifactServices, RuntimeArtifactStorageContribution,
+  RuntimeRecordAccessServices,
+} from "@openshapeforge/plugin-runtime";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -18,7 +21,29 @@ function descriptor(value: RuntimeArtifactDescriptor): RuntimeArtifactDescriptor
     mediaType: value.mediaType, sha256: value.sha256, byteSize: value.byteSize });
 }
 
-/** Core-only composition and live-session fence around the private storage contribution. */
+/** The owner as the record-access oracle names it, or a VALIDATION refusal. */
+function owner(input: RuntimeArtifactOwnerInput): { entity: string; id: string } {
+  const record = input?.owner;
+  if (!input || typeof input.artifactId !== "string" || !UUID.test(input.artifactId) ||
+      !record || typeof record.entity !== "string" || record.entity.trim() !== record.entity || !record.entity ||
+      record.entity.length > 200 || typeof record.id !== "string" || !UUID.test(record.id)) {
+    throw operationFailure({ code: "VALIDATION", message: "The file or owning record identifier is invalid." });
+  }
+  return { entity: record.entity, id: record.id };
+}
+
+/**
+ * Core-only composition and live-session fence around the private storage
+ * contribution. Any canonical record may own an artifact: a read is
+ * authorized as `get` on the owner through the record-access oracle before
+ * the provider is asked, so what a session — a grant included — reaches in
+ * files is exactly what it reaches in records. The named owner is a claim,
+ * not a proof: the provider returns the record it found the artifact bound
+ * to, and a result whose owner is not the one named is refused, so knowing
+ * an artifact id and reaching some other record opens nothing. A bind runs
+ * inside the Operation transaction that creates or updates the owner, whose
+ * own authorization it inherits; the provider proves the association.
+ */
 export class ArtifactStorageRuntime<Session, Transaction> {
   readonly services: RuntimeArtifactServices<Session>;
   #provider: RuntimeArtifactStorageContribution<Session, Transaction> | undefined;
@@ -28,6 +53,7 @@ export class ArtifactStorageRuntime<Session, Transaction> {
     acceptsSession(session: Session): boolean;
     currentTransaction(session: Session): Transaction | undefined;
     withTransaction<T>(session: Session, work: (transaction: Transaction) => Promise<T>): Promise<T>;
+    records: RuntimeRecordAccessServices<Session>;
   }) {
     const provider = (session: Session) => {
       if (!options.acceptsSession(session)) throw operationFailure({ code: "FORBIDDEN", message: "File access requires the live verified session." });
@@ -40,11 +66,6 @@ export class ArtifactStorageRuntime<Session, Transaction> {
         return options.withTransaction(session, work);
       },
     });
-    const owner = (input: { artifactId: string; documentVersionId: string }) => {
-      if (!input || typeof input.artifactId !== "string" || typeof input.documentVersionId !== "string" || !UUID.test(input.artifactId) || !UUID.test(input.documentVersionId)) {
-        throw operationFailure({ code: "VALIDATION", message: "The file or document version identifier is invalid." });
-      }
-    };
     this.services = Object.freeze<RuntimeArtifactServices<Session>>({
       stage: async (session, input) => descriptor(await provider(session).stage(context(session), input)),
       bind: async (session, input) => {
@@ -54,20 +75,29 @@ export class ArtifactStorageRuntime<Session, Transaction> {
           throw operationFailure({ code: "VALIDATION", message: "The expected file version is invalid." });
         }
         const transaction = options.currentTransaction(session);
-        if (!transaction) throw operationFailure({ code: "ARTIFACT_TRANSACTION_REQUIRED", message: "A file must be linked in the document version transaction." });
+        if (!transaction) throw operationFailure({ code: "ARTIFACT_TRANSACTION_REQUIRED", message: "A file must be linked in the owning record's Operation transaction." });
         const result = descriptor(await active.bind({ session, transaction }, input));
         if (result.artifactId !== input.artifactId) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The linked file identity does not match." });
         return result;
       },
       read: async (session, input) => {
         const active = provider(session);
-        owner(input);
-        const result = await active.read(context(session), input);
-        const safe = descriptor(result.descriptor);
-        if (safe.artifactId !== input.artifactId || !(result.bytes instanceof Uint8Array) || result.bytes.byteLength !== safe.byteSize) {
-          throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The returned file does not match its stored descriptor." });
-        }
-        return { descriptor: safe, bytes: result.bytes };
+        const record = owner(input);
+        // One transaction for the oracle and the provider: the record the
+        // session was found to reach is the record the bytes are read against.
+        return options.withTransaction(session, async () => {
+          await options.records.assertAccess(session, { entityName: record.entity, id: record.id, intent: "get" });
+          const result = await active.read(context(session), input);
+          const safe = descriptor(result.descriptor);
+          if (safe.artifactId !== input.artifactId || !(result.bytes instanceof Uint8Array) || result.bytes.byteLength !== safe.byteSize) {
+            throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The returned file does not match its stored descriptor." });
+          }
+          const bound = result.owner;
+          if (!bound || bound.entity !== record.entity || bound.id !== record.id) {
+            throw operationFailure({ code: "FORBIDDEN", message: "The file is not bound to the named record." });
+          }
+          return { descriptor: safe, bytes: result.bytes, owner: Object.freeze({ entity: bound.entity, id: bound.id }) };
+        });
       },
     });
   }

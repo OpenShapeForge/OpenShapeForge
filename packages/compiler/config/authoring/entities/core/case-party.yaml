@@ -199,6 +199,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

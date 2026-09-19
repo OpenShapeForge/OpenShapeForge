@@ -964,6 +964,15 @@ tables:
       # under a tenant session for this user, so every row the handler touches
       # is fenced as if that person had written it.
       - { name: actor_id, type: uuid, required: true }
+      # The rest of that person's effective session at enqueue — roles,
+      # org-unit groups, RelationGroup memberships and scope — replayed when
+      # the job runs, so the handler reaches exactly what the enqueuing
+      # request could and nothing a later role change would add or remove.
+      - { name: actor_session, type: jsonb, required: true, default: "'{}'::jsonb" }
+      # Monotonic insertion order; the `jobs.list` cursor. `created_at` is
+      # not one: rows of one transaction share it, and a cursor on it skips
+      # the ones after the page boundary.
+      - { name: sequence, type: bigint, required: true, generated: identity }
       - { name: payload, type: jsonb, required: true, default: "'{}'::jsonb" }
       - { name: delivery_key, type: text }
       - { name: status, type: text, required: true, default: "'queued'" }
@@ -989,6 +998,8 @@ tables:
       - name: jobs_subject_idx
         columns: [tenant_id, subject_entity, subject_id]
         where: subject_id IS NOT NULL
+      - name: jobs_tenant_sequence_idx
+        columns: [tenant_id, sequence]
       - name: jobs_completed_idx
         columns: [status, completed_at]
         where: completed_at IS NOT NULL

@@ -533,6 +533,15 @@ describe("coreEntity properties the compiler implements", () => {
     const unmarked: string[] = [];
     const seen: string[] = [];
     const visited = new Set<unknown>();
+    // A choice site: a field key reference, a renderer key, or a string whose
+    // name says it is an operation, renderer or component — the places an
+    // editor must not treat as free text.
+    const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
+      if (path.includes("variableSources")) return false;
+      if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
+      const name = path.split(/[.\]|>]/).at(-1) ?? "";
+      return schema.type === "string" && /^(actions\[|resultRenderer|component|render|<key>)$/.test(name) && !path.includes("i18n");
+    };
     const walk = (node: unknown, path: string) => {
       if (!node || typeof node !== "object" || Array.isArray(node)) return;
       const schema = node as Record<string, unknown>;
@@ -541,11 +550,14 @@ describe("coreEntity properties the compiler implements", () => {
         const kind = typeof choice === "string" ? choice : (choice as { kind?: string }).kind;
         if (!kind || !kinds.has(kind)) unmarked.push(`${path} has an unknown x-osf-choice ${JSON.stringify(choice)}`);
         seen.push(path);
-      } else if (schema.$ref === "#/$defs/fieldKey" && !path.includes("variableSources")) unmarked.push(path);
-      // Follow local refs once per target, so a recursive definition terminates.
-      if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/$defs/")) {
-        const name = schema.$ref.slice("#/$defs/".length);
-        const target = defs[name];
+      } else if (isChoiceSite(schema, path)) unmarked.push(path);
+      // Follow refs once per target, so a recursive definition terminates; the
+      // render definition lives in field-definition.schema.json.
+      if (typeof schema.$ref === "string") {
+        const local = schema.$ref.match(/^#\/\$defs\/(.+)$/);
+        const external = schema.$ref.match(/field-definition\.schema\.json#\/\$defs\/(.+)$/);
+        const name = local?.[1] ?? external?.[1];
+        const target = local ? defs[name!] : external ? (fieldDefinitionSchema.$defs as Record<string, unknown>)[name!] : undefined;
         if (target && !visited.has(target)) { visited.add(target); walk(target, `${path}->${name}`); }
       }
       for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
@@ -568,7 +580,7 @@ describe("coreEntity properties the compiler implements", () => {
       "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.relationship",
       "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.fields[]->webFieldEntryV2|oneOf1.render",
       "web.fields.<key>",
-      "web.fields.*.render.component",
+      "web.fields.*.render->render.component",
       "web.operations->webInterfaceOperationsV2.<key>",
       "web.operations->webInterfaceOperationsV2.*|oneOf1.resultRenderer",
     ]) expect(seen).toContain(expected);

@@ -1299,13 +1299,7 @@
                 "properties": {
                   "render": {
                     "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render",
-                    "x-osf-i18n": { "title": { "en": "Render", "nl": "Weergave" } },
-                    "properties": {
-                      "component": {
-                        "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
-                        "x-osf-choice": "component"
-                      }
-                    }
+                    "x-osf-i18n": { "title": { "en": "Render", "nl": "Weergave" } }
                   }
                 },
                 "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }

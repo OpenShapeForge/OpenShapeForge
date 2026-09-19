@@ -24,6 +24,7 @@ import type { ApiKeyProvisioningConfig } from "./runtime-config.js";
 import {
   ApiKeyNotFoundError,
   ApiKeyProvisioningError,
+  ApiKeyValidationError,
   createIntegration,
   disableIntegration,
   issueKey,
@@ -116,6 +117,11 @@ function toGraphqlError(error: unknown): GraphQLError {
   if (error instanceof ApiKeyProvisioningError) {
     return new GraphQLError(error.message, {
       extensions: { code: "API_KEY_PROVISIONING_FAILED", status: 502 },
+    });
+  }
+  if (error instanceof ApiKeyValidationError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "VALIDATION", status: 400 },
     });
   }
   throw error;

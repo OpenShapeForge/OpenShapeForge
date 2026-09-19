@@ -65,6 +65,32 @@ export class ApiKeyNotFoundError extends Error {
   }
 }
 
+export class ApiKeyValidationError extends Error {
+  readonly code = "VALIDATION";
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiKeyValidationError";
+  }
+}
+
+/**
+ * A subset is a narrowing or it is absent. An EMPTY subset is neither: the
+ * store reads `[]` back as "no narrowing recorded" (store.ts, parseRoleSubset),
+ * so accepting it here would mint an unrestricted key from a request that
+ * looked like the most restricted one possible. Refused instead.
+ */
+function roleSubsetOrThrow(subset: string[] | null | undefined): string[] | null {
+  if (subset === undefined || subset === null) return null;
+  const roles = [...new Set(subset.map((role) => role.trim()).filter(Boolean))];
+  if (roles.length === 0) {
+    throw new ApiKeyValidationError(
+      "roleSubset must name at least one role, or be omitted for the integration's full role set.",
+    );
+  }
+  return roles;
+}
+
 /** Default key lifetime. A non-expiring key must be asked for explicitly. */
 const DEFAULT_KEY_TTL_DAYS = 365;
 
@@ -104,7 +130,9 @@ export async function createIntegration(
   input: CreateIntegrationInput,
   now: Date = new Date(),
 ): Promise<CreatedApiKey> {
-  assertMayGrantRoles(session, input.roles);
+  assertMayManageApiKeys(session);
+  const roleSubset = roleSubsetOrThrow(input.roleSubset);
+  assertMayGrantRoles(session, [...input.roles, ...(roleSubset ?? [])]);
 
   const displayName = input.displayName.trim();
   if (displayName === "") {
@@ -180,7 +208,7 @@ export async function createIntegration(
       lookupId: minted.lookupId,
       secretHash: minted.secretHash,
       displayName,
-      roleSubset: input.roleSubset ?? null,
+      roleSubset,
       expiresAt,
       createdBy: session.userId,
       now,
@@ -202,9 +230,11 @@ export type IssueKeyInput = {
  * primitive. Two keys live at once, the old one is revoked after the external
  * party has cut over.
  *
- * The ceiling applies to the SUBSET, not just to creation: a subset is only
- * meaningful as a narrowing of roles the caller could have granted anyway, and
- * checking it here is what keeps `update`-shaped paths from being the weak one.
+ * The ceiling applies to what the KEY WILL HOLD, not just to creation: with a
+ * subset that is the subset, without one it is the integration's full granted
+ * set — a caller who has since lost a role the integration holds may not mint
+ * a fresh key carrying it. Checking it here is what keeps `update`-shaped
+ * paths from being the weak one.
  */
 export async function issueKey(
   deps: ApiKeyServiceDeps,
@@ -212,7 +242,8 @@ export async function issueKey(
   input: IssueKeyInput,
   now: Date = new Date(),
 ): Promise<CreatedApiKey> {
-  assertMayGrantRoles(session, input.roleSubset ?? []);
+  assertMayManageApiKeys(session);
+  const roleSubset = roleSubsetOrThrow(input.roleSubset);
 
   const minted = mintApiKey();
   const keyId = randomUUID();
@@ -224,8 +255,8 @@ export async function issueKey(
   await withSession(deps, session, async (trx) => {
     // RLS already confines this to the caller's tenant; the explicit predicate
     // is the same defense-in-depth the generated engine applies.
-    const found = await sql<{ id: string }>`
-      select id from platform.api_key_integrations
+    const found = await sql<{ id: string; granted_roles: unknown }>`
+      select id, granted_roles from platform.api_key_integrations
        where id = ${input.integrationId}
          and tenant_id = ${session.tenantId}
          and status = 'active'
@@ -234,6 +265,7 @@ export async function issueKey(
     if (!found.rows[0]) {
       throw new ApiKeyNotFoundError("No such active integration.");
     }
+    assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(found.rows[0].granted_roles) ?? []));
 
     await insertKeyRow(trx, {
       keyId,
@@ -242,7 +274,7 @@ export async function issueKey(
       lookupId: minted.lookupId,
       secretHash: minted.secretHash,
       displayName: input.displayName.trim(),
-      roleSubset: input.roleSubset ?? null,
+      roleSubset,
       expiresAt,
       createdBy: session.userId,
       now,

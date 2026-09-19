@@ -17,6 +17,7 @@ import type { ApiKeyProvisioningConfig } from "./runtime-config.js";
 import {
   ApiKeyNotFoundError,
   ApiKeyProvisioningError,
+  ApiKeyValidationError,
   createIntegration,
   disableIntegration,
   issueKey,
@@ -47,6 +48,9 @@ function handleError(reply: FastifyReply, error: unknown) {
   if (error instanceof ApiKeyProvisioningError) {
     return sendError(reply, error.status, error.code, error.message);
   }
+  if (error instanceof ApiKeyValidationError) {
+    return sendError(reply, error.status, error.code, error.message);
+  }
   // Anything else is ours, not the caller's. Do not describe it.
   reply.log.error({ err: error }, "API key provisioning request failed.");
   return sendError(reply, 500, "INTERNAL", "Request failed.");
@@ -55,6 +59,12 @@ function handleError(reply: FastifyReply, error: unknown) {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
+
+/** `null` when explicitly null, otherwise the array — an empty one included, so the service can refuse it. */
+function asRoleSubset(value: unknown): string[] | null {
+  if (value === null) return null;
+  return asStringArray(value);
 }
 
 function asExpiry(value: unknown): number | null | undefined {
@@ -136,7 +146,7 @@ export function registerApiKeyRestRoutes(
           displayName: typeof body.displayName === "string" ? body.displayName : "",
           roles: asStringArray(body.roles),
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined ? {} : { roleSubset: asRoleSubset(body.roleSubset) }),
         });
         // 201 with the token in the body, once. Never logged, never in a URL.
         return reply.status(201).send(created);
@@ -154,7 +164,7 @@ export function registerApiKeyRestRoutes(
           integrationId,
           displayName: typeof body.displayName === "string" ? body.displayName : "rotated",
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined ? {} : { roleSubset: asRoleSubset(body.roleSubset) }),
         });
         return reply.status(201).send(created);
       } catch (error) {

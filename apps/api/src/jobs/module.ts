@@ -18,10 +18,28 @@ import { JOB_WORKER_ROLE, readJobWorkerOptions, startJobWorker } from "./worker.
 
 export { JOBS_PLUGIN, JOB_WORKER_ROLE };
 
-/** SMTP when configured, otherwise the logging null provider — logged once at boot. */
+export const MAIL_PROVIDER_ENV = "OPENSHAPEFORGE_MAIL_PROVIDER";
+
+/**
+ * The transport a deployment configured, or a refusal. SMTP when
+ * `OPENSHAPEFORGE_SMTP_URL` is set; the logging null provider only on the
+ * explicit `OPENSHAPEFORGE_MAIL_PROVIDER=null`, and never under
+ * `NODE_ENV=production` — a production worker that quietly dropped every
+ * message would be worse than one that did not start. Nothing else is a
+ * configuration, so the worker refuses to start on it.
+ */
 export function configuredMailProvider(env: NodeJS.ProcessEnv = process.env): MailProvider {
   const smtp = readSmtpConfig(env);
-  return smtp ? createSmtpMailProvider(smtp) : createNullMailProvider();
+  if (smtp) return createSmtpMailProvider(smtp);
+  const selected = env[MAIL_PROVIDER_ENV]?.trim();
+  if (selected === "null") {
+    if (env.NODE_ENV === "production") {
+      throw new Error(`${MAIL_PROVIDER_ENV}=null is a development setting; a production job-worker needs OPENSHAPEFORGE_SMTP_URL.`);
+    }
+    return createNullMailProvider();
+  }
+  if (selected) throw new Error(`${MAIL_PROVIDER_ENV} "${selected}" is unknown; set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null in development.`);
+  throw new Error(`No mail transport is configured: set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null to log messages instead in development.`);
 }
 
 export type JobsRuntimeModuleOptions = {
@@ -33,9 +51,13 @@ export type JobsRuntimeModuleOptions = {
 
 export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): RuntimeModule {
   const env = options.env ?? process.env;
-  const provider = options.mailProvider ?? configuredMailProvider(env);
+  // Resolved when the worker starts, not when the module is created: the API
+  // process composes this module to validate the job kinds and never sends.
+  let provider = options.mailProvider;
+  const resolve = (): MailProvider => (provider ??= configuredMailProvider(env));
+  const lazy: MailProvider = { get name() { return resolve().name; }, send: (message) => resolve().send(message) };
   const jobHandlers: Record<string, ModuleJobHandler> = {
-    [MAIL_DELIVER_KIND]: createMailDeliverHandler(provider),
+    [MAIL_DELIVER_KIND]: createMailDeliverHandler(lazy),
   };
   const module: RuntimeModule = {
     name: JOBS_PLUGIN,
@@ -43,9 +65,10 @@ export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): Runt
     workers: {
       [JOB_WORKER_ROLE]: {
         start({ db, log }) {
+          const mail = resolve();
           const handlers = composeJobHandlers([module, ...options.modules().filter((other) => other !== module)]);
           log.info(
-            { worker: JOB_WORKER_ROLE, kinds: [...handlers.keys()].sort(), mail: provider.name },
+            { worker: JOB_WORKER_ROLE, kinds: [...handlers.keys()].sort(), mail: mail.name },
             "Draining platform.jobs.",
           );
           return startJobWorker(db, handlers, log, readJobWorkerOptions(env));

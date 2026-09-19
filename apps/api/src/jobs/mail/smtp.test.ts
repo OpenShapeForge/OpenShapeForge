@@ -11,7 +11,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server, type Socket } from "node:net";
 import { createMailDeliverHandler } from "./deliver.js";
-import { createNullMailProvider, isMailAddress, MailDeliveryError, renderMailMessage, type MailMessage } from "./provider.js";
+import { configuredMailProvider, createJobsRuntimeModule } from "../module.js";
+import { createNullMailProvider, isMailAddress, MAIL_NOT_CONFIGURED, MailDeliveryError, renderMailMessage, type MailMessage } from "./provider.js";
 import { createSmtpMailProvider, readSmtpConfig } from "./smtp.js";
 import type { ModuleJobHandlerContext } from "../../modules/contract.js";
 
@@ -129,6 +130,19 @@ describe("smtp provider", () => {
     });
     expect(() => readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "http://x", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" })).toThrow(/scheme/);
   });
+
+  test("the worker needs a transport: SMTP, or the null provider opted into outside production", () => {
+    expect(configuredMailProvider({ OPENSHAPEFORGE_SMTP_URL: "smtp://localhost:1025", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" }).name).toBe("smtp");
+    expect(configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null" }).name).toBe("null");
+    expect(() => configuredMailProvider({})).toThrow(/No mail transport is configured/);
+    expect(() => configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "carrier-pigeon" })).toThrow(/unknown/);
+    expect(() => configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null", NODE_ENV: "production" })).toThrow(/production/);
+    // The module resolves the transport when the worker starts, not when the API composes it.
+    const module = createJobsRuntimeModule({ modules: () => [], env: {} });
+    expect(Object.keys(module.jobHandlers ?? {})).toEqual(["mail.deliver"]);
+    const start = module.workers?.["job-worker"]?.start;
+    expect(() => start!({ db: {} as never, log: { info() {}, warn() {}, error() {} } } as never)).toThrow(/No mail transport is configured/);
+  });
 });
 
 describe("message rendering", () => {
@@ -151,10 +165,15 @@ describe("mail.deliver handler", () => {
 
   test("maps the provider's phases onto job outcomes and refuses bad payloads without retrying", async () => {
     const sent: MailMessage[] = [];
-    const ok = createMailDeliverHandler(createNullMailProvider({ sent, log: () => {} }));
-    await expect(ok({ to: "a@b.test", subject: "s", text: "t" }, context)).resolves.toMatchObject({ outcome: "done", result: { provider: "null" } });
+    const ok = createMailDeliverHandler({ name: "fake", send: async (message) => { sent.push(message); return { providerMessageId: "m1" }; } });
+    await expect(ok({ to: "a@b.test", subject: "s", text: "t" }, context)).resolves.toMatchObject({ outcome: "done", result: { provider: "fake", providerMessageId: "m1" } });
     expect(sent).toHaveLength(1);
     await expect(ok({ to: "not an address", subject: "s", text: "t" }, context)).resolves.toMatchObject({ outcome: "failed", error: { code: "MAIL_INVALID" } });
+    // The null provider logs and refuses: a message nobody received is not done.
+    const logged: MailMessage[] = [];
+    const nothing = createMailDeliverHandler(createNullMailProvider({ sent: logged, log: () => {} }));
+    await expect(nothing({ to: "a@b.test", subject: "s", text: "t" }, context)).resolves.toMatchObject({ outcome: "failed", error: { code: MAIL_NOT_CONFIGURED } });
+    expect(logged).toHaveLength(1);
     const phase = (which: "before-data" | "after-data" | "rejected") =>
       createMailDeliverHandler({ name: "fake", send: async () => { throw new MailDeliveryError(which, `phase ${which}`); } });
     await expect(phase("before-data")({ to: "a@b.test", subject: "s", text: "t" }, context)).resolves.toMatchObject({ outcome: "retry" });

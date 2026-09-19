@@ -21,6 +21,7 @@ import {
   checkGeneratedSchemaDrift,
   databaseNameFromUrl,
   describeGeneratedSchemaDrift,
+  findLiveManifestSchemaTables,
   findUndeclaredDatabaseSchema,
 } from "../../db/schema-drift.js";
 
@@ -37,6 +38,8 @@ describe("schema drift preflight", () => {
       throw new Error(
         describeGeneratedSchemaDrift(drift, undeclared, {
           databaseName: databaseNameFromUrl(process.env.DATABASE_URL),
+          liveTables:
+            drift.status === "unmigrated" ? await findLiveManifestSchemaTables(db) : [],
         }).message,
       );
     }

@@ -203,8 +203,9 @@ another branch's?
   | **development** | bootstrapped (same-database migrate URL) | warning banner naming `db:reset`, keeps serving | error log, keeps serving |
 
 - **Readiness** (`/api/ready`): the schema check raises
-  `GENERATED_SCHEMA_BEHIND` or `GENERATED_SCHEMA_UNMIGRATED`; nothing else
-  about the schema gates readiness.
+  `GENERATED_SCHEMA_BEHIND`, `GENERATED_SCHEMA_UNMIGRATED` or — on a
+  matching checksum with a table or column beside the manifest —
+  `GENERATED_SCHEMA_FOREIGN`; nothing else about the schema gates readiness.
 
 - **e2e preflight** — `schema-drift.e2e.test.ts` fails the suite fast with
   the recorded vs bundled checksums and the remediation that fits:
@@ -224,10 +225,12 @@ another branch's?
   second run, is rolled back, and is named in the error; write
   `CREATE OR REPLACE`, `IF NOT EXISTS`, or a guarded DO block.
 - **A matching checksum is not the whole story.** A column added with
-  `psql` keeps the recorded checksum; the chain, the e2e preflight and the
-  API's bootstrap all run the undeclared-schema probe
-  (`findUndeclaredDatabaseSchema`) as well, so it is refused or reported
-  rather than carried along. What none of them see is a *declared* object
+  `psql` keeps the recorded checksum; the chain, the e2e preflight, the
+  API's startup check and `/api/ready` all run the undeclared-schema probe
+  (`findUndeclaredDatabaseSchema`) on a matching checksum as well, so it is
+  refused or reported rather than carried along. (`bootstrapIfEmpty` never
+  sees a matching checksum: it stops at "migrated" and leaves the probe to
+  the startup check that called it.) What none of them see is a *declared* object
   altered in place — a retyped column, a rewritten generated index — because
   nothing compares a built database's shape to the manifest; that is what
   the checksum stands for, and a `db:reset` is the only way to be sure.

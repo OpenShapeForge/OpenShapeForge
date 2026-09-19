@@ -65,6 +65,21 @@ describe("describeGeneratedSchemaDrift — database built from another manifest"
     expect(remediation.message).toContain("bun run db:migrate");
   });
 
+  test('"unmigrated" with leftover tables is the chain\'s refusal, not a db:migrate hint', () => {
+    const remediation = describeGeneratedSchemaDrift(drift("unmigrated", null), nothingUndeclared, {
+      databaseName: "openshapeforge_dev",
+      liveTables: ["erp.relations", "platform.tenants"],
+    });
+
+    expect(remediation.kind).toBe("reset");
+    expect(remediation.message).toContain("has no recorded generated-schema migration but is not empty");
+    expect(remediation.message).toContain("- table  erp.relations");
+    expect(remediation.message).toContain("- table  platform.tenants");
+    expect(remediation.message).toContain("builds an empty database only and refuses this one");
+    expect(remediation.message).toContain("bun run db:reset");
+    expect(remediation.message).not.toContain("  bun run db:migrate");
+  });
+
   test("both the migrate and the reset case offer the scratch-database escape", () => {
     for (const status of ["behind", "unmigrated"] as const) {
       const message = describeGeneratedSchemaDrift(drift(status), nothingUndeclared).message;

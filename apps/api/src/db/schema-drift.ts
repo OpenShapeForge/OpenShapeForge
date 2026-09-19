@@ -227,9 +227,10 @@ export async function findUndeclaredDatabaseSchema(
 
 /**
  * - "migrate": the database is empty; `db:migrate` builds it.
- * - "reset": the database was built from another manifest and nothing in it
- *   is foreign to this branch. A built database is never changed in place,
- *   so `db:reset` (or a scratch database) is the fix.
+ * - "reset": the database was built from another manifest, or has tables
+ *   but no generated-schema record, and nothing in it is foreign to this
+ *   branch. A built database is never changed in place, so `db:reset` (or
+ *   a scratch database) is the fix.
  * - "foreign-schema": the database carries schema this branch does not
  *   declare — a shared database another worktree built. The same reset, but
  *   the honest suggestion is a scratch database.
@@ -291,7 +292,16 @@ const SCRATCH_DATABASE_RECIPE = [
 export function describeGeneratedSchemaDrift(
   drift: GeneratedSchemaDriftResult,
   undeclared: UndeclaredDatabaseSchema,
-  options: { databaseName?: string | null } = {},
+  options: {
+    databaseName?: string | null;
+    /**
+     * Every live table in a manifest-covered schema
+     * (`findLiveManifestSchemaTables`), for an "unmigrated" database: with
+     * any present, the chain refuses to build rather than adopt them, so the
+     * remedy is a reset, not `db:migrate`.
+     */
+    liveTables?: readonly string[];
+  } = {},
 ): SchemaDriftRemediation {
   const database =
     options.databaseName === undefined || options.databaseName === null
@@ -326,6 +336,28 @@ export function describeGeneratedSchemaDrift(
         "Or rebuild the shared database from this branch's manifest, destroying its",
         "data — and only until the next worktree rebuilds it:",
         RESET_RECIPE,
+      ].join("\n"),
+    };
+  }
+
+  const leftovers = options.liveTables ?? [];
+  if (drift.status === "unmigrated" && leftovers.length > 0) {
+    return {
+      kind: "reset",
+      message: [
+        `Generated schema drift detected (status: "${drift.status}"): ${database} has no recorded generated-schema migration but is not empty.`,
+        ...checksums,
+        "",
+        "Tables already present in a manifest-covered schema:",
+        ...listUndeclared("table", [...leftovers]),
+        "",
+        "`bun run db:migrate` builds an empty database only and refuses this one:",
+        "adopting these tables would stamp the checksum onto a build nobody verified.",
+        "Rebuild it from this branch's manifest, destroying its data:",
+        RESET_RECIPE,
+        "",
+        "Or leave the shared database alone entirely and run against a scratch one:",
+        ...SCRATCH_DATABASE_RECIPE,
       ].join("\n"),
     };
   }

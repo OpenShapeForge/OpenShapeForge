@@ -23,8 +23,9 @@ import { DEV_WORKER_ROLE_PASSWORD_DEFAULT, WORKER_ROLE } from "../migrations/wor
 import { composeJobHandlers } from "../../jobs/handlers.js";
 import { jobsOperationHandler } from "../../jobs/operations.js";
 import { getJob, listJobs, resolveJob, sweepDoneJobs } from "../../jobs/queries.js";
-import { claimJobs, enqueueJob, settleJob, type ClaimedJob } from "../../jobs/store.js";
-import { JOB_WORKER_ROLE, processJobBatch, withJobWorkerSession } from "../../jobs/worker.js";
+import { lockClaimedJob, settleJob } from "../../jobs/settle.js";
+import { claimJobs, enqueueJob, type ClaimedJob } from "../../jobs/store.js";
+import { JOB_WORKER_ROLE, processJobBatch, runClaimedJob, withJobWorkerSession } from "../../jobs/worker.js";
 import type { ModuleJobHandler, ModuleOperationContext, ModuleWorkerLogger } from "../../modules/contract.js";
 
 const ADMIN_URL =
@@ -63,8 +64,8 @@ async function enqueue(session: typeof sessionA, kind: string, extra: Partial<Pa
   return appSession(session, (trx) => enqueueJob(trx, { tenantId: session.tenantId, actorId: session.userId, kind, payload: { n: 1 }, ...extra }));
 }
 
-async function claim(limit = 10, kinds?: string[]) {
-  return withJobWorkerSession(suite.worker.db, (trx) => claimJobs(trx, { limit, leaseSeconds: 60, ...(kinds ? { kinds } : {}) }));
+async function claim(limit = 10, kinds?: string[], leaseSeconds = 60) {
+  return withJobWorkerSession(suite.worker.db, (trx) => claimJobs(trx, { limit, leaseSeconds, ...(kinds ? { kinds } : {}) }));
 }
 
 /** Backdate a lease as the privileged role, which is what a dead worker leaves behind. */
@@ -227,8 +228,10 @@ describe("platform.jobs", () => {
     expect(await appSession(sessionA, (trx) => resolveJob(trx, { id, action: "done" }))).toBeUndefined();
   });
 
-  test("processJobBatch runs handlers under the job's tenant session and settles every outcome", async () => {
+  test("processJobBatch replays the enqueuing session for the handler and settles every outcome", async () => {
     const seen: string[] = [];
+    const guc = async (db: Transaction<DB>, name: string) =>
+      (await sql<{ v: string }>`select coalesce(current_setting(${name}, true), '') as v`.execute(db)).rows[0]!.v;
     const handlers = composeJobHandlers([
       {
         name: "probe",
@@ -236,21 +239,40 @@ describe("platform.jobs", () => {
           "probe.ok": (async (payload, { db, job }) => {
             const tenant = (await sql<{ t: string }>`select app.current_tenant()::text as t`.execute(db)).rows[0]!.t;
             seen.push(`${job.kind}:${tenant}:${JSON.stringify(payload)}`);
+            seen.push(`roles=${await guc(db, "app.roles")} worker=${await guc(db, "app.worker_role")} scope=${await guc(db, "app.scope")} relation_groups=${await guc(db, "app.relation_group_ids")}`);
+            // The handler's session is not the worker's: platform.jobs shows it its own tenant only.
+            const tenants = (await sql<{ t: string }>`select distinct tenant_id::text as t from platform.jobs`.execute(db)).rows.map((row) => row.t);
+            seen.push(`job_tenants=${tenants.join(",")}`);
             return { outcome: "done", result: { echoed: payload } };
           }) as ModuleJobHandler,
           "probe.throws": (async () => { throw new Error("handler exploded"); }) as ModuleJobHandler,
           "probe.unknown": (async () => ({ outcome: "outcome_unknown", error: { message: "maybe sent" } })) as ModuleJobHandler,
+          "probe.malformed": (async () => ({ outcome: "retry" })) as unknown as ModuleJobHandler,
+          "probe.after": (async () => ({ outcome: "done" })) as ModuleJobHandler,
         },
       },
     ]);
-    const ok = await enqueue(sessionA, "probe.ok", { payload: { hello: "world" } });
+    const relationGroup = randomUUID();
+    const ok = await enqueue(sessionA, "probe.ok", {
+      payload: { hello: "world" },
+      actorSession: { roles: ["Zebra.Role", "Alpha.Role"], relationGroupIds: [relationGroup], scope: "tenant" },
+    });
     const throws = await enqueue(sessionB, "probe.throws");
     const unknown = await enqueue(sessionA, "probe.unknown");
     const orphan = await enqueue(sessionA, "probe.nobody");
-    const kinds = ["probe.ok", "probe.throws", "probe.unknown", "probe.nobody"];
-    expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds })).toEqual({ processed: 4 });
-    expect(seen).toEqual([`probe.ok:${tenantA}:{"hello":"world"}`]);
-    expect((await appSession(sessionA, (trx) => getJob(trx, ok.id)))!.result).toEqual({ echoed: { hello: "world" } });
+    // A malformed outcome is that job's failure, not the batch's: the job after it still runs.
+    const malformed = await enqueue(sessionA, "probe.malformed");
+    const after = await enqueue(sessionA, "probe.after");
+    const kinds = ["probe.ok", "probe.throws", "probe.unknown", "probe.nobody", "probe.malformed", "probe.after"];
+    expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds })).toEqual({ processed: 6 });
+    expect(seen).toEqual([
+      `probe.ok:${tenantA}:{"hello":"world"}`,
+      `roles=Alpha.Role,Zebra.Role worker= scope=tenant relation_groups=${relationGroup}`,
+      `job_tenants=${tenantA}`,
+    ]);
+    const finished = (await appSession(sessionA, (trx) => getJob(trx, ok.id)))!;
+    expect(finished.result).toEqual({ echoed: { hello: "world" } });
+    expect(finished.actorSession).toEqual({ roles: ["Alpha.Role", "Zebra.Role"], groups: [], relationGroupIds: [relationGroup], scope: "tenant" });
     const retried = await rawStatus(throws.id);
     expect(retried.status).toBe("queued");
     expect(retried.attempts).toBe(1);
@@ -258,6 +280,82 @@ describe("platform.jobs", () => {
     const dead = await appSession(sessionA, (trx) => getJob(trx, orphan.id));
     expect(dead!.status).toBe("dead");
     expect(dead!.lastError?.code).toBe("NO_HANDLER");
+    const invalid = await appSession(sessionA, (trx) => getJob(trx, malformed.id));
+    expect(invalid!.status).toBe("failed");
+    expect(invalid!.lastError?.code).toBe("INVALID_OUTCOME");
+    expect((await rawStatus(after.id)).status).toBe("done");
+    // The enqueuing session is stored as it was, and the least session is the default.
+    expect((await appSession(sessionA, (trx) => getJob(trx, after.id)))!.actorSession).toEqual({ roles: [], groups: [], relationGroupIds: [], scope: "self" });
+    await expect(enqueue(sessionA, "probe.ok", { actorSession: { scope: "everything" as "self" } })).rejects.toThrow(/scope/);
+  });
+
+  test("a running handler holds its job row, and a claim that was reclaimed stops before any effect", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => { started = resolve; });
+    let runs = 0;
+    const handlers = composeJobHandlers([{
+      name: "lease",
+      jobHandlers: {
+        "lease.slow": (async () => { runs += 1; started(); await held; return { outcome: "done" }; }) as ModuleJobHandler,
+      },
+    }]);
+    const { id } = await enqueue(sessionA, "lease.slow", { maxAttempts: 5 });
+    // A lease of ten milliseconds: expired long before the handler lets go.
+    const [job] = await claim(1, ["lease.slow"], 0.01);
+    const run = runClaimedJob(suite.worker.db, job!, handlers, silent);
+    await running;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The lease has expired on paper, but the row is locked by the run: skip locked leaves it alone.
+    expect(await claim(1, ["lease.slow"])).toEqual([]);
+    release();
+    expect(await run).toMatchObject({ ran: true, result: { settled: true, status: "done" } });
+    expect(runs).toBe(1);
+    expect((await rawStatus(id)).status).toBe("done");
+
+    // Reclaimed before the run began: the stale claim matches nothing and the handler never runs.
+    const second = await enqueue(sessionA, "lease.slow");
+    const [stale] = await claim(1, ["lease.slow"]);
+    await expireLease(second.id);
+    const [fresh] = await claim(1, ["lease.slow"]);
+    expect(fresh?.id).toBe(second.id);
+    const locked = await withJobWorkerSession(suite.worker.db, (trx) => lockClaimedJob(trx, stale!));
+    expect(locked).toBe(false);
+    expect(await runClaimedJob(suite.worker.db, stale!, handlers, silent)).toEqual({ ran: false });
+    expect(runs).toBe(1);
+    expect((await rawStatus(second.id)).status).toBe("running");
+    expect(await withJobWorkerSession(suite.worker.db, (trx) => lockClaimedJob(trx, fresh!))).toBe(true);
+  });
+
+  test("a stopping worker finishes the job in hand and claims no other", async () => {
+    let stop = false;
+    const handlers = composeJobHandlers([{
+      name: "stop",
+      jobHandlers: { "stop.job": (async () => { stop = true; return { outcome: "done" }; }) as ModuleJobHandler },
+    }]);
+    const first = await enqueue(sessionA, "stop.job");
+    const second = await enqueue(sessionA, "stop.job");
+    expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds: ["stop.job"], batchSize: 10 }, () => stop)).toEqual({ processed: 1 });
+    expect((await rawStatus(first.id)).status).toBe("done");
+    expect((await rawStatus(second.id)).status).toBe("queued");
+  });
+
+  test("jobs.list pages on the insertion sequence, so jobs of one transaction never straddle a page", async () => {
+    const ids = await appSession(sessionA, async (trx) => {
+      const created: string[] = [];
+      for (let i = 0; i < 5; i += 1) created.push((await enqueueJob(trx, { tenantId: tenantA, actorId: actor, kind: "test.page", payload: { i } })).id);
+      return created;
+    });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await appSession(sessionA, (trx) => listJobs(trx, { kind: "test.page", limit: 2, ...(cursor ? { cursor } : {}) }));
+      seen.push(...page.items.map((job) => job.id));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(seen).toEqual([...ids].reverse());
+    await expect(appSession(sessionA, (trx) => listJobs(trx, { limit: 2, cursor: "2024-01-01T00:00:00.000Z|x" }))).rejects.toThrow(/cursor/);
   });
 
   test("two modules registering one kind fail composition", () => {

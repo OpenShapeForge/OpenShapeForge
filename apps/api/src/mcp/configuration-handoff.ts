@@ -313,6 +313,44 @@ export function handoffFailureCode(error: unknown): string {
   return error instanceof Error ? `error:${error.name}` : "unknown";
 }
 
+/**
+ * The identity a browser handoff will write the row with. The form asks the
+ * person only for the elicited values, so every other required create
+ * argument has to be known when the form is minted. A model routinely omits
+ * a connection's key and name; the source (provider) row supplies both, the
+ * way the connection-problem path already does. Anything still missing
+ * refuses the handoff here, naming the fields, so the model can call again —
+ * rather than the person's submission failing on a NOT NULL column with a
+ * page that cannot say why.
+ */
+export function handoffModelValues(input: {
+  required: readonly string[];
+  elicit: ElicitOnCreateEntry;
+  modelValues: JsonRecord;
+  sourceRow: JsonRecord;
+}): JsonRecord {
+  const values: JsonRecord = { ...input.modelValues };
+  for (const field of ["key", "name"]) {
+    if (values[field] === undefined && typeof input.sourceRow[field] === "string") {
+      values[field] = input.sourceRow[field];
+    }
+  }
+  const missing = input.required.filter(
+    (field) =>
+      field !== input.elicit.into &&
+      (values[field] === undefined || values[field] === null || values[field] === ""),
+  );
+  if (missing.length > 0) {
+    throw new HttpError(
+      400,
+      "VALIDATION",
+      `Provide ${missing.join(", ")} in the call: the secure form asks the person ` +
+        `only for ${input.elicit.into}, so every other required value must come from you.`,
+    );
+  }
+  return values;
+}
+
 /** Encrypt-and-shape the parsed values exactly as the in-band form would. */
 export function storeSubmission(
   pending: PendingConfiguration,

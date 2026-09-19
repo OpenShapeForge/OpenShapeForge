@@ -36,6 +36,13 @@ indexes:
       - documentId
       - versionNumber
     unique: true
+  # A storage artifact is bound to one version: the open path resolves a
+  # version by (document, artifact) and must never find two.
+  - name: document_versions_tenant_artifact_uidx
+    fields:
+      - tenantId
+      - artifactId
+    unique: true
 authorization:
   roles:
     read:

@@ -522,12 +522,10 @@ function renderTableSql(table: TableDefinition): string {
         ? renderRowScopePredicate(table, workerAccess, false)!
         : rowScopePredicate;
       const policyName = quoteIdent(`${table.name}_row_scope`);
-      const supersededPolicyName = quoteIdent(`${table.name}_tenant_isolation`);
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
-        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${rowScopePredicate})`,
@@ -535,13 +533,11 @@ function renderTableSql(table: TableDefinition): string {
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);
-      const supersededPolicyName = quoteIdent(`${table.name}_row_scope`);
       const tenantExpression = `app.bypass_rls()${workerAccess} OR (tenant_id = app.current_tenant())`;
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
         `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
-        `DROP POLICY IF EXISTS ${supersededPolicyName} ON ${tableIdent(table)};`,
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${tenantExpression})`,
@@ -826,10 +822,6 @@ function renderManifestJson(
       required: column.required === true || column.primaryKey === true,
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
-      // Verbatim SQL default so the roll-forward migrator can detect default
-      // drift (a changed default is otherwise invisible: it does not alter
-      // information_schema.data_type/nullability/identity).
-      ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
       // Authored `immutable: true` — the runtime's writability rule refuses the

@@ -30,7 +30,6 @@ export function renderMigrationReport(
     migration: result.version,
     checksum: result.checksum,
     applied: result.applied,
-    ...(result.rollForward === undefined ? {} : { rollForward: result.rollForward }),
     ...(result.pluginMigrationsApplied.length === 0
       ? {}
       : { pluginMigrationsApplied: result.pluginMigrationsApplied }),

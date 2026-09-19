@@ -249,7 +249,7 @@ describe("Document commands", () => {
       2,
     ]);
     expect(fixture.artifactBindings).toEqual([
-      { artifactId, documentVersionId, expectedArtifactVersion: 2 },
+      { artifactId, owner: { entity: "Document", id: documentId }, expectedArtifactVersion: 2 },
     ]);
     expect(fixture.executed[1]?.sql).toContain("finalize_artifact_binding");
     expect(fixture.executed[1]?.parameters).toEqual([

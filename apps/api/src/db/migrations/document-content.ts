@@ -23,10 +23,10 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
 
 /**
  * Name and expression of the compiler-owned owner check on erp.blocks, as
- * emitted in apps/api/src/generated/db/manifest.json ("compilerOwned" check
- * with replaceExisting). The plugin-migration step applies it under the same
- * name as a repeatable DROP/ADD; restating it here keeps the invariant
- * visible next to the guards that rely on it and is a no-op for that step.
+ * emitted in apps/api/src/generated/db/manifest.json ("compilerOwned" check).
+ * The plugin-migration step adds it under the same name when absent;
+ * restating it here keeps the invariant visible next to the guards that rely
+ * on it and is a no-op once the definitions agree.
  */
 const BLOCK_OWNER_CHECK = {
   table: "erp.blocks",

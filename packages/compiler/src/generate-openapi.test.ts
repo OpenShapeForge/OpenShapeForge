@@ -331,7 +331,9 @@ describe("rich generated REST OpenAPI", () => {
       paths: Record<string, unknown>;
     };
 
-    expect(rendered.paths).toEqual({});
+    // The file transport is core's and is documented for every host: any
+    // record may own a file. An empty manifest documents nothing else.
+    expect(Object.keys(rendered.paths).sort()).toEqual(["/api/artifacts", "/api/artifacts/{artifactId}/contents"]);
     expect(rendered.info.title).toBe("OpenShapeForge generated REST API");
     expect(rendered.info.version).toBe("1");
     expect(rendered.info.description).toContain("## Start here");
@@ -1075,6 +1077,10 @@ describe("rich generated REST OpenAPI", () => {
   it("tags operations with the compiled entity description", () => {
     const generated = spec();
     expect(generated.tags).toEqual([
+      {
+        name: "Files",
+        description: "Authenticated streaming transport for temporary and record-bound files. Storage policy and authorization remain server-side.",
+      },
       {
         name: "Edit leases",
         description: "Central leases for long-running record write modes.",

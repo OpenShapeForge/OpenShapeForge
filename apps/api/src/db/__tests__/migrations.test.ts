@@ -6,6 +6,10 @@
  * the same Postgres instance. The live openshapeforge_dev database is never
  * touched.
  *
+ * The reset model under test: an empty database is built, a built one with
+ * the bundled checksum is left alone, and a built one with any other
+ * checksum is refused — nothing rolls a database forward.
+ *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db 2>&1
  */
@@ -17,12 +21,8 @@ import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import {
-  diffManifestAgainstDatabase,
-  generatedSchemaMigrationVersion,
-  type ManifestColumn,
-  type ManifestTable,
-} from "../migrations/generated-schema.js";
+import { generatedSchemaMigrationVersion } from "../migrations/generated-schema.js";
+import { ensureCheckConstraint } from "../migrations/sql-invariants.js";
 import { findUndeclaredDatabaseSchema } from "../schema-drift.js";
 
 // The migration chain now provisions the cluster-wide openshapeforge_app role and
@@ -134,20 +134,17 @@ describe("generated schema migration", () => {
         const first = await runChain(url);
         expect(first.applied).toBe(true);
         expect(first.checksum).toBe(manifest.checksum);
-        expect(first.rollForward).toBeUndefined();
+        expect(first.pluginMigrationsApplied.length).toBeGreaterThan(0);
 
         await withDb(url, async (db) => {
-          // The ledger holds the generated-schema record plus the immutable
-          // migrations contributed by the generated compiler-plugin registry.
-          // No unrelated hand-written history is replayed on a fresh install.
-          // Both sides sorted in JS: the database's collation orders a hyphen
-          // differently from a code-point sort, and the set is what matters.
+          // The ledger holds the generated-schema record and nothing else:
+          // plugin DDL is applied on every run, not remembered.
           const ledger = await sql<{ version: string }>`
-            select version from platform.schema_migrations
+            select version from platform.schema_migrations order by version
           `.execute(db);
-          expect(ledger.rows.map((row) => row.version).sort()).toEqual(
-            [generatedSchemaMigrationVersion, ...first.pluginMigrationsApplied].sort(),
-          );
+          expect(ledger.rows.map((row) => row.version)).toEqual([
+            generatedSchemaMigrationVersion,
+          ]);
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
             manifest.checksum,
           );
@@ -183,10 +180,6 @@ describe("generated schema migration", () => {
 
         await withDb(url, async (db) => {
           expect(await findUndeclaredDatabaseSchema(db)).toEqual({ tables: [], columns: [] });
-          const diff = await diffManifestAgainstDatabase(db);
-          expect(diff.nonAdditive).toEqual([]);
-          expect(diff.missingTables).toEqual([]);
-          expect(diff.missingColumns).toEqual([]);
 
           // The runtime-owned platform tables that used to be created by
           // their own migration files now come from platform-schema.yaml,
@@ -282,140 +275,118 @@ describe("generated schema migration", () => {
   );
 
   test(
-    "additive roll-forward: recreates a dropped table and column, rolls the checksum forward",
+    "a checksum mismatch is refused with the db:reset remediation and changes nothing",
     async () => {
       await withScratchDb(async (url) => {
         await runChain(url);
 
-        // Simulate an OLD database: one table and one nullable column are
-        // missing, and the recorded checksum is stale.
+        // A database built from another manifest: a column the bundled
+        // manifest declares is missing, and the recorded checksum differs.
+        // Whether the difference would have been "additive" is irrelevant —
+        // the chain never looks.
         await withDb(url, async (db) => {
-          await sql`drop table platform.entity_field_suggestions`.execute(db);
           await sql`alter table erp.relations drop column notes`.execute(db);
           await sql`
             update platform.schema_migrations
-            set checksum = ${"simulated-old"}
+            set checksum = ${"built-from-another-manifest"}
             where version = ${generatedSchemaMigrationVersion}
           `.execute(db);
         });
 
-        const result = await runChain(url);
-        expect(result.applied).toBe(true);
-        expect(result.checksum).toBe(manifest.checksum);
-        expect(result.rollForward?.addedTables).toEqual(["platform.entity_field_suggestions"]);
-        expect(result.rollForward?.addedColumns).toEqual(["erp.relations.notes"]);
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("Generated schema checksum mismatch");
+        expect(message).toContain("built-from-another-manifest");
+        expect(message).toContain(manifest.checksum);
+        expect(message).toContain("`bun run db:reset`");
 
         await withDb(url, async (db) => {
-          expect(await tableExists(db, "platform", "entity_field_suggestions")).toBe(true);
-          expect(await columnExists(db, "erp", "relations", "notes")).toBe(true);
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(
-            manifest.checksum,
+            "built-from-another-manifest",
           );
+          expect(await columnExists(db, "erp", "relations", "notes")).toBe(false);
         });
 
-        const after = await runChain(url);
-        expect(after.applied).toBe(false);
+        // Still refused on every later run: nothing rolls forward.
+        expect(await expectRejects(runChain(url))).toContain("`bun run db:reset`");
       });
     },
     TEST_TIMEOUT,
   );
 
   test(
-    "non-additive drift: an extra database column hard-errors with exact details and records nothing",
+    "a database with no generated-schema row but leftover tables is refused, and no checksum is written",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.legacy_relations (id uuid primary key)`.execute(db);
+        });
+
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("no generated-schema record but is not empty");
+        expect(message).toContain("  - table  erp.legacy_relations");
+        expect(message).toContain("`bun run db:reset`");
+
+        await withDb(url, async (db) => {
+          expect(await tableExists(db, "platform", "schema_migrations")).toBe(false);
+          expect(await tableExists(db, "erp", "relations")).toBe(false);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a declared table left behind without a generated-schema row is refused too",
+    async () => {
+      // CREATE IF NOT EXISTS would silently adopt it and stamp the checksum
+      // onto a table nobody verified.
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.relations (id uuid primary key)`.execute(db);
+        });
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("  - table  erp.relations");
+        await withDb(url, async (db) => {
+          expect(await tableExists(db, "platform", "schema_migrations")).toBe(false);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a built database with a matching checksum is still refused when it carries undeclared schema",
     async () => {
       await withScratchDb(async (url) => {
         await runChain(url);
-
         await withDb(url, async (db) => {
           await sql`alter table erp.relations add column legacy_extra text`.execute(db);
-          await sql`
-            update platform.schema_migrations
-            set checksum = ${"simulated-old"}
-            where version = ${generatedSchemaMigrationVersion}
-          `.execute(db);
         });
-
         const message = await expectRejects(runChain(url));
-        expect(message).toContain("erp.relations");
-        expect(message).toContain("legacy_extra");
-        expect(message).toContain("db:reset");
-
-        // The failed run must not roll the checksum forward.
-        await withDb(url, async (db) => {
-          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
-        });
+        expect(message).toContain("schema the manifest does not declare");
+        expect(message).toContain("  - column erp.relations.legacy_extra");
+        expect(message).toContain("`bun run db:reset`");
       });
     },
     TEST_TIMEOUT,
   );
 
   test(
-    "required no-default column is non-additive on a populated table, additive once empty",
+    "a table the manifest does not declare is reported as foreign, with no exemption",
     async () => {
       await withScratchDb(async (url) => {
         await runChain(url);
-
         await withDb(url, async (db) => {
-          await sql`
-            insert into erp.relations (tenant_id, display_name, relation_type)
-            values (gen_random_uuid(), ${"Populated"}, ${"person"})
-          `.execute(db);
-          await sql`alter table erp.relations drop column display_name`.execute(db);
-          await sql`
-            update platform.schema_migrations
-            set checksum = ${"simulated-old"}
-            where version = ${generatedSchemaMigrationVersion}
-          `.execute(db);
-        });
-
-        const message = await expectRejects(runChain(url));
-        expect(message).toContain("erp.relations.display_name");
-        expect(message).toContain("backfill");
-
-        // Same drift on an EMPTY table is additive.
-        await withDb(url, async (db) => {
-          await sql`delete from erp.relations`.execute(db);
-        });
-        const result = await runChain(url);
-        expect(result.applied).toBe(true);
-        expect(result.rollForward?.addedColumns).toEqual(["erp.relations.display_name"]);
-        await withDb(url, async (db) => {
-          expect(await columnExists(db, "erp", "relations", "display_name")).toBe(true);
-        });
-      });
-    },
-    TEST_TIMEOUT,
-  );
-
-  test(
-    "changed column default is non-additive drift and hard-errors without rolling forward",
-    async () => {
-      await withScratchDb(async (url) => {
-        await runChain(url);
-
-        await withDb(url, async (db) => {
-          // The manifest declares erp.relations.created_at DEFAULT now(); drift
-          // it in the database to a different (but valid) default. The
-          // roll-forward cannot ALTER a default in place, so it must surface
-          // this as non-additive rather than silently keeping the stale one.
-          await sql`
-            alter table erp.relations alter column created_at set default now() - interval '1 day'
-          `.execute(db);
-          await sql`
-            update platform.schema_migrations
-            set checksum = ${"simulated-old"}
-            where version = ${generatedSchemaMigrationVersion}
-          `.execute(db);
-        });
-
-        const message = await expectRejects(runChain(url));
-        expect(message).toContain("erp.relations.created_at");
-        expect(message.toLowerCase()).toContain("default mismatch");
-        expect(message).toContain("db:reset");
-
-        // The failed run must not roll the checksum forward.
-        await withDb(url, async (db) => {
-          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe("simulated-old");
+          // A leftover of another repository's plugin in a manifest-covered
+          // schema, and a stray column on a declared table.
+          await sql`create table platform.preference_definitions (id uuid primary key)`.execute(db);
+          await sql`alter table erp.relations add column legacy_extra text`.execute(db);
+          expect(await findUndeclaredDatabaseSchema(db)).toEqual({
+            tables: ["platform.preference_definitions"],
+            columns: ["erp.relations.legacy_extra"],
+          });
         });
       });
     },
@@ -423,269 +394,57 @@ describe("generated schema migration", () => {
   );
 });
 
-/**
- * Column-default drift (issue #210). The bundled manifest cannot exhibit both
- * spellings of the same default at once, so these tests drive the classifier
- * against a purpose-built schema instead — the `tables` parameter exists for
- * exactly that, the way MigrationChainOptions.pluginMigrations does for the chain.
- * The DDL below is written the way the generated schema.sql would render each
- * authoring spelling, so what is compared is a real live column, not a string.
- */
-function probeColumn(
-  name: string,
-  type: string,
-  columnDefault: string,
-  overrides: Partial<ManifestColumn> = {},
-): ManifestColumn {
-  return {
-    name,
-    type,
-    required: true,
-    primaryKey: false,
-    generated: null,
-    default: columnDefault,
-    ...overrides,
-  };
-}
-
-describe("generated schema column defaults", () => {
+describe("hand-written check invariants", () => {
   test(
-    "a default authored without the redundant cast Postgres adds is not drift",
+    "a changed CHECK definition is replaced in place; an unchanged one is left alone",
     async () => {
       await withScratchDb(async (url) => {
         await withDb(url, async (db) => {
-          // Every quoted default here is authored BARE in the DDL. Postgres
-          // stores each one with a cast to the column type appended, so the
-          // live column_default never matches the authored spelling verbatim.
-          await sql`create schema drift_probe`.execute(db);
-          await sql`
-            create table drift_probe.equivalent_defaults (
-              id uuid primary key default gen_random_uuid(),
-              category text not null default 'process',
-              quoted_label text not null default 'it''s',
-              external_ref uuid not null default '00000000-0000-0000-0000-000000000001',
-              payload jsonb not null default '{}',
-              execution_state jsonb not null default '{"version":1,"branches":[],"groups":[],"joins":[],"primaryOutput":null}'::jsonb,
-              effective_on date not null default '2020-01-01',
-              instance_key text not null default 'default',
-              wait_token text not null default (gen_random_uuid())::text,
-              created_at timestamptz not null default now(),
-              enabled boolean not null default false,
-              attempts integer not null default 0
-            )
+          await sql`create schema invariant_probe`.execute(db);
+          await sql`create table invariant_probe.tickets (status text not null)`.execute(db);
+          await sql`insert into invariant_probe.tickets values ('open'), ('closed')`.execute(db);
+          const constraint = { table: "invariant_probe.tickets", name: "tickets_status_shape" };
+          const current = async () => (
+            await sql<{ oid: number; definition: string }>`
+              select oid, pg_get_constraintdef(oid) as definition
+              from pg_constraint
+              where conrelid = 'invariant_probe.tickets'::regclass
+                and conname = 'tickets_status_shape'
+            `.execute(db)
+          ).rows;
+
+          await ensureCheckConstraint(db, { ...constraint, expression: "status in ('open', 'closed')" });
+          const [added] = await current();
+          expect(added?.definition).toContain("'closed'");
+
+          // Same expression, spelled as authored: the canonical definitions
+          // agree, so the constraint is not touched (same catalog row).
+          await ensureCheckConstraint(db, { ...constraint, expression: "status in ('open', 'closed')" });
+          expect((await current())[0]?.oid).toBe(added!.oid);
+
+          // A widened expression differs from what the database holds: the
+          // constraint is dropped and re-added under the same name.
+          await ensureCheckConstraint(db, {
+            ...constraint,
+            expression: "status in ('open', 'closed', 'archived')",
+          });
+          const [replaced] = await current();
+          expect(replaced?.oid).not.toBe(added!.oid);
+          expect(replaced?.definition).toContain("'archived'");
+          await sql`insert into invariant_probe.tickets values ('archived')`.execute(db);
+
+          // A narrowed expression the rows violate is refused by Postgres,
+          // and the previous constraint is still in place.
+          await expect(
+            ensureCheckConstraint(db, { ...constraint, expression: "status in ('open')" }),
+          ).rejects.toThrow(/violated/);
+          expect((await current())[0]?.definition).toContain("'archived'");
+
+          // The probe never survives.
+          const probes = await sql<{ conname: string }>`
+            select conname from pg_constraint where conname like '%probe%'
           `.execute(db);
-
-          const table: ManifestTable = {
-            name: "drift_probe.equivalent_defaults",
-            schema: "drift_probe",
-            table: "equivalent_defaults",
-            columns: [
-              probeColumn("id", "uuid", "gen_random_uuid()", {
-                primaryKey: true,
-              }),
-              // The issue's exact case: a text default with no ::text.
-              probeColumn("category", "text", "'process'"),
-              // Escaped quotes must survive the literal scan intact.
-              probeColumn("quoted_label", "text", "'it''s'"),
-              probeColumn("external_ref", "uuid", "'00000000-0000-0000-0000-000000000001'"),
-              probeColumn("payload", "jsonb", "'{}'"),
-              // jsonb discards object-key order and authored whitespace.
-              probeColumn(
-                "execution_state",
-                "jsonb",
-                '\'{"primaryOutput":null, "joins":[], "groups":[], "branches":[], "version":1}\'::jsonb',
-              ),
-              probeColumn("effective_on", "date", "'2020-01-01'"),
-              // The other direction: authored WITH the cast, live column
-              // created bare. Either spelling must compare equal to either.
-              probeColumn("instance_key", "text", "'default'::text"),
-              // Postgres may render the function operand with one extra pair
-              // of parentheses before the same column-type cast.
-              probeColumn("wait_token", "text", "gen_random_uuid()::text"),
-              // Non-literal defaults are untouched and still match.
-              probeColumn("created_at", "timestamptz", "now()"),
-              probeColumn("enabled", "boolean", "false"),
-              probeColumn("attempts", "integer", "0"),
-            ],
-          };
-
-          const diff = await diffManifestAgainstDatabase(db, [table]);
-          expect(diff.nonAdditive).toEqual([]);
-          expect(diff.missingTables).toEqual([]);
-          expect(diff.missingColumns).toEqual([]);
-        });
-      });
-    },
-    TEST_TIMEOUT,
-  );
-
-  test(
-    "a genuinely changed default expression is still non-additive drift",
-    async () => {
-      await withScratchDb(async (url) => {
-        await withDb(url, async (db) => {
-          await sql`create schema drift_probe`.execute(db);
-          await sql`
-            create table drift_probe.changed_defaults (
-              changed_literal text not null default 'draft',
-              wrapped_call text not null default upper('process'),
-              foreign_cast text not null default 'process'::varchar,
-              concatenated text not null default 'a' || '',
-              shifted_clock timestamptz not null default now() - interval '1 day',
-              changed_json jsonb not null default '{"version":2,"branches":[]}',
-              precise_json jsonb not null default '{"amount":9007199254740993}',
-              precise_decimal jsonb not null default '{"amount":1.0000000000000001}',
-              tiny_exponent jsonb not null default '{"amount":1e-999}',
-              unchanged text not null default 'process'
-            )
-          `.execute(db);
-
-          const table: ManifestTable = {
-            name: "drift_probe.changed_defaults",
-            schema: "drift_probe",
-            table: "changed_defaults",
-            columns: [
-              probeColumn("changed_literal", "text", "'process'"),
-              probeColumn("wrapped_call", "text", "'process'"),
-              // The cast must name the column's OWN type to be redundant;
-              // ::varchar on a text column is a different expression.
-              probeColumn("foreign_cast", "text", "'process'"),
-              probeColumn("concatenated", "text", "'a'"),
-              probeColumn("shifted_clock", "timestamptz", "now()"),
-              probeColumn("changed_json", "jsonb", '\'{"branches":[],"version":1}\'::jsonb'),
-              // Distinct jsonb numerics outside JavaScript's safe integer
-              // range must never collapse to equality during normalization.
-              probeColumn("precise_json", "jsonb", "'{\"amount\":9007199254740992}'::jsonb"),
-              // JSON.parse rounds both of these live values to the manifest
-              // value; their original number tokens must remain distinct.
-              probeColumn("precise_decimal", "jsonb", "'{\"amount\":1}'::jsonb"),
-              probeColumn("tiny_exponent", "jsonb", "'{\"amount\":0}'::jsonb"),
-              // Control: proves the five above are not drifting for some
-              // unrelated reason.
-              probeColumn("unchanged", "text", "'process'"),
-            ],
-          };
-
-          const diff = await diffManifestAgainstDatabase(db, [table]);
-          const drifted = diff.nonAdditive;
-          expect(drifted).toHaveLength(9);
-          for (const column of [
-            "changed_literal",
-            "wrapped_call",
-            "foreign_cast",
-            "concatenated",
-            "shifted_clock",
-            "changed_json",
-            "precise_json",
-            "precise_decimal",
-            "tiny_exponent",
-          ]) {
-            expect(
-              drifted.some((line) =>
-                line.startsWith(`drift_probe.changed_defaults.${column}: default mismatch`),
-              ),
-            ).toBe(true);
-          }
-          expect(drifted.some((line) => line.includes("unchanged"))).toBe(false);
-
-          // The report quotes both sides verbatim; normalization is for the
-          // comparison only, so a reader still sees what the database holds.
-          const foreignCast = drifted.find((line) => line.includes("foreign_cast"));
-          expect(foreignCast).toContain("DEFAULT 'process'");
-          expect(foreignCast).toContain("'process'::character varying");
-        });
-      });
-    },
-    TEST_TIMEOUT,
-  );
-});
-
-describe("plugin-migration-owned columns", () => {
-  // The osf-integration plugin's 0004_platform-catalog migration ALTERs the
-  // generated integration.* tables to add its installation bookkeeping. Those
-  // columns exist in the database and not in the manifest by design, so the
-  // roll-forward diff must not classify them as non-additive drift — while a
-  // column nobody declared anywhere stays drift.
-  const idColumn = probeColumn("id", "uuid", "gen_random_uuid()", {
-    primaryKey: true,
-  });
-
-  test(
-    "a column owned by a plugin schema migration is not drift",
-    async () => {
-      await withScratchDb(async (url) => {
-        await withDb(url, async (db) => {
-          await sql`create schema integration`.execute(db);
-          await sql`
-            create table integration.adapters (
-              id uuid primary key default gen_random_uuid(),
-              key text not null default '',
-              catalog_entry_id uuid,
-              installed_version integer,
-              overridden boolean not null default false,
-              override_fields text[] not null default '{}',
-              update_available_version integer
-            )
-          `.execute(db);
-
-          const table: ManifestTable = {
-            name: "integration.adapters",
-            schema: "integration",
-            table: "adapters",
-            columns: [idColumn, probeColumn("key", "text", "''")],
-          };
-
-          const diff = await diffManifestAgainstDatabase(db, [table]);
-          expect(diff.nonAdditive).toEqual([]);
-          expect(diff.missingTables).toEqual([]);
-          expect(diff.missingColumns).toEqual([]);
-        });
-      });
-    },
-    TEST_TIMEOUT,
-  );
-
-  test(
-    "a column no plugin migration owns is still non-additive drift",
-    async () => {
-      await withScratchDb(async (url) => {
-        await withDb(url, async (db) => {
-          await sql`create schema integration`.execute(db);
-          // The exempt table plus one column with no owner at all, and a
-          // second table where the plugin-owned NAME is not exempt: the
-          // exemption is keyed schema.table.column, not just column.
-          await sql`
-            create table integration.adapters (
-              id uuid primary key default gen_random_uuid(),
-              catalog_entry_id uuid,
-              rogue text
-            )
-          `.execute(db);
-          await sql`
-            create table integration.unrelated (
-              id uuid primary key default gen_random_uuid(),
-              catalog_entry_id uuid
-            )
-          `.execute(db);
-
-          const diff = await diffManifestAgainstDatabase(db, [
-            {
-              name: "integration.adapters",
-              schema: "integration",
-              table: "adapters",
-              columns: [idColumn],
-            },
-            {
-              name: "integration.unrelated",
-              schema: "integration",
-              table: "unrelated",
-              columns: [idColumn],
-            },
-          ]);
-          expect(diff.nonAdditive).toEqual([
-            "integration.adapters.rogue: column exists in the database but not in the generated manifest",
-            "integration.unrelated.catalog_entry_id: column exists in the database but not in the generated manifest",
-          ]);
+          expect(probes.rows).toEqual([]);
         });
       });
     },

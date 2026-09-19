@@ -29,6 +29,7 @@ import {
 } from "./migration-chain.js";
 import {
   checkGeneratedSchemaDrift,
+  findLiveManifestSchemaTables,
   findUndeclaredDatabaseSchema,
   type GeneratedSchemaDriftResult,
   type UndeclaredDatabaseSchema,
@@ -79,10 +80,12 @@ export type BootstrapOutcome =
       /**
        * - "migrated": the database already matches the bundled manifest.
        * - "behind": it was built from another manifest; that is drift for
-       *   `db:migrate` (or `db:reset`) to settle, not something to build over.
+       *   `db:reset` to settle, not something to build over.
        * - "foreign-schema": it carries schema this build does not declare —
-       *   another branch's, or a legacy layout — and building the manifest
-       *   over the top would produce a database no manifest describes.
+       *   another branch's, or a legacy layout — or declared tables with no
+       *   generated-schema row; building the manifest over the top would
+       *   produce a database no manifest describes. `undeclared` lists what
+       *   was found.
        */
       reason: "migrated" | "behind" | "foreign-schema";
       drift: GeneratedSchemaDriftResult;
@@ -125,6 +128,18 @@ async function bootstrapEligibility(
   const undeclared = await findUndeclaredDatabaseSchema(db);
   if (undeclared.tables.length > 0 || undeclared.columns.length > 0) {
     return { bootstrapped: false, reason: "foreign-schema", drift, undeclared };
+  }
+  // Declared tables without a generated-schema row are a build nobody
+  // verified — the same refusal the chain itself makes, reached here so the
+  // API logs it instead of failing half-way into the chain.
+  const leftovers = await findLiveManifestSchemaTables(db);
+  if (leftovers.length > 0) {
+    return {
+      bootstrapped: false,
+      reason: "foreign-schema",
+      drift,
+      undeclared: { tables: leftovers, columns: [] },
+    };
   }
   return undefined;
 }

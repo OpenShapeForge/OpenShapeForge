@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createHash } from "node:crypto";
+/**
+ * The registry of plugin-declared DDL the migrate chain applies after the
+ * generated schema: table constraints (rendered idempotently, see
+ * render-constraint-sql.ts) and a plugin's free-form `schemaMigrations`.
+ * There is no ledger — every entry runs on every migrate, so free-form SQL
+ * must be idempotent (CREATE OR REPLACE, IF NOT EXISTS, guarded DO blocks).
+ * The plugin-local version is an ordering key, not a history.
+ */
 import type {
   CompilerPlugin,
   PluginBaseContext,
   PluginSchemaMigration,
 } from "./plugins.js";
-import type {
-  PlatformSchemaManifest,
-  TableConstraintDefinition,
-  TableDefinition,
-} from "./schema.js";
+import { renderConstraintSql } from "./render-constraint-sql.js";
+import type { PlatformSchemaManifest } from "./schema.js";
 
 export const PLUGIN_MIGRATION_REGISTRY_PATH =
   "apps/api/src/generated/plugin-migrations/registry.json";
@@ -17,10 +21,7 @@ export const PLUGIN_MIGRATION_REGISTRY_PATH =
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
-  checksum: string;
   sql: string;
-  /** Reconcile idempotent compiler DDL even when this identity was applied before. */
-  repeatable?: true;
 };
 
 export type GeneratedPluginMigrationRegistry = {
@@ -30,16 +31,6 @@ export type GeneratedPluginMigrationRegistry = {
 
 const pluginNamePattern = /^[a-z][a-z0-9-]*$/;
 const migrationVersionPattern = /^\d{4}_[a-z0-9][a-z0-9-]*$/;
-const constraintNamePattern = /^[a-z][a-z0-9_]*$/;
-const onDeleteActions = new Set(["CASCADE", "RESTRICT", "SET NULL"]);
-
-function quoteIdent(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
-}
-
-function checksum(sql: string): string {
-  return createHash("sha256").update(sql).digest("hex");
-}
 
 function nonEmptySql(sql: string, label: string): string {
   if (sql.trim().length === 0) {
@@ -47,7 +38,6 @@ function nonEmptySql(sql: string, label: string): string {
   }
   return sql.endsWith("\n") ? sql : `${sql}\n`;
 }
-
 function assertMigrationIdentity(plugin: string, version: string): void {
   if (!pluginNamePattern.test(plugin)) {
     throw new Error(
@@ -69,159 +59,6 @@ function compareMigrationIdentity(
     left.plugin.localeCompare(right.plugin) ||
     left.version.localeCompare(right.version)
   );
-}
-
-function assertSingleCheckExpression(expression: string, label: string): void {
-  let depth = 0;
-  for (let index = 0; index < expression.length; index += 1) {
-    const character = expression[index]!;
-    if (character === "'" || character === '"') {
-      const quote = character;
-      while (++index < expression.length) {
-        if (expression[index] !== quote) continue;
-        if (expression[index + 1] === quote) index += 1;
-        else break;
-      }
-      continue;
-    }
-    if (character === "$") {
-      const delimiter = expression
-        .slice(index)
-        .match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)?.[0];
-      if (delimiter) {
-        const closing = expression.indexOf(delimiter, index + delimiter.length);
-        if (closing === -1) {
-          throw new Error(`${label} has an unterminated dollar-quoted string.`);
-        }
-        index = closing + delimiter.length - 1;
-        continue;
-      }
-    }
-    if (character === "(") depth += 1;
-    if (character === ")") {
-      if (depth === 0) {
-        throw new Error(`${label} closes the compiler-owned CHECK expression.`);
-      }
-      depth -= 1;
-    }
-  }
-  if (depth !== 0) throw new Error(`${label} has unbalanced parentheses.`);
-}
-
-function assertColumns(
-  table: TableDefinition,
-  constraint: TableConstraintDefinition,
-): void {
-  if (constraint.kind === "check") return;
-  if (constraint.columns.length === 0) {
-    throw new Error(
-      `Constraint ${table.schema}.${table.name}.${constraint.name} has no columns.`,
-    );
-  }
-  const present = new Set(table.columns.map((column) => column.name));
-  const seen = new Set<string>();
-  for (const column of constraint.columns) {
-    if (!present.has(column)) {
-      throw new Error(
-        `Constraint ${table.schema}.${table.name}.${constraint.name} references unknown column "${column}".`,
-      );
-    }
-    if (seen.has(column)) {
-      throw new Error(
-        `Constraint ${table.schema}.${table.name}.${constraint.name} repeats column "${column}".`,
-      );
-    }
-    seen.add(column);
-  }
-  if (
-    constraint.kind === "foreignKey" &&
-    constraint.references.columns.length !== constraint.columns.length
-  ) {
-    throw new Error(
-      `Foreign key ${table.schema}.${table.name}.${constraint.name} has ${constraint.columns.length} local column(s) but ${constraint.references.columns.length} referenced column(s).`,
-    );
-  }
-}
-
-function renderConstraintSql(
-  table: TableDefinition,
-  constraint: TableConstraintDefinition,
-): string {
-  assertColumns(table, constraint);
-  if (!constraintNamePattern.test(constraint.name)) {
-    throw new Error(
-      `Constraint name ${table.schema}.${table.name}.${constraint.name} must be a lower_snake_case identifier.`,
-    );
-  }
-  if (
-    constraint.kind === "primaryKey" &&
-    table.columns.some((column) => column.primaryKey === true)
-  ) {
-    throw new Error(
-      `Table ${table.schema}.${table.name} declares both a column primary key and table constraint ${constraint.name}.`,
-    );
-  }
-
-  const tableName = `${quoteIdent(table.schema)}.${quoteIdent(table.name)}`;
-  if (
-    constraint.replaceExisting &&
-    (!constraint.compilerOwned || constraint.kind !== "check")
-  ) {
-    throw new Error(
-      `Constraint ${table.schema}.${table.name}.${constraint.name} may only replace an existing compiler-owned CHECK.`,
-    );
-  }
-  const replacement = constraint.replaceExisting
-    ? `ALTER TABLE ${tableName} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraint.name)};\n`
-    : "";
-  const prefix =
-    `ALTER TABLE ${tableName}\n` +
-    `  ADD CONSTRAINT ${quoteIdent(constraint.name)} `;
-
-  if (constraint.kind === "check") {
-    if (constraint.expression.trim().length === 0) {
-      throw new Error(
-        `Check constraint ${table.schema}.${table.name}.${constraint.name} has an empty expression.`,
-      );
-    }
-    if (/;|--|\/\*|\*\//.test(constraint.expression)) {
-      throw new Error(
-        `Check constraint ${table.schema}.${table.name}.${constraint.name} must not contain a statement terminator or comment. Use schemaMigrations for free-form SQL.`,
-      );
-    }
-    assertSingleCheckExpression(
-      constraint.expression,
-      `Check constraint ${table.schema}.${table.name}.${constraint.name}`,
-    );
-    return `${replacement}${prefix}CHECK (${constraint.expression});\n`;
-  }
-
-  const columns = `(${constraint.columns.map(quoteIdent).join(", ")})`;
-  if (constraint.kind === "primaryKey") {
-    return `${prefix}PRIMARY KEY ${columns};\n`;
-  }
-  if (constraint.kind === "unique") {
-    return `${prefix}UNIQUE ${columns};\n`;
-  }
-
-  const referenced =
-    `${quoteIdent(constraint.references.schema)}.${quoteIdent(constraint.references.table)}` +
-    ` (${constraint.references.columns.map(quoteIdent).join(", ")})`;
-  if (constraint.onDelete && !onDeleteActions.has(constraint.onDelete)) {
-    throw new Error(
-      `Foreign key ${table.schema}.${table.name}.${constraint.name} has unsupported ON DELETE action "${constraint.onDelete}".`,
-    );
-  }
-  if (constraint.initiallyDeferred && !constraint.deferrable) {
-    throw new Error(
-      `Foreign key ${table.schema}.${table.name}.${constraint.name} is initially deferred but not deferrable.`,
-    );
-  }
-  const onDelete = constraint.onDelete ? ` ON DELETE ${constraint.onDelete}` : "";
-  const deferred = constraint.deferrable
-    ? ` DEFERRABLE${constraint.initiallyDeferred ? " INITIALLY DEFERRED" : ""}`
-    : "";
-  return `${prefix}FOREIGN KEY ${columns} REFERENCES ${referenced}${onDelete}${deferred};\n`;
 }
 
 function sameColumns(left: readonly string[], right: readonly string[]): boolean {
@@ -341,19 +178,13 @@ function migrationEntry(
     migration.sql,
     `Plugin "${plugin}" schema migration "${migration.version}"`,
   );
-  return {
-    plugin,
-    version: migration.version,
-    checksum: checksum(sql),
-    sql,
-  };
+  return { plugin, version: migration.version, sql };
 }
 
 /**
- * Build the one immutable migration registry consumed by the API migrator.
- * Constraint migrations and free-form plugin DDL share a plugin-local version
- * namespace, so ordering and collisions are explicit rather than dependent on
- * object iteration.
+ * Build the registry consumed by the API migrate chain. Constraint entries and
+ * free-form plugin DDL share a plugin-local version namespace, so ordering and
+ * collisions are explicit rather than dependent on object iteration.
  */
 export function collectPluginMigrationRegistry(
   manifest: PlatformSchemaManifest,
@@ -376,18 +207,12 @@ export function collectPluginMigrationRegistry(
       const plugin = constraint.compilerOwned ? "osf-compiler" : table.pluginOwner;
       if (!plugin) {
         throw new Error(
-          `Table ${table.schema}.${table.name} declares versioned constraint ${constraint.name} but has no plugin owner. Table constraints are currently a compiler-plugin contract.`,
+          `Table ${table.schema}.${table.name} declares constraint ${constraint.name} but has no plugin owner. Table constraints are currently a compiler-plugin contract.`,
         );
       }
       assertMigrationIdentity(plugin, constraint.version);
       const sql = renderConstraintSql(table, constraint);
-      entries.push({
-        plugin,
-        version: constraint.version,
-        checksum: checksum(sql),
-        sql,
-        ...(constraint.replaceExisting ? { repeatable: true as const } : {}),
-      });
+      entries.push({ plugin, version: constraint.version, sql });
     }
   }
 

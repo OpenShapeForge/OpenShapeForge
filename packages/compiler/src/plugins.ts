@@ -312,9 +312,11 @@ export type CompilerPlugin = {
    */
   contributePlatformTables?(context: PluginBaseContext): TableDefinition[];
   /**
-   * Versioned DDL for invariants that are not table constraints, such as
-   * functions and triggers. Applied after generated tables and checksum-locked
-   * in the shared migration ledger.
+   * Idempotent DDL for invariants that are not table constraints, such as
+   * functions and triggers. Applied after the generated tables on EVERY
+   * migrate — there is no ledger — so each statement must be safe to repeat
+   * (CREATE OR REPLACE, IF NOT EXISTS, a guarded DO block). The version is
+   * an ordering key within the plugin.
    */
   schemaMigrations?:
     | PluginSchemaMigration[]

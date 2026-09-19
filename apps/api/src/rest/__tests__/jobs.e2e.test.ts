@@ -76,7 +76,7 @@ function enqueue(payload: Record<string, unknown>, deliveryKey?: string) {
 }
 
 describe("durable jobs end to end", () => {
-  test("a mail job is enqueued, drained through the null provider and readable on REST and GraphQL", async () => {
+  test("a mail job is enqueued, refused by the null provider as undelivered, and readable on REST and GraphQL", async () => {
     const sent: MailMessage[] = [];
     const module = createJobsRuntimeModule({ modules: () => [], mailProvider: createNullMailProvider({ sent, log: () => {} }) });
     const handlers = composeJobHandlers([module]);
@@ -97,21 +97,21 @@ describe("durable jobs end to end", () => {
     await processJobBatch(worker!.db, handlers, silent, { kinds: [kind], batchSize: 50 });
     expect(sent.map((message) => message.to)).toEqual([["someone@example.test"]]);
 
-    const done = await post(operator, "/api/jobs/get", { id: good.id });
-    expect(done.body).toMatchObject({ status: "done", attempts: 1, result: { provider: "null" }, leaseUntil: null });
-    expect(typeof done.body.result.providerMessageId).toBe("string");
-    expect(done.body.completedAt).not.toBeNull();
+    // The null provider logged the message and did not send it: never `done`.
+    const undelivered = await post(operator, "/api/jobs/get", { id: good.id });
+    expect(undelivered.body).toMatchObject({ status: "failed", attempts: 1, result: null, leaseUntil: null, lastError: { code: "MAIL_NOT_CONFIGURED" } });
+    expect(undelivered.body.completedAt).not.toBeNull();
 
     const failed = await post(operator, "/api/jobs/get", { id: bad.id });
     expect(failed.body).toMatchObject({ status: "failed", lastError: { code: "MAIL_INVALID" } });
 
     const listed = await post(operator, "/api/jobs/list", { subject, status: "failed" });
     expect(listed.status).toBe(200);
-    expect(listed.body.items.map((job: { id: string }) => job.id)).toEqual([bad.id]);
+    expect(listed.body.items.map((job: { id: string }) => job.id).sort()).toEqual([bad.id, good.id].sort());
     expect(listed.body.nextCursor).toBeNull();
 
     const data = await expectData(operator, /* GraphQL */ `query Job($input: JSON!) { job(input: $input) }`, { input: { id: good.id } });
-    expect(data.job).toMatchObject({ id: good.id, status: "done" });
+    expect(data.job).toMatchObject({ id: good.id, status: "failed" });
   });
 
   test("retry requeues a failed job, refuses a done one, and is fenced by tenant and role", async () => {

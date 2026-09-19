@@ -500,8 +500,9 @@ An overlay layer can introduce all of these without compiler changes.
    `scripts/check-generated-artifacts.mjs` (currently `3`).
 3. `bun run generate` — regenerates schema.sql, types, manifest, realm,
    plugin artifacts.
-4. `bun run db:migrate` — new tables/columns are additive and apply
-   automatically ([migrations.md](migrations.md)).
+4. `bun run db:reset` on a built database, `bun run db:migrate` on an empty
+   one — the manifest checksum moved, and a built database is rebuilt, not
+   altered ([migrations.md](migrations.md)).
 5. Done. The GraphQL CRUD surface, entity-event journaling, the e2e suite,
    and the k6 load test all pick the entity up from the manifest — no test or
    API code changes ([testing.md](testing.md)).

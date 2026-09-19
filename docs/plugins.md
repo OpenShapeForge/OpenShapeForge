@@ -343,17 +343,17 @@ double-generation gates. With no contributions the file is absent, preserving
 the existing generated output byte-for-byte.
 
 `db:migrate` applies every entry after the generated tables exist and before
-the grant sweep. A database is built from the manifest, so there is no earlier
-phase in which legacy ownership could be transformed: a contributed table's
-shape is declared, not migrated to. Each migration and its ledger write run in
-one transaction under `plugin:<plugin>:<version>` in
-`platform.schema_migrations`. The ledger stores the exact SQL checksum; a
-rerun skips an identical entry, and changing the SQL of an applied entry fails
-migration. Ledger entries absent from an older registry are tolerated so an
-image rollback remains serviceable. Applied contributions are still immutable:
-retain old entries in forward builds and add a new version for an additive
-roll-forward — or, in the reset model, rebuild the database with
-`bun run db:reset`.
+the grant sweep, on every run, in plugin-then-version order, each in its own
+transaction — and keeps no ledger. A database is built from the manifest, so
+there is no earlier phase in which legacy ownership could be transformed: a
+contributed table's shape is declared, not migrated to. `constraints` are
+rendered by the compiler as name-guarded DO blocks, so they are repeatable by
+construction; free-form `schemaMigrations` must be written that way by the
+plugin (`CREATE OR REPLACE`, `IF NOT EXISTS`, a guarded DO block), because an
+entry that fails on its second run is rolled back and named in the error.
+Changing a constraint moves the manifest checksum and the built database is
+refused until it is rebuilt with `bun run db:reset`; the version is an
+ordering key within the plugin, not a history.
 
 ### `ownedPaths` and the gates
 

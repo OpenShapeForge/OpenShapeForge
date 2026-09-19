@@ -406,6 +406,9 @@ describe("explicit service credentials in host mode", () => {
     // The database credential, not the deployment service allowlist, grants this client access.
     delete process.env.OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES;
     const credentialRows = (query: CompiledQuery) => {
+      // The store's first read: which tenant the lookup id belongs to, before
+      // it opens the tenant-fenced session for the row itself.
+      if (query.sql.includes("app.api_key_tenant(")) return [{ tenant_id: TENANT_A }];
       if (query.sql.includes("from platform.api_keys")) return [{
         id: "55555555-5555-4555-8555-555555555555", tenant_id: TENANT_A,
         integration_id: integrationId, secret_hash: apiKey.secretHash,
@@ -434,6 +437,9 @@ describe("explicit service credentials in host mode", () => {
       if (scenario.allowed) {
         expect(session.tenantId).toBe(TENANT_A);
         expect(session.roles).toEqual(["Records.Read"]);
+        // Let the fire-and-forget use-timestamp write settle before counting,
+        // so the refusal below is measured on its own.
+        await new Promise((resolve) => setImmediate(resolve));
         const count = queries.length;
         expect((await resolveSessionContext(request, { db, requiredAudience: RESOURCE })).credential).toBe("none");
         expect(queries).toHaveLength(count);

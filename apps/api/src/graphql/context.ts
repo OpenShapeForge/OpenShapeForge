@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { GraphQLError } from "graphql";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { resolveSessionContext } from "../auth/identity.js";
+import { HttpError } from "../rest/http-error.js";
 import type {
   SessionCredential,
   SessionScope,
@@ -55,7 +57,18 @@ export async function createGraphqlContext(
   options: CreateGraphqlContextOptions = {},
 ): Promise<GraphqlContext> {
   const resolved = options.resolvedSession ??
-    await resolveSessionContext(headers, { db: options.db });
+    await resolveSessionContext(headers, { db: options.db }).catch((error: unknown) => {
+      // A refusal or an unavailability the resolver already classified (403
+      // NOT_INVITED, 403 ORGANIZATION_RESOURCE_FORBIDDEN, 503
+      // AUTHENTICATION_UNAVAILABLE) is an answer, not an internal fault:
+      // carried as an expected GraphQL error rather than masked.
+      if (error instanceof HttpError) {
+        throw new GraphQLError(error.message, {
+          extensions: { code: error.code, status: error.status, http: { status: error.status } },
+        });
+      }
+      throw error;
+    });
   const session: GraphqlSessionContext = {
     tenantId: resolved.tenantId,
     userId: resolved.userId,

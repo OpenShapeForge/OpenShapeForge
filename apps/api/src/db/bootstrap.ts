@@ -79,7 +79,7 @@ export type BootstrapOutcome =
       /**
        * - "migrated": the database already matches the bundled manifest.
        * - "behind": it was built from another manifest; that is drift for
-       *   `db:migrate` (or `db:reset`) to settle, not something to build over.
+       *   `db:reset` to settle, not something to build over.
        * - "foreign-schema": it carries schema this build does not declare —
        *   another branch's, or a legacy layout — and building the manifest
        *   over the top would produce a database no manifest describes.

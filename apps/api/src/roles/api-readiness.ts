@@ -70,10 +70,12 @@ function driftBanner(drift: GeneratedSchemaDriftResult): string {
     `GENERATED SCHEMA DRIFT DETECTED (status: ${drift.status})`,
     drift.status === "unmigrated"
       ? "The database has no applied generated-schema migration record (fresh DB?)."
-      : "The database's generated schema is BEHIND the manifest bundled in this build.",
+      : "The database was built from another manifest than the one bundled in this build.",
     `  recorded checksum: ${drift.recordedChecksum ?? "<none>"}`,
     `  bundled checksum:  ${drift.bundledChecksum}`,
-    "Run `bun run db:migrate` to bring the database up to date.",
+    drift.status === "unmigrated"
+      ? "Run `bun run db:migrate` to build the database."
+      : "Rebuild the database with `bun run db:reset`; a built database is never changed in place.",
     "============================================================================",
   ].join("\n");
 }

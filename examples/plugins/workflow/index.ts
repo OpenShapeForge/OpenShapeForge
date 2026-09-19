@@ -335,7 +335,12 @@ function workflowDataTables(): TableDefinition[] {
         // node types the designer offers, and adding one must not be a migration.
         { name: "category", type: "text", required: true, default: "'process'::text" },
         // Subflow parentage: which node of which definition invokes this one.
-        { name: "parent_definition_id", type: "uuid" },
+        // Deleting the parent leaves the subflow standing on its own.
+        {
+          name: "parent_definition_id",
+          type: "uuid",
+          references: tenantBound("parent_definition_id", "definitions", "SET NULL"),
+        },
         { name: "parent_node_id", type: "text" },
         // Stable identifier for a definition that arrived from outside this
         // deployment, so re-importing updates rather than duplicates.

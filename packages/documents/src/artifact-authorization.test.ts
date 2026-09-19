@@ -108,6 +108,44 @@ describe("Document artifact authorization", () => {
     expect(state.executed[0]!.sql).not.toContain("for share");
   });
 
+  test("open under a capability grant asks the parent Document alone, so versions created after issue stay readable", async () => {
+    const access: unknown[] = [];
+    const grantSession: PluginSessionContext = {
+      ...session,
+      roles: [],
+      scope: "self",
+      credential: "grant",
+      grant: {
+        id: userId,
+        subject: { entity: "Envelope", id: "60000000-0000-4000-8000-000000000001" },
+        recipient: { kind: "email" },
+        operations: ["envelopes.read"],
+        records: [{ entity: "Document", id: documentId, intents: ["get"] }],
+        expiresAt: "2030-01-01T00:00:00.000Z",
+        maxUses: null,
+      },
+    };
+    const authorization = createDocumentArtifactAuthorization({
+      session: grantSession,
+      records: {
+        async assertAccess(receivedSession, request) {
+          expect(receivedSession).toBe(grantSession);
+          access.push(request);
+        },
+      },
+    });
+    const transaction: DocumentArtifactSqlExecutor = {
+      async executeQuery() {
+        return { rows: [{ documentId }] };
+      },
+    };
+    await expect(authorization.resolveDocumentVersionArtifactAccess(
+      transaction,
+      { action: "open", artifactId, owner },
+    )).resolves.toEqual({ tenantId, artifactId, owner });
+    expect(access).toEqual([{ entityName: "Document", id: documentId, intent: "get" }]);
+  });
+
   test("open propagates either canonical read refusal and never substitutes update authority", async () => {
     const access: unknown[] = [];
     const denial = new Error("denied");

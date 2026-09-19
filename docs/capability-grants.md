@@ -137,13 +137,16 @@ records: [
 Issuing verifies every delegated intent against the issuer's own access
 through the same oracle, so a grant never reaches a record its issuer could
 not; the delegation is journaled with the grant and shown in its summary.
-`delete` is never delegated. This is what lets a recipient open the exact PDF
-they are asked to sign (`platform.artifacts.read` under the grant) and lets
-the completing handler append the signed copy to the record's Document
-(`appendDocumentVersion` from `@openshapeforge/documents/runtime`, the same
-command `DocumentVersion.create` runs, under a grant that delegates `update`
-on that Document). The generated Operations still refuse the grant session:
-delegation admits authored handler code, never a client.
+`delete` is never delegated. This is what lets a recipient open the PDF they
+are asked to sign and lets the completing handler append the signed copy to
+the record's Document (`appendDocumentVersion` from
+`@openshapeforge/documents/runtime`, the same command `DocumentVersion.create`
+runs, under a grant that delegates `update` on that Document). Reading a
+version's bytes through `platform.artifacts.read` under a grant asks the
+parent **Document**'s `get` alone: the versions a completion creates did not
+exist when the grant was issued, and a version is the document's content.
+The generated Operations still refuse the grant session: delegation admits
+authored handler code, never a client.
 
 ### The use is counted in the handler's transaction
 

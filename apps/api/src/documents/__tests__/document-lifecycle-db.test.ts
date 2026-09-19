@@ -139,6 +139,13 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     await collections(restricted(), session, documentBinding("remove"), { id: nl.id, expectedVersion: await version(), childId: inserted.childId });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 
+    // Once draft, a further block edit still advances the document's version token: the token captured after
+    // the first edit no longer publishes what the second edit changed.
+    const afterFirst = (await document(documentId)).updated_at;
+    const [template0] = await variantBlocks(nl.id);
+    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: template0!.id, values: { values: { text: "Second edit while draft" } } });
+    expect((await document(documentId)).updated_at).not.toBe(afterFirst);
+
     // The template's own collection Operations draft the template head the same way, through its variant.
     expect((await template(ids.template)).lifecycle_status).toBe("published");
     const templateVersion = (await sql<{ v: string }>`select updated_at::text as v from erp.template_variants where id = ${ids.variant}::uuid`.execute(privileged())).rows[0]!.v;

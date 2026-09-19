@@ -170,7 +170,10 @@ runtime reads from the manifest (`apps/api/src/operations/entity/versioned-head.
   `TemplateVariant.insertBlock` drafts the `Template`), as does a generic
   update of an owned child; a child update with its stored values or a move
   to the child's own place is the same no-op (no owner touch, no draft, no
-  event);
+  event). Every real change below the head advances the head's `updatedAt`,
+  draft or not, so a publisher's `expectedVersion` never covers content it
+  has not seen; a row whose owner columns resolve to more than one head or
+  path is refused;
 - a follow that actually re-seeds, diverges, inserts, removes or moves a block;
   a follow that only moves the pin (a head-only template change) leaves a
   published document published.

@@ -341,13 +341,27 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
   return { value, status: 201 };
 };
 
-export const createDocumentVersion: ModuleOperationHandler = async (input, context) => {
-  const { platform, session } = contextServices(context);
+/**
+ * Append one version to a Document under a session, as the canonical
+ * `DocumentVersion.create` does: the session's `update` access on the
+ * Document is asserted through the core oracle, the version is appended by
+ * the database command, and an artifact is bound and finalized in the same
+ * transaction. Exported for a runtime module whose own Operation appends a
+ * file to a record's Document — a signed copy, a generated certificate —
+ * under a session the generated Operation would not admit, such as a
+ * capability grant whose issuer delegated `update` on that Document. The
+ * authorization is the same oracle; only the transport envelope differs.
+ */
+export async function appendDocumentVersion(
+  services: { platform: PluginPlatformServices; session: PluginSessionContext },
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { platform, session } = services;
   const documentId = inputUuid(input, "documentId");
   const version = inputObject(input, "version");
   const { logicalVersion, binding } = artifactInput(input, version);
 
-  const value = await translateDatabaseError(platform, () =>
+  return translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
       await platform.records.assertAccess(session, {
         entityName: "Document",
@@ -392,5 +406,9 @@ export const createDocumentVersion: ModuleOperationHandler = async (input, conte
       return authoredRow(row, { id: created.documentVersionId, documentId });
     }),
   );
+}
+
+export const createDocumentVersion: ModuleOperationHandler = async (input, context) => {
+  const value = await appendDocumentVersion(contextServices(context), input);
   return { value, status: 201 };
 };

@@ -422,6 +422,9 @@ export class ModulePlatformRuntime {
           return this.services.db.withSession(session, (trx) =>
             issueCapabilityGrantInTransaction(trx, session, input, {
               capabilityOperations: this.#capabilityOperations ?? generatedCapabilityOperations(),
+              // The issuer's own access, through the same oracle a handler
+              // uses: a delegated record is one the issuer could reach.
+              assertIssuerAccess: (record) => this.services.records.assertAccess(session, record),
             })
           );
         },

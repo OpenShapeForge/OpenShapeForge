@@ -105,7 +105,7 @@ events and RLS have an actor), `roles: []`, and `session.grant`:
 
 ```ts
 session.grant = {
-  id, subject: { entity, id }, recipient, operations, expiresAt, maxUses,
+  id, subject: { entity, id }, recipient, operations, records, expiresAt, maxUses,
 };
 ```
 
@@ -118,6 +118,32 @@ session (a bearer session presented to one is `401 GRANT_INVALID`). When the
 Operation declares a record target with an `inputField`, core sets that
 field to the grant's subject id before validation; a different value in the
 request is `403 GRANT_SCOPE`.
+
+### What a grant session may reach
+
+`platform.records.assertAccess` — and everything built on it, notably the
+artifact port's `read` — answers a grant session from the grant row rather
+than from roles: the **subject** record is reachable for `get` and `update`
+(the Operation exists to act on it), and any other record only when the
+grant **delegates** it:
+
+```ts
+records: [
+  { entity: "DocumentVersion", id: pdfVersionId, intents: ["get"] },
+  { entity: "Document", id: documentId, intents: ["get", "update"] },
+]
+```
+
+Issuing verifies every delegated intent against the issuer's own access
+through the same oracle, so a grant never reaches a record its issuer could
+not; the delegation is journaled with the grant and shown in its summary.
+`delete` is never delegated. This is what lets a recipient open the exact PDF
+they are asked to sign (`platform.artifacts.read` under the grant) and lets
+the completing handler append the signed copy to the record's Document
+(`appendDocumentVersion` from `@openshapeforge/documents/runtime`, the same
+command `DocumentVersion.create` runs, under a grant that delegates `update`
+on that Document). The generated Operations still refuse the grant session:
+delegation admits authored handler code, never a client.
 
 ### The use is counted in the handler's transaction
 
@@ -160,8 +186,9 @@ const { id, token, expiresAt } = await platform.grants.issue(session, {
 - Every key in `operations` must be an `auth.mode: capability` Operation of
   the generated catalog; the subject id must be a UUID; the recipient is an
   object with a non-empty `kind`, at most 2 KB as JSON, and otherwise opaque
-  to core; `expiresAt` must be in the future. Violations throw — this is
-  authored plugin logic, not client input.
+  to core; `records` (optional, at most sixteen) lists distinct records with
+  `get`/`update` intents the issuer must hold; `expiresAt` must be in the
+  future. Violations throw — this is authored plugin logic, not client input.
 - `supersede: "same-subject-and-recipient"` revokes, in the same
   transaction, every still-active grant for the same subject and the same
   recipient object, recording `revoked_reason: "superseded"` and
@@ -192,7 +219,7 @@ They are bound to the runtime's own `osf-grants` module and need no plugin.
 Every lifecycle change appends to `platform.entity_events` with
 `aggregate_type: "capability_grant"` and the grant id, inside the
 transaction that made the change: `capability_grant_issued` (subject,
-recipient, Operations, expiry, uses limit, supersede mode),
+recipient, Operations, delegated records, expiry, uses limit, supersede mode),
 `capability_grant_used` (Operation, use count, whether it consumed the
 grant), `capability_grant_locked` (attempts, `locked_until`) and
 `capability_grant_revoked` (reason, and `supersededBy` when a newer grant

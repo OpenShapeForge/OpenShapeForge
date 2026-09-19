@@ -133,6 +133,41 @@ describe("capability grants", () => {
         await expect(issue({ recipient: { address: "x" } as never })).rejects.toThrow(/non-empty kind/);
         await expect(issue({ maxUses: 0 })).rejects.toThrow(/positive integer/);
 
+        // Delegated records: validated, then proven against the issuer's own
+        // access before the row exists; the resolved session carries them.
+        await expect(issue({ records: [{ entity: "Document", id: "not-a-uuid", intents: ["get"] }] }))
+          .rejects.toThrow(/must be a UUID/);
+        await expect(issue({ records: [{ entity: "Document", id: randomUUID(), intents: [] }] }))
+          .rejects.toThrow(/at least one intent/);
+        await expect(issue({ records: [{ entity: "Document", id: randomUUID(), intents: ["delete" as never] }] }))
+          .rejects.toThrow(/not get or update/);
+        await expect(issue({ records: [{ entity: "Document", id: randomUUID(), intents: ["get"] }] }))
+          .rejects.toThrow(/requires the issuer access check/);
+        const documentId = randomUUID();
+        const checked: string[] = [];
+        const delegated = await withDbSession(db, session, (trx) =>
+          issueCapabilityGrantInTransaction(trx, session, {
+            operations: [...OPERATIONS], subject, recipient, expiresAt,
+            records: [{ entity: "Document", id: documentId, intents: ["get", "update", "get"] }],
+          }, {
+            capabilityOperations: OPERATIONS,
+            assertIssuerAccess: async (record) => {
+              checked.push(`${record.entityName}:${record.intent}`);
+              if (record.intent === "update" && record.id !== documentId) throw new Error("issuer lacks update");
+            },
+          }));
+        expect(checked).toEqual(["Document:get", "Document:update"]);
+        const delegatedSession = await resolveCapabilityGrantSession(db, delegated.token, { key: "demo.envelope.read" });
+        expect(delegatedSession.grant?.records).toEqual([{ entity: "Document", id: documentId, intents: ["get", "update"] }]);
+        await expect(withDbSession(db, session, (trx) =>
+          issueCapabilityGrantInTransaction(trx, session, {
+            operations: [...OPERATIONS], subject, recipient, expiresAt,
+            records: [{ entity: "Document", id: randomUUID(), intents: ["update"] }],
+          }, {
+            capabilityOperations: OPERATIONS,
+            assertIssuerAccess: async () => { throw new Error("issuer lacks update"); },
+          }))).rejects.toThrow("issuer lacks update");
+
         // A reusable grant resolves repeatedly and counts every use.
         const reusable = await issue();
         expect(parseGrantToken(reusable.token)?.id).toBe(reusable.id);
@@ -141,7 +176,7 @@ describe("capability grants", () => {
         expect(grantSession.tenantId).toBe(tenantA);
         expect(grantSession.userId).toBe(reusable.id);
         expect(grantSession.roles).toEqual([]);
-        expect(grantSession.grant).toMatchObject({ id: reusable.id, subject, recipient, operations: [...OPERATIONS] });
+        expect(grantSession.grant).toMatchObject({ id: reusable.id, subject, recipient, operations: [...OPERATIONS], records: [] });
         for (const uses of [1, 2]) {
           const used = await withDbSession(db, grantSession, (trx) =>
             consumeCapabilityGrantInTransaction(trx, grantSession, "demo.envelope.read"));
@@ -253,7 +288,8 @@ describe("capability grants", () => {
         expect(await purgeCapabilityGrants(db, session, { retainDays: 30, now })).toBe(0);
         const farFuture = new Date(now.getTime() + 31 * 24 * 60 * 60 * 1000);
         const purged = await purgeCapabilityGrants(db, session, { retainDays: 30, now: farFuture });
-        expect(purged).toBe(5);
+        // The five grants of the lifecycle above plus the delegated one.
+        expect(purged).toBe(6);
         const remaining = await withDbSession(db, session, (trx) => listCapabilityGrantsInTransaction(trx, subject, farFuture));
         expect(remaining).toEqual([]);
       });

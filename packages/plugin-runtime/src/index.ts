@@ -39,6 +39,17 @@ export type PluginSessionCredential =
    */
   | "grant";
 
+/**
+ * One record a grant reaches beside its subject, with the intents the
+ * issuer delegated. Core verified at issue time that the issuer held each
+ * intent on the record, so a grant never reaches further than its issuer.
+ */
+export type RuntimeCapabilityGrantRecordAccess = {
+  entity: string;
+  id: string;
+  intents: readonly ("get" | "update")[];
+};
+
 /** What a capability grant covers, verified by the host from the grant row. */
 export type PluginCapabilityGrant = {
   id: string;
@@ -46,6 +57,8 @@ export type PluginCapabilityGrant = {
   /** Opaque beyond its `kind`; whatever the issuer recorded about the recipient. */
   recipient: { kind: string; [key: string]: unknown };
   operations: readonly string[];
+  /** Delegated record access beside the subject; see `RuntimeCapabilityGrantRecordAccess`. */
+  records: readonly RuntimeCapabilityGrantRecordAccess[];
   expiresAt: string;
   maxUses: number | null;
 };
@@ -80,6 +93,14 @@ export type RuntimeCapabilityGrantIssueInput = {
   operations: readonly string[];
   subject: { entity: string; id: string };
   recipient: RuntimeCapabilityGrantRecipient;
+  /**
+   * Records the grant's handlers may reach beside the subject, each with the
+   * intents delegated: `get` admits `platform.records.assertAccess` and the
+   * artifact reads that build on it; `update` admits the document commands.
+   * Issuing verifies the issuer holds every intent listed, so a grant never
+   * reaches further than the session that issued it.
+   */
+  records?: readonly RuntimeCapabilityGrantRecordAccess[];
   expiresAt: Date | string;
   /** Omitted or null: reusable until expiry. 1: single use. */
   maxUses?: number | null;
@@ -103,6 +124,7 @@ export type RuntimeCapabilityGrantSummary = {
   subjectId: string;
   recipient: RuntimeCapabilityGrantRecipient;
   operations: readonly string[];
+  records: readonly RuntimeCapabilityGrantRecordAccess[];
   issuedBy: string;
   issuedAt: string;
   expiresAt: string;

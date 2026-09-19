@@ -22,6 +22,7 @@ import {
   CAPABILITY_GRANT_AGGREGATE,
   capabilityGrantStatus,
   recipientOf,
+  recordsOf,
   type CapabilityGrantRow,
 } from "./capability-grants.js";
 import {
@@ -75,7 +76,7 @@ function grantDbSession(tenantId: string, grantId: string): DbSessionInput {
 export function capabilityGrantSessionFromRow(
   row: Pick<
     CapabilityGrantRow,
-    "id" | "tenant_id" | "subject_entity" | "subject_id" | "recipient" | "operations" | "expires_at" | "max_uses"
+    "id" | "tenant_id" | "subject_entity" | "subject_id" | "recipient" | "records" | "operations" | "expires_at" | "max_uses"
   >,
 ): TrustedSessionContext {
   const grant: CapabilityGrantSession = Object.freeze({
@@ -83,6 +84,8 @@ export function capabilityGrantSessionFromRow(
     subject: Object.freeze({ entity: row.subject_entity, id: row.subject_id }),
     recipient: Object.freeze(recipientOf(row.recipient)),
     operations: Object.freeze([...row.operations]),
+    records: Object.freeze(recordsOf(row.records).map((record) =>
+      Object.freeze({ entity: record.entity, id: record.id, intents: Object.freeze([...record.intents]) }))),
     expiresAt: new Date(row.expires_at).toISOString(),
     maxUses: row.max_uses,
   });

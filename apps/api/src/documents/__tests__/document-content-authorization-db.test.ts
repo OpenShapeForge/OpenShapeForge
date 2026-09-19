@@ -94,6 +94,24 @@ describe("document content authorization against PostgreSQL", () => {
     }
   }, 60_000);
 
+  test("a document editor without a template role materializes the pinned version; a template reader without a document role cannot", async () => {
+    const setup = platformFor(editor);
+    const ids = await seedTemplate();
+    const templateVersion = await publishTemplate(setup.context, ids.template);
+    const documentId = await createDocument();
+    const caseSetup = platformFor(caseUser);
+    await linked(caseSetup.handlers, caseSetup.context, { id: documentId, templateVersionId: templateVersion, parameters: { name: "Reader" } });
+    const request = { id: documentId, channel: "document", locale: "nl" };
+    const materialized = (await caseSetup.handlers.materializeDocument!(request, caseSetup.context)).value as { templateVersionId: string; blocks: { values: { text: string } }[] };
+    expect(materialized.templateVersionId).toBe(templateVersion);
+    expect(materialized.blocks.map((block) => block.values.text)).toEqual(["Hello Reader", "Second"]);
+    // The same for a document reader; the frozen version itself stays out of reach of a template reader without a document role.
+    const readerSetup = platformFor(documentReader);
+    expect(((await readerSetup.handlers.materializeDocument!(request, readerSetup.context)).value as { templateVersionId: string }).templateVersionId).toBe(templateVersion);
+    const templateSetup = platformFor(templateUser);
+    await fails(templateSetup.handlers.materializeDocument!(request, templateSetup.context), "FORBIDDEN");
+  }, 60_000);
+
   test("the database keeps the pinned template version, the follow problem and the version table server-managed", async () => {
     const { context, handlers } = platformFor(editor);
     const ids = await seedTemplate();

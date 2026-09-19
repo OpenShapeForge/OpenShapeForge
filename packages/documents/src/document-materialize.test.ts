@@ -83,7 +83,13 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
           queries.push(query.sql);
           expect(query.parameters[0]).toBe(ids.tenant);
           if (query.sql.includes("from erp.documents")) return { rows: [{ id: ids.document, template_version_id: templateVersionId, parameters: options.parameters === undefined ? { name: "Ada" } : options.parameters }] };
-          if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: query.parameters[1] }] };
+          if (query.sql.includes("from erp.template_versions")) {
+            // The pinned version is read raw under the document's authority; an inclusion's row is only locked here.
+            if (!query.sql.startsWith("select template_id")) return { rows: [{ id: query.parameters[1] }] };
+            expect(query.parameters[1]).toBe(ids.version);
+            const frozenBlock = { id: ids.templateBlock, tenant_id: ids.tenant, variant_id: ids.templateVariant, variant_id_position: 0, definition_key: "TextBlock", definition_version: 1, values: { text: data.frozenText } };
+            return { rows: [{ template_id: ids.template, version_number: 3, snapshot: templateSnapshot(ids.template, ids.templateVariant, [frozenBlock]) }] };
+          }
           if (query.sql.includes("from erp.document_variants")) {
             return { rows: query.parameters[2] === "document" ? [{ id: ids.documentVariant, channel: "document", locale: "en" }] : [] };
           }
@@ -159,9 +165,10 @@ describe("Document.materialize", () => {
     expect(snapshot.blocks[0].values.text).toBe("First Ada");
     expect(snapshot.blocks[1].values.text).toBe("Second");
     expect(JSON.stringify(snapshot)).not.toContain(f.data.frozenText);
-    expect(f.authorizations).toEqual([`Document:${ids.document}`, `TemplateVersion:${ids.version}`, `Template:${ids.template}`]);
-    expect(f.reads).toEqual([`TemplateVersion:${ids.version}`]);
-    expect(f.queries.every((query) => /for share$/.test(query))).toBe(true);
+    // The pinned version is the document's own: its read needs no TemplateVersion or Template role.
+    expect(f.authorizations).toEqual([`Document:${ids.document}`]);
+    expect(f.reads).toEqual([]);
+    expect(f.queries.filter((query) => !query.startsWith("select template_id")).every((query) => /for share$/.test(query))).toBe(true);
     expect(f.executions.map((execution) => execution.id)).toEqual(["TextBlock.materialize", "TextBlock.materialize"]);
   });
   test("passes the document's stored parameters to the engine and defaults a missing row value to an empty object", async () => {
@@ -178,8 +185,11 @@ describe("Document.materialize", () => {
     const f = fixture({ withInclusion: true });
     const response = await materializeDocument(request, f.context);
     const snapshot = (response as any).value;
-    expect(f.reads[0]).toBe(`TemplateVersion:${ids.version}`);
-    expect(f.reads.slice(1).every((read) => read === `TemplateVersion:${ids.included}`)).toBe(true);
+    // An included template is another template: it keeps its TemplateVersion and Template read checks.
+    expect(f.reads.length).toBeGreaterThan(0);
+    expect(f.reads.every((read) => read === `TemplateVersion:${ids.included}`)).toBe(true);
+    expect(f.authorizations).toContain(`Template:${ids.include}`);
+    expect(f.authorizations).not.toContain(`Template:${ids.template}`);
     expect(f.queries.filter((query) => query.includes("from erp.document_variants"))).toHaveLength(1);
     expect(snapshot.templates.map((entry: { version: { id: string } }) => entry.version.id)).toEqual([ids.version, ids.included]);
     const included = snapshot.templates[1].version;

@@ -196,6 +196,13 @@ export type ContentScope = {
   /** The template variant collection's allowlist, applied to every frozen template version. */
   readonly allowedDefinitions: readonly string[];
   readonly read: CanonicalReader;
+  /**
+   * Version ids the caller reaches through its own record's authority (a
+   * document's pinned version, whose editor need hold no template role, as
+   * for Document.linkTemplate). Every other version, an inclusion of another
+   * template, still needs TemplateVersion and Template read.
+   */
+  readonly ownVersions?: ReadonlySet<string>;
 };
 
 /**
@@ -218,10 +225,20 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       const locked = (await rows<{ id: string }>(trx,
         "select id from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
       if (!locked) return null;
-      const version = await read("TemplateVersion", id);
-      if (!version) return null;
+      let version: Record<string, unknown>;
+      if (scope.ownVersions?.has(id)) {
+        // The row the caller's own record pins, read as Document.linkTemplate reads it: the frozen snapshot, server-side.
+        const own = (await rows<{ template_id: string; version_number: number; snapshot: unknown }>(trx,
+          "select template_id, version_number, snapshot from erp.template_versions where tenant_id = $1 and id = $2", [tenantId, id]))[0];
+        if (!own) return null;
+        version = { template: own.template_id, versionNumber: own.version_number, snapshot: own.snapshot };
+      } else {
+        const found = await read("TemplateVersion", id);
+        if (!found) return null;
+        version = found;
+        await platform.records.assertAccess(session, { entityName: "Template", id: uuid(version.template, "template"), intent: "get" });
+      }
       const templateId = uuid(version.template, "template");
-      await platform.records.assertAccess(session, { entityName: "Template", id: templateId, intent: "get" });
       const frozen = templateSnapshotContent(version.snapshot, {
         tenantId, templateId, channel, carrier, allowedDefinitions: scope.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
       });

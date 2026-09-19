@@ -69,7 +69,10 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
       if (!document!.template_version_id) refuse("INVALID_STATE", "The document has no linked template version.");
       const templateVersionId = uuid(document!.template_version_id, "template version");
       const parameters = immutableContent(document!.parameters == null ? {} : object(document!.parameters, "parameters")) as JsonObject;
-      const frozen = contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: templateCollection.allowedDefinitions, read });
+      // The pinned version is reached through the document's own read access,
+      // as linkTemplate reached it through the document's update access; a
+      // template another block includes still needs its own read roles.
+      const frozen = contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: templateCollection.allowedDefinitions, read, ownVersions: new Set([templateVersionId]) });
       const resolvers: ContentResolvers = {
         ...frozen,
         async resolveTemplateVersion(id, scope) {

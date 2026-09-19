@@ -21,6 +21,7 @@ import { appendScopedEntityEventInTransaction } from "../platform/entity-events.
 import {
   CAPABILITY_GRANT_AGGREGATE,
   capabilityGrantStatus,
+  recipientOf,
   type CapabilityGrantRow,
 } from "./capability-grants.js";
 import {
@@ -80,7 +81,7 @@ export function capabilityGrantSessionFromRow(
   const grant: CapabilityGrantSession = Object.freeze({
     id: row.id,
     subject: Object.freeze({ entity: row.subject_entity, id: row.subject_id }),
-    recipient: Object.freeze(structuredClone(row.recipient)),
+    recipient: Object.freeze(recipientOf(row.recipient)),
     operations: Object.freeze([...row.operations]),
     expiresAt: new Date(row.expires_at).toISOString(),
     maxUses: row.max_uses,

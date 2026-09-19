@@ -74,6 +74,11 @@ const MAX_RECIPIENT_JSON_BYTES = 2048;
 const MAX_REASON_LENGTH = 500;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** The driver hands jsonb back as text on some paths; the summary always carries the object. */
+export function recipientOf(value: unknown): RuntimeCapabilityGrantRecipient {
+  return (typeof value === "string" ? JSON.parse(value) : value) as RuntimeCapabilityGrantRecipient;
+}
+
 function iso(value: Date | string): string {
   return new Date(value).toISOString();
 }
@@ -101,7 +106,7 @@ export function summarizeCapabilityGrant(
     id: row.id,
     subjectEntity: row.subject_entity,
     subjectId: row.subject_id,
-    recipient: row.recipient,
+    recipient: recipientOf(row.recipient),
     operations: [...row.operations],
     issuedBy: row.issued_by,
     issuedAt: iso(row.issued_at),
@@ -203,7 +208,7 @@ export async function issueCapabilityGrantInTransaction(
       (id, tenant_id, token_hash, operations, subject_entity, subject_id, recipient,
        issued_by, issued_at, expires_at, max_uses)
     values
-      (${id}, ${session.tenantId}, ${hashGrantSecret(secret)}, ${sql.val(operations)}::text[],
+      (${id}, ${session.tenantId}, ${hashGrantSecret(secret)}, array[${sql.join(operations.map((key) => sql.val(key)))}]::text[],
        ${input.subject.entity}, ${input.subject.id}, ${JSON.stringify(recipient)}::jsonb,
        ${session.userId}, ${now}, ${expiresAt}, ${maxUses})
   `.execute(trx);

@@ -74,6 +74,16 @@ function context(
       errors: {
         classifyDatabase: () => options.classifiedError,
       },
+      operations: {
+        async list() { return [{ id: "Document.get", entityName: "Document", intent: "get", effects: { data: "read", external: "none" } }]; },
+        async execute(receivedSession: unknown, request: { operation: { id: string }; input: { id: string } }) {
+          expect(receivedSession).toBe(session);
+          expect(transactionActive).toBe(true);
+          expect(request.operation.id).toBe("Document.get");
+          events.push("read");
+          return { data: options.results?.[resultIndex++]?.[0] ?? null };
+        },
+      },
       artifacts: {
         async bind(receivedSession: unknown, input: unknown) {
           expect(receivedSession).toBe(session);
@@ -196,10 +206,11 @@ describe("Document commands", () => {
         updatedAt: "2026-09-13T10:00:00.000Z",
       },
     });
-    expect(fixture.executed).toHaveLength(2);
+    // The head comes back through the canonical Document.get, not a column list of this module's own.
+    expect(fixture.executed).toHaveLength(1);
     expect(fixture.executed[0]?.sql).toContain("document_internal.create_with_first_version");
     expect(fixture.executed[0]?.parameters).toEqual([document, version]);
-    expect(fixture.executed[1]?.parameters).toEqual([documentId]);
+    expect(fixture.events).toEqual(["transaction", "query", "read"]);
     expect(fixture.artifactBindings).toEqual([]);
     expect(fixture.executed.flatMap((entry) => entry.parameters)).not.toContain(
       "core-owned-control",
@@ -240,7 +251,7 @@ describe("Document commands", () => {
       fixture.operationContext,
     );
 
-    expect(fixture.events).toEqual(["transaction", "query", "bind", "query", "query"]);
+    expect(fixture.events).toEqual(["transaction", "query", "bind", "query", "read"]);
     expect(fixture.executed[0]?.sql).toContain("create_with_first_version_and_artifact");
     expect(fixture.executed[0]?.parameters).toEqual([
       document,

@@ -65,23 +65,6 @@ const FINALIZE_ARTIFACT_BINDING_SQL = `
   )
 `;
 
-const READ_DOCUMENT_SQL = `
-  select
-    id, tenant_id as "tenantId",
-    -- Microsecond text, as the generic engine serializes them: updatedAt is
-    -- the version token the update Operation compares against the column.
-    to_jsonb(created_at) #>> '{}' as "createdAt", to_jsonb(updated_at) #>> '{}' as "updatedAt",
-    external_id as "externalId", source_authority as "sourceAuthority",
-    source_organization as "sourceOrganization", source_administration as "sourceAdministration",
-    code, title, description, document_type as "documentType", status, confidentiality,
-    source, author, is_external as "isExternal", registered_at as "registeredAt",
-    received_at as "receivedAt", published_at as "publishedAt",
-    current_version_id as "currentVersionId", case_file_id as "caseFileId",
-    case_id as "caseId", relation_id as "relationId"
-  from erp.documents
-  where tenant_id = app.current_tenant() and id = $1::uuid
-`;
-
 const READ_DOCUMENT_VERSION_SQL = `
   select
     id, tenant_id as "tenantId",
@@ -301,6 +284,21 @@ async function translateDatabaseError<T>(
   }
 }
 
+/**
+ * The created head, through the canonical Document.get: the generic read
+ * owns the column list and the field policy (classification, computed
+ * fields), so this module names no host-domain column.
+ */
+async function readCanonicalDocument(platform: PluginPlatformServices, session: PluginSessionContext, id: string): Promise<Record<string, unknown> | undefined> {
+  const matches = (await platform.operations.list(session)).filter((operation) => operation.entityName === "Document" && operation.intent === "get");
+  if (matches.length !== 1 || matches[0]!.effects.data !== "read" || matches[0]!.effects.external !== "none") {
+    throw operationFailure({ code: "OPERATION_UNAVAILABLE", message: "No unambiguous canonical Document read Operation.", retryable: false });
+  }
+  const result = await platform.operations.execute(session, { operation: matches[0]!, input: { id } });
+  if ("error" in result) throw operationFailure(result.error);
+  return result.data == null ? undefined : (result.data as Record<string, unknown>);
+}
+
 export const createDocument: ModuleOperationHandler = async (input, context) => {
   const { platform, session } = contextServices(context);
   const document = inputObject(input, "document");
@@ -328,10 +326,7 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
       if (binding) {
         await finalizeArtifactBinding(transaction, platform, session, created, binding);
       }
-      const row = (
-        await rows<Record<string, unknown>>(transaction, READ_DOCUMENT_SQL, [created.documentId])
-      )[0];
-      return authoredRow(row, { id: created.documentId });
+      return authoredRow(await readCanonicalDocument(platform, session, created.documentId), { id: created.documentId });
     }),
   );
   return { value, status: 201 };

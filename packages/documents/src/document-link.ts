@@ -2,6 +2,7 @@
 import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
+import { contentCarrier } from "./content-runtime.js";
 import { appendRecordEvent, blockColumns, deleteDocumentVariants, readTemplateVersion, templateParameterFields, withDocumentCommand } from "./document-blocks.js";
 import { applyTemplateVersion, type ApplyContext } from "./document-follow.js";
 import { object, refuse, uuid } from "./validation.js";
@@ -59,7 +60,7 @@ export const linkTemplate: ModuleOperationHandler = async (input, context) => {
     const tracked = document!.template_version_id ? await readTemplateVersion(trx, document!.template_version_id) : undefined;
     const sameTemplate = !document!.template_version_id || tracked?.template_id === next!.template_id;
     const apply: ApplyContext = {
-      trx, columns: await blockColumns(trx), tracked: new Map(tracked ? [[tracked.id, tracked]] : []),
+      trx, columns: await blockColumns(trx, contentCarrier(context)), tracked: new Map(tracked ? [[tracked.id, tracked]] : []),
       permitted: new Set(platform.schemas.entityValues?.collection("DocumentVariant", "blocks")?.allowedDefinitions ?? []),
     };
     await withDocumentCommand(trx, "link", async () => {

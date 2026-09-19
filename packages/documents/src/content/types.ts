@@ -24,6 +24,8 @@ export type ContentField = ContentValueShape & {
 export type CompiledContentBlockDefinition = {
   readonly entityName: string;
   readonly schemaVersion: number;
+  /** The compiler's fingerprint of the definition (fields, references, storage, Operations), frozen with every result. */
+  readonly definitionHash?: string;
   readonly fields: Readonly<Record<string, ContentField>>;
   /** Output-channel to renderer identifier. No renderer code is executed by this engine. */
   readonly renderers: Readonly<Record<string, string>>;

@@ -177,8 +177,10 @@ export const followTemplatePublish: PublishFollower = async (context) => {
       order by d.id for update of d`, [sourceId, version.id]);
   if (!documents.length) return;
   const next: TemplateVersionRow = { id: version.id, template_id: sourceId, version_number: Number(version.version_number), status: String(version.status), snapshot: parseSnapshot(version.snapshot) };
+  const carrier = platform.schemas.entityValues?.get("Block", "values");
+  if (!carrier) throw new Error("Compiled block definitions are unavailable.");
   const apply: ApplyContext = {
-    trx, columns: await blockColumns(trx), tracked: new Map(),
+    trx, columns: await blockColumns(trx, carrier), tracked: new Map(),
     permitted: new Set(platform.schemas.entityValues?.collection("DocumentVariant", "blocks")?.allowedDefinitions ?? []),
   };
   await withDocumentCommand(trx, "follow", async () => {

@@ -6,7 +6,7 @@
  * so a plugin that adds a reference column needs no change here. Ownership,
  * ordering and provenance columns are the only ones this module writes itself.
  */
-import type { PluginPlatformServices, PluginSessionContext } from "@openshapeforge/plugin-runtime";
+import type { PluginPlatformServices, PluginSessionContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { childNodes, findChild, orderedChildren, parseSnapshot, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
 
@@ -65,10 +65,11 @@ export async function withDocumentCommand<T>(trx: unknown, command: DocumentComm
   finally { await rows(trx, "select set_config('app.document_command', '', true)", []); }
 }
 
-/** Live column names and types of erp.blocks, so copies follow the deployed schema. */
-export async function blockColumns(trx: unknown): Promise<BlockColumns> {
+/** Live column names and types of the block table the compiled carrier names, so copies follow the deployed schema. */
+export async function blockColumns(trx: unknown, carrier: Pick<RuntimeEntityValueCarrier, "schema" | "table">): Promise<BlockColumns> {
   const found = await rows<{ column_name: string; data_type: string }>(trx,
-    "select column_name, data_type from information_schema.columns where table_schema = 'erp' and table_name = 'blocks'", []);
+    "select column_name, data_type from information_schema.columns where table_schema = $1 and table_name = $2", [carrier.schema, carrier.table]);
+  if (!found.length) throw new Error(`The block table ${carrier.schema}.${carrier.table} has no columns.`);
   return new Map(found.map((column) => [column.column_name, column.data_type]));
 }
 

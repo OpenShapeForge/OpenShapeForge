@@ -32,6 +32,7 @@ function fixture() {
   const stored = () => ({ id: ids.version, documentId: ids.document, artifactId: ids.artifact, artifactVersion: 2, mimeType: "application/json", checksum: controls.corruptBinding ? "c".repeat(64) : descriptor.sha256, byteSize: descriptor.byteSize, fileName: descriptor.fileName });
   const createOps = ["Document", "DocumentVersion"].map((entityName) => ({ id: `${entityName}.create`, entityName, intent: "create", input: { kind: "json-schema", schema: { type: "object" } }, effects: { data: "write", external: "none" } }));
   const get = { id: "DocumentVersion.get", entityName: "DocumentVersion", intent: "get", effects: { data: "read", external: "none" } };
+  const getDocument = { id: "Document.get", entityName: "Document", intent: "get", effects: { data: "read", external: "none" } };
   const materialize = { id: "TemplateVersion.materialize", effects: { data: "read", external: "none" } };
   const trx = { async executeQuery(query: { sql: string; parameters: unknown[] }) {
     expect(active).toBe(true);
@@ -44,7 +45,6 @@ function fixture() {
     if (query.sql.includes("append_version_with_artifact")) { events.push("append-version"); return { rows: [{ documentVersionId: ids.version }] }; }
     if (query.sql.includes("finalize_artifact_binding")) { events.push("finalize-binding"); return { rows: [] }; }
     if (query.sql.includes("from erp.document_versions")) return { rows: [stored()] };
-    if (query.sql.includes("from erp.documents")) return { rows: [{ id: ids.document, currentVersionId: ids.version }] };
     throw new Error(`Unexpected SQL ${query.sql}`);
   } };
   const context = {
@@ -82,7 +82,7 @@ function fixture() {
         },
       },
       operations: {
-        list: async () => controls.hideCreate ? [get] : [...createOps, get],
+        list: async () => controls.hideCreate ? [get, getDocument] : [...createOps, get, getDocument],
         get: async () => materialize,
         async execute(received: unknown, request: { operation: { id: string }; input: Record<string, unknown>; idempotencyKey?: string }) {
           expect(received).toBe(context.session); expect(active).toBe(true); requests.push(request);
@@ -92,6 +92,7 @@ function fixture() {
             return { data: liveSnapshot, operations: [] };
           }
           if (request.operation.id === get.id) return { data: stored(), operations: [] };
+          if (request.operation.id === getDocument.id) return { data: { id: ids.document, currentVersionId: ids.version }, operations: [] };
           const handler = request.operation.id === "Document.create" ? createDocument : createDocumentVersion;
           const response = await handler(request.input, context as unknown as ModuleOperationContext);
           if ("value" in response) return { data: response.value, operations: [] };

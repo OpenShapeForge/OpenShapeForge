@@ -186,6 +186,9 @@ export function validateContentRegistry(
     if (!Number.isSafeInteger(definition.schemaVersion) || definition.schemaVersion < 1) {
       contentError("INVALID_VALUE", "Definition schemaVersion must be a positive integer.");
     }
+    if (definition.definitionHash !== undefined && !/^[a-f0-9]{64}$/.test(definition.definitionHash)) {
+      contentError("INVALID_VALUE", "Definition definitionHash must be a SHA-256 hex digest.");
+    }
     assertContentRecord(definition.fields, "definition fields");
     for (const [name, shape] of Object.entries(definition.fields)) {
       assertContentName(name, "field name");

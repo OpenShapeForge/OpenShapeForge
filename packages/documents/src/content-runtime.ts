@@ -114,7 +114,10 @@ export async function compiledContentRegistry(context: ModuleOperationContext, c
   return Object.fromEntries(await Promise.all(Object.entries(carrier.definitions).map(async ([key, entry]) => {
     const operation = entry.materializeOperationId ? await platform.operations.get(session, entry.materializeOperationId) : undefined;
     return [key, {
-      entityName: entry.entityName, schemaVersion: 1,
+      // The compiled contract's own version and fingerprint: a frozen block
+      // names the version it was authored against, and the snapshot records
+      // the exact definition it was computed with.
+      entityName: entry.entityName, schemaVersion: entry.schemaVersion, definitionHash: entry.definitionHash,
       source: immutableContent(entry) as unknown as JsonObject,
       ...(operation?.output?.kind === "json-schema" ? { materializationSchema: immutableContent(operation.output.schema) as JsonObject } : {}),
       fields: Object.fromEntries(entry.fields.map((field) => [text(field.key, "field key"), contentFieldProjection(field)])),

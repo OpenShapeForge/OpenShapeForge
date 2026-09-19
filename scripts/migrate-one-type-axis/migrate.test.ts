@@ -100,7 +100,7 @@ describe("inverse collections", () => {
 
   test("a collection matching the derived defaults folds to nothing", () => {
     const defaults = entity("Parent", `  - key: childs
-    label: { en: Child, nl: Child }
+    label: { en: Childs, nl: Childs }
     semanticType: Child
     cardinality: collection
     relationship: { inverse: parentId }

@@ -55,6 +55,18 @@ export function entityLabels(entity: EntityRef): unknown {
   return { en: getString(entity.root, "title") ?? entity.name };
 }
 
+/** The label a derived inverse collection would carry: the child's plural labels. */
+function derivedCollectionLabel(entity: EntityRef): unknown {
+  const labels = entity.root.get("labels", true);
+  const pluralLabels = entity.root.get("pluralLabels", true);
+  return defaultInverseLabel({
+    entity: entity.name,
+    labels: labels ? (toPlain(labels) as Record<string, string>) : undefined,
+    pluralLabels: pluralLabels ? (toPlain(pluralLabels) as Record<string, string>) : undefined,
+    title: getString(entity.root, "title"),
+  });
+}
+
 /** `relationship:` on a field, created in the conventional trailing position. */
 function relationshipMap(field: YAMLMap): YAMLMap {
   const existing = getMap(field, "relationship");
@@ -73,7 +85,7 @@ export function inverseDeclaration(collection: YAMLMap, child: EntityRef): Recor
   const key = getString(collection, "key")!;
   if (key !== defaultInverseKey(child.name)) declaration.key = key;
   const label = collection.get("label", true);
-  if (label && !plainEqual(toPlain(label), defaultInverseLabel({ entity: child.entity, labels: child.labels, pluralLabels: child.pluralLabels, title: child.title }))) declaration.label = toPlain(label);
+  if (label && !plainEqual(toPlain(label), derivedCollectionLabel(child))) declaration.label = toPlain(label);
   const relationship = getMap(collection, "relationship");
   if (relationship && getString(relationship, "ownership") === "owned") declaration.ownership = "owned";
   const sortable = collection.get("sortable", true);

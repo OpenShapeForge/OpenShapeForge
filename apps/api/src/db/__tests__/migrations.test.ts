@@ -267,9 +267,7 @@ describe("generated schema migration", () => {
               'identity_relations_status_shape',
               'employee_invitations_status_shape',
               'operation_execution_receipts_state_shape',
-              'blueprint_copies_source_version_fkey',
-              'tenants_relation_id_fkey',
-              'identity_relations_relation_id_fkey'
+              'blueprint_copies_source_version_fkey'
             )
             order by 1
           `.execute(db);
@@ -277,10 +275,8 @@ describe("generated schema migration", () => {
             "blueprint_copies_source_version_fkey",
             "capability_grants_max_uses_check",
             "employee_invitations_status_shape",
-            "identity_relations_relation_id_fkey",
             "identity_relations_status_shape",
             "operation_execution_receipts_state_shape",
-            "tenants_relation_id_fkey",
           ]);
           const policies = await sql<{ policyname: string }>`
             select policyname from pg_policies

@@ -35,6 +35,7 @@ import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
 import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
+import { TENANT_IDENTITY_CHECK_EXPRESSION, hasTenantIdentityCheck, tenantIdentityCheckName } from "../tenant-bound-references.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -979,6 +980,24 @@ function compileFieldRelationStorage(
     const tenancyIdentity = source.tenantScoped && column.name === "tenant_id";
     if (tenancyIdentity && (unique || onDelete)) {
       throw new Error(`Server-managed tenant identity ${tableKey(source)}.${column.name} cannot be owned or unique through a relationship.`);
+    }
+    // A tenant column pointing at a tenant-scoped registry is bound only if
+    // that registry's rows ARE their tenant: the compiler stamps
+    // CHECK (id = tenant_id) on the target, which the emitter requires
+    // before it accepts the single-column key (tenant-bound-references.ts).
+    if (tenancyIdentity && target.tenantScoped && !hasTenantIdentityCheck(target)) {
+      const constraints = target.constraints ??= [];
+      const name = tenantIdentityCheckName(target);
+      if (constraints.some((constraint) => constraint.name === name)) {
+        throw new Error(`Tenant identity check collides with ${tableKey(target)}.${name}.`);
+      }
+      constraints.push({
+        compilerOwned: true,
+        version: `0001_tenant-identity-${target.name.replaceAll("_", "-")}`,
+        name,
+        kind: "check",
+        expression: TENANT_IDENTITY_CHECK_EXPRESSION,
+      });
     }
     const composite = source.tenantScoped && target.tenantScoped && !tenancyIdentity;
     const deleteAction = onDelete ?? previous?.onDelete;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import type { ColumnDefinition, TableConstraintDefinition } from "../schema.js";
-import { stringRule } from "../field-json-schema.js";
+import { numericRule, stringRule } from "../field-json-schema.js";
 import { fieldCardinality } from "./compiler/helpers.js";
 import type { Field } from "./types/authoring.js";
 
@@ -30,13 +30,16 @@ const digestOf = (value: string) => createHash("sha256").update(value).digest("h
 /**
  * The subset of JSON Schema (ECMA-262) regex syntax whose meaning under a
  * PostgreSQL advanced regular expression (`~`) is the same: literals, escaped
- * metacharacters, the `\d \w \s` classes, bracket expressions, groups
+ * metacharacters, the `\d \w \s` classes and their negations outside a
+ * bracket expression, bracket expressions of literals and ranges, groups
  * without `(?` modifiers, alternation, the usual quantifiers and anchors.
  * Anything else (lookarounds, backreferences, `\b`, unicode escapes, named
- * groups, flags) is left to the runtime validator, which speaks ECMA-262.
+ * groups, flags, and a class shorthand inside brackets, which an ARE reads
+ * as an escape of the letter) is left to the runtime validator, which speaks
+ * ECMA-262.
  */
 const SAFE_POSIX_PATTERN =
-  /^(?:[A-Za-z0-9 _:;,@#%&=!~\-]|\\[.^$|()\[\]{}*+?\\\/\-]|\\[dwsDWS]|\[\^?(?:[A-Za-z0-9 _:;,@#%&=!~.\/]|\\[.^$|()\[\]{}*+?\\\/\-]|\\[dwsDWS]|[A-Za-z0-9]-[A-Za-z0-9])+\]|\((?!\?)|\)|\||\.|\^|\$|[*+?](?!\?)|\{\d+(?:,\d*)?\})+$/;
+  /^(?:[A-Za-z0-9 _:;,@#%&=!~\-]|\\[.^$|()\[\]{}*+?\\\/\-]|\\[dwsDWS]|\[\^?(?:[A-Za-z0-9 _:;,@#%&=!~.\/]|\\[.^$|()\[\]{}*+?\\\/\-]|[A-Za-z0-9]-[A-Za-z0-9])+\]|\((?!\?)|\)|\||\.|\^|\$|[*+?](?!\?)|\{\d+(?:,\d*)?\})+$/;
 
 export function isPosixSafePattern(pattern: string): boolean {
   if (!SAFE_POSIX_PATTERN.test(pattern)) return false;
@@ -100,4 +103,40 @@ export function fieldValueCheckConstraints(
     }
   }
   return constraints;
+}
+
+/**
+ * An authored `defaultValue` is a value the row takes when the caller omits
+ * the field, so it has to satisfy the field's own contract: the static
+ * options, the pattern, the length and numeric bounds the JSON schema and the
+ * CHECKs enforce on a caller. A default outside it would make the omitted
+ * field the one way to store an invalid value; the build fails instead.
+ */
+export function assertDefaultSatisfiesContract(field: Field): void {
+  const value = field.defaultValue;
+  if (value === undefined || value === null) return;
+  const refuse = (why: string): never => {
+    throw new Error(`Field ${field.key} declares defaultValue ${JSON.stringify(value)}, which ${why}.`);
+  };
+  const options = field.options;
+  if (options?.type === "static" && options.items?.length && fieldCardinality(field) === "single" &&
+    !options.items.some((item) => item.value === value)) {
+    refuse(`is not one of its options (${options.items.map((item) => item.value).join(", ")})`);
+  }
+  const validation = field.validation;
+  if (!validation) return;
+  if (typeof value === "string") {
+    const minLength = numericRule(validation.minLength);
+    const maxLength = numericRule(validation.maxLength);
+    const pattern = stringRule(validation.pattern);
+    if (minLength !== undefined && value.length < minLength) refuse(`is shorter than minLength ${minLength}`);
+    if (maxLength !== undefined && value.length > maxLength) refuse(`is longer than maxLength ${maxLength}`);
+    if (pattern !== undefined && !new RegExp(pattern, "u").test(value)) refuse(`does not match pattern ${pattern}`);
+  }
+  if (typeof value === "number") {
+    const min = numericRule(validation.min);
+    const max = numericRule(validation.max);
+    if (min !== undefined && value < min) refuse(`is below min ${min}`);
+    if (max !== undefined && value > max) refuse(`is above max ${max}`);
+  }
 }

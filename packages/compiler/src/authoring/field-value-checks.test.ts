@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { collectPluginMigrationRegistry } from "../generate-plugin-migrations.js";
 import { renderConstraintSql } from "../render-constraint-sql.js";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
-import { isPosixSafePattern } from "./field-value-checks.js";
+import { assertDefaultSatisfiesContract, isPosixSafePattern } from "./field-value-checks.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__", "rowaccess");
 
@@ -29,6 +29,18 @@ describe("authored value contracts reach the database", () => {
     expect(() => compileFixture("value-contract-bad-default")).toThrow(
       /quantity declares defaultValue "one", which cannot be rendered as a SQL default for numeric column quantity/,
     );
+  });
+
+  it("fails the build on a default outside the field's own contract", () => {
+    expect(() => compileFixture("value-contract-bad-option")).toThrow(
+      /status declares defaultValue "banana", which is not one of its options \(open, closed\)/,
+    );
+    const field = (defaultValue: unknown) =>
+      ({ key: "code", validation: { pattern: "^[a-z]{2}$", maxLength: 2 }, defaultValue }) as never;
+    expect(() => assertDefaultSatisfiesContract(field("nl"))).not.toThrow();
+    expect(() => assertDefaultSatisfiesContract(field("NL"))).toThrow(/does not match pattern/);
+    expect(() => assertDefaultSatisfiesContract(field("nld"))).toThrow(/longer than maxLength 2/);
+    expect(() => assertDefaultSatisfiesContract({ key: "qty", validation: { min: 1 }, defaultValue: 0 } as never)).toThrow(/below min 1/);
   });
 
   it("emits a CHECK for static options and POSIX-safe patterns on scalar text columns only", () => {
@@ -94,10 +106,11 @@ describe("authored value contracts reach the database", () => {
   });
 
   it("classifies patterns by whether PostgreSQL reads them the way ECMA-262 does", () => {
-    for (const safe of ["^[a-z][a-zA-Z0-9]*$", "^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$", "^\\d+(\\.\\d{1,2})?$", "^(foo|bar)$", "^[^@\\s]+@[^@\\s]+$"]) {
+    for (const safe of ["^[a-z][a-zA-Z0-9]*$", "^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$", "^\\d+(\\.\\d{1,2})?$", "^(foo|bar)$", "^\\S+@\\S+$", "^[^@ ]+@[^@ ]+$"]) {
       expect(isPosixSafePattern(safe)).toBe(true);
     }
-    for (const unsafe of ["^(?!-)[a-z-]+$", "(?<year>\\d{4})", "\\bword\\b", "^\\p{L}+$", "(a)\\1", "^[a-z]+?$", "^\\u00e9$", "[[:alpha:]]", "^(a", "a)b"]) {
+    // A class shorthand inside brackets is not the same expression to an ARE.
+    for (const unsafe of ["^(?!-)[a-z-]+$", "(?<year>\\d{4})", "\\bword\\b", "^\\p{L}+$", "(a)\\1", "^[a-z]+?$", "^\\u00e9$", "[[:alpha:]]", "^(a", "a)b", "^[\\W]+$", "^[^@\\s]+$", "^[\\d-]+$"]) {
       expect(isPosixSafePattern(unsafe)).toBe(false);
     }
   });

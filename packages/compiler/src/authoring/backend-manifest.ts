@@ -35,7 +35,7 @@ import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
 import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
-import { fieldValueCheckConstraints } from "./field-value-checks.js";
+import { assertDefaultSatisfiesContract, fieldValueCheckConstraints } from "./field-value-checks.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -1218,6 +1218,7 @@ export function compileAuthoringBackendManifest(
           ? { writtenBy: fieldWriters.get(storageColumn.field)! }
           : {}),
       };
+      if (field) assertDefaultSatisfiesContract(field);
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
         column.default = defaultValue;

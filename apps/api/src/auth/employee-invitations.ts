@@ -46,20 +46,23 @@
  *
  * APPLYING THE INVITED ROLE ON FIRST SIGN-IN
  * ---------------------------------------------------------------------------
- * Wired. `ensureIdentityLink` (./identity-link.ts) calls
- * `findPendingInvitation` before it creates anything, and `acceptInvitation`
- * once the Relation exists: the invited composite client role is granted on
- * the audience client through `control/member-role-admin.ts` and the row
- * moves to `accepted`. Two consequences worth knowing here:
+ * `ensureIdentityLink` (./identity-link.ts) calls `findPendingInvitation`
+ * before it creates anything, and `acceptInvitation` once the Relation
+ * exists: the invited roles are written to `platform.identity_relations.roles`
+ * for THIS (identity, tenant) and the row moves to `accepted`. Nothing is
+ * granted in Keycloak — a client role on the user would be user-wide and
+ * apply in every organization the account is a member of. Two consequences
+ * worth knowing here:
  *
  *   - that lookup is also the ADMISSION check. No Relation carrying the
  *     token's e-mail and no pending invitation means the person is refused
  *     (`NotInvitedError`), not silently given a Relation of their own. An
  *     invitation is the only way into a tenant that nobody has linked you to.
- *   - the accept write needs `Organization.All.ReadWrite` to pass the table's
- *     RLS `with check`, and the person signing in does not have it. The
- *     runtime therefore performs that one write on an elevated db session
- *     (see `acceptInvitation`): the runtime records the acceptance, the
+ *   - both writes need `Organization.All.ReadWrite` — the invitation table's
+ *     RLS `with check`, and the trigger on `identity_relations.roles` — and
+ *     the person signing in does not have it. The runtime therefore performs
+ *     them on an elevated db session (see `acceptInvitation`): the runtime
+ *     records the acceptance on behalf of the administrator who invited, the
  *     invitee never holds the role that made the write legal.
  */
 import { sql, type Transaction } from "kysely";
@@ -76,8 +79,6 @@ import {
   type KeycloakAdminErrorCode,
 } from "../control/keycloak-organization-admin.js";
 import type { KeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
-import { readControlPlaneConfig } from "../control/config.js";
-import { createMemberRoleAdminClient } from "../control/member-role-admin.js";
 
 export { IDENTITY_LINK_ADMIN_ROLE as EMPLOYEE_INVITATION_ADMIN_ROLE };
 
@@ -89,11 +90,12 @@ export function isEmployeeInvitationRole(value: string): value is EmployeeInvita
 }
 
 /**
- * The Keycloak client roles each invited role carries on the audience client.
- * One table, read by both the automatic path (`acceptInvitation`, on first
- * sign-in) and the manual one (`set_member_role`, mcp/identity-link-tools.ts)
- * — a second copy of a table that decides what an administrator can do is the
- * kind of duplication that drifts silently.
+ * The organization-scoped roles each invited role carries — what lands in
+ * `platform.identity_relations.roles` for the tenant. One table, read by both
+ * the automatic path (`acceptInvitation`, on first sign-in) and the manual one
+ * (`set_member_role`, mcp/identity-link-tools.ts) — a second copy of a table
+ * that decides what an administrator can do is the kind of duplication that
+ * drifts silently.
  *
  * `org_admin` grants exactly the role that gates every organization-admin
  * surface here; `org_employee` grants exactly the minimal read-only set a
@@ -126,33 +128,16 @@ export function employeeInvitationRoleGrants(
 }
 
 /**
- * The client entity roles live on. Reuses the same env var the API key path
- * already reads for the identical question (auth/api-key/runtime-config.ts)
- * rather than inventing a second name for "which client is the audience
- * client" — defaults to the base layer's `erp-provider`; Hubble's runtime
- * config sets it to `hubble-api` (the renamed audience client).
+ * The Keycloak client that service-account entity roles live on. Reuses the
+ * same env var the API key path already reads for the identical question
+ * (auth/api-key/runtime-config.ts) — defaults to the base layer's
+ * `erp-provider`; a host's runtime config sets it to its renamed audience
+ * client. Person roles no longer live there (see the module header); this
+ * remains for the control plane's Keycloak member reads.
  */
 export function memberRoleClientId(): string {
   return process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID?.trim() || "erp-provider";
 }
-
-/**
- * How long after acceptance the invited role is still carried on the session
- * from Hubble's own record instead of from the token.
- *
- * The grant lands in Keycloak while the person is already holding a token
- * that was minted seconds earlier, so that token cannot contain it. Without
- * this window an invited administrator would sign in, be an ordinary reader,
- * and have to sign out and back in to become what they were invited as —
- * precisely the "authenticated but half-working" session this change exists
- * to remove. Bounded by the access token's own lifetime, and anchored on the
- * row's `accepted_at`, so it closes by itself exactly when the token that
- * predates the grant can no longer be in play. After that the token is the
- * only authority again: a role an administrator later takes away in Keycloak
- * really is gone, which a permanent union of this table would have quietly
- * prevented.
- */
-export const INVITED_ROLE_GRACE_MS = 15 * 60_000;
 
 type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 
@@ -397,118 +382,50 @@ export async function findPendingInvitation(
   return { id: row.id, role: row.role };
 }
 
-/**
- * The role of a recently ACCEPTED invitation for `email`, while it is still
- * inside {@link INVITED_ROLE_GRACE_MS}. Null otherwise — including for an
- * acceptance older than the window, which is the whole point (see that
- * constant). Same tenant-isolated read as above.
- */
-export async function invitedRoleWithinGrace(
-  trx: Transaction<DB>,
-  tenantId: string,
-  email: string,
-): Promise<EmployeeInvitationRole | null> {
-  const result = await sql<{ role: string }>`
-    select role
-      from platform.employee_invitations
-     where tenant_id = ${tenantId}
-       and lower(email) = lower(${email})
-       and status = 'accepted'
-       and accepted_at is not null
-       and accepted_at > now() - make_interval(secs => ${INVITED_ROLE_GRACE_MS / 1000})
-     order by accepted_at desc
-     limit 1
-  `.execute(trx);
-  const role = result.rows[0]?.role;
-  return role && isEmployeeInvitationRole(role) ? role : null;
-}
-
-/**
- * How the invited client roles reach Keycloak. A parameter rather than a
- * direct call so the admission path can be tested end to end against a real
- * database without a Keycloak — the alternative, letting the test rely on an
- * unconfigured control plane, would only ever exercise the FAILED grant.
- */
-export type GrantInvitedRole = (
-  keycloakSubject: string,
-  clientId: string,
-  roles: readonly string[],
-) => Promise<readonly string[] | void>;
-
-/** The real one: `control/member-role-admin.ts` against the tenant realm. */
-const grantThroughKeycloak: GrantInvitedRole = async (keycloakSubject, clientId, roles) => {
-  const controlPlane = readControlPlaneConfig();
-  if (!controlPlane.ok) {
-    throw new HttpError(
-      503,
-      "CONTROL_PLANE_UNCONFIGURED",
-      `The Keycloak admin credentials are not configured; missing: ${controlPlane.missing.join(", ")}.`,
-    );
-  }
-  const admin = createMemberRoleAdminClient(controlPlane.config.keycloak);
-  return admin.grantClientRoles(keycloakSubject, clientId, roles);
-};
-
 export type AcceptInvitationResult = {
   role: EmployeeInvitationRole;
-  /** Client roles actually granted on the audience client. */
-  clientRoles: readonly string[];
-  /**
-   * False when Keycloak could not be asked (control plane unconfigured, or
-   * the admin API refused/was unreachable). The invitation then stays
-   * `pending` and the identity keeps `needs_role_assignment`, so an
-   * administrator finishes it with `set_member_role` — admission itself is
-   * unaffected, because the invitation is what admitted them.
-   */
-  granted: boolean;
+  /** The roles now recorded for this identity in this tenant. */
+  roles: readonly string[];
 };
 
 /**
- * Grant the invited role in Keycloak and mark the invitation `accepted`.
+ * Record the invited roles on the identity's membership row for this tenant
+ * and mark the invitation `accepted`, in one transaction on a DELIBERATELY
+ * ELEVATED db session. The invitation table's RLS `with check` and the
+ * trigger on `identity_relations.roles` both demand
+ * `Organization.All.ReadWrite`, and the person signing in has nothing of the
+ * sort; it is the RUNTIME that is recording "this invitation has now been
+ * used", on behalf of the administrator who created it. The elevation is
+ * scoped to this one transaction and to the invitee's own tenant, and the
+ * invitee's session never sees it.
  *
- * Keycloak first, then the row: a row that says `accepted` while the person
- * holds no role is a silent lie an administrator cannot see, whereas a
- * successful grant whose row never moved leaves the invitation pending — the
- * next sign-in simply grants the same roles again, which is idempotent
- * (`grantClientRoles` is additive).
- *
- * The status write runs on a DELIBERATELY ELEVATED db session. The table's
- * RLS `with check` demands `Organization.All.ReadWrite` for any write, and
- * the person signing in has nothing of the sort; it is the RUNTIME that is
- * recording "this invitation has now been used", on behalf of the
- * administrator who created it. The elevation is scoped to this one
- * statement and to the invitee's own tenant, and the invitee's session never
- * sees it.
+ * A failure here propagates: the caller (resolveIdentityLink) turns it into a
+ * 503 rather than admitting the person with no roles or with roles the row
+ * does not say they hold.
  */
 export async function acceptInvitation(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   invitation: PendingInvitationMatch,
-  keycloakSubject: string,
-  grantInvitedRole: GrantInvitedRole = grantThroughKeycloak,
+  identityId: string,
 ): Promise<AcceptInvitationResult> {
-  const clientRoles = employeeInvitationRoleGrants(invitation.role);
-  let effectiveClientRoles = clientRoles;
-
-  try {
-    const effective = await grantInvitedRole(keycloakSubject, memberRoleClientId(), clientRoles);
-    if (effective?.length) effectiveClientRoles = [...new Set(effective)];
-  } catch (error) {
-    // Never fatal: the invitation already decided the person may be here.
-    // Refusing the session over a Keycloak hiccup would turn "you are invited"
-    // into "you are locked out", which is the wrong failure of the two.
-    console.warn(
-      `[auth] Admitted ${session.userId} on invitation ${invitation.id}, but granting the ` +
-        `invited role ${invitation.role} failed:`,
-      error instanceof Error ? error.stack ?? error.message : String(error),
-    );
-    return { role: invitation.role, clientRoles, granted: false };
-  }
+  const roles = [...new Set(employeeInvitationRoleGrants(invitation.role))].sort();
 
   await withDbSession(
     db,
     { ...session, roles: [IDENTITY_LINK_ADMIN_ROLE] },
     async (trx) => {
+      await sql`
+        update platform.identity_relations
+           set roles = (
+                 select coalesce(array_agg(value), '{}'::text[])
+                   from jsonb_array_elements_text(${roles}::jsonb)
+               ),
+               needs_role_assignment = false,
+               updated_at = now()
+         where identity_id = ${identityId}
+           and tenant_id = ${session.tenantId}
+      `.execute(trx);
       await sql`
         update platform.employee_invitations
            set status = 'accepted',
@@ -523,9 +440,9 @@ export async function acceptInvitation(
 
   console.info(
     `[auth] ${session.userId} accepted invitation ${invitation.id} in tenant ` +
-      `${session.tenantId}; granted ${invitation.role} (${clientRoles.join(", ")}).`,
+      `${session.tenantId}; holds ${invitation.role} here (${roles.join(", ")}).`,
   );
-  return { role: invitation.role, clientRoles: effectiveClientRoles, granted: true };
+  return { role: invitation.role, roles };
 }
 
 export type RevokeInvitationInput = { email: string };

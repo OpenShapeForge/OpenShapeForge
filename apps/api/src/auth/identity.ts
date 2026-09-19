@@ -25,6 +25,7 @@ import {
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
 import { configuredOrganizationServiceAccount } from "./organization-service-identities.js";
+import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 import {
   bindOrganizationResource,
@@ -70,11 +71,7 @@ function hostOrganizationContext(): boolean {
   return process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT === "host";
 }
 
-export class SessionAuthenticationUnavailableError extends Error {
-  constructor() {
-    super("Authentication is unavailable.");
-  }
-}
+export { SessionAuthenticationUnavailableError };
 
 function bearerVerifierUnavailable(error: unknown): boolean {
   return error instanceof BearerVerifierUnavailableError;
@@ -466,7 +463,7 @@ async function verifyBearerIdentity(
 }
 
 /**
- * Legacy effective roles for a bearer identity = realm roles ∪ every
+ * Legacy effective roles for a SERVICE identity = realm roles ∪ every
  * `resource_access` client's roles. Keycloak expands realm and client
  * composites into per-client roles under `resource_access`, so entity roles
  * like `Relations.All.ReadWrite` only exist there — realm_access alone would
@@ -474,6 +471,8 @@ async function verifyBearerIdentity(
  * all clients is safe because the entity guard matches exact strings from
  * the manifest, so unrelated built-ins (`account.manage-account`, …) are
  * inert. Exported for unit testing.
+ *
+ * Never applied to a PERSON: see {@link personSessionRoles}.
  */
 export function mergeIdentityRoles(identity: {
   roles: readonly string[];
@@ -487,6 +486,29 @@ export function mergeIdentityRoles(identity: {
   ].sort();
 }
 
+/**
+ * A person's roles are per organization. The identity provider says WHICH
+ * organizations the account is a member of; the membership row in
+ * `platform.identity_relations` says what the person may do in the one the
+ * token selected (auth/identity-link.ts). A client role on the Keycloak user
+ * is user-wide — an administrator of organization A granting it would have
+ * made the person that in organization B too — so a person's session never
+ * reads `resource_access` at all. Realm roles remain issuer-wide grants by
+ * design (platform operator decisions such as `Platform.*`), and the
+ * just-in-time minimum applies while the membership row still says
+ * `needs_role_assignment` and carries nothing.
+ */
+export function personSessionRoles(
+  identity: Pick<AuthIdentity, "roles">,
+  membership: { roles: readonly string[]; needsRoleAssignment: boolean } | null,
+): string[] {
+  if (membership?.needsRoleAssignment && membership.roles.length === 0) {
+    return [...NEEDS_ROLE_ASSIGNMENT_ROLES];
+  }
+  return [...new Set([...identity.roles, ...(membership?.roles ?? [])])].sort();
+}
+
+/** Service identities (configured service accounts, API-key exchanges). */
 function sessionIdentityRoles(identity: AuthIdentity): string[] {
   if (!hostOrganizationContext()) return mergeIdentityRoles(identity);
   // Client roles belong to a resource server, not every sibling client in the
@@ -608,7 +630,6 @@ export async function resolveSessionContext(
           !(typeof claims.aud === "string" ? [claims.aud] : claims.aud ?? [])
             .includes(options.requiredAudience)) return EMPTY_SESSION;
       const groups = identity.groups ?? [];
-      const roles = sessionIdentityRoles(identity);
       const hostMode = hostOrganizationContext();
       const configuredService = hostMode
         ? configuredOrganizationServiceAccount(claims, identity.tenantId)
@@ -637,41 +658,31 @@ export async function resolveSessionContext(
             options.db,
           ));
       if (hostMode && tenantId !== hostTenantId) return EMPTY_SESSION;
-      const scope = resolveScope(roles, groups);
       // ---- identity ↔ Relation link (auth/identity-link.ts) ----
       // A person's first session in a tenant links (or records) the Relation
-      // they act as; later sessions read it back. Never blocks authentication.
+      // they act as; later sessions read it back. The same row carries the
+      // person's roles in that tenant.
       const personClaims = identityClaimsFromToken(claims as Record<string, unknown>);
       // An explicitly configured client-credentials identity is not a person.
       // Never infer this from a username prefix alone or from unverified input.
       const serviceAccount = configuredOrganizationServiceAccount(claims as Record<string, unknown>, tenantId);
+      const isPerson = !serviceAccount && personClaims !== null;
+      // The link is read on a session that holds no organization roles yet:
+      // the row itself is the source of those, and RLS on it fences by tenant
+      // and by the identity being one's own.
+      const linkSession = { roles: [...identity.roles], groups, scope: resolveScope(identity.roles, groups) };
       const relation =
-        !serviceAccount && tenantId && identity.userId && options.db && personClaims
+        isPerson && tenantId && identity.userId && options.db
           ? await resolveIdentityLink(
               options.db,
-              { tenantId, userId: identity.userId, roles, groups, scope },
+              { tenantId, userId: identity.userId, ...linkSession },
               personClaims,
             )
           : null;
-      // A brand-new identity (needs_role_assignment) never gets the JWT's
-      // resource_access roles: those were computed above from a token issued
-      // before this Relation existed, so a Keycloak admin-API grant made just
-      // now cannot be in it. Recompute scope too, so a bypass role the JWT
-      // happened to carry cannot smuggle tenant-wide access past the override.
-      //
-      // `invitedRoles` is the other side of that same timing problem: the role
-      // an administrator INVITED this person as has just been granted in
-      // Keycloak, and their token — minted moments ago — cannot carry it yet.
-      // Unioned rather than substituted, and only inside the short window
-      // auth/employee-invitations.ts anchors on the acceptance itself.
-      const invitedRoles = relation?.invitedRoles ?? [];
-      const baseRoles = relation?.needsRoleAssignment ? [...NEEDS_ROLE_ASSIGNMENT_ROLES] : roles;
-      const effectiveRoles =
-        invitedRoles.length > 0 ? [...new Set([...baseRoles, ...invitedRoles])] : baseRoles;
-      const effectiveScope =
-        relation?.needsRoleAssignment || invitedRoles.length > 0
-          ? resolveScope(effectiveRoles, groups)
-          : scope;
+      const effectiveRoles = isPerson
+        ? personSessionRoles(identity, relation)
+        : sessionIdentityRoles(identity);
+      const effectiveScope = resolveScope(effectiveRoles, groups);
       const loginSessionBinding = loginSessionBindingFromClaims(
         claims as Record<string, unknown>,
       );
@@ -712,6 +723,13 @@ export async function resolveSessionContext(
         // is the hole this closes, and a bare 401 would tell them nothing they
         // could act on. Let it through as the 403 it is — the message names
         // the way in.
+        console.warn(`[auth] ${error.message}`);
+        throw error;
+      }
+      if (error instanceof SessionAuthenticationUnavailableError) {
+        // The token verified; the record that says whether this tenant
+        // admitted the person and which roles they hold here could not be
+        // read. Not an anonymous session and not a token-only one: 503.
         console.warn(`[auth] ${error.message}`);
         throw error;
       }

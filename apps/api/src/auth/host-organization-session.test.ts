@@ -182,15 +182,19 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(request)).tenantId).toBe(TENANT_A);
   });
 
-  test("host roles exclude sibling clients and never flatten organization-local grants", async () => {
+  test("a person's client roles never reach the session; realm roles do, organization-local grants are never flattened", async () => {
+    // A client role on the Keycloak user is user-wide: whatever organization
+    // the token selects, it would be there. A person's organization roles come
+    // from the membership row (auth/identity-link.ts), which needs a database;
+    // without one the session holds realm roles only, in either mode.
     const request = await headers({
       realm_access: { roles: ["realm-reader"] },
       resource_access: { api: { roles: ["Records.Read"] }, sibling: { roles: ["Records.Admin"] } },
       organization: { alpha: { id: "org-a", realm_access: { roles: ["nested-admin"] } } },
     });
-    expect((await resolveSessionContext(request)).roles).toEqual(["Records.Read", "realm-reader"]);
+    expect((await resolveSessionContext(request)).roles).toEqual(["realm-reader"]);
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
-    expect((await resolveSessionContext(request)).roles).toEqual(["Records.Admin", "Records.Read", "realm-reader"]);
+    expect((await resolveSessionContext(request)).roles).toEqual(["realm-reader"]);
   });
 
   test("strict mode refuses signed trusted context, including with an invalid bearer", async () => {

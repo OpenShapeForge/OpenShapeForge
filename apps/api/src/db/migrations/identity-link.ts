@@ -15,7 +15,13 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *   - the `lower(email)` lookup index (an expression index);
  *   - the status vocabulary and the columns each status requires, as checks;
  *   - `app.identity_subject()`, the point lookup the write policy needs;
- *   - row-level security and the two bespoke policies.
+ *   - row-level security and the two bespoke policies;
+ *   - the guard on `roles`: the organization-scoped grant may only be changed
+ *     by a session holding Organization.All.ReadWrite or by the audited
+ *     bypass. The write policy below lets an identity write its OWN row
+ *     (confirm_my_link, onboarding state), and without this trigger that
+ *     same permission would let a person raise their own roles through any
+ *     raw-SQL path — the one column on the row the person may never touch.
  *
  * Row-level security, consistent with the rest of platform.*:
  *   - identity_relations is tenant-fenced the way erp.relations is
@@ -93,6 +99,31 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
         app.bypass_rls()
         or subject = app.current_user_id()::text
       );
+
+    create or replace function app.identity_relation_roles_guard() returns trigger
+    language plpgsql
+    as $$
+    begin
+      if tg_op = 'UPDATE' and new.roles is not distinct from old.roles then
+        return new;
+      end if;
+      if tg_op = 'INSERT' and coalesce(array_length(new.roles, 1), 0) = 0 then
+        return new;
+      end if;
+      if app.bypass_rls() or 'Organization.All.ReadWrite' = any (
+        string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
+      ) then
+        return new;
+      end if;
+      raise exception 'identity_relations.roles may only be changed by an organization administrator'
+        using errcode = 'insufficient_privilege';
+    end
+    $$;
+
+    drop trigger if exists identity_relations_roles_guard on platform.identity_relations;
+    create trigger identity_relations_roles_guard
+      before insert or update of roles on platform.identity_relations
+      for each row execute function app.identity_relation_roles_guard();
 
     drop policy if exists identity_relations_tenant_isolation on platform.identity_relations;
     create policy identity_relations_tenant_isolation on platform.identity_relations

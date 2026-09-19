@@ -780,9 +780,9 @@ tables:
   # the acting session to BE the identity or to hold Organization.All.ReadWrite.
   #
   # needs_role_assignment is true only for a Relation the just-in-time path
-  # CREATED: while set, auth/identity.ts overrides the session's roles to a
-  # minimal working set because no admin API grant can reach that very first
-  # token. Cleared by set_member_role.
+  # CREATED whose invited role could not be recorded: while set, auth/identity.ts
+  # overrides the session's roles to a minimal working set. Cleared by
+  # set_member_role, which also writes `roles`.
   #
   # The onboarding_* columns are first-use onboarding state (mcp/onboarding.ts),
   # kept on this row because they have the same lifetime and owner — one
@@ -806,6 +806,15 @@ tables:
       # of whoever linked: the person (confirm_my_link) or an administrator.
       - { name: linked_by, type: text }
       - { name: needs_role_assignment, type: boolean, required: true, default: "false" }
+      # The roles this identity holds IN THIS TENANT, and nowhere else: the
+      # organization-scoped grant an invitation or set_member_role records
+      # (auth/employee-invitations.ts, mcp/identity-link-tools.ts) and that
+      # auth/identity.ts unions onto the session for the selected tenant. A
+      # Keycloak user-wide client role would be visible in every organization
+      # the same account is a member of; this column is what replaced that.
+      # Only a session holding Organization.All.ReadWrite (or the audited
+      # bypass) may change it — trigger in db/migrations/identity-link.ts.
+      - { name: roles, type: "text[]", required: true, default: "'{}'" }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
       - { name: onboarding_completed_at, type: timestamptz }

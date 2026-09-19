@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
+  personSessionRoles,
   realmFromIssuer,
   resolveSessionContext,
   selectOrganizationMembership,
@@ -228,6 +229,32 @@ describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("returns realm roles unchanged when the token carries no client roles", () => {
     expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
+  });
+});
+
+describe("personSessionRoles (a person's effective roles in the selected organization)", () => {
+  const identity = {
+    roles: ["default-roles-openshapeforge", "Platform.ApiKeys.Manage"],
+    clientRoles: { "erp-provider": ["Organization.All.ReadWrite", "Relations.All.ReadWrite"] },
+  };
+
+  test("unions realm roles with the membership row's roles and ignores client roles entirely", () => {
+    expect(
+      personSessionRoles(identity, { roles: ["General.All.Read"], needsRoleAssignment: false }),
+    ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
+  });
+
+  test("a membership row with nothing recorded yet yields the just-in-time minimum only", () => {
+    expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true })).toEqual([
+      "General.All.Read",
+    ]);
+  });
+
+  test("without a membership row (no database) only realm roles remain", () => {
+    expect(personSessionRoles(identity, null)).toEqual([
+      "Platform.ApiKeys.Manage",
+      "default-roles-openshapeforge",
+    ]);
   });
 });
 

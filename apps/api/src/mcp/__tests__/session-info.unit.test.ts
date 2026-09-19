@@ -65,8 +65,7 @@ const linked: IdentityLinkState = {
   candidateRelationId: null,
   linkedBy: "jit",
   needsRoleAssignment: false,
-  invitedRoles: [],
-  linkedAtMs: null,
+  roles: [],
 };
 
 const session = (

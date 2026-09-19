@@ -13,9 +13,12 @@
  *                          whose very first (just-in-time-created) session is
  *                          still running on the hardcoded minimal role set
  *                          (`platform.identity_relations.needs_role_assignment`).
- *   set_member_role      — an organization administrator grants one of those
- *                          identities its real Keycloak client role
- *                          (`org_admin` or `org_employee`) and clears the flag.
+ *   set_member_role      — an organization administrator records the roles an
+ *                          identity holds IN THIS ORGANIZATION (`org_admin` or
+ *                          `org_employee`) on its membership row and clears
+ *                          the flag. Nothing is written to Keycloak: a client
+ *                          role on the user would apply in every organization
+ *                          the account is a member of.
  *
  * Listed per session like every other tool: link_identity/list_pending_members/
  * set_member_role only for administrators, confirm_my_link only while there is
@@ -25,23 +28,17 @@
  * lives here.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { employeeInvitationRoleGrants } from "../auth/employee-invitations.js";
 import {
-  employeeInvitationRoleGrants,
-  memberRoleClientId,
-} from "../auth/employee-invitations.js";
-import {
-  clearNeedsRoleAssignment,
   confirmPendingLink,
   identityIdForRelation,
-  identityKeycloakSubject,
   IDENTITY_LINK_ADMIN_ROLE,
   linkIdentityToRelation,
   listPendingRoleAssignments,
+  setMembershipRoles,
   type IdentityLinkState,
 } from "../auth/identity-link.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { readControlPlaneConfig } from "../control/config.js";
-import { createMemberRoleAdminClient } from "../control/member-role-admin.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 
@@ -51,13 +48,10 @@ export const LIST_PENDING_MEMBERS_TOOL = "list_pending_members";
 export const SET_MEMBER_ROLE_TOOL = "set_member_role";
 
 /**
- * What each role grants, and on which client, both from
- * auth/employee-invitations.ts. This tool applies the same table the
- * invitation path applies automatically on first sign-in; the two must never
- * be able to disagree about what `org_admin` means, so there is one table.
- * The client is the audience client, `hubble-api` (the runtime pins `aud` to
- * it; see `scripts/runtime-config.ts` in the host and
- * `authoring/hubble-demo/authorization.yaml`'s `renameClient`).
+ * What each role grants comes from auth/employee-invitations.ts. This tool
+ * applies the same table the invitation path applies automatically on first
+ * sign-in; the two must never be able to disagree about what `org_admin`
+ * means, so there is one table.
  */
 const LINK_IDENTITY: Tool = {
   name: LINK_IDENTITY_TOOL,
@@ -140,12 +134,11 @@ const SET_MEMBER_ROLE: Tool = {
   name: SET_MEMBER_ROLE_TOOL,
   title: "Assign a member's role",
   description:
-    "Grant a member their real role — organization administrator or employee — replacing " +
-    "the read-only access their first sign-in started with. Ends their current sign-in so " +
-    "the new role takes effect immediately: they will need to sign in again. (A long-lived " +
-    "offline session, such as a CLI tool that stays signed in for months, is not force-" +
-    "ended by this and keeps its old access until it happens to refresh or is revoked " +
-    "separately.) For organization administrators.",
+    "Set a member's role in this organization — organization administrator or employee — " +
+    "replacing whatever they held here before, including the read-only access their first " +
+    "sign-in started with. Applies to this organization only; the same person's role in " +
+    "another organization is unchanged. Takes effect on their next request (within a " +
+    "minute across replicas); no sign-out is needed. For organization administrators.",
   inputSchema: {
     type: "object",
     properties: {
@@ -326,55 +319,16 @@ export async function callIdentityLinkTool(
           "No linked identity found for that relationId in this organization.",
         );
       }
-      const subject = await identityKeycloakSubject(db, scoped, identityId);
-      if (!subject) {
-        throw new HttpError(
-          404,
-          "IDENTITY_NOT_FOUND",
-          "No such identity has a link in this organization.",
-        );
-      }
-
-      const controlPlane = readControlPlaneConfig();
-      if (!controlPlane.ok) {
-        throw new HttpError(
-          503,
-          "CONTROL_PLANE_UNCONFIGURED",
-          `Role assignment needs the Keycloak admin credentials; missing: ${controlPlane.missing.join(", ")}.`,
-        );
-      }
-      const admin = createMemberRoleAdminClient(controlPlane.config.keycloak);
-      const clientRoles = employeeInvitationRoleGrants(role);
-      await admin.grantClientRoles(subject.subject, memberRoleClientId(), clientRoles);
-      await clearNeedsRoleAssignment(db, scoped, identityId);
-
-      // Best-effort: the role grant above already succeeded and is durable
-      // (the flag is cleared), so a hiccup ending this person's CURRENT
-      // session must not turn a successful grant into a reported failure —
-      // worst case they keep their old access for up to the access token's
-      // natural 15-minute lifetime, same as if this call did not exist.
-      let forcedReauthentication = true;
-      try {
-        await admin.forceReauthentication(subject.subject);
-      } catch (error) {
-        forcedReauthentication = false;
-        console.warn(
-          "[identity-link] set_member_role granted the role but could not force " +
-            `re-authentication for identity ${identityId}:`,
-          error instanceof Error ? error.stack ?? error.message : String(error),
-        );
-      }
+      const roles = employeeInvitationRoleGrants(role);
+      const state = await setMembershipRoles(db, scoped, identityId, roles);
 
       return succeeded({
         granted: true,
         identityId,
         role,
-        clientRoles,
-        forcedReauthentication,
-        note: forcedReauthentication
-          ? "Their current sign-in was ended; they need to sign in again for the new role to take effect."
-          : "The role was granted, but ending their current sign-in failed. It will still take " +
-            "effect once their session naturally expires or they sign in again.",
+        roles: state.roles,
+        note:
+          "The role applies in this organization only and takes effect on their next request.",
       });
     } catch (error) {
       return failed(error);

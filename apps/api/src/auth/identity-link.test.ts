@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import {
+  __resetIdentityLinkForTests,
   displayNameFromClaims,
   identityClaimsFromToken,
   personNameFromClaims,
+  resolveIdentityLink,
   sessionRelation,
   type IdentityLinkState,
 } from "./identity-link.js";
+import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 
 const linked: IdentityLinkState = {
   identityId: "11111111-1111-4111-8111-111111111111",
@@ -19,8 +23,7 @@ const linked: IdentityLinkState = {
   candidateRelationId: null,
   linkedBy: "jit",
   needsRoleAssignment: false,
-  invitedRoles: [],
-  linkedAtMs: null,
+  roles: [],
 };
 
 describe("sessionRelation", () => {
@@ -92,5 +95,37 @@ describe("names from claims", () => {
       lastName: "van der Dev",
     });
     expect(personNameFromClaims({ ...base, name: "hans", preferredUsername: "hans" })).toBeNull();
+  });
+});
+
+describe("resolveIdentityLink when the database fails", () => {
+  test("a database error is a 503, never a session without the membership record", async () => {
+    __resetIdentityLinkForTests();
+    // Every statement fails the way an exhausted pool or a statement timeout
+    // does. The link row is what says whether this tenant admitted the person
+    // and which roles they hold here, so no answer means no session.
+    const failing = {
+      transaction: () => ({
+        setIsolationLevel: () => ({
+          execute: async () => {
+            throw new Error("canceling statement due to statement timeout");
+          },
+        }),
+        execute: async () => {
+          throw new Error("canceling statement due to statement timeout");
+        },
+      }),
+    } as unknown as OpenShapeForgeDatabase;
+    const session = {
+      tenantId: "44444444-4444-4444-8444-444444444444",
+      userId: linked.subject,
+      roles: [],
+      groups: [],
+      scope: "self" as const,
+    };
+    const claims = { issuer: linked.issuer, subject: linked.subject, email: "a@example.com" };
+    const attempt = resolveIdentityLink(failing, session, claims);
+    await expect(attempt).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+    await expect(attempt).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   });
 });

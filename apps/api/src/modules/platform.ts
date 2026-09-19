@@ -325,6 +325,7 @@ export class ModulePlatformRuntime {
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
+      records: records.services,
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
         const active = this.#operationTransactionStorage.getStore();

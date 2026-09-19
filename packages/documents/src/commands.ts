@@ -199,16 +199,18 @@ function artifactInput(input: JsonObject, version: JsonObject): {
   };
 }
 
+/** The Document owns the bytes; the version row is the association that names the artifact. */
 async function finalizeArtifactBinding(
   transaction: unknown,
   platform: PluginPlatformServices,
   session: PluginSessionContext,
-  documentVersionId: string,
+  ids: { documentId: string; documentVersionId: string },
   binding: ArtifactBinding,
 ): Promise<RuntimeArtifactDescriptor> {
+  const { documentId, documentVersionId } = ids;
   const descriptor = await platform.artifacts.bind(session, {
     artifactId: binding.artifactId,
-    documentVersionId,
+    owner: { entity: "Document", id: documentId },
     expectedArtifactVersion: binding.expectedArtifactVersion,
   });
   await rows(transaction, FINALIZE_ARTIFACT_BINDING_SQL, [
@@ -324,13 +326,7 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
         });
       }
       if (binding) {
-        await finalizeArtifactBinding(
-          transaction,
-          platform,
-          session,
-          created.documentVersionId,
-          binding,
-        );
+        await finalizeArtifactBinding(transaction, platform, session, created, binding);
       }
       const row = (
         await rows<Record<string, unknown>>(transaction, READ_DOCUMENT_SQL, [created.documentId])
@@ -394,7 +390,7 @@ export async function appendDocumentVersion(
           transaction,
           platform,
           session,
-          created.documentVersionId,
+          { documentId, documentVersionId: created.documentVersionId },
           binding,
         );
       }

@@ -44,22 +44,23 @@ function harness(rows: readonly Record<string, unknown>[]) {
   return { authorization, transaction, executed, access };
 }
 
-const owner = { entity: "DocumentVersion" as const, recordId: documentVersionId };
+const owner = { entity: "Document" as const, id: documentId };
+const resolved = { tenantId, artifactId, owner, documentVersionId };
 
 describe("Document artifact authorization", () => {
   test("bind accepts only the actor-owned provisional head without adding read or update authorization", async () => {
-    const state = harness([{ present: 1 }]);
+    const state = harness([{ documentVersionId }]);
     await expect(state.authorization.resolveDocumentVersionArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner, expectedArtifactVersion: 7 },
-    )).resolves.toEqual({ tenantId, artifactId, owner });
+    )).resolves.toEqual(resolved);
 
     expect(state.access).toEqual([]);
     expect(state.executed).toHaveLength(1);
     expect(state.executed[0]!.parameters).toEqual([
       tenantId,
       userId,
-      documentVersionId,
+      documentId,
       artifactId,
       7,
     ]);
@@ -81,15 +82,14 @@ describe("Document artifact authorization", () => {
     expect(state.executed[0]!.parameters.at(-1)).toBeNull();
   });
 
-  test("open authorizes both the immutable version and parent while retaining historical readability", async () => {
-    const state = harness([{ documentId }]);
+  test("open proves the artifact is one of the Document's stored versions and asks the Document's get", async () => {
+    const state = harness([{ documentVersionId }]);
     await expect(state.authorization.resolveDocumentVersionArtifactAccess(
       state.transaction,
       { action: "open", artifactId, owner, expectedArtifactVersion: 9 },
-    )).resolves.toEqual({ tenantId, artifactId, owner });
+    )).resolves.toEqual(resolved);
 
     expect(state.access).toEqual([
-      { entityName: "DocumentVersion", id: documentVersionId, intent: "get" },
       { entityName: "Document", id: documentId, intent: "get" },
     ]);
     expect(state.executed[0]!.sql).toContain("document_version.file_name is not null");
@@ -97,7 +97,7 @@ describe("Document artifact authorization", () => {
     expect(state.executed[0]!.parameters).toEqual([
       tenantId,
       userId,
-      documentVersionId,
+      documentId,
       artifactId,
       9,
     ]);
@@ -136,17 +136,17 @@ describe("Document artifact authorization", () => {
     });
     const transaction: DocumentArtifactSqlExecutor = {
       async executeQuery() {
-        return { rows: [{ documentId }] };
+        return { rows: [{ documentVersionId }] };
       },
     };
     await expect(authorization.resolveDocumentVersionArtifactAccess(
       transaction,
       { action: "open", artifactId, owner },
-    )).resolves.toEqual({ tenantId, artifactId, owner });
+    )).resolves.toEqual(resolved);
     expect(access).toEqual([{ entityName: "Document", id: documentId, intent: "get" }]);
   });
 
-  test("open propagates either canonical read refusal and never substitutes update authority", async () => {
+  test("open propagates the canonical read refusal and never substitutes update authority", async () => {
     const access: unknown[] = [];
     const denial = new Error("denied");
     const authorization = createDocumentArtifactAuthorization({
@@ -160,7 +160,7 @@ describe("Document artifact authorization", () => {
     });
     const transaction: DocumentArtifactSqlExecutor = {
       async executeQuery() {
-        return { rows: [{ documentId }] };
+        return { rows: [{ documentVersionId }] };
       },
     };
     await expect(authorization.resolveDocumentVersionArtifactAccess(
@@ -168,9 +168,14 @@ describe("Document artifact authorization", () => {
       { action: "open", artifactId, owner },
     )).rejects.toBe(denial);
     expect(access).toEqual([
-      { entityName: "DocumentVersion", id: documentVersionId, intent: "get" },
       { entityName: "Document", id: documentId, intent: "get" },
     ]);
+    // An artifact that is not one of the Document's versions is refused before the oracle is asked.
+    const unrelated = createDocumentArtifactAuthorization({ session, records: { assertAccess: async () => { throw new Error("must not be asked"); } } });
+    await expect(unrelated.resolveDocumentVersionArtifactAccess(
+      { async executeQuery() { return { rows: [] }; } },
+      { action: "open", artifactId, owner },
+    )).resolves.toBeUndefined();
   });
 
   test("rejects malformed authority inputs before SQL and keeps physical deletion disabled", async () => {
@@ -178,7 +183,7 @@ describe("Document artifact authorization", () => {
       session: { ...session, tenantId: null },
       records: { assertAccess: async () => undefined },
     });
-    const state = harness([{ present: 1 }]);
+    const state = harness([{ documentVersionId }]);
     await expect(invalidSession.resolveDocumentVersionArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner },
@@ -190,6 +195,10 @@ describe("Document artifact authorization", () => {
     await expect(state.authorization.resolveDocumentVersionArtifactAccess(
       state.transaction,
       { action: "bind", artifactId: "not-an-id", owner },
+    )).resolves.toBeUndefined();
+    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+      state.transaction,
+      { action: "bind", artifactId, owner: { entity: "DocumentVersion", id: documentVersionId } as never },
     )).resolves.toBeUndefined();
     expect(state.executed).toEqual([]);
     await expect(state.authorization.resolvePhysicalDeleteDecision(

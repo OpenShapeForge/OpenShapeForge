@@ -598,6 +598,8 @@ export function renderOpenApiSpec(
     }),
   )].sort();
   const hasCanonicalEditLease = restEditLeaseOperationIds.length > 0;
+  // The transport is documented where the document entities that bind files
+  // through it are compiled in; any canonical record may own a file at runtime.
   const hasArtifactTransport = contractsByEntityName.has("Document") &&
     contractsByEntityName.has("DocumentVersion");
 
@@ -870,13 +872,13 @@ export function renderOpenApiSpec(
   if (hasArtifactTransport) {
   tags.push({
     name: "Files",
-    description: "Authenticated streaming transport for temporary and document-bound files. Storage policy and authorization remain server-side.",
+    description: "Authenticated streaming transport for temporary and record-bound files. Storage policy and authorization remain server-side.",
   });
   paths["/api/artifacts"] = {
     post: {
       operationId: "stageArtifact",
       summary: "Upload a temporary document file",
-      description: "Streams bytes into the configured storage provider. Use the returned opaque handle in Document.create or DocumentVersion.create before it expires.",
+      description: "Streams bytes into the configured storage provider. Use the returned opaque handle in the Operation that binds it to its owning record — Document.create or DocumentVersion.create for a document file — before it expires.",
       tags: ["Files"],
       parameters: [{
         name: "x-file-name",
@@ -926,12 +928,13 @@ export function renderOpenApiSpec(
   paths["/api/artifacts/{artifactId}/contents"] = {
     get: {
       operationId: "downloadArtifact",
-      summary: "Download a document-version file",
-      description: "Returns bytes only when this exact artifact is bound to the supplied authorized DocumentVersion.",
+      summary: "Download a record's file",
+      description: "Returns bytes only when this exact artifact is bound to the named owning record and the session may read that record (its `get` Operation). A document file is owned by its Document.",
       tags: ["Files"],
       parameters: [
         { name: "artifactId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
-        { name: "documentVersionId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
+        { name: "ownerEntity", in: "query", required: true, description: "Canonical Entity name of the owning record.", schema: { type: "string", minLength: 1, maxLength: 200 } },
+        { name: "ownerId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
       ],
       responses: {
         "200": { description: "Authorized file contents", headers: {

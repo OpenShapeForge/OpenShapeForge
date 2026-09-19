@@ -8,7 +8,7 @@ import { registerArtifactRestRoutes } from "./rest-routes.js";
 
 const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
-const VERSION_ID = "6180f0f3-b637-4b9b-ac44-eb00cf30570a";
+const DOCUMENT_ID = "6180f0f3-b637-4b9b-ac44-eb00cf30570a";
 
 function authorizationHeaders(): Record<string, string> {
   const headers = new Headers({ "content-type": "application/octet-stream", "x-file-name": encodeURIComponent("bewijs.pdf") });
@@ -69,11 +69,11 @@ describe("artifact REST adapter", () => {
     const headers = authorizationHeaders();
     delete headers["content-type"];
     delete headers["x-file-name"];
-    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?documentVersionId=${VERSION_ID}`, headers });
+    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers });
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe("download");
     expect(response.headers["content-disposition"]).toContain('filename="rapport.pdf"');
-    expect(owner).toEqual({ artifactId: ARTIFACT_ID, documentVersionId: VERSION_ID });
+    expect(owner).toEqual({ artifactId: ARTIFACT_ID, owner: { entity: "Document", id: DOCUMENT_ID } });
     await app.close();
   });
 

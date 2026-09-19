@@ -258,8 +258,9 @@ describe("Document artifact binding migration", () => {
       const executor: DocumentArtifactSqlExecutor = { executeQuery: async query =>
         ({ rows: (await trx.executeQuery<Record<string, unknown>>(CompiledQuery.raw(query.sql, [...query.parameters]))).rows }) };
       const input = { action: "bind" as const, artifactId,
-        owner: { entity: "DocumentVersion" as const, recordId: ids.documentVersionId } };
-      expect(await policy.resolveDocumentVersionArtifactAccess(executor, input)).toMatchObject({ artifactId, tenantId });
+        owner: { entity: "Document" as const, id: ids.documentId } };
+      expect(await policy.resolveDocumentVersionArtifactAccess(executor, input))
+        .toMatchObject({ artifactId, tenantId, documentVersionId: ids.documentVersionId });
       expect(checked).toEqual([]); // First-create does not imply read/update authority.
       expect(await policy.resolveDocumentVersionArtifactAccess(executor, { ...input, expectedArtifactVersion: 1 })).toBeUndefined();
       expect(await policy.resolveDocumentVersionArtifactAccess(executor, { ...input, artifactId: randomUUID() })).toBeUndefined();
@@ -277,9 +278,13 @@ describe("Document artifact binding migration", () => {
       const reader = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
       expect(await reader.resolveDocumentVersionArtifactAccess(executor, {
         action: "open", artifactId,
-        owner: { entity: "DocumentVersion", recordId: created.documentVersionId },
-      })).toMatchObject({ artifactId, tenantId });
-      expect(checked).toEqual(["DocumentVersion", "Document"]);
+        owner: { entity: "Document", id: created.documentId },
+      })).toMatchObject({ artifactId, tenantId, documentVersionId: created.documentVersionId });
+      expect(checked).toEqual(["Document"]);
+      // A Document that does not hold this artifact in any version resolves nothing.
+      expect(await reader.resolveDocumentVersionArtifactAccess(executor, {
+        action: "open", artifactId, owner: { entity: "Document", id: randomUUID() },
+      })).toBeUndefined();
       expect(await reader.resolvePhysicalDeleteDecision(executor, randomUUID())).toBeUndefined();
     });
   });

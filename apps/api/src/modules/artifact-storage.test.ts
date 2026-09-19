@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { operationErrorOf } from "@openshapeforge/operations";
+import { operationErrorOf, operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeArtifactDescriptor,
   RuntimeArtifactSessionContext,
   RuntimeArtifactStorageContribution,
+  RuntimeRecordAccessRequest,
 } from "@openshapeforge/plugin-runtime";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 
@@ -13,7 +14,7 @@ type Transaction = { readonly id: string };
 
 const artifactId = "10000000-0000-4000-8000-000000000001";
 const otherArtifactId = "10000000-0000-4000-8000-000000000002";
-const documentVersionId = "20000000-0000-4000-8000-000000000001";
+const documentId = "20000000-0000-4000-8000-000000000001";
 const providerId = "test-provider";
 const descriptor: RuntimeArtifactDescriptor = {
   artifactId,
@@ -50,11 +51,18 @@ function provider(
   };
 }
 
-function harness() {
+function harness(options: { refuse?: boolean } = {}) {
   const live = new Set<Session>();
   let active: { session: Session; transaction: Transaction } | undefined;
   let transactionCalls = 0;
+  const access: { session: Session; request: RuntimeRecordAccessRequest }[] = [];
   const runtime = new ArtifactStorageRuntime<Session, Transaction>({
+    records: {
+      async assertAccess(session, request) {
+        access.push({ session, request });
+        if (options.refuse) throw operationFailure({ code: "FORBIDDEN", message: "Not authorized to access this record." });
+      },
+    },
     acceptsSession: session => live.has(session),
     currentTransaction: session => active?.session === session ? active.transaction : undefined,
     withTransaction: async (session, work) => {
@@ -72,6 +80,7 @@ function harness() {
   return {
     runtime,
     live,
+    access,
     transactionCalls: () => transactionCalls,
   };
 }
@@ -81,7 +90,7 @@ const stageInput = {
   fileName: "evidence.pdf",
   source: (async function* () { yield Uint8Array.of(1, 2, 3); })(),
 };
-const ownerInput = { artifactId, documentVersionId };
+const ownerInput = { artifactId, owner: { entity: "Document", id: documentId } };
 const bindInput = { ...ownerInput, expectedArtifactVersion: descriptor.version };
 
 describe("ArtifactStorageRuntime", () => {
@@ -269,6 +278,39 @@ describe("ArtifactStorageRuntime", () => {
         "HANDLER_CONTRACT_VIOLATION",
       );
     }
+  });
+
+  test("read asks the record oracle for `get` on the owner before the provider, whatever the entity", async () => {
+    const session = { id: "session-a" };
+    const allowed = harness();
+    allowed.live.add(session);
+    let reads = 0;
+    allowed.runtime.configure([{ name: "storage", artifactStorage: provider({
+      read: async () => { reads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3) }; },
+    }) }], [providerId]);
+    const relation = { artifactId, owner: { entity: "Relation", id: documentId } };
+    await expect(allowed.runtime.services.read(session, relation)).resolves.toMatchObject({ descriptor });
+    expect(allowed.access).toEqual([{ session, request: { entityName: "Relation", id: documentId, intent: "get" } }]);
+    expect(reads).toBe(1);
+
+    const refused = harness({ refuse: true });
+    refused.live.add(session);
+    let refusedReads = 0;
+    refused.runtime.configure([{ name: "storage", artifactStorage: provider({
+      read: async () => { refusedReads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3) }; },
+    }) }], [providerId]);
+    await expectFailure(refused.runtime.services.read(session, ownerInput), "FORBIDDEN");
+    expect(refusedReads).toBe(0);
+
+    for (const owner of [
+      { entity: "", id: documentId },
+      { entity: " Document", id: documentId },
+      { entity: "Document", id: "not-a-uuid" },
+      undefined,
+    ]) {
+      await expectFailure(allowed.runtime.services.read(session, { artifactId, owner } as never), "VALIDATION");
+    }
+    expect(allowed.access).toHaveLength(1);
   });
 
   test("read rejects mismatched identity, non-byte contents, and descriptor length drift", async () => {

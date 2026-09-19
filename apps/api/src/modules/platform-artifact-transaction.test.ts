@@ -35,7 +35,7 @@ const { ModulePlatformRuntime, withModuleOperationSession } = await import(
 const tenantId = "10000000-0000-4000-8000-000000000001";
 const userId = "20000000-0000-4000-8000-000000000001";
 const artifactId = "30000000-0000-4000-8000-000000000001";
-const documentVersionId = "40000000-0000-4000-8000-000000000001";
+const documentId = "40000000-0000-4000-8000-000000000001";
 const descriptor: RuntimeArtifactDescriptor = {
   artifactId,
   version: 1,
@@ -104,14 +104,14 @@ describe("artifact record authorization transaction scope", () => {
         read: async (context) => context.withTransaction(async (transaction) => {
           await sql`select 1 as artifact_transaction_marker`.execute(transaction);
           await platform.services.records.assertAccess(context.session, {
-            entityName: "DocumentVersion",
-            id: documentVersionId,
+            entityName: "Document",
+            id: documentId,
             intent: "get",
           });
           try {
             await platform.services.artifacts.bind(context.session, {
               artifactId,
-              documentVersionId,
+              owner: { entity: "Document", id: documentId },
               expectedArtifactVersion: 1,
             });
           } catch (error) {
@@ -129,14 +129,14 @@ describe("artifact record authorization transaction scope", () => {
         session,
         async (active) => platform.services.artifacts.read(active!, {
           artifactId,
-          documentVersionId,
+          owner: { entity: "Document", id: documentId },
         }),
       );
       const artifactQuery = observations.find((entry) =>
         entry.sql.includes("artifact_transaction_marker")
       );
       const recordQuery = observations.find((entry) =>
-        entry.sql.includes('from "erp"."document_versions" as row_source')
+        entry.sql.includes('from "erp"."documents" as row_source')
       );
       expect(artifactQuery).toBeDefined();
       expect(recordQuery).toBeDefined();

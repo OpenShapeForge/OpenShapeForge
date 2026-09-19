@@ -10,7 +10,7 @@ import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
 export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent } from "./record-access.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
-export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
+export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationConfirmation,

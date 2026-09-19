@@ -95,7 +95,7 @@ export function registerArtifactRestRoutes(
       const { artifactId } = request.params as { artifactId: string };
       const result = await options.artifacts.read(verified, {
         artifactId,
-        documentVersionId: queryString(request, "documentVersionId"),
+        owner: { entity: queryString(request, "ownerEntity"), id: queryString(request, "ownerId") },
       });
       return reply
         .header("content-type", result.descriptor.mediaType)

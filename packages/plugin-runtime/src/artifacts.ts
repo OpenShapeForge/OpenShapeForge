@@ -15,7 +15,14 @@ export type RuntimeArtifactStageInput = Readonly<{
   fileName: string;
   source: AsyncIterable<Uint8Array>;
 }>;
-export type RuntimeArtifactOwnerInput = Readonly<{ artifactId: string; documentVersionId: string }>;
+/**
+ * The record that owns an artifact's bytes: any canonical Entity record, named
+ * by entity and id. Core authorizes a read as `get` on this record through
+ * `platform.records.assertAccess`, so a grant reaches a file exactly when it
+ * reaches the record; a Document owns the files of its versions.
+ */
+export type RuntimeArtifactOwner = Readonly<{ entity: string; id: string }>;
+export type RuntimeArtifactOwnerInput = Readonly<{ artifactId: string; owner: RuntimeArtifactOwner }>;
 export type RuntimeArtifactBindInput = RuntimeArtifactOwnerInput & Readonly<{ expectedArtifactVersion: number }>;
 export type RuntimeArtifactContents = Readonly<{ descriptor: RuntimeArtifactDescriptor; bytes: Uint8Array }>;
 
@@ -35,7 +42,8 @@ export type RuntimeArtifactStorageContribution<Session, Transaction> = {
 /** No physical-delete API: destructive work requires a durable OSF policy decision. */
 export type RuntimeArtifactServices<Session> = Readonly<{
   stage(session: Session, input: RuntimeArtifactStageInput): Promise<RuntimeArtifactDescriptor>;
-  /** Requires the live Operation transaction that also creates the DocumentVersion. */
+  /** Requires the live Operation transaction that also creates or updates the owning record. */
   bind(session: Session, input: RuntimeArtifactBindInput): Promise<RuntimeArtifactDescriptor>;
+  /** Core asserts `get` on the owner before the provider is asked; the provider may narrow further. */
   read(session: Session, input: RuntimeArtifactOwnerInput): Promise<RuntimeArtifactContents>;
 }>;

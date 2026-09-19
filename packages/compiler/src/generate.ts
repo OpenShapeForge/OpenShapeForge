@@ -11,7 +11,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
-import { assertTenantBoundReferences, hasTenantIdentityCheck, renderOnDeleteSql } from "./tenant-bound-references.js";
+import { assertTenantBoundReferences, renderOnDeleteSql, renderTenantRegistryWritePolicies } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
@@ -551,27 +551,7 @@ function renderTableSql(table: TableDefinition): string {
     // is the exception, and says so with `tenantIdentityColumn`.
     lines.push(...tenantRegistryPolicy);
   }
-  if (table.tenantScoped && hasTenantIdentityCheck(table)) {
-    // A tenant-scoped registry (rows ARE their tenant, CHECK (id = tenant_id))
-    // has one writer: provisioning, in the bypass session. The tenant policy
-    // above would let any session of a tenant insert or delete its own
-    // registry row; these two RESTRICTIVE policies AND into it and keep
-    // INSERT and DELETE to the bypass session, leaving reads and updates to
-    // the policy above and the entity contract.
-    const insertPolicy = quoteIdent(`${table.name}_registry_insert`);
-    const deletePolicy = quoteIdent(`${table.name}_registry_delete`);
-    lines.push(
-      "",
-      `DROP POLICY IF EXISTS ${insertPolicy} ON ${tableIdent(table)};`,
-      `CREATE POLICY ${insertPolicy} ON ${tableIdent(table)}`,
-      "  AS RESTRICTIVE FOR INSERT",
-      "  WITH CHECK (app.bypass_rls());",
-      `DROP POLICY IF EXISTS ${deletePolicy} ON ${tableIdent(table)};`,
-      `CREATE POLICY ${deletePolicy} ON ${tableIdent(table)}`,
-      "  AS RESTRICTIVE FOR DELETE",
-      "  USING (app.bypass_rls());",
-    );
-  }
+  lines.push(...renderTenantRegistryWritePolicies(table));
 
   for (const index of deriveRowScopeIndexes(table)) {
     lines.push("", renderIndexSql(table, index));

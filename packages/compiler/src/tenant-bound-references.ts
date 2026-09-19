@@ -272,3 +272,34 @@ export function ensureCompositeReferenceKeys(manifest: PlatformSchemaManifest): 
     }
   }
 }
+
+function quoteIdent(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+/**
+ * The write policies of a tenant-scoped registry (rows ARE their tenant,
+ * CHECK (id = tenant_id)). Such a table has one writer, provisioning, in the
+ * bypass session; the generated tenant policy alone would let any session of
+ * a tenant insert or delete its own registry row. Two RESTRICTIVE policies
+ * AND into that policy and keep INSERT and DELETE to the bypass session,
+ * leaving reads and updates to the tenant policy and the entity contract.
+ * Empty for every other table.
+ */
+export function renderTenantRegistryWritePolicies(table: TableDefinition): string[] {
+  if (!table.tenantScoped || !hasTenantIdentityCheck(table)) return [];
+  const ident = `${quoteIdent(table.schema)}.${quoteIdent(table.name)}`;
+  const insertPolicy = quoteIdent(`${table.name}_registry_insert`);
+  const deletePolicy = quoteIdent(`${table.name}_registry_delete`);
+  return [
+    "",
+    `DROP POLICY IF EXISTS ${insertPolicy} ON ${ident};`,
+    `CREATE POLICY ${insertPolicy} ON ${ident}`,
+    "  AS RESTRICTIVE FOR INSERT",
+    "  WITH CHECK (app.bypass_rls());",
+    `DROP POLICY IF EXISTS ${deletePolicy} ON ${ident};`,
+    `CREATE POLICY ${deletePolicy} ON ${ident}`,
+    "  AS RESTRICTIVE FOR DELETE",
+    "  USING (app.bypass_rls());",
+  ];
+}

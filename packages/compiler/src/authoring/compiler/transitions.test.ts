@@ -12,12 +12,12 @@ const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");
 const catalogs = { componentCatalog: milestone.componentCatalog, osfTypes: milestone.osfTypes };
 
-function withStatus(patch: Partial<Field> & { transitions?: Field["transitions"] }, entityPatch: Partial<CoreEntity> = {}): CoreEntity {
+function withStatus(patch: Record<string, unknown>, entityPatch: Record<string, unknown> = {}): CoreEntity {
   const base = milestone.coreEntity;
   return {
     ...base,
     ...entityPatch,
-    fields: base.fields.map((field) => (field.key === "status" ? { ...field, ...patch } : field)),
+    fields: base.fields.map((field) => (field.key === "status" ? { ...field, ...patch } as Field : field)),
   };
 }
 
@@ -64,7 +64,7 @@ describe("status transitions", () => {
     expect(contract.interfaces?.web?.operations).toBeDefined();
     const web = buildWebManifest([{ slug: "agreement-milestone", contract }]);
     const entity = web.entities.AgreementMilestone!;
-    expect(entity.transitions).toEqual(contract.transitions);
+    expect(entity.transitions).toEqual(contract.transitions as typeof entity.transitions);
     expect(entity.views.record!.operations.actions!.map((action) => action.id)).toContain("AgreementMilestone.trigger");
   });
 
@@ -88,7 +88,7 @@ describe("status transitions", () => {
 describe("status transition validation", () => {
   const rule = { key: "trigger", from: ["pending"], to: "triggered" };
   const lower = (entity: CoreEntity) => () => withStatusTransitions(entity, catalogs);
-  const formless = { interfaces: { ...milestone.coreEntity.interfaces, web: undefined } } as Partial<CoreEntity>;
+  const formless = { interfaces: { ...milestone.coreEntity.interfaces, web: undefined } };
 
   test("requires static options and states from the option set", () => {
     expect(lower(withStatus({ options: { type: "referentiedata", referentieGroep: "X" } }))).toThrow("options.type: static");

@@ -63,7 +63,7 @@ async function row(id: string) {
 async function events(id: string) {
   return (await sql<{ event_type: string }>`select event_type from platform.entity_events where aggregate_id = ${id} order by sequence`.execute(privileged!.db)).rows.map((event) => event.event_type);
 }
-const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejects.toMatchObject({ operationError: { code } });
+const fails = (promise: unknown, code: string) => expect(Promise.resolve(promise)).rejects.toMatchObject({ operationError: { code } });
 
 describe("status transitions against PostgreSQL", () => {
   beforeAll(async () => {
@@ -145,7 +145,7 @@ describe("status transitions against PostgreSQL", () => {
   test("the rule is offered only while the status is in from", async () => {
     const pending = await milestone();
     const triggered = await milestone("triggered");
-    const decisions = await withDbSession(restricted!.db, session, (trx) =>
+    const decisions = await withDbSession(restricted!.db, session, async (trx) =>
       transitionAvailabilityHandler(operation)([pending, triggered, randomUUID()], { db: trx, session: session as never }));
     expect(decisions[pending]).toEqual({ available: true });
     expect(decisions[triggered]).toMatchObject({ available: false, error: { code: "INVALID_STATE" } });

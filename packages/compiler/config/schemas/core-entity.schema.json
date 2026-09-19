@@ -1279,15 +1279,32 @@
           "anyOf": [{ "required": ["views"] }, { "required": ["fields"] }],
           "properties": {
             "fields": {
-              "type": "object", "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$" },
+              "type": "object",
+              "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$" },
               "additionalProperties": {
-                "type": "object", "additionalProperties": false, "required": ["render"],
-                "properties": { "render": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render" } }
-              }
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["render"],
+                "properties": {
+                  "render": {
+                    "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render",
+                    "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } }
+                  }
+                },
+                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+              },
+              "x-osf-i18n": { "title": { "en": "Field components", "nl": "Veldcomponenten" } }
             },
-            "operations": { "$ref": "#/$defs/webInterfaceOperationsV2" },
-            "views": { "$ref": "#/$defs/webViewsV2" }
-          }
+            "operations": {
+              "$ref": "#/$defs/webInterfaceOperationsV2",
+              "x-osf-i18n": { "title": { "en": "Operations", "nl": "Operaties" } }
+            },
+            "views": {
+              "$ref": "#/$defs/webViewsV2",
+              "x-osf-i18n": { "title": { "en": "Views", "nl": "Weergaven" } }
+            }
+          },
+          "x-osf-i18n": { "title": { "en": "Web", "nl": "Web" } }
         }
       }
     },
@@ -1315,13 +1332,27 @@
           "additionalProperties": false,
           "required": ["route", "columns"],
           "properties": {
-            "renderer": { "$ref": "#/$defs/webRendererKeyV2" },
-            "route": { "$ref": "#/$defs/localizedOrString" },
-            "title": { "$ref": "#/$defs/localizedText" },
+            "renderer": {
+              "$ref": "#/$defs/webRendererKeyV2",
+              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } }
+            },
+            "route": {
+              "$ref": "#/$defs/localizedOrString",
+              "x-osf-i18n": { "title": { "en": "Route", "nl": "Route" } }
+            },
+            "title": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+            },
             "actions": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9]*$",
+                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } }
+              },
+              "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
             "columns": {
               "type": "array",
@@ -1331,40 +1362,94 @@
                 "additionalProperties": false,
                 "required": ["key"],
                 "properties": {
-                  "key": { "$ref": "#/$defs/fieldKey" },
-                  "label": { "$ref": "#/$defs/localizedText" },
-                  "sortable": { "type": "boolean" }
-                }
-              }
+                  "key": {
+                    "$ref": "#/$defs/fieldKey",
+                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText",
+                    "x-osf-i18n": { "title": { "en": "Label", "nl": "Label" } }
+                  },
+                  "sortable": {
+                    "type": "boolean",
+                    "x-osf-i18n": { "title": { "en": "Sortable", "nl": "Sorteerbaar" } }
+                  }
+                },
+                "x-osf-i18n": { "title": { "en": "Column", "nl": "Kolom" } }
+              },
+              "x-osf-i18n": { "title": { "en": "Columns", "nl": "Kolommen" } }
             },
             "defaultSort": {
               "type": "object",
               "additionalProperties": false,
               "required": ["key", "direction"],
               "properties": {
-                "key": { "$ref": "#/$defs/fieldKey" },
-                "direction": { "enum": ["asc", "desc"] }
-              }
+                "key": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                },
+                "direction": {
+                  "enum": ["asc", "desc"],
+                  "x-osf-i18n": {
+                    "title": { "en": "Direction", "nl": "Richting" },
+                    "enum": {
+                      "asc": { "en": "Ascending", "nl": "Oplopend" },
+                      "desc": { "en": "Descending", "nl": "Aflopend" }
+                    }
+                  }
+                }
+              },
+              "x-osf-i18n": { "title": { "en": "Default sort", "nl": "Standaardsortering" } }
             }
-          }
+          },
+          "x-osf-i18n": { "title": { "en": "List", "nl": "Lijst" } }
         },
         "record": {
           "type": "object",
           "additionalProperties": false,
           "required": ["title", "layout"],
           "properties": {
-            "renderer": { "$ref": "#/$defs/webRendererKeyV2" },
+            "renderer": {
+              "$ref": "#/$defs/webRendererKeyV2",
+              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } }
+            },
             "routes": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "read": { "$ref": "#/$defs/localizedOrString" },
-                "create": { "$ref": "#/$defs/localizedOrString" }
+                "read": {
+                  "$ref": "#/$defs/localizedOrString",
+                  "x-osf-i18n": { "title": { "en": "Read", "nl": "Lezen" } }
+                },
+                "create": {
+                  "$ref": "#/$defs/localizedOrString",
+                  "x-osf-i18n": { "title": { "en": "Create", "nl": "Aanmaken" } }
+                }
+              },
+              "x-osf-i18n": { "title": { "en": "Routes", "nl": "Routes" } }
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": { "en": "Title", "nl": "Titel" },
+                "description": {
+                  "en": "A template over the record's fields, such as {{displayName}}.",
+                  "nl": "Een sjabloon over de velden van het record, zoals {{displayName}}."
+                }
               }
             },
-            "title": { "type": "string", "minLength": 1 },
-            "subtitle": { "type": "string", "minLength": 1 },
-            "badges": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/fieldKey" } },
+            "subtitle": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": { "title": { "en": "Subtitle", "nl": "Ondertitel" } }
+            },
+            "badges": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/fieldKey" },
+              "x-osf-i18n": { "title": { "en": "Badges", "nl": "Badges" } }
+            },
             "variableSources": {
               "type": "array",
               "items": {
@@ -1372,16 +1457,46 @@
                 "additionalProperties": false,
                 "required": ["key", "resolver"],
                 "properties": {
-                  "key": { "$ref": "#/$defs/fieldKey" },
-                  "resolver": { "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"] },
-                  "params": { "type": "object" }
-                }
-              }
+                  "key": {
+                    "$ref": "#/$defs/fieldKey",
+                    "x-osf-i18n": { "title": { "en": "Key", "nl": "Sleutel" } }
+                  },
+                  "resolver": {
+                    "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"],
+                    "x-osf-i18n": {
+                      "title": { "en": "Resolver", "nl": "Resolver" },
+                      "enum": {
+                        "chips": { "en": "Chips", "nl": "Chips" },
+                        "entityFields": { "en": "Entity fields", "nl": "Entiteitsvelden" },
+                        "templateParameters": {
+                          "en": "Template parameters",
+                          "nl": "Sjabloonparameters"
+                        },
+                        "workflowGraphVariables": {
+                          "en": "Workflow variables",
+                          "nl": "Workflowvariabelen"
+                        }
+                      }
+                    }
+                  },
+                  "params": {
+                    "type": "object",
+                    "x-osf-i18n": { "title": { "en": "Parameters", "nl": "Parameters" } }
+                  }
+                },
+                "x-osf-i18n": { "title": { "en": "Variable source", "nl": "Variabelebron" } }
+              },
+              "x-osf-i18n": { "title": { "en": "Variable sources", "nl": "Variabelebronnen" } }
             },
             "actions": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9]*$",
+                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } }
+              },
+              "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
             "layout": {
               "type": "object",
@@ -1393,27 +1508,57 @@
                   "additionalProperties": false,
                   "required": ["fields"],
                   "properties": {
-                    "fields": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
-                    "relationships": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
-                  }
+                    "fields": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                      },
+                      "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }
+                    },
+                    "relationships": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+                      },
+                      "x-osf-i18n": { "title": { "en": "Relationships", "nl": "Relaties" } }
+                    }
+                  },
+                  "x-osf-i18n": { "title": { "en": "Context column", "nl": "Contextkolom" } }
                 },
                 "tabs": {
                   "type": "array",
-                  "items": { "$ref": "#/$defs/webViewGroupV2" }
+                  "items": { "$ref": "#/$defs/webViewGroupV2" },
+                  "x-osf-i18n": { "title": { "en": "Tabs", "nl": "Tabbladen" } }
                 }
-              }
+              },
+              "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
             },
             "modes": {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "create": { "$ref": "#/$defs/webWriteModeV2" },
-                "update": { "$ref": "#/$defs/webWriteModeV2" }
-              }
+                "create": {
+                  "$ref": "#/$defs/webWriteModeV2",
+                  "x-osf-i18n": { "title": { "en": "Create form", "nl": "Aanmaakformulier" } }
+                },
+                "update": {
+                  "$ref": "#/$defs/webWriteModeV2",
+                  "x-osf-i18n": { "title": { "en": "Update form", "nl": "Wijzigformulier" } }
+                }
+              },
+              "x-osf-i18n": { "title": { "en": "Forms", "nl": "Formulieren" } }
             }
-          }
+          },
+          "x-osf-i18n": { "title": { "en": "Record", "nl": "Record" } }
         }
-      }
+      },
+      "x-osf-i18n": { "title": { "en": "Views", "nl": "Weergaven" } }
     },
     "webRendererKeyV2": {
       "type": "string",
@@ -1426,36 +1571,98 @@
       "additionalProperties": false,
       "required": ["title"],
       "properties": {
-        "title": { "$ref": "#/$defs/localizedText" },
+        "title": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+        },
         "groups": {
           "type": "array",
-          "items": { "$ref": "#/$defs/webViewGroupV2" }
+          "items": { "$ref": "#/$defs/webViewGroupV2" },
+          "x-osf-i18n": { "title": { "en": "Groups", "nl": "Groepen" } }
         }
-      }
+      },
+      "x-osf-i18n": { "title": { "en": "Form", "nl": "Formulier" } }
     },
     "webViewGroupV2": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "title": { "$ref": "#/$defs/localizedText" },
-        "label": { "$ref": "#/$defs/localizedText" },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": { "title": { "en": "Id", "nl": "Id" } }
+        },
+        "title": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } }
+        },
+        "label": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": { "title": { "en": "Label", "nl": "Label" } }
+        },
         "fields": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/fieldKey" }
+          "items": { "$ref": "#/$defs/webFieldEntryV2" },
+          "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }
         },
-        "relationship": { "$ref": "#/$defs/fieldKey" },
+        "relationship": {
+          "$ref": "#/$defs/fieldKey",
+          "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+        },
         "groups": {
           "type": "array",
-          "items": { "$ref": "#/$defs/webViewGroupV2" }
+          "items": { "$ref": "#/$defs/webViewGroupV2" },
+          "x-osf-i18n": { "title": { "en": "Groups", "nl": "Groepen" } }
         }
       },
       "anyOf": [
         { "required": ["fields"] },
         { "required": ["relationship"] },
         { "required": ["groups"] }
-      ]
+      ],
+      "x-osf-i18n": { "title": { "en": "Group", "nl": "Groep" } }
+    },
+    "webFieldEntryV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/fieldKey" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+            },
+            "render": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": { "en": "Component", "nl": "Component" },
+                "description": {
+                  "en": "The component that draws this field here, instead of the field's default.",
+                  "nl": "Het component dat dit veld hier tekent, in plaats van de standaard van het veld."
+                }
+              }
+            },
+            "fieldDisplayMode": {
+              "enum": ["hidden"],
+              "x-osf-i18n": {
+                "title": { "en": "Display", "nl": "Tonen" },
+                "enum": {
+                  "hidden": {
+                    "en": "Hidden (loaded, not shown)",
+                    "nl": "Verborgen (wel geladen, niet getoond)"
+                  }
+                }
+              }
+            }
+          },
+          "x-osf-i18n": { "title": { "en": "Field entry", "nl": "Veldregel" } }
+        }
+      ],
+      "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
     },
     "mcpOperation": {
       "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name and/or description for that operation (dedicated style only).",

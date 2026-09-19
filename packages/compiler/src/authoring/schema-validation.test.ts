@@ -29,6 +29,7 @@ import fieldDefinitionSchema from "../../config/schemas/field-definition.schema.
   type: "json",
 };
 import fieldV2Schema from "../../config/schemas/field-v2.schema.json" with { type: "json" };
+import coreEntitySchema from "../../config/schemas/core-entity.schema.json" with { type: "json" };
 import workflowInspectorSchema from "../../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
 };
@@ -494,6 +495,55 @@ describe("coreEntity properties the compiler implements", () => {
       },
     });
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  const webViews = (tabs: unknown) => coreEntity({
+    schemaVersion: 2,
+    operations: { list: v2Operation("list"), get: v2Operation("get") },
+    interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" }, web: { views: {
+      collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+      record: { title: "{{idempotencyKey}}", layout: { tabs } },
+    } } },
+  });
+
+  it("accepts a FieldRef entry in a view group, as the compiler does", () => {
+    // FieldEntry is string | FieldRef in types/views.ts and web-manifest.ts
+    // reads render and fieldDisplayMode; the schema used to admit only the key.
+    const document = webViews([{ id: "main", fields: [
+      "idempotencyKey",
+      { key: "idempotencyKey", render: "TextDisplay" },
+      { key: "idempotencyKey", fieldDisplayMode: "hidden" },
+    ] }]);
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", hidden: true }] }]), "billing-run.yaml"))
+      .toThrow(/fields\/0/);
+    expect(() => validator.validate(webViews([{ id: "main", fields: [{ key: "idempotencyKey", fieldDisplayMode: "collapsed" }] }]), "billing-run.yaml"))
+      .toThrow(/fieldDisplayMode/);
+  });
+
+  it("titles every interfaces.web schema node in both locales, for schema-driven editors", () => {
+    // A node is every object schema and every property under it; the enum
+    // members of a choice are titled too. Anything added later must be titled
+    // or this fails, so an editor built from the schema never shows raw keys.
+    const defs = coreEntitySchema.$defs as Record<string, unknown>;
+    const untitled: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+      const schema = node as Record<string, unknown>;
+      if ("$ref" in schema && Object.keys(schema).length === 1) return;
+      const i18n = schema["x-osf-i18n"] as { title?: { en?: string; nl?: string }; enum?: Record<string, { en?: string; nl?: string }> } | undefined;
+      if (!i18n?.title?.en || !i18n.title.nl) untitled.push(path);
+      for (const member of (schema.enum as string[] | undefined) ?? []) {
+        if (!i18n?.enum?.[member]?.en || !i18n.enum[member]?.nl) untitled.push(`${path}=${member}`);
+      }
+      for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
+      if (schema.items) walk(schema.items, `${path}[]`);
+      for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
+    };
+    walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
+    for (const def of ["webViewsV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2"]) walk(defs[def], def);
+    expect(untitled).toEqual([]);
   });
 
   it("accepts plugin-backed CRUD without a second authorization policy", () => {

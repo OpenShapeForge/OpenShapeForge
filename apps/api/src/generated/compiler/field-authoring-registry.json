@@ -17078,14 +17078,7 @@
           "osfType": "TemplateVersion",
           "relationship": {
             "ownership": "reference",
-            "version": "pinned",
-            "inverse": {
-              "key": "documents",
-              "label": {
-                "en": "Documents",
-                "nl": "Documenten"
-              }
-            }
+            "version": "pinned"
           }
         },
         {

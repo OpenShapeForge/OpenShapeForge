@@ -288,9 +288,6 @@ fields:
     relationship:
       ownership: reference
       version: pinned
-      inverse:
-        key: documents
-        label: { en: Documents, nl: Documenten }
   - key: parameters
     osfType: object
     required: false

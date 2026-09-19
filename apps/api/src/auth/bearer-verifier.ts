@@ -94,9 +94,6 @@ export function getApiKeyKeyring(): SecretKeyring | null {
   return cachedApiKeyKeyring;
 }
 
-/**
- * Verify a Keycloak token through the ordinary bearer path and flatten it to
-
 /** Test-only: reset cached state so env changes are picked up. */
 export function __resetBearerVerifiersForTests(): void {
   verifierInitialized = false;

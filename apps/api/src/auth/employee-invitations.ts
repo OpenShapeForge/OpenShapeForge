@@ -47,9 +47,11 @@
  * APPLYING THE INVITED ROLE ON FIRST SIGN-IN
  * ---------------------------------------------------------------------------
  * `ensureIdentityLink` (./identity-link.ts) calls `findPendingInvitation`
- * before it creates anything, and `acceptInvitation` once the Relation
- * exists: the invited roles are written to `platform.identity_relations.roles`
- * for THIS (identity, tenant) and the row moves to `accepted`. Nothing is
+ * before it creates anything, and `admitInvitedPerson`
+ * (./identity-link-admission.ts) then creates the Relation, links it with
+ * the invited roles on `platform.identity_relations.roles` for THIS
+ * (identity, tenant) and CLAIMS the invitation (`claimPendingInvitation`,
+ * below) in one transaction. Nothing is
  * granted in Keycloak — a client role on the user would be user-wide and
  * apply in every organization the account is a member of. Two consequences
  * worth knowing here:
@@ -61,7 +63,7 @@
  *   - both writes need `Organization.All.ReadWrite` — the invitation table's
  *     RLS `with check`, and the trigger on `identity_relations.roles` — and
  *     the person signing in does not have it. The runtime therefore performs
- *     them on an elevated db session (see `acceptInvitation`): the runtime
+ *     them on an elevated db session (see identity-link-admission.ts): the runtime
  *     records the acceptance on behalf of the administrator who invited, the
  *     invitee never holds the role that made the write legal.
  */

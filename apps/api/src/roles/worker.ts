@@ -10,9 +10,10 @@
  * policies check both — the first is what the database can verify, the second
  * says which worker it is (see docs/api.md#the-worker-axis).
  *
- * Which worker runs is `OPENSHAPEFORGE_ROLE`. No worker is hardcoded here —
- * `apps/api` names none of them, exactly as it names none of the contributed
- * GraphQL types.
+ * Which worker runs is `OPENSHAPEFORGE_ROLE`. No plugin worker is hardcoded
+ * here — `apps/api` names none of them, exactly as it names none of the
+ * contributed GraphQL types. The one exception is core's own `job-worker`
+ * (jobs/module.ts), which drains the outbox every plugin enqueues into.
  *
  * Fail-closed where the API role degrades:
  *   - no OPENSHAPEFORGE_WORKER_DATABASE_URL is fatal, and it never falls back
@@ -27,6 +28,7 @@
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
+import { createJobsRuntimeModule } from "../jobs/module.js";
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import { runtimeSettings } from "../modules/settings.js";
@@ -186,7 +188,12 @@ export async function startWorkerRole(
     // would claim commands and then fail every one of them with NO_BRIDGE —
     // burning the retry bound on a configuration problem.
     initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
-    const workers = indexModuleWorkers(initialised);
+    // The core jobs module is not in the generated registry — nothing can
+    // drop it — and joins the loaded plugins here so `job-worker` is indexed
+    // like any contributed role and drains every module's job kinds.
+    const loadedModules = initialised.loaded;
+    const jobsModule = createJobsRuntimeModule({ modules: () => loadedModules, env: options.env ?? process.env });
+    const workers = indexModuleWorkers({ loaded: [jobsModule, ...loadedModules], failures: initialised.failures });
     const resolved = workers.get(role);
 
     if (!resolved) {

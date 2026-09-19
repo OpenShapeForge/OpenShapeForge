@@ -598,10 +598,12 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            // The whole list, enumerated. Three queue tables the command and
-            // schedule workers claim from, and the two wait tables the
-            // collection-wait sweeps scan (#221) — that scan is their claim.
+            // The whole list, enumerated. Core's job queue (docs/jobs.md),
+            // three queue tables the command and schedule workers claim from,
+            // and the two wait tables the collection-wait sweeps scan (#221) —
+            // that scan is their claim.
             expect(policies.rows.map((row) => row.qualified)).toEqual([
+              "platform.jobs",
               "workflow.collection_waits",
               "workflow.control_commands",
               "workflow.schedule_fires",
@@ -613,7 +615,7 @@ describe("worker-role RLS axis", () => {
             // it, which is the property #223 added.
             for (const row of policies.rows) {
               for (const predicate of [row.qual, row.withcheck]) {
-                expect(predicate).toContain(WORKER_GUC_ROLE);
+                expect(predicate).toContain(row.qualified === "platform.jobs" ? "job-worker" : WORKER_GUC_ROLE);
                 expect(predicate).toContain(`CURRENT_USER = '${WORKER_ROLE}'`);
                 expect(predicate).not.toMatch(
                   /\(current_worker_role\(\) = '[^']*'::text\)(?!\))/i,

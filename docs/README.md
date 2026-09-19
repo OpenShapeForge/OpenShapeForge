@@ -12,6 +12,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [authoring.md](authoring.md) | Entity YAML anatomy, `_base.yaml`, slug rules, catalogs, `authorization.yaml`, adding an entity end-to-end |
 | [layers.md](layers.md) | `authoring.config.yaml`, overlays, `kind: entityPatch` strategic merge, catalog merging, `.authoring-build/` |
 | [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, workflow) |
+| [jobs.md](jobs.md) | The durable job queue: `platform.jobs`, enqueue/claim/settle, `outcome_unknown`, the `job-worker` role, the `mail.deliver` kind and SMTP provider, the `jobs.*` Operations |
 | [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
 | [identity-providers.md](identity-providers.md) | External identity providers: what OSF ships vs. what a host authors, the `keycloak.identityProviders` contract, Apple, validation rules, reconciling an existing realm, Keycloak/provider lockstep |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |

@@ -31,6 +31,7 @@ clientRoleComposites:
           - Cases.All.ReadWrite
           - Relations.Bsn.Read
           - Platform.ApiKeys.Manage
+          - Platform.Jobs.Manage
           - workflow-admin
         openshapeforge-support:
           - Support.Issues.All

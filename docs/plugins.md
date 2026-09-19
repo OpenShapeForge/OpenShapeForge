@@ -404,6 +404,7 @@ export type RuntimeModule = {
   restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
   seeds?: ModuleSeed[];                             // appended to the migration chain
   workers?: Record<string, ModuleWorker>;           // background roles, keyed by role name
+  jobHandlers?: Record<string, ModuleJobHandler>;   // durable job kinds, keyed by kind — see jobs.md
 };
 ```
 
@@ -446,6 +447,14 @@ Seven properties are worth knowing:
 `restRoutes` is declared but unimplemented by the shipped workflow module,
 which stays that way until the webhook trigger lands rather than being stubbed.
 
+`jobHandlers` is how a module takes part in the core job queue: an Operation
+handler enqueues (`platform.jobs.enqueue`) inside its own transaction, and the
+core `job-worker` runs the handler registered for that kind later, under a
+tenant session for the job's tenant. A kind two modules both register fails
+composition at boot. The queue, its states — including `outcome_unknown`, the
+job form of `OPERATION_OUTCOME_UNKNOWN` — the `mail.deliver` kind and the
+operator Operations are described in [jobs.md](jobs.md).
+
 ### Worker roles
 
 `apps/api` has one entry point and several roles. `OPENSHAPEFORGE_ROLE` picks
@@ -466,6 +475,10 @@ workers: {
   },
 },
 ```
+
+Core contributes one worker role of its own, `job-worker`, which drains the
+job queue every module enqueues into ([jobs.md](jobs.md#the-worker)); it is
+started the same way and holds the same contract.
 
 A worker is its own process rather than a timer inside the API, for three
 reasons: a poll loop and a request path have unrelated failure modes and

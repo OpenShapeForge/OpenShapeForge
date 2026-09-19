@@ -54,6 +54,10 @@ import type {
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
   RuntimeWorkerLogger,
+  RuntimeJobHandlerContextContract,
+  RuntimeJobHandlerContract,
+  RuntimeJobEnqueueInput,
+  RuntimeJobEnqueueResult,
 } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
@@ -312,6 +316,9 @@ export type ModulePlatformServices = {
       fn: (trx: Transaction<DB>) => Promise<T>,
     ): Promise<T>;
   };
+  readonly jobs: {
+    enqueue(session: TrustedSessionContext, input: RuntimeJobEnqueueInput): Promise<RuntimeJobEnqueueResult>;
+  };
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
@@ -515,6 +522,10 @@ export type ModuleWorkerHandle = RuntimeWorkerHandle;
  */
 export type ModuleWorker = RuntimeWorkerContract<ModuleWorkerContext>;
 
+/** A job handler as the host calls it: the tenant session is a typed transaction. */
+export type ModuleJobHandlerContext = RuntimeJobHandlerContextContract<Transaction<DB>>;
+export type ModuleJobHandler = RuntimeJobHandlerContract<ModuleJobHandlerContext>;
+
 export type ModuleOperationSuccessResult = PublicModuleOperationSuccessResult<
   CallToolResult["content"]
 >;
@@ -550,7 +561,8 @@ export type RuntimeModule = RuntimeModuleContract<
   RuntimeOperationProvider,
   ModuleWorker,
   ModuleOperationAvailabilityHandler,
-  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>
+  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>,
+  ModuleJobHandler
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */

@@ -67,6 +67,8 @@ import {
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
+import { composeJobHandlers } from "../jobs/handlers.js";
+import { createJobsRuntimeModule } from "../jobs/module.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
@@ -353,6 +355,10 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    // A job kind two modules both register is refused here, at API boot, and
+    // not only in the worker: the worker may not be running, and the API is
+    // what would enqueue jobs into a queue nothing can drain unambiguously.
+    composeJobHandlers([createJobsRuntimeModule({ modules: () => initialised.loaded }), ...initialised.loaded]);
     // The control plane the `osf-control` Operations run against: its
     // configuration, Keycloak clients and the loaded module that administers
     // a catalog. Assembled after init so a module that failed to initialise

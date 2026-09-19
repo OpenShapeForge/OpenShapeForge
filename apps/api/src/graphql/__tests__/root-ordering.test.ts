@@ -28,11 +28,16 @@ function expectedRootOrder() {
       ...sortedFields(generatedEntityQueryFields),
       ...sortedFields(`${connectorQueryFields}\n${connectorNamespaceQueryFields}`),
       ...sortedFields(apiKeyQueryFields),
+      // The core `osf-jobs` Operations project in every process (jobs.md),
+      // after the module groups, as the operation contribution is merged last.
+      "job",
+      "jobs",
     ],
     mutation: [
       ...sortedFields(generatedEntityMutationFields),
       ...sortedFields(`${connectorMutationFields}\n${connectorNamespaceMutationFields}`),
       ...sortedFields(apiKeyMutationFields),
+      "jobRetry",
     ],
   };
 }

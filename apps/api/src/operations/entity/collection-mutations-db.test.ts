@@ -177,7 +177,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     const create = f.operations.find(op => op.entityName === "Block" && op.intent === "create")!;
     (create.inputSchema!.properties as any).values.properties.title = { $ref: "#/$defs/title" };
     create.inputSchema!.$defs = { title: { type: "string", minLength: 3 } };
-    await expect(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "x" } })).rejects.toThrow("Child values");
+    await expect(f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "x" } })).rejects.toMatchObject({ operationError: { code: "VALIDATION", violations: [{ field: "title", code: "TOO_SHORT" }] } });
     const result = await f.execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Valid child" } });
     expect(result.orderedIds).toEqual([result.childId]);
   });
@@ -313,8 +313,12 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
     for (const altered of [{ ...binding, field: "missing" }, { ...binding, entityName: "Missing" }]) {
       await fails(execute(restricted!.db, session, altered, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" } }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
     }
-    for (const values of [{}, { title: 42 }, { title: "" }]) {
-      await fails(execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values }), "BAD_USER_INPUT");
+    // The child's write contract answers the way every interface does: the
+    // canonical VALIDATION failure naming the field.
+    for (const [values, field, code] of [[{}, "title", "REQUIRED"], [{ title: 42 }, "title", "INVALID_TYPE"], [{ title: "" }, "title", "TOO_SHORT"]] as const) {
+      await expect(execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values })).rejects.toMatchObject({
+        operationError: { code: "VALIDATION", violations: [{ field, code }] },
+      });
     }
     await fails(execute(restricted!.db, session, binding, { id: seeded.id, expectedVersion: seeded.expectedVersion, values: { title: "Denied" }, table: "erp.blocks" } as never), "BAD_USER_INPUT");
     expect((await state(seeded.id)).events).toBe(0);

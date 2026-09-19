@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { operationErrorOf } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
@@ -12,7 +13,7 @@ import { collectionManagedFields } from "./collection-policy.js";
 import { createGeneratedEntityInTransaction } from "./mutations.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
-import { createOperationAjv } from "../operation-ajv.js";
+import { assertEntityValuesValid } from "./input-validation.js";
 import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInTransaction } from "./entity-value-io.js";
 import { assertRelationshipConstraintsInTransaction } from "./relationship-constraints.js";
 import type { EntityOperationContract, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
@@ -28,7 +29,21 @@ export type CollectionMutationRequest = {
 };
 export type CollectionMutationResult = { parent: GeneratedEntityRow; childId: string; orderedIds: string[] };
 
-const ajv = createOperationAjv();
+/**
+ * The child's write contract, enforced the way every interface enforces it
+ * (input-validation.ts): the same schema, the same VALIDATION failure with
+ * per-field violations, the same nullable-null relaxation.
+ */
+function contractValues(operation: EntityOperationContract, table: GeneratedCrudTable, values: Record<string, unknown>, intent: "create" | "update", options: { partial: boolean }): void {
+  const schema = (operation.inputSchema?.properties as Record<string, unknown> | undefined)?.values;
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) unsupported(`An authored child ${intent}-values schema is required.`);
+  try {
+    assertEntityValuesValid(operation, table, values, options);
+  } catch (error) {
+    if (operationErrorOf(error)) throw error;
+    unsupported(`The child ${intent}-values schema cannot be validated safely.`);
+  }
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const unsupported = (message: string): never => { throw generatedCrudError(message, "RELATION_COLLECTION_MUTATION_UNSUPPORTED"); };
 const invalid = (message: string): never => { throw generatedCrudError(message, "BAD_USER_INPUT"); };
@@ -131,14 +146,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         const column = target.columns.find((column) => fieldNameForColumn(column) === key);
         if (!column || !isWritableColumn(column, "update") || column.writtenBy?.length || managed.has(key) || column.name === foreignKey!.name) invalid(`Field ${key} is not caller-writable for collection update.`);
       }
-      const schema = (updateOp!.inputSchema?.properties as Record<string, unknown> | undefined)?.values;
-      if (!schema || typeof schema !== "object" || Array.isArray(schema)) unsupported("An authored child update-values schema is required.");
-      let valid;
-      try {
-        const definitions = updateOp!.inputSchema?.$defs;
-        valid = ajv.compile({ ...(schema as Record<string, unknown>), ...(definitions && typeof definitions === "object" && !Array.isArray(definitions) ? { $defs: definitions } : {}) })(request.values);
-      } catch { unsupported("The child update-values schema cannot be validated safely."); }
-      if (!valid) invalid("Child values do not satisfy the authored update schema.");
+      contractValues(updateOp!, target, request.values!, "update", { partial: true });
     }
     if (binding.action === "insert" && (request.childId !== undefined || !request.values || typeof request.values !== "object" || Array.isArray(request.values))) invalid("Insert requires child values and cannot link an existing id.");
     let insertValues: Record<string, unknown> | undefined;
@@ -153,22 +161,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if (target.source?.graphql?.relationships?.some((item) => item.resolve !== "belongsTo" && typeof item.cardinality === "object" && (item.cardinality.min ?? 0) > 0)) unsupported("Creating required descendant collections is not supported.");
       insertValues = { ...request.values, [fieldNameForColumn(foreignKey!)]: request.id };
       // Validate the authored create values, with only the inverse injected by the server.
-      const schema = (createOp.inputSchema?.properties as Record<string, unknown> | undefined)?.values;
-      if (!schema || typeof schema !== "object" || Array.isArray(schema)) unsupported("An authored child create-values schema is required.");
-      const objectSchema = schema as Record<string, unknown>;
-      let valid;
-      try {
-        // $ref values are rooted in the authored operation, not its values
-        // subtree. Preserve the bundled definitions when validating that part.
-        const definitions = createOp.inputSchema?.$defs;
-        valid = ajv.compile({
-          ...objectSchema,
-          ...(definitions && typeof definitions === "object" && !Array.isArray(definitions)
-            ? { $defs: definitions }
-            : {}),
-        })(insertValues);
-      } catch { unsupported("The child create-values schema cannot be validated safely."); }
-      if (!valid) invalid("Child values do not satisfy the authored create schema.");
+      contractValues(createOp, target, insertValues, "create", { partial: false });
     }
     const run = async (trx: Transaction<DB>): Promise<CollectionMutationResult> => {
       // The explicit transaction entry must not mix JS authorization with another DB identity.

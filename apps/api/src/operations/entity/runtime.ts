@@ -872,9 +872,13 @@ export async function executeEntityOperation(
         if (interactionError) return { intent: "create", error: interactionError };
         const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
         const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // A blueprint create completes the caller's overlay from the blueprint
+        // before the row is written; the merged record is what the contract
+        // has to hold for, so it is validated in full once merged.
         requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
         const data = blueprintId !== undefined
-          ? await createFromBlueprint(db, session, table, blueprintId, values)
+          ? await createFromBlueprint(db, session, table, blueprintId, values,
+              (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }))
           : await createGeneratedEntity(db, session, { table: table.name, values });
         return {
           intent: "create",
@@ -894,6 +898,10 @@ export async function executeEntityOperation(
           );
         }
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        // Before any confirmation or lease work: an illegal payload must not
+        // start a challenge it can only fail on the confirmed retry.
+        const values = requireValues(request.input);
+        requireContractValues(operation, table, values, { partial: true });
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -915,8 +923,6 @@ export async function executeEntityOperation(
                 : {}),
             }
           : undefined;
-        const values = requireValues(request.input);
-        requireContractValues(operation, table, values, { partial: true });
         const data = await updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),

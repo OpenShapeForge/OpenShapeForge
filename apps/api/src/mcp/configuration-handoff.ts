@@ -39,6 +39,8 @@ export {
   type ConfigurationFormOptions,
 } from "./browser-pages.js";
 import { keyringFromEnv, type SecretKeyring } from "../connectors/secrets.js";
+import { HttpError } from "../rest/http-error.js";
+import { operationErrorOf } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -290,6 +292,25 @@ export function mergeConfigurationValues(
       ? (existing as JsonRecord)
       : {};
   return { ...base, ...submitted };
+}
+
+/**
+ * Why a browser handoff failed, as a bounded name for the server log. The
+ * request logger redacts every error to its class, which is right for
+ * messages (a provider's or the database's text can carry personal data)
+ * but left an administrator's "could not be saved" page with no trail at
+ * all. Codes are ours (HttpError, OperationFailure) or PostgreSQL's
+ * five-character SQLSTATE; a message never gets through here.
+ */
+export function handoffFailureCode(error: unknown): string {
+  if (error instanceof HttpError) return `http:${error.code}`;
+  const operation = operationErrorOf(error);
+  if (operation) return `operation:${operation.code}`;
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) {
+    return `postgres:${code}`;
+  }
+  return error instanceof Error ? `error:${error.name}` : "unknown";
 }
 
 /** Encrypt-and-shape the parsed values exactly as the in-band form would. */

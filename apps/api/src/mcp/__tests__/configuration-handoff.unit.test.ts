@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test";
 import {
   consumeConfiguration,
   findExistingConfiguration,
+  handoffFailureCode,
   mergeConfigurationValues,
   mintConfiguration,
   parseSubmission,
@@ -25,6 +26,8 @@ import {
   redactElicitedValues,
   SECRET_SET_SENTINEL,
 } from "../../connectors/secrets.js";
+import { HttpError } from "../../rest/http-error.js";
+import { operationFailure } from "@openshapeforge/operations";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 5).toString("base64")}`,
@@ -263,5 +266,18 @@ describe("resubmitting a key that already exists", () => {
     expect(mergeConfigurationValues(["not", "an", "object"], { clientId: "x" })).toEqual({
       clientId: "x",
     });
+  });
+});
+
+describe("handoffFailureCode", () => {
+  it("names the failure by its bounded code, never its message", () => {
+    expect(handoffFailureCode(new HttpError(500, "SECRET_KEYRING_MISSING", "set the keyring"))).toBe("http:SECRET_KEYRING_MISSING");
+    expect(handoffFailureCode(operationFailure({ code: "VALIDATION", message: "email jane@example.com is taken" }))).toBe("operation:VALIDATION");
+    expect(handoffFailureCode(Object.assign(new Error("null value in column \"key\""), { code: "23502" }))).toBe("postgres:23502");
+    expect(handoffFailureCode(new TypeError("undefined is not an object"))).toBe("error:TypeError");
+    expect(handoffFailureCode("boom")).toBe("unknown");
+    for (const error of [new HttpError(400, "VALIDATION", "jane@example.com"), Object.assign(new Error("jane@example.com"), { code: "23505" })]) {
+      expect(handoffFailureCode(error)).not.toContain("jane");
+    }
   });
 });

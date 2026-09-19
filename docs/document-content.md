@@ -85,10 +85,28 @@ so a plugin adding a block definition patches `block.yaml`, restating the full
 list on both references. The compiler unions them for `Block.values`; keep them equal or
 the follow rule skips the block (see below).
 
+### Which variant a locale gets
+
+Materialization asks for a channel and a locale. The channel is exact; the
+locale is served by language: the variant with the exact locale, else one of
+the same language subtag (`nl-NL` is served by `nl`; the bare language wins
+over another region), else the variant the template authors as the channel's
+default (`TemplateVariant.isDefault`, at most one per channel). A channel with
+none of those refuses with `UNSUPPORTED_LOCALE`; another channel is never
+substituted (`packages/documents/src/content/validation.ts`,
+`selectContentTemplateVariant`). The result keeps the requested `locale`; the
+served variant is `templates[].variantId` with its own `locale`. A document
+materializes with the default its pinned template version froze, carried
+over by channel and locale, so its variants need no flag of their own.
+
 ## Who reads and writes what
 
-Roles come from the entity files; `apps/api/src/db/migrations/document-content.ts`
-restates them at the database.
+Roles come from the entity files. Which blocks a session may read is authored
+on `Block` as `authorization.ownerAxis` (`entities/core/block.yaml`): each
+owning reference lends its owner entity's `authorization.roles.read` to the
+rows it carries, and the compiler renders the restrictive policy
+`blocks_owner_read` into `schema.sql` from those role lists, so a host
+renaming a role renames the policy and no migration restates a role name.
 
 | Subject | Template-owned blocks | Document-owned blocks |
 |---|---|---|
@@ -111,6 +129,8 @@ restates them at the database.
   read policy regardless of roles, so a template publisher holding only
   `Organization.All.ReadWrite` still re-seeds the documents tracking the
   template; the setting is transaction-local and never set by generated CRUD.
+  It is the `ownerAxis.command` the entity authors; the provenance triggers in
+  `apps/api/src/db/migrations/document-content.ts` honour the same marker.
   The same setting admits the server-managed writes: `Document.templateVersionId`,
   `Document.followError` and, on a document block, `origin`, `templateBlockId`,
   `diverged` and `locked` (triggers `documents_content_guard`, `blocks_document_guard`).
@@ -118,6 +138,9 @@ restates them at the database.
   needs the document's update access and a *published* target version, nothing
   more: a document editor picks a published template without a template role;
   the command reads the version's frozen snapshot server-side.
+  `Document.materialize` resolves the pinned version the same way, under the
+  document's read access; a template version another block *includes* still
+  needs `TemplateVersion` and `Template` read.
 - The generic `Document.publish` inserts the snapshot version as the runtime
   role under the transaction-local marker `app.publishing_entity = 'Document'`
   (set by `packages/versioning`); the `document_versions_write_guard` trigger
@@ -129,11 +152,31 @@ restates them at the database.
 
 ## Lifecycle
 
-The head is always editable. `lifecycleStatus` is `draft` after any change to
-the head (a generic update, a follow) and `published` right after
-`Document.publish`, exactly as for `Template`. Publishing is allowed in any
-state and requires the head's `updatedAt` as `expectedVersion`. `Document.status`
-(records management) is a separate, caller-owned field.
+The head is always editable. `lifecycleStatus` is `draft` after a content
+change to the head and `published` right after `Document.publish`, exactly as
+for `Template`. What counts as a content change is the **draft rule** the
+compiler emits beside the managed lifecycle fields
+(`source.versioning.onEdit: { field: lifecycleStatus, value: draft }`) and the
+runtime reads from the manifest (`apps/api/src/operations/entity/versioned-head.ts`):
+
+- a generic update that changes at least one content column; `PATCH {}` or a
+  value already stored writes nothing at all, neither the version token nor
+  the lifecycle;
+- an owned-collection Operation (`insert`, `update`, `move`, `remove`) on the
+  head or on anything the head owns, walking the bound ownership tree up to
+  the head (`DocumentVariant.insertBlock` drafts the `Document`,
+  `TemplateVariant.insertBlock` drafts the `Template`), as does a generic
+  update of an owned child;
+- a follow that actually re-seeds, diverges, inserts, removes or moves a block;
+  a follow that only moves the pin (a head-only template change) leaves a
+  published document published.
+
+Publishing is allowed in any state and requires the head's `updatedAt` as
+`expectedVersion`. Publishing a head whose content hashes like its latest
+version is a no-op: the current version comes back, no row is added, no
+follower runs, and the head is `published` again (a change edited back is no
+change). `Document.status` (records management) is a separate, caller-owned
+field.
 
 ## Operations
 
@@ -144,7 +187,7 @@ state and requires the head's `updatedAt` as `expectedVersion`. `Document.status
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |
 | `DocumentVariant.removeBlock` `{ id, expectedVersion, childId }` | Owner-scoped removal of an unlocked block; positions are compacted. |
-| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles. Resolves the editable head for one channel and locale through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
+| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles only (the pinned version is read under that authority; an included template still needs its own read roles). Resolves the editable head for one channel and locale (served by language, see above) through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
 | `Document.publish` `{ id, expectedVersion }` | Generic snapshot publish (`packages/versioning`): freezes the document row with its variants and blocks into a new `DocumentVersion`, moves `latestVersion(Id)`/`publishedVersion(Id)`, sets `lifecycleStatus = published`. |
 | `Template.publish` (existing) | Unchanged input; also runs the follow rule. |
 | `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; plugins that render a frozen template to a file build on it. |
@@ -179,7 +222,8 @@ channel and locale (created when missing):
    preceded them.
 4. Document variants the template no longer has are left in place and named
    in `followError`. `templateVersionId` moves to the new version,
-   `lifecycleStatus` becomes `draft`, positions are renumbered in one statement.
+   `lifecycleStatus` becomes `draft` only when a block changed (the draft
+   rule above), positions are renumbered in one statement.
 
 Each document runs under its own savepoint: a document that fails (or whose
 tracked version is unavailable) keeps its blocks and old `templateVersionId`,
@@ -199,8 +243,9 @@ parameter definitions, inclusions frozen. A `DocumentVersion` snapshot is
 still not rendered.
 
 A snapshot is content, and `contentHash` is the SHA-256 of its canonical JSON,
-so publishing an unchanged head again yields a new version with the same hash.
-Three things are therefore left out of every snapshot:
+which is how `publish` recognises an unchanged head and returns the current
+version instead of a new row. Three things are therefore left out of every
+snapshot:
 
 - the version table itself, even where the version entity's head reference is
   owned (`template_versions.template_id` cascades): the walk excludes the
@@ -216,4 +261,8 @@ Which tables `publish` reads and writes is bound by the compiler into the head
 table's manifest source (`source.versioning.storage`) and served to the
 runtime as `platform.schemas.versioning`; nothing is derived from the entity
 name, so a plugin entity in its own schema publishes the same way
-([plugins.md](plugins.md#shipped-example-3-notebook)).
+([plugins.md](plugins.md#shipped-example-3-notebook)). The walk itself follows
+`storage.owned`, the tree of authored `ownership: owned` collections under the
+head (`snapshot.ownedRelationships: recursive`), version table excluded at
+every level; it never consults the catalog, so a cascading foreign key from a
+bookkeeping table is not content and never enters a snapshot.

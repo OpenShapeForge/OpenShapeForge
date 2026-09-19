@@ -120,9 +120,13 @@ working mutations.
 ## Template materialization
 
 Templates have versions, and versions have explicit channel/locale variants.
-Materialization selects an exact variant; it does not silently fall back to
-another channel or language. Local parameters use `{{local.name}}`; shared Chip
-values use `{{chips.name}}`.
+Materialization selects the channel exactly and the locale by language: the
+exact locale, else a variant of the same language subtag, else the variant
+authored as the channel's default (`TemplateVariant.isDefault`); it never
+falls back to another channel, and a channel without a variant for the
+language or a default refuses (`docs/document-content.md`, "Which variant a
+locale gets"). Local parameters use `{{local.name}}`; shared Chip values use
+`{{chips.name}}`.
 
 The documents runtime reads authorized template, placement and Chip records,
 validates values, resolves typed references through canonical read Operations,

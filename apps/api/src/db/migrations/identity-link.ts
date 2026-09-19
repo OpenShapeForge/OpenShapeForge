@@ -33,7 +33,10 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *     identity's subject is read through app.identity_subject() so the two
  *     policies do not query each other (policy recursion).
  *   - identities has no tenant column. A session sees its OWN identity row
- *     (`subject = app.current_user_id()`) and the identities that have a row —
+ *     (`subject = app.user_id`, compared as text: the subject is Keycloak's
+ *     user id and a bypass session's actor is not a uuid, so the uuid cast in
+ *     app.current_user_id() would fail there before the bypass clause could
+ *     answer) and the identities that have a row —
  *     linked or pending — in its tenant. An administrator therefore cannot
  *     enumerate people who never signed in to their organization.
  */
@@ -88,7 +91,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     create policy identities_visibility on platform.identities
       using (
         app.bypass_rls()
-        or subject = app.current_user_id()::text
+        or subject = current_setting('app.user_id', true)
         or exists (
           select 1 from platform.identity_relations ir
            where ir.identity_id = identities.id
@@ -97,7 +100,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       )
       with check (
         app.bypass_rls()
-        or subject = app.current_user_id()::text
+        or subject = current_setting('app.user_id', true)
       );
 
     create or replace function app.identity_relation_roles_guard() returns trigger
@@ -136,7 +139,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
         or (
           tenant_id = app.current_tenant()
           and (
-            app.identity_subject(identity_id) = app.current_user_id()::text
+            app.identity_subject(identity_id) = current_setting('app.user_id', true)
             or 'Organization.All.ReadWrite' = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { __setRoleCompositesForTests, expandRoleComposites, personSessionRoles } from "./person-roles.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
-  personSessionRoles,
   realmFromIssuer,
   resolveSessionContext,
   selectOrganizationMembership,
@@ -237,24 +237,56 @@ describe("personSessionRoles (a person's effective roles in the selected organiz
     roles: ["default-roles-openshapeforge", "Platform.ApiKeys.Manage"],
     clientRoles: { "erp-provider": ["Organization.All.ReadWrite", "Relations.All.ReadWrite"] },
   };
+  const realm = "openshapeforge";
 
   test("unions realm roles with the membership row's roles and ignores client roles entirely", () => {
     expect(
-      personSessionRoles(identity, { roles: ["General.All.Read"], needsRoleAssignment: false }),
+      personSessionRoles(identity, { roles: ["General.All.Read"], needsRoleAssignment: false }, realm),
     ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
   });
 
   test("a membership row with nothing recorded yet yields the just-in-time minimum only", () => {
-    expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true })).toEqual([
+    expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true }, realm)).toEqual([
       "General.All.Read",
     ]);
   });
 
   test("without a membership row (no database) only realm roles remain", () => {
-    expect(personSessionRoles(identity, null)).toEqual([
+    expect(personSessionRoles(identity, null, realm)).toEqual([
       "Platform.ApiKeys.Manage",
       "default-roles-openshapeforge",
     ]);
+  });
+
+  test("a persona on the row expands through the realm's composites, transitively, for that realm only", () => {
+    __setRoleCompositesForTests({
+      [realm]: {
+        org_admin: ["Organization.All.ReadWrite", "General.All.ReadWrite"],
+        "General.All.ReadWrite": ["Relations.All.ReadWrite", "General.All.Read"],
+      },
+    });
+    try {
+      expect(expandRoleComposites(realm, ["org_admin"])).toEqual([
+        "General.All.Read",
+        "General.All.ReadWrite",
+        "Organization.All.ReadWrite",
+        "Relations.All.ReadWrite",
+        "org_admin",
+      ]);
+      expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
+      expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
+      expect(
+        personSessionRoles({ roles: [] }, { roles: ["org_admin"], needsRoleAssignment: false }, realm),
+      ).toContain("Relations.All.ReadWrite");
+    } finally {
+      __setRoleCompositesForTests(null);
+    }
+  });
+
+  test("the generated artifact carries the realm export's composites", () => {
+    // Test.Admin is the dev layer's administrator composite in the shipped
+    // realm; what Keycloak expanded into resource_access is what this expands.
+    expect(expandRoleComposites("openshapeforge", ["Test.Admin"])).toContain("Relations.All.ReadWrite");
   });
 });
 

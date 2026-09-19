@@ -3,9 +3,14 @@
 One Keycloak account may be a member of several organizations. The identity
 provider asserts WHO signs in and WHICH organizations they belong to; what a
 person may do in one of them is recorded by that organization, in
-`platform.identity_relations.roles`, per (identity, tenant). The invitation
-path writes it on first sign-in and `set_member_role` replaces it; a person's
-session unions that row's roles with the token's realm roles and never reads
+`platform.identity_relations.roles`, per (identity, tenant): the persona the
+invitation admitted them as (`org_admin`, `org_employee`) and the OSF
+baseline beside it. The invitation path writes it on first sign-in, in the
+same transaction as the link; `set_member_role` and the platform operator's
+member-role operations replace it. A person's session expands the row's
+names through the realm's composites (`generated/compiler/role-composites.json`,
+auth/person-roles.ts) exactly as Keycloak expanded a composite into
+`resource_access`, unions the token's realm roles, and never reads
 `resource_access`. A Keycloak client role on the user is user-wide and would
 apply in every organization the account is a member of, so nothing in this
 runtime writes one for a person any more (see `identity-link.ts`,

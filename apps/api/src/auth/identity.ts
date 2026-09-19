@@ -12,9 +12,7 @@ import {
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
-import { ORGANIZATION_ADDRESS_HEADER } from "../mcp/organization-resource.js";
 import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
-import { HttpError } from "../rest/http-error.js";
 import { looksLikeApiKey } from "./api-key/format.js";
 // ---- identity ↔ Relation link (auth/identity-link.ts) ----
 import {
@@ -26,7 +24,13 @@ import {
 // ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
+import {
+  __resetOrganizationAddressForTests,
+  assertSessionAddressesOrganization,
+  OrganizationAddressError,
+} from "./organization-address.js";
 import { configuredOrganizationServiceAccount } from "./organization-service-identities.js";
+import { personSessionRoles } from "./person-roles.js";
 import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 import {
@@ -74,7 +78,7 @@ function hostOrganizationContext(): boolean {
   return process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT === "host";
 }
 
-export { SessionAuthenticationUnavailableError };
+export { OrganizationAddressError, SessionAuthenticationUnavailableError };
 
 function bearerVerifierUnavailable(error: unknown): boolean {
   return error instanceof BearerVerifierUnavailableError;
@@ -199,18 +203,8 @@ export function __resetSessionResolverForTests(): void {
   cachedApiKeyKeyring = null;
   organizationTenantCache.clear();
   tenantForOrganizationOverride = null;
-  tenantSlugCache.clear();
-  tenantSlugOverride = null;
+  __resetOrganizationAddressForTests();
 }
-
-/**
- * Test-only: stand in for the `platform.tenants.slug` read behind the short
- * address check. Cleared by the reset above.
- */
-export function __setTenantSlugForTests(lookup: ((tenantId: string) => string | null) | null): void {
-  tenantSlugOverride = lookup;
-}
-let tenantSlugOverride: ((tenantId: string) => string | null) | null = null;
 
 /**
  * Test-only: stand in for the registry read
@@ -500,28 +494,6 @@ export function mergeIdentityRoles(identity: {
   ].sort();
 }
 
-/**
- * A person's roles are per organization. The identity provider says WHICH
- * organizations the account is a member of; the membership row in
- * `platform.identity_relations` says what the person may do in the one the
- * token selected (auth/identity-link.ts). A client role on the Keycloak user
- * is user-wide — an administrator of organization A granting it would have
- * made the person that in organization B too — so a person's session never
- * reads `resource_access` at all. Realm roles remain issuer-wide grants by
- * design (platform operator decisions such as `Platform.*`), and the
- * just-in-time minimum applies while the membership row still says
- * `needs_role_assignment` and carries nothing.
- */
-export function personSessionRoles(
-  identity: Pick<AuthIdentity, "roles">,
-  membership: { roles: readonly string[]; needsRoleAssignment: boolean } | null,
-): string[] {
-  if (membership?.needsRoleAssignment && membership.roles.length === 0) {
-    return [...NEEDS_ROLE_ASSIGNMENT_ROLES];
-  }
-  return [...new Set([...identity.roles, ...(membership?.roles ?? [])])].sort();
-}
-
 /** Service identities (configured service accounts, API-key exchanges). */
 function sessionIdentityRoles(identity: AuthIdentity): string[] {
   if (!hostOrganizationContext()) return mergeIdentityRoles(identity);
@@ -535,89 +507,6 @@ function sessionIdentityRoles(identity: AuthIdentity): string[] {
 }
 
 /**
- * A credential that is not for the organization the request was addressed
- * to: `/<alias>/api/...` or `/<alias>/graphql` with a token or key of another
- * tenant. The same refusal the per-organization MCP resource gives
- * (OrganizationBindingError), for the two surfaces that reach the session
- * resolver by rewritten URL — see ORGANIZATION_ADDRESS_HEADER.
- */
-export class OrganizationAddressError extends HttpError {
-  constructor(alias: string) {
-    super(
-      403,
-      "ORGANIZATION_RESOURCE_FORBIDDEN",
-      `This credential is not for the organization at /${alias}.`,
-    );
-    this.name = "OrganizationAddressError";
-  }
-}
-
-const tenantSlugCache = new Map<string, { slug: string; expiresAtMs: number }>();
-
-/** The tenant's own slug, read as the tenant (its registry row is visible to it). */
-async function tenantSlug(
-  db: OpenShapeForgeDatabase,
-  session: TrustedSessionContext & { tenantId: string; userId: string },
-): Promise<string | null> {
-  if (tenantSlugOverride) return tenantSlugOverride(session.tenantId);
-  const cached = tenantSlugCache.get(session.tenantId);
-  if (cached && cached.expiresAtMs > Date.now()) return cached.slug;
-  const slug = await withDbSession(
-    db,
-    {
-      tenantId: session.tenantId,
-      userId: session.userId,
-      roles: session.roles,
-      groups: session.groups,
-      scope: session.scope,
-    },
-    async (trx) => {
-      const result = await sql<{ slug: string }>`
-        select slug from platform.tenants where id = ${session.tenantId}::uuid
-      `.execute(trx);
-      return result.rows[0]?.slug ?? null;
-    },
-  );
-  if (slug) {
-    // Slugs are immutable after creation (platform-schema.yaml), so a cached
-    // answer never goes stale in the direction that matters.
-    tenantSlugCache.set(session.tenantId, { slug, expiresAtMs: Date.now() + ORGANIZATION_TENANT_CACHE_TTL_MS });
-  }
-  return slug;
-}
-
-/**
- * Refuse a session whose tenant is not the organization the short address
- * named. The per-organization MCP resource pins the tenant through its
- * binding and needs no second check; every other credential — bearer, API
- * key, trusted context — is compared by the tenant's registry slug, which is
- * the Keycloak Organization alias and the URL segment.
- */
-async function assertSessionAddressesOrganization(
-  headers: Headers,
-  session: TrustedSessionContext,
-  options: ResolveSessionOptions,
-): Promise<TrustedSessionContext> {
-  const alias = headers.get(ORGANIZATION_ADDRESS_HEADER)?.trim().toLowerCase();
-  if (!alias || options.organization || !session.tenantId || !session.userId) return session;
-  if (!options.db) {
-    console.warn(
-      `[auth] A credential was presented at /${alias} on a surface that resolves sessions ` +
-        "without a database; the organization cannot be verified. Rejecting.",
-    );
-    return EMPTY_SESSION;
-  }
-  const slug = await tenantSlug(options.db, session as TrustedSessionContext & { tenantId: string; userId: string });
-  if (slug?.toLowerCase() !== alias) {
-    console.warn(
-      `[auth] Credential for tenant ${session.tenantId} (${slug ?? "no slug"}) refused at /${alias}.`,
-    );
-    throw new OrganizationAddressError(alias);
-  }
-  return session;
-}
-
-/**
  * Resolves the canonical session context for a request, and refuses it when
  * the request's short address names another organization than the
  * credential's (see {@link assertSessionAddressesOrganization}).
@@ -627,7 +516,12 @@ export async function resolveSessionContext(
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
   const session = await resolveCredentialSession(headers, options);
-  return assertSessionAddressesOrganization(headers, session, options);
+  return assertSessionAddressesOrganization(
+    headers,
+    session,
+    { db: options.db, bound: options.organization !== undefined },
+    EMPTY_SESSION,
+  );
 }
 
 /**
@@ -767,7 +661,7 @@ async function resolveCredentialSession(
             claims as Record<string, unknown>,
             options.db,
           ));
-      if (hostMode && tenantId !== hostTenantId) return EMPTY_SESSION;
+      if (hostMode && !sameTenantId(tenantId, hostTenantId)) return EMPTY_SESSION;
       // ---- identity ↔ Relation link (auth/identity-link.ts) ----
       // A person's first session in a tenant links (or records) the Relation
       // they act as; later sessions read it back. The same row carries the
@@ -790,7 +684,7 @@ async function resolveCredentialSession(
             )
           : null;
       const effectiveRoles = isPerson
-        ? personSessionRoles(identity, relation)
+        ? personSessionRoles(identity, relation, realmFromIssuer(claims.iss))
         : sessionIdentityRoles(identity);
       const effectiveScope = resolveScope(effectiveRoles, groups);
       const loginSessionBinding = loginSessionBindingFromClaims(

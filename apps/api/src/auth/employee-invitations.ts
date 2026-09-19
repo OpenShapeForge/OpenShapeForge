@@ -91,28 +91,34 @@ export function isEmployeeInvitationRole(value: string): value is EmployeeInvita
 
 /**
  * The organization-scoped roles each invited role carries — what lands in
- * `platform.identity_relations.roles` for the tenant. One table, read by both
- * the automatic path (`acceptInvitation`, on first sign-in) and the manual one
+ * `platform.identity_relations.roles` for the tenant, as DECLARED names. One
+ * table, read by both the automatic path (first sign-in) and the manual one
  * (`set_member_role`, mcp/identity-link-tools.ts) — a second copy of a table
  * that decides what an administrator can do is the kind of duplication that
  * drifts silently.
  *
- * `org_admin` grants exactly the role that gates every organization-admin
- * surface here; `org_employee` grants exactly the minimal read-only set a
- * JIT-created identity's session already runs on, so granting it changes
- * nothing but makes that access durable once the flag is cleared.
+ * Each entry starts with the persona name itself (`org_admin`,
+ * `org_employee`): the realm may declare a composite of that name, and
+ * auth/person-roles.ts expands it at session time exactly as Keycloak used to
+ * expand it into `resource_access` — so an invited administrator holds
+ * whatever the realm says an administrator holds. Where the realm declares
+ * no such composite the name is inert, and the OSF baseline beside it is what
+ * counts: `org_admin` carries the role that gates every organization-admin
+ * surface here; `org_employee` carries the minimal read-only set a
+ * JIT-created identity's session runs on. `whoami` reads the persona name
+ * off the session to say what the person is.
  */
 export const EMPLOYEE_INVITATION_ROLE_GRANTS: Readonly<
   Record<EmployeeInvitationRole, readonly string[]>
 > = {
-  org_admin: [IDENTITY_LINK_ADMIN_ROLE],
-  org_employee: NEEDS_ROLE_ASSIGNMENT_ROLES,
+  org_admin: ["org_admin", IDENTITY_LINK_ADMIN_ROLE],
+  org_employee: ["org_employee", ...NEEDS_ROLE_ASSIGNMENT_ROLES],
 };
 
 /**
- * A host may attach its product persona to the canonical organization intent.
- * The OSF baseline role always remains part of the grant: authorization of the
- * shared invitation and identity tools must not depend on a host role name.
+ * A host may attach its product persona under another name. The OSF baseline
+ * always remains part of the grant: authorization of the shared invitation
+ * and identity tools must not depend on a host role name.
  */
 export function employeeInvitationRoleGrants(
   role: EmployeeInvitationRole,
@@ -382,67 +388,31 @@ export async function findPendingInvitation(
   return { id: row.id, role: row.role };
 }
 
-export type AcceptInvitationResult = {
-  role: EmployeeInvitationRole;
-  /** The roles now recorded for this identity in this tenant. */
-  roles: readonly string[];
-};
-
 /**
- * Record the invited roles on the identity's membership row for this tenant
- * and mark the invitation `accepted`, in one transaction on a DELIBERATELY
- * ELEVATED db session. The invitation table's RLS `with check` and the
- * trigger on `identity_relations.roles` both demand
- * `Organization.All.ReadWrite`, and the person signing in has nothing of the
- * sort; it is the RUNTIME that is recording "this invitation has now been
- * used", on behalf of the administrator who created it. The elevation is
- * scoped to this one transaction and to the invitee's own tenant, and the
- * invitee's session never sees it.
- *
- * A failure here propagates: the caller (resolveIdentityLink) turns it into a
- * 503 rather than admitting the person with no roles or with roles the row
- * does not say they hold.
+ * Mark the invitation `accepted`, inside the caller's transaction. The caller
+ * (identity-link.ts) runs it on a DELIBERATELY ELEVATED session together with
+ * the write of the invited roles onto the membership row: the invitation
+ * table's RLS `with check` demands `Organization.All.ReadWrite`, and the
+ * person signing in has nothing of the sort; it is the RUNTIME that records
+ * "this invitation has now been used", on behalf of the administrator who
+ * created it. One transaction, so a person is never linked without the roles
+ * they were invited as, and an invitation is never spent on a link that did
+ * not land.
  */
-export async function acceptInvitation(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
+export async function recordAcceptedInvitation(
+  trx: Transaction<DB>,
+  tenantId: string,
   invitation: PendingInvitationMatch,
-  identityId: string,
-): Promise<AcceptInvitationResult> {
-  const roles = [...new Set(employeeInvitationRoleGrants(invitation.role))].sort();
-
-  await withDbSession(
-    db,
-    { ...session, roles: [IDENTITY_LINK_ADMIN_ROLE] },
-    async (trx) => {
-      await sql`
-        update platform.identity_relations
-           set roles = (
-                 select coalesce(array_agg(value), '{}'::text[])
-                   from jsonb_array_elements_text(${roles}::jsonb)
-               ),
-               needs_role_assignment = false,
-               updated_at = now()
-         where identity_id = ${identityId}
-           and tenant_id = ${session.tenantId}
-      `.execute(trx);
-      await sql`
-        update platform.employee_invitations
-           set status = 'accepted',
-               accepted_at = now(),
-               updated_at = now()
-         where id = ${invitation.id}
-           and tenant_id = ${session.tenantId}
-           and status = 'pending'
-      `.execute(trx);
-    },
-  );
-
-  console.info(
-    `[auth] ${session.userId} accepted invitation ${invitation.id} in tenant ` +
-      `${session.tenantId}; holds ${invitation.role} here (${roles.join(", ")}).`,
-  );
-  return { role: invitation.role, roles };
+): Promise<void> {
+  await sql`
+    update platform.employee_invitations
+       set status = 'accepted',
+           accepted_at = now(),
+           updated_at = now()
+     where id = ${invitation.id}
+       and tenant_id = ${tenantId}
+       and status = 'pending'
+  `.execute(trx);
 }
 
 export type RevokeInvitationInput = { email: string };

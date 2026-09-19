@@ -18,7 +18,8 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 /** The languages a phrase is authored in. */
 export type PhraseLanguage = "en" | "nl";
 
-/** Composite roles the realm grants; the label is what a person reads. */
+/** Personas the membership row records (auth/employee-invitations.ts) or the
+ * realm's composites name; the label is what a person reads. */
 export const ROLE_LABELS: ReadonlyArray<{
   role: string;
   label: string;

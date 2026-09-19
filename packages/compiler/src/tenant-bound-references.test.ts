@@ -146,8 +146,8 @@ describe("tenant-bound references", () => {
     orders.constraints = constraints;
     expect(() => assertTenantBoundReferences(manifest(orders, tenantTable("customers")))).toThrow(
       "Foreign key erp.orders.orders_customer_fk references tenant-scoped erp.customers by (customer_id) alone; " +
-        "a tenant-scoped row must reuse its own tenant: set references.localColumns: [tenant_id, customer_id] " +
-        "and references.targetColumns: [tenant_id, id].",
+        "a tenant-scoped row must reuse its own tenant: set columns: [tenant_id, customer_id] " +
+        "and references.columns: [tenant_id, id].",
     );
     constraints[0] = {
       ...constraints[0]!, kind: "foreignKey", onDelete: "SET NULL",
@@ -176,5 +176,46 @@ describe("tenant-bound references", () => {
     }];
     expect(hasTenantIdentityCheck(registry)).toBe(true);
     expect(() => assertTenantBoundReferences(manifest(registry, settings))).not.toThrow();
+  });
+
+  it("refuses an unknown or mistyped referenced column before any key is provisioned", () => {
+    const orders = tenantTable("orders", [
+      { name: "customer_id", type: "uuid", references: {
+        schema: "erp", table: "customers", column: "id", localColumns: ["tenant_id", "customer_id"], targetColumns: ["tenant_id", "identifier"],
+      } },
+    ]);
+    const customers = tenantTable("customers");
+    expect(() => ensureCompositeReferenceKeys(manifest(orders, customers))).toThrow(
+      "erp.orders.customer_id references unknown column erp.customers.identifier.",
+    );
+    expect(customers.indexes).toBeUndefined();
+    expect(() => assertTenantBoundReferences(manifest(orders, customers))).toThrow(
+      "erp.orders.customer_id references unknown column erp.customers.identifier.",
+    );
+    orders.columns[2]!.references!.targetColumns = ["tenant_id", "code"];
+    customers.columns.push({ name: "code", type: "text", required: true });
+    expect(() => assertTenantBoundReferences(manifest(orders, customers))).toThrow(
+      "erp.orders.customer_id pairs erp.orders.customer_id (uuid) with erp.customers.code (text); the types must match.",
+    );
+  });
+
+  it("grants the tenant-identity exception only to a required tenant column targeting id", () => {
+    const registry = tenantTable("tenants");
+    registry.constraints = [{
+      compilerOwned: true, version: "0001_tenant-identity-tenants", name: tenantIdentityCheckName(registry),
+      kind: "check", expression: TENANT_IDENTITY_CHECK_EXPRESSION,
+    }];
+    const settings = tenantTable("settings");
+    const tenant = settings.columns.find((column) => column.name === "tenant_id")!;
+    tenant.references = { schema: "erp", table: "tenants", column: "id" };
+    tenant.required = false;
+    expect(() => assertTenantBoundReferences(manifest(registry, settings))).toThrow(
+      "erp.settings.tenant_id is the row's tenant identity and must be a required UUID column",
+    );
+    tenant.required = true;
+    tenant.references = { schema: "erp", table: "tenants", column: "tenant_id" };
+    expect(() => assertTenantBoundReferences(manifest(registry, settings))).toThrow(
+      "erp.settings.tenant_id is the row's tenant identity and may only reference erp.tenants.id, not (tenant_id).",
+    );
   });
 });

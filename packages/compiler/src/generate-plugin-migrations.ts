@@ -13,6 +13,7 @@ import type {
   PluginSchemaMigration,
 } from "./plugins.js";
 import { renderConstraintSql } from "./render-constraint-sql.js";
+import { assertTenantBoundReferences } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 export const PLUGIN_MIGRATION_REGISTRY_PATH =
@@ -194,6 +195,7 @@ export function collectPluginMigrationRegistry(
   const entries: GeneratedPluginMigration[] = [];
   assertConstraintRelations(manifest);
   assertForeignKeyTargets(manifest);
+  assertTenantBoundReferences(manifest);
 
   for (const table of manifest.tables) {
     const constraintNames = new Set<string>();

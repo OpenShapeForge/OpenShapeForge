@@ -76,13 +76,59 @@ type BoundReference = {
   localColumns: readonly string[];
   targetColumns: readonly string[];
   target: TableDefinition;
+  /** How the local and target column lists are spelled where this reference is authored. */
+  spelling: { local: string; target: string };
 };
 
-function assertBoundReference(table: TableDefinition, reference: BoundReference): void {
-  const { label, declaredColumn, localColumns, targetColumns, target } = reference;
+export const columnReferenceSpelling = { local: "references.localColumns", target: "references.targetColumns" };
+export const tableConstraintSpelling = { local: "columns", target: "references.columns" };
+
+/**
+ * Every referenced column must exist on the target and match the type of the
+ * local column it pairs with; a name that only fails inside PostgreSQL would
+ * surface at migrate time, after generation had claimed success.
+ */
+function assertReferencePairs(
+  table: TableDefinition,
+  label: string,
+  localColumns: readonly string[],
+  targetColumns: readonly string[],
+  target: TableDefinition,
+): void {
   const targetKey = tableKey(target);
+  if (localColumns.length !== targetColumns.length || localColumns.length === 0) {
+    throw new Error(`${label} pairs ${localColumns.length} local column(s) with ${targetColumns.length} referenced column(s).`);
+  }
+  targetColumns.forEach((name, position) => {
+    const targetColumn = target.columns.find((candidate) => candidate.name === name);
+    if (!targetColumn) throw new Error(`${label} references unknown column ${targetKey}.${name}.`);
+    const local = table.columns.find((candidate) => candidate.name === localColumns[position]);
+    if (!local) throw new Error(`${label} names unknown local column ${localColumns[position]}.`);
+    if (local.type !== targetColumn.type) {
+      throw new Error(
+        `${label} pairs ${tableKey(table)}.${local.name} (${local.type}) with ${targetKey}.${name} (${targetColumn.type}); the types must match.`,
+      );
+    }
+  });
+}
+
+function assertBoundReference(table: TableDefinition, reference: BoundReference): void {
+  const { label, declaredColumn, localColumns, targetColumns, target, spelling } = reference;
+  const targetKey = tableKey(target);
+  assertReferencePairs(table, label, localColumns, targetColumns, target);
   if (!target.tenantScoped) return;
   if (localColumns.length === 1 && declaredColumn === tenantIdentityColumn(table)) {
+    const identity = table.columns.find((candidate) => candidate.name === declaredColumn);
+    if (!identity || identity.type !== "uuid" || !(identity.required || identity.primaryKey)) {
+      throw new Error(
+        `${label} is the row's tenant identity and must be a required UUID column; a nullable tenant leaves the foreign key unchecked.`,
+      );
+    }
+    if (targetColumns.length !== 1 || targetColumns[0] !== "id") {
+      throw new Error(
+        `${label} is the row's tenant identity and may only reference ${targetKey}.id, not (${targetColumns.join(", ")}).`,
+      );
+    }
     if (hasTenantIdentityCheck(target)) return;
     throw new Error(
       `${label} is the row's tenant identity but ${targetKey} does not prove id = tenant_id; ` +
@@ -95,8 +141,8 @@ function assertBoundReference(table: TableDefinition, reference: BoundReference)
   if (tenantPosition < 0) {
     const key = `(${localColumns.join(", ")})`;
     const fix =
-      `set references.localColumns: [${localTenant ?? "<tenant column>"}, ${declaredColumn}] ` +
-      `and references.targetColumns: [${TENANT_COLUMN}, ${targetIdColumn}]`;
+      `set ${spelling.local}: [${localTenant ?? "<tenant column>"}, ${declaredColumn}] ` +
+      `and ${spelling.target}: [${TENANT_COLUMN}, ${targetIdColumn}]`;
     throw new Error(
       table.tenantScoped
         ? `${label} references tenant-scoped ${targetKey} by ${key} alone; ` +
@@ -109,7 +155,7 @@ function assertBoundReference(table: TableDefinition, reference: BoundReference)
   if (table.tenantScoped && localTenantColumn !== TENANT_COLUMN) {
     throw new Error(
       `${label} binds ${targetKey}.${TENANT_COLUMN} to ${localTenantColumn}; ` +
-        `a tenant-scoped row must reuse its own ${TENANT_COLUMN} (references.localColumns: [${TENANT_COLUMN}, ${declaredColumn}]).`,
+        `a tenant-scoped row must reuse its own ${TENANT_COLUMN} (${spelling.local}: [${TENANT_COLUMN}, ${declaredColumn}]).`,
     );
   }
   const local = table.columns.find((candidate) => candidate.name === localTenantColumn);
@@ -129,15 +175,10 @@ function assertBoundReference(table: TableDefinition, reference: BoundReference)
  */
 export function assertTenantBoundReferences(manifest: PlatformSchemaManifest): void {
   const tables = new Map(manifest.tables.map((table) => [tableKey(table), table]));
-  const resolve = (label: string, schema: string, name: string, columns: readonly string[]): TableDefinition => {
+  const resolve = (label: string, schema: string, name: string): TableDefinition => {
     const targetKey = `${schema}.${name}`;
     const target = tables.get(targetKey);
     if (!target) throw new Error(`${label} references unknown table ${targetKey}.`);
-    for (const column of columns) {
-      if (!target.columns.some((candidate) => candidate.name === column)) {
-        throw new Error(`${label} references unknown column ${targetKey}.${column}.`);
-      }
-    }
     return target;
   };
   for (const table of manifest.tables) {
@@ -149,19 +190,22 @@ export function assertTenantBoundReferences(manifest: PlatformSchemaManifest): v
         throw new Error(`Invalid composite foreign key ${label}: localColumns and targetColumns go together.`);
       }
       const targetColumns = reference.targetColumns ?? [reference.column];
-      const target = resolve(label, reference.schema, reference.table, [reference.column]);
+      const target = resolve(label, reference.schema, reference.table);
+      if (!target.columns.some((candidate) => candidate.name === reference.column)) {
+        throw new Error(`${label} references unknown column ${tableKey(target)}.${reference.column}.`);
+      }
       assertBoundReference(table, {
-        label, declaredColumn: column.name, target,
+        label, declaredColumn: column.name, target, spelling: columnReferenceSpelling,
         localColumns: reference.localColumns ?? [column.name], targetColumns,
       });
     }
     for (const constraint of table.constraints ?? []) {
       if (constraint.kind !== "foreignKey") continue;
       const label = `Foreign key ${tableKey(table)}.${constraint.name}`;
-      const target = resolve(label, constraint.references.schema, constraint.references.table, constraint.references.columns);
+      const target = resolve(label, constraint.references.schema, constraint.references.table);
       const declaredColumn = constraint.columns.find((name) => name !== tenantIdentityColumn(table)) ?? constraint.columns[0]!;
       assertBoundReference(table, {
-        label, declaredColumn, target,
+        label, declaredColumn, target, spelling: tableConstraintSpelling,
         localColumns: constraint.columns, targetColumns: constraint.references.columns,
       });
     }
@@ -212,8 +256,10 @@ export function ensureCompositeReferenceKeys(manifest: PlatformSchemaManifest): 
     for (const column of table.columns) {
       const targetColumns = column.references?.targetColumns;
       if (!column.references || !targetColumns) continue;
+      const label = columnKey(table, column);
       const target = tables.get(`${column.references.schema}.${column.references.table}`);
-      if (!target) continue;
+      if (!target) throw new Error(`${label} references unknown table ${column.references.schema}.${column.references.table}.`);
+      assertReferencePairs(table, label, column.references.localColumns ?? [column.name], targetColumns, target);
       const indexes = target.indexes ??= [];
       if (indexes.some((index) => index.unique && !index.where &&
         index.columns.length === targetColumns.length &&

@@ -540,6 +540,49 @@ operations:
     reliability: { idempotency: { mode: none } }
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
+  materialize:
+    name: { en: Preview document, nl: Document bekijken }
+    description:
+      en: Resolve this document's editable content for one channel and language, from its own variants and blocks, its stored local values and the linked template version's variable definitions, without changing any stored content.
+      nl: Stel de bewerkbare inhoud van dit document samen voor één kanaal en taal, uit de eigen varianten en blokken, de opgeslagen lokale waarden en de variabeledefinities van de gekoppelde templateversie, zonder opgeslagen inhoud te wijzigen.
+    implementation: { type: plugin, plugin: documents, handler: materializeDocument }
+    target: { scope: record, inputField: id }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, channel, locale]
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Document }
+            x-osf-i18n: { title: { en: Document, nl: Document } }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
+          locale:
+            type: string
+            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+    output: { schema: { type: object } }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The document or its template version is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+      - { status: 409, code: INVALID_STATE, description: The document has no linked template version. }
+    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   update:
     name: { en: Update document, nl: Document wijzigen }
     description: Updates the document metadata without changing its version pointer.
@@ -560,9 +603,12 @@ interfaces:
   rest:
     operations:
       linkTemplate: { method: POST, path: "/api/document-content/:id/link-template" }
+      materialize: { method: POST, path: "/api/document-content/:id/materialize" }
   graphql: {}
   mcp: {}
   web:
+    operations:
+      materialize: { resultRenderer: document.content }
     views:
       collection:
         route: /documents
@@ -578,7 +624,7 @@ interfaces:
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"
-        actions: [linkTemplate]
+        actions: [linkTemplate, materialize]
         layout:
           context:
             fields: [ documentType, confidentiality, author, registeredAt, lifecycleStatus ]

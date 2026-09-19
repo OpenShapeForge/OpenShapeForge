@@ -144,13 +144,14 @@ state and requires the head's `updatedAt` as `expectedVersion`. `Document.status
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |
 | `DocumentVariant.removeBlock` `{ id, expectedVersion, childId }` | Owner-scoped removal of an unlocked block; positions are compacted. |
+| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles. Resolves the editable head for one channel and locale through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
 | `Document.publish` `{ id, expectedVersion }` | Generic snapshot publish (`packages/versioning`): freezes the document row with its variants and blocks into a new `DocumentVersion`, moves `latestVersion(Id)`/`publishedVersion(Id)`, sets `lifecycleStatus = published`. |
 | `Template.publish` (existing) | Unchanged input; also runs the follow rule. |
 | `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; the CPQ plugin depends on it. |
 
 The web manifest projects `insert`, `move`, `update` and `remove` on the
 `DocumentVariant.blocks` relationship; the `Document` record view authors
-`linkTemplate` as a record action and the compiler adds `publish`. Each
+`linkTemplate` and `materialize` as record actions and the compiler adds `publish`. Each
 command appends the same `updated` entity events the generated CRUD appends
 (`document`).
 
@@ -191,8 +192,11 @@ the same routine under the `link` command.
 `DocumentVersion.snapshot` is the generic shape
 `{ schemaVersion: 1, entity: "Document", head: { table, row, children: { document_variants: [ { row, children: { blocks: [...] } } ] } } }`,
 children ordered by the owning key's position column
-(`packages/versioning/src/snapshot.ts`). Materializing a published document
-snapshot to rendered text is not in this slice.
+(`packages/versioning/src/snapshot.ts`). The head is materialized through
+`Document.materialize` (`packages/documents/src/document-materialize.ts`):
+live variants and blocks, the stored `parameters`, the pinned version's
+parameter definitions, inclusions frozen. A `DocumentVersion` snapshot is
+still not rendered.
 
 A snapshot is content, and `contentHash` is the SHA-256 of its canonical JSON,
 so publishing an unchanged head again yields a new version with the same hash.

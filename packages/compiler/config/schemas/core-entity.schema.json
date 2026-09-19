@@ -1299,8 +1299,13 @@
                 "properties": {
                   "render": {
                     "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render",
-                    "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
-                    "x-osf-choice": "component"
+                    "x-osf-i18n": { "title": { "en": "Render", "nl": "Weergave" } },
+                    "properties": {
+                      "component": {
+                        "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
+                        "x-osf-choice": "component"
+                      }
+                    }
                   }
                 },
                 "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
@@ -1480,8 +1485,7 @@
                 "properties": {
                   "key": {
                     "$ref": "#/$defs/fieldKey",
-                    "x-osf-i18n": { "title": { "en": "Key", "nl": "Sleutel" } },
-                    "x-osf-choice": "field"
+                    "x-osf-i18n": { "title": { "en": "Key", "nl": "Sleutel" } }
                   },
                   "resolver": {
                     "enum": ["chips", "entityFields", "templateParameters", "workflowGraphVariables"],

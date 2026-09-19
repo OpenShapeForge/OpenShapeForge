@@ -525,12 +525,14 @@ describe("coreEntity properties the compiler implements", () => {
     // A schema-driven editor fills these from the entity (its fields,
     // relationships, sortable fields, custom operations) or the host (its
     // renderer registry, the component catalogue) — from the marker, never
-    // from a property's name or position. Every fieldKey use and every
-    // operation, renderer or component key must carry one.
+    // from a property's name or position. Every fieldKey reference and every
+    // operation, renderer or component key must carry one; a key that is an
+    // identifier of something else (a variable source) must not.
     const defs = coreEntitySchema.$defs as Record<string, unknown>;
     const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
     const unmarked: string[] = [];
     const seen: string[] = [];
+    const visited = new Set<unknown>();
     const walk = (node: unknown, path: string) => {
       if (!node || typeof node !== "object" || Array.isArray(node)) return;
       const schema = node as Record<string, unknown>;
@@ -539,25 +541,38 @@ describe("coreEntity properties the compiler implements", () => {
         const kind = typeof choice === "string" ? choice : (choice as { kind?: string }).kind;
         if (!kind || !kinds.has(kind)) unmarked.push(`${path} has an unknown x-osf-choice ${JSON.stringify(choice)}`);
         seen.push(path);
-      } else if (schema.$ref === "#/$defs/fieldKey" && !path.endsWith("|1.key")) unmarked.push(path);
+      } else if (schema.$ref === "#/$defs/fieldKey" && !path.includes("variableSources")) unmarked.push(path);
+      // Follow local refs once per target, so a recursive definition terminates.
+      if (typeof schema.$ref === "string" && schema.$ref.startsWith("#/$defs/")) {
+        const name = schema.$ref.slice("#/$defs/".length);
+        const target = defs[name];
+        if (target && !visited.has(target)) { visited.add(target); walk(target, `${path}->${name}`); }
+      }
       for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
       if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
       if (schema.propertyNames && typeof schema.propertyNames === "object") walk(schema.propertyNames, `${path}.<key>`);
       if (schema.items) walk(schema.items, `${path}[]`);
-      for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
+      for (const combinator of ["oneOf", "anyOf", "allOf"]) {
+        for (const [index, variant] of ((schema[combinator] as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${combinator}${index}`);
+      }
     };
     walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
-    for (const def of ["webViewsV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2", "webInterfaceOperationsV2"]) walk(defs[def], def);
     expect(unmarked).toEqual([]);
-    expect(seen).toContain("webViewsV2.collection.columns[].key");
-    expect(seen).toContain("webViewsV2.collection.defaultSort.key");
-    expect(seen).toContain("webViewsV2.record.layout.context.fields[]");
-    expect(seen).toContain("webViewsV2.record.layout.context.relationships[]");
-    expect(seen).toContain("webViewsV2.collection.actions[]");
-    expect(seen).toContain("webViewGroupV2.relationship");
-    expect(seen).toContain("webFieldEntryV2|1.render");
-    expect(seen).toContain("web.fields.<key>");
-    expect(seen).toContain("webInterfaceOperationsV2.*|1.resultRenderer");
+    for (const expected of [
+      "web.views->webViewsV2.collection.columns[].key",
+      "web.views->webViewsV2.collection.defaultSort.key",
+      "web.views->webViewsV2.collection.actions[]",
+      "web.views->webViewsV2.record.badges[]",
+      "web.views->webViewsV2.record.layout.context.fields[]",
+      "web.views->webViewsV2.record.layout.context.relationships[]",
+      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.relationship",
+      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.fields[]->webFieldEntryV2|oneOf1.render",
+      "web.fields.<key>",
+      "web.fields.*.render.component",
+      "web.operations->webInterfaceOperationsV2.<key>",
+      "web.operations->webInterfaceOperationsV2.*|oneOf1.resultRenderer",
+    ]) expect(seen).toContain(expected);
+    expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
   });
 
   it("titles every interfaces.web schema node in both locales, for schema-driven editors", () => {

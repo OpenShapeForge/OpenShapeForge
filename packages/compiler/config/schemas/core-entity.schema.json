@@ -1192,7 +1192,7 @@
     },
     "webInterfaceOperationsV2": {
       "type": "object",
-      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-choice": "operation" },
       "additionalProperties": {
         "oneOf": [
           { "const": false },
@@ -1201,7 +1201,11 @@
             "additionalProperties": false,
             "properties": {
               "instructions": { "$ref": "#/$defs/localizedOrString" },
-              "resultRenderer": { "type": "string", "pattern": "^[a-z][A-Za-z0-9.-]*$" }
+              "resultRenderer": {
+                "type": "string",
+                "pattern": "^[a-z][A-Za-z0-9.-]*$",
+                "x-osf-choice": "renderer"
+              }
             }
           }
         ]
@@ -1280,7 +1284,10 @@
           "properties": {
             "fields": {
               "type": "object",
-              "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$" },
+              "propertyNames": {
+                "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$",
+                "x-osf-choice": "field"
+              },
               "additionalProperties": {
                 "type": "object",
                 "additionalProperties": false,
@@ -1288,7 +1295,7 @@
                 "properties": {
                   "render": {
                     "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render",
-                    "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } }
+                    "x-osf-i18n": { "title": { "en": "Render", "nl": "Weergave" } }
                   }
                 },
                 "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
@@ -1334,7 +1341,8 @@
           "properties": {
             "renderer": {
               "$ref": "#/$defs/webRendererKeyV2",
-              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } }
+              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } },
+              "x-osf-choice": "renderer"
             },
             "route": {
               "$ref": "#/$defs/localizedOrString",
@@ -1350,7 +1358,8 @@
               "items": {
                 "type": "string",
                 "pattern": "^[a-z][A-Za-z0-9]*$",
-                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } }
+                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } },
+                "x-osf-choice": { "kind": "operation", "scope": "collection" }
               },
               "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
@@ -1364,7 +1373,8 @@
                 "properties": {
                   "key": {
                     "$ref": "#/$defs/fieldKey",
-                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                    "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                    "x-osf-choice": "field"
                   },
                   "label": {
                     "$ref": "#/$defs/localizedText",
@@ -1386,7 +1396,8 @@
               "properties": {
                 "key": {
                   "$ref": "#/$defs/fieldKey",
-                  "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                  "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                  "x-osf-choice": "sortableField"
                 },
                 "direction": {
                   "enum": ["asc", "desc"],
@@ -1411,7 +1422,8 @@
           "properties": {
             "renderer": {
               "$ref": "#/$defs/webRendererKeyV2",
-              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } }
+              "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } },
+              "x-osf-choice": "renderer"
             },
             "routes": {
               "type": "object",
@@ -1447,7 +1459,11 @@
             "badges": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/fieldKey" },
+              "items": {
+                "$ref": "#/$defs/fieldKey",
+                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                "x-osf-choice": "field"
+              },
               "x-osf-i18n": { "title": { "en": "Badges", "nl": "Badges" } }
             },
             "variableSources": {
@@ -1494,7 +1510,8 @@
               "items": {
                 "type": "string",
                 "pattern": "^[a-z][A-Za-z0-9]*$",
-                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } }
+                "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } },
+                "x-osf-choice": { "kind": "operation", "scope": "record" }
               },
               "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
@@ -1512,9 +1529,9 @@
                       "type": "array",
                       "uniqueItems": true,
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                        "$ref": "#/$defs/fieldKey",
+                        "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+                        "x-osf-choice": "field"
                       },
                       "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } }
                     },
@@ -1522,9 +1539,9 @@
                       "type": "array",
                       "uniqueItems": true,
                       "items": {
-                        "type": "string",
-                        "minLength": 1,
-                        "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+                        "$ref": "#/$defs/fieldKey",
+                        "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
+                        "x-osf-choice": "relationship"
                       },
                       "x-osf-i18n": { "title": { "en": "Relationships", "nl": "Relaties" } }
                     }
@@ -1608,7 +1625,8 @@
         },
         "relationship": {
           "$ref": "#/$defs/fieldKey",
-          "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } }
+          "x-osf-i18n": { "title": { "en": "Relationship", "nl": "Relatie" } },
+          "x-osf-choice": "relationship"
         },
         "groups": {
           "type": "array",
@@ -1625,7 +1643,11 @@
     },
     "webFieldEntryV2": {
       "oneOf": [
-        { "$ref": "#/$defs/fieldKey" },
+        {
+          "$ref": "#/$defs/fieldKey",
+          "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+          "x-osf-choice": "field"
+        },
         {
           "type": "object",
           "additionalProperties": false,
@@ -1633,7 +1655,8 @@
           "properties": {
             "key": {
               "$ref": "#/$defs/fieldKey",
-              "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+              "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } },
+              "x-osf-choice": "field"
             },
             "render": {
               "type": "string",
@@ -1644,7 +1667,8 @@
                   "en": "The component that draws this field here, instead of the field's default.",
                   "nl": "Het component dat dit veld hier tekent, in plaats van de standaard van het veld."
                 }
-              }
+              },
+              "x-osf-choice": "component"
             },
             "fieldDisplayMode": {
               "enum": ["hidden"],

@@ -167,10 +167,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Addresses
-          nl: Adressen
   - key: naturalPersonId
     label:
       en: Natural person
@@ -181,10 +177,6 @@ fields:
     osfType: NaturalPerson
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Addresses
-          nl: Adressen
   - key: legalEntityId
     label:
       en: Legal entity
@@ -195,10 +187,6 @@ fields:
     osfType: LegalEntity
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Addresses
-          nl: Adressen
 operations:
   list:
     name: { en: List addresses, nl: Adressen tonen }

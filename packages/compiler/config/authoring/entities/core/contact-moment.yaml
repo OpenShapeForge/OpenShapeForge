@@ -150,10 +150,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Contact moments
-          nl: Contactmomenten
   - key: relationRoleId
     label:
       en: Relation role
@@ -164,10 +160,6 @@ fields:
     osfType: RelationRole
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Contact moments
-          nl: Contactmomenten
   - key: caseId
     label:
       en: Case
@@ -178,10 +170,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Contact moments
-          nl: Contactmomenten
 operations:
   list:
     name: List Contact Moment

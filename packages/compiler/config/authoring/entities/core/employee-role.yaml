@@ -153,10 +153,6 @@ fields:
     osfType: OrgUnit
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Employee roles
-          nl: Medewerkerrollen
   - key: positionId
     label:
       en: Position
@@ -167,10 +163,6 @@ fields:
     osfType: Position
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Employee roles
-          nl: Medewerkerrollen
   - key: reportsToId
     label:
       en: Reports to

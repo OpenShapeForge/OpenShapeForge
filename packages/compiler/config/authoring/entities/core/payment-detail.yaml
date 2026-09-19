@@ -180,10 +180,6 @@ fields:
       category: workflow
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Payment details
-          nl: Betaalgegevens
 operations:
   list:
     name: { en: List payment details, nl: Betaalgegevens tonen }

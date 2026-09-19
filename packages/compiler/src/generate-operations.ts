@@ -222,8 +222,6 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/swagger-initializer.js", owner: "core REST documentation" },
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.html", owner: "core REST OAuth callback" },
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
-  { method: "POST", path: "/api/documents", owner: "core document commands" },
-  { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
   { method: "POST", path: "/api/artifacts", owner: "core artifact transport" },
   { method: "GET", path: "/api/artifacts/:artifactId/contents", owner: "core artifact transport" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },

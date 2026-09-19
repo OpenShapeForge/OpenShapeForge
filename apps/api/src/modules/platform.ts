@@ -325,13 +325,20 @@ export class ModulePlatformRuntime {
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
+      records: records.services,
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
         const active = this.#operationTransactionStorage.getStore();
         return active?.session === session ? active.trx : undefined;
       },
+      // Joins the Operation transaction when there is one, else the read
+      // transaction an enclosing artifact call opened: a download's oracle
+      // check and the provider's read are then one transaction, so the record
+      // the session was found to reach is the record the bytes are read
+      // against. `currentTransaction` (bind) stays on the Operation one alone.
       withTransaction: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore();
+        const active = this.#operationTransactionStorage.getStore() ??
+          this.#recordAccessTransactionStorage.getStore();
         if (active) {
           if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
           return work(active.trx);
@@ -382,8 +389,16 @@ export class ModulePlatformRuntime {
           }
           const tenantId = session.tenantId;
           const actorId = session.userId;
+          // The whole effective session goes on the row: the job runs later
+          // as this person, with what this request could reach — not more.
+          const actorSession = {
+            roles: session.roles,
+            groups: session.groups,
+            relationGroupIds: session.relationGroupIds ?? [],
+            scope: session.scope,
+          };
           return this.services.db.withSession(session, (trx) =>
-            enqueueJob(trx, { ...input, tenantId, actorId }),
+            enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
           );
         },
       },

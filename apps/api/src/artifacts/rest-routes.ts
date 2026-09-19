@@ -83,7 +83,7 @@ export function registerArtifactRestRoutes(
         throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
       }
       const descriptor = await options.artifacts.stage(verified, {
-        purpose: "document-upload",
+        purpose: "record-upload",
         fileName: fileName(request),
         source,
       });
@@ -95,7 +95,7 @@ export function registerArtifactRestRoutes(
       const { artifactId } = request.params as { artifactId: string };
       const result = await options.artifacts.read(verified, {
         artifactId,
-        documentVersionId: queryString(request, "documentVersionId"),
+        owner: { entity: queryString(request, "ownerEntity"), id: queryString(request, "ownerId") },
       });
       return reply
         .header("content-type", result.descriptor.mediaType)

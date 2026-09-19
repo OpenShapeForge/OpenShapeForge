@@ -24,7 +24,6 @@ import { createKeycloakOrganizationAdminClient, KeycloakAdminError } from "./key
 import { createServiceAccountTokenProvider } from "./keycloak-service-account.js";
 import { createKeycloakSpiClient, KeycloakSpiError } from "./keycloak-spi-client.js";
 import { createOrganizationScopeAdminClient } from "./organization-scopes.js";
-import { createMemberRoleAdminClient, type MemberRoleAdminClient } from "./member-role-admin.js";
 import type { PlatformCatalogProvider } from "./platform-catalog.js";
 import type { ControlDeps } from "./tenant-registry.js";
 
@@ -32,7 +31,6 @@ import type { ControlDeps } from "./tenant-registry.js";
 export type PlatformKeycloakClients = {
   firstAdministrator: FirstAdministratorClients;
   identityMembers?: KeycloakTenantMemberAdminClient;
-  memberRoles?: MemberRoleAdminClient;
   control: Omit<ControlDeps, "db" | "operator">;
 };
 
@@ -107,7 +105,6 @@ export function createPlatformKeycloakClients(
     ...options,
     tokens: adminTokens,
   });
-  const memberRoles = createMemberRoleAdminClient(config.keycloak, { ...options, tokens: adminTokens });
   return {
     firstAdministrator: {
       tenantRealm: config.keycloak.tenantRealm,
@@ -115,7 +112,6 @@ export function createPlatformKeycloakClients(
       organizations: keycloakAdmin,
     },
     identityMembers: members,
-    memberRoles,
     control: {
       keycloak,
       keycloakAdmin,

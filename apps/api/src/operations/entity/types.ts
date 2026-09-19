@@ -101,9 +101,12 @@ export type GeneratedCrudTable = {
       versionsField: string;
       snapshot: { ownedRelationships: "recursive" };
       publishOperation: string;
+      /** The draft rule: the head field a content edit resets, and to what. */
+      onEdit: { field: string; value: string };
       storage: {
         head: { schema: string; table: string };
         version: { schema: string; table: string; headColumn: string };
+        owned: Array<{ schema: string; table: string; childColumns: string[]; parentColumns: string[]; children: unknown[] }>;
       };
     };
     computedFields?: Array<{

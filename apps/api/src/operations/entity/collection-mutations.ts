@@ -12,6 +12,7 @@ import { fieldNameForColumn } from "./columns.js";
 import { collectionManagedFields } from "./collection-policy.js";
 import { createGeneratedEntityInTransaction } from "./mutations.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
+import { draftOwningHead, draftRule } from "./versioned-head.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
 import { assertEntityValuesValid } from "./input-validation.js";
 import { assertEntityValueInput, entityValueCarriers, prepareEntityValueWriteInTransaction } from "./entity-value-io.js";
@@ -250,8 +251,12 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);
       const parentRow = touched.rows[0]?.row;
       if (!parentRow) throw generatedCrudError("Parent update was refused.", "FORBIDDEN");
-      await appendGeneratedCrudEvent(trx, owner, { aggregateId: request.id, eventType: "updated", row: parentRow }, entityValues);
-      return { parent: projectGeneratedEntityRow(owner, session, parentRow, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
+      // The draft rule from the manifest: the owner is a versioned head, or one owns it.
+      const draft = draftRule(owner);
+      if (draft) await sql`update ${sql.id(owner.schema, owner.table)} set ${sql.id(draft.column)} = ${draft.value} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid`.execute(trx);
+      else await draftOwningHead(trx, catalog.tables, owner, parentRow);
+      await appendGeneratedCrudEvent(trx, owner, { aggregateId: request.id, eventType: "updated", row: draft ? { ...parentRow, [draft.column]: draft.value } : parentRow }, entityValues);
+      return { parent: projectGeneratedEntityRow(owner, session, draft ? { ...parentRow, [draft.column]: draft.value } : parentRow, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
     };
     return (transaction ? run(transaction) : withDbSession(db!, session, run)).catch((error) => { throw translateDatabaseError(owner, error); });
   }

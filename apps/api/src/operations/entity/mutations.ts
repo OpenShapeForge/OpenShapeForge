@@ -39,6 +39,7 @@ import {
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
+import { draftOwningHead, draftRule } from "./versioned-head.js";
 import {
   assertCreateRecordPermissions,
   assertRecordPermissionInTransaction,
@@ -380,11 +381,11 @@ async function applyGeneratedRowUpdate(
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
-    const lifecycleStatus = table.source?.versioning
-      ? table.columns.find((column) => fieldNameForColumn(column) === "lifecycleStatus")
-      : undefined;
-    if (lifecycleStatus) assignments.push(sql`${sql.id(lifecycleStatus.name)} = 'draft'`);
-    if (updatedAt) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
+    // No content column changes: nothing is written, neither the version
+    // token nor the draft rule, and the unchanged row is returned below.
+    const draft = assignments.length ? draftRule(table) : undefined;
+    if (draft) assignments.push(sql`${sql.id(draft.column)} = ${draft.value}`);
+    if (updatedAt && assignments.length) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
 
     if (assignments.length === 0) {
       const unchanged = await sql<{ row: GeneratedEntityRow }>`
@@ -428,6 +429,7 @@ async function applyGeneratedRowUpdate(
       }
       return null;
     }
+    await draftOwningHead(trx, getGeneratedCrudTables(), table, row);
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",

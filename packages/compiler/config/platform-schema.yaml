@@ -628,6 +628,56 @@ tables:
       - name: mcp_handoffs_expires_idx
         columns: [expires_at]
 
+  # Capability grants: the token behind a link that lets someone WITHOUT an
+  # account run a fixed set of Operations on one record — accept a document,
+  # sign it, answer a request. Only the SHA-256 of the secret half of the
+  # token is stored; the `<id>.<secret>` token is returned once by
+  # `platform.grants.issue`. Core resolves a presented token into a grant
+  # session before an `auth.mode: capability` Operation runs
+  # (operations/capability-grants.ts): the row is located by id, the secret
+  # is compared in constant time, and expiry, revocation, use count and the
+  # attempt lock are checked. A single-use grant is consumed in the handler's
+  # transaction, so a failed handler leaves it usable. `recipient` is opaque
+  # to core beyond its shape; `operations` holds canonical Operation keys.
+  - schema: platform
+    name: capability_grants
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: token_hash, type: text, required: true }
+      - { name: operations, type: "text[]", required: true }
+      - { name: subject_entity, type: text, required: true }
+      - { name: subject_id, type: uuid, required: true }
+      - { name: recipient, type: jsonb, required: true }
+      - { name: issued_by, type: uuid, required: true }
+      - { name: issued_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+      # null = reusable until expiry; 1 = single use.
+      - { name: max_uses, type: integer }
+      - { name: uses, type: integer, required: true, default: "0" }
+      - { name: consumed_at, type: timestamptz }
+      - { name: revoked_at, type: timestamptz }
+      - { name: revoked_reason, type: text }
+      - { name: superseded_by, type: uuid }
+      # Attempt limiting: failures inside the current window count up; when
+      # they reach the limit the grant is locked until locked_until.
+      - { name: failed_attempts, type: integer, required: true, default: "0" }
+      - { name: window_started_at, type: timestamptz }
+      - { name: locked_until, type: timestamptz }
+    indexes:
+      - name: capability_grants_token_uidx
+        columns: [token_hash]
+        unique: true
+      - name: capability_grants_subject_idx
+        columns: [tenant_id, subject_entity, subject_id]
+      # Drives the housekeeping purge, which finds dead rows without scanning
+      # every tenant's history.
+      - name: capability_grants_expires_idx
+        columns: [expires_at]
+
   # ---------------------------------------------------------------------------
   # Runtime bookkeeping
   #

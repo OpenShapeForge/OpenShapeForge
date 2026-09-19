@@ -31,7 +31,26 @@ export type SessionCredential =
   | "bearer"
   | "api-key"
   | "trusted-context"
-  | "control-bearer";
+  | "control-bearer"
+  /**
+   * A capability grant resolved by core for an `auth.mode: capability`
+   * Operation: a tenant, no user, no roles, and exactly the Operations and
+   * the one record the grant names (`grant`). Only those Operations accept
+   * it; a session Operation refuses it like an unauthenticated call.
+   */
+  | "grant";
+
+/** What a capability grant covers, as core verified it from the grant row. */
+export type CapabilityGrantSession = {
+  id: string;
+  subject: { entity: string; id: string };
+  /** Opaque beyond its `kind`; whatever the issuer recorded about the recipient. */
+  recipient: { kind: string; [key: string]: unknown };
+  operations: readonly string[];
+  expiresAt: string;
+  /** Single-use grants are consumed in the handler's transaction. */
+  maxUses: number | null;
+};
 
 export type TrustedSessionContext = {
   tenantId: string | null;
@@ -73,6 +92,12 @@ export type TrustedSessionContext = {
    * is null because no tenant context exists on the control realm.
    */
   administrator?: PlatformAdministrator;
+  /**
+   * The verified capability grant behind a "grant" session. Present exactly
+   * when `credential` is "grant"; `userId` then carries the grant id so the
+   * session layer, receipts and events have an actor, and `roles` is empty.
+   */
+  grant?: CapabilityGrantSession;
   // ---- identity ↔ Relation link (auth/identity-link.ts) ----
   /**
    * The party this login acts as in the tenant: the link state resolved on

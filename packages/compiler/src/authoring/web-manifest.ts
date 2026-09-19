@@ -863,6 +863,11 @@ function standaloneAuth(
       throw new Error(
         `Standalone Operation "${operation.key}" uses custom auth and cannot be projected to a web page.`,
       );
+    case "capability":
+      // A grant token belongs to its recipient's link, not to a signed-in page.
+      throw new Error(
+        `Standalone Operation "${operation.key}" uses capability auth and cannot be projected to a web page.`,
+      );
   }
 }
 

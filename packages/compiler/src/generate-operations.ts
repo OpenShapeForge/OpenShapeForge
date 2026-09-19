@@ -9,6 +9,7 @@ import type {
   JsonSchema,
   PluginBaseContext,
   PluginOperationContract,
+  PluginOperationError,
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import type { CompiledEntityOperation } from "./authoring/types.js";
@@ -42,7 +43,38 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * blueprint Operations, `osf-control` the platform's own administration and
  * `osf-jobs` the durable job queue.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-jobs"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-grants", "osf-jobs"];
+
+/**
+ * The one OpenAPI security scheme every `auth.mode: capability` Operation is
+ * described by. Core owns the token format and its resolution, so a plugin
+ * never declares a scheme of its own for it — and cannot reuse this name for
+ * a custom scheme.
+ */
+export const CAPABILITY_GRANT_SECURITY_SCHEME = "capabilityGrant";
+
+/**
+ * Refusals core raises while resolving a capability grant, before the handler
+ * runs. Appended to every capability Operation's declared errors so OpenAPI
+ * and every client see them without each plugin repeating the list; an
+ * Operation that declares one of these status-and-code pairs itself keeps its
+ * own description.
+ */
+export const CAPABILITY_GRANT_ERRORS: readonly PluginOperationError[] = Object.freeze([
+  { status: 401, code: "GRANT_INVALID", description: "The grant token is missing, malformed, unknown or its secret does not match." },
+  { status: 403, code: "GRANT_SCOPE", description: "The grant does not cover this Operation or its declared target." },
+  { status: 409, code: "GRANT_CONSUMED", description: "The grant has already been used as often as it allows." },
+  { status: 410, code: "GRANT_EXPIRED", description: "The grant has expired." },
+  { status: 410, code: "GRANT_REVOKED", description: "The grant was revoked or superseded by a newer grant." },
+  { status: 423, code: "GRANT_LOCKED", description: "Too many failed attempts; the grant is temporarily locked." },
+]);
+
+function withCapabilityGrantErrors(operation: PluginOperationContract): PluginOperationContract {
+  if (operation.auth.mode !== "capability") return operation;
+  const declared = new Set(operation.errors.map((error) => JSON.stringify([error.status, error.code])));
+  const appended = CAPABILITY_GRANT_ERRORS.filter((error) => !declared.has(JSON.stringify([error.status, error.code])));
+  return { ...operation, errors: [...operation.errors, ...appended.map((error) => ({ ...error }))] };
+}
 
 /**
  * Platform-owned mutation controls are derived from the canonical Operation
@@ -414,6 +446,16 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
       throw new Error(`${where} custom auth can only project to REST; MCP and GraphQL need disabled reasons.`);
     }
   }
+  if (operation.auth.mode === "capability") {
+    // The grant carries the tenant and the record; the handler runs under a
+    // grant session that no MCP or GraphQL session can present.
+    if (operation.tenancy.mode !== "required") {
+      throw new Error(`${where} capability auth requires tenancy mode required; the grant supplies the tenant.`);
+    }
+    if (operation.transports.mcp.enabled || operation.transports.graphql.enabled) {
+      throw new Error(`${where} capability auth can only project to REST; MCP and GraphQL need disabled reasons.`);
+    }
+  }
   if (operation.auth.mode === "public" && operation.transports.mcp.enabled) {
     throw new Error(`${where} public operations cannot project to the authenticated MCP endpoint; disable MCP with a reason.`);
   }
@@ -638,8 +680,9 @@ function collectOperationContracts(
     const declared = typeof plugin.operations === "function"
       ? plugin.operations(context)
       : plugin.operations ?? [];
-    for (const operation of declared) {
-      if (Object.hasOwn(operation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+    for (const authoredOperation of declared) {
+      if (Object.hasOwn(authoredOperation, "implementation")) throw new Error(`Plugin ${plugin.name} cannot supply compiler-native implementation metadata.`);
+      const operation = withCapabilityGrantErrors(authoredOperation);
       validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
@@ -663,6 +706,9 @@ function collectOperationContracts(
         throw new Error(`Duplicate plugin operation TypeScript function "${typescriptKey}".`);
       }
       if (operation.auth.mode === "custom") {
+        if (operation.auth.scheme === CAPABILITY_GRANT_SECURITY_SCHEME) {
+          throw new Error(`Plugin ${plugin.name} custom security scheme "${CAPABILITY_GRANT_SECURITY_SCHEME}" is reserved for capability grants.`);
+        }
         const definition = JSON.stringify({
           description: operation.auth.description,
           ...operation.auth.securityScheme,
@@ -684,7 +730,7 @@ function collectOperationContracts(
         id: operation.key,
         intent: "invoke",
       };
-      const native = authored ? nativeBindings.get(operation) : undefined;
+      const native = authored ? nativeBindings.get(authoredOperation) : undefined;
       if (native) {
         compiled.implementation = { ...native };
         verifiedNativeOperations.set(compiled, JSON.stringify(native));
@@ -1375,7 +1421,9 @@ export function operationOpenApiPaths(
             : operation.auth.mode === "control"
               // A control-realm bearer: its own scheme, never the tenant session's.
               ? [{ controlBearerAuth: [] }]
-              : [{ [operation.auth.scheme]: [] }],
+              : operation.auth.mode === "capability"
+                ? [{ [CAPABILITY_GRANT_SECURITY_SCHEME]: [] }]
+                : [{ [operation.auth.scheme]: [] }],
         "x-osf-operation": {
           key: operation.key,
           handler: operation.handler,

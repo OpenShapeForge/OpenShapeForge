@@ -75,6 +75,13 @@ import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
+import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
+import {
+  capabilityGrantRefusal,
+  consumeCapabilityGrantInTransaction,
+  resolveCapabilityGrantSession,
+} from "./capability-grant-resolution.js";
+import { grantTokenFromAuthorization } from "./capability-grant-token.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 
@@ -117,6 +124,7 @@ export type OperationContract = {
         recordPermission?: RecordPermissionAction;
         recordPermissions?: readonly RecordPermissionAction[];
       }
+    | { mode: "capability" }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
@@ -607,6 +615,11 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: jobsOperationHandler(operation) });
       continue;
     }
+    if (operation.plugin === GRANTS_PLUGIN) {
+      if (modulesByName.has(GRANTS_PLUGIN)) throw new Error("The core capability grant runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
+      continue;
+    }
     if (operation.implementation?.type === "entity-type-list") {
       bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
       continue;
@@ -669,12 +682,23 @@ export function requireOperationAuthorization(
     }
     return;
   }
+  // A capability Operation takes the grant session core resolved from the
+  // presented token and nothing else; the grant's own Operation list is the
+  // whole authorization, there are no roles to consult.
+  if (operation.auth.mode === "capability") {
+    if (!session || session.credential !== "grant" || !session.grant || !session.tenantId) {
+      throw capabilityGrantRefusal("GRANT_INVALID");
+    }
+    if (!session.grant.operations.includes(operation.key)) throw capabilityGrantRefusal("GRANT_SCOPE");
+    return;
+  }
   if (operation.auth.mode !== "session") return;
   // The mirror image: a platform operator has no tenant and is not a session
-  // on this surface, whatever roles the control realm gave them.
+  // on this surface, whatever roles the control realm gave them — and a grant
+  // session covers its listed capability Operations only.
   if (
     !session || session.credential === "none" || session.credential === "control-bearer" ||
-    !session.userId
+    session.credential === "grant" || !session.userId
   ) {
     throw new HttpError(401, "UNAUTHENTICATED", "Operation requires an authenticated bearer session.");
   }
@@ -830,6 +854,29 @@ function customHandlerInput(
 }
 
 async function invokeCustomOperationWithControls(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  const operation = bound.operation;
+  if (operation.auth.mode === "capability") {
+    // The grant is used in the handler's transaction: a handler that fails
+    // leaves it usable, a single-use grant that succeeded is spent for good.
+    // Any further guard below joins this same transaction.
+    const session = context.session;
+    if (!session || session.credential !== "grant" || !context.platform) {
+      throw capabilityGrantRefusal("GRANT_INVALID");
+    }
+    return withModuleOperationTransaction(context.platform, session, async (trx) => {
+      await consumeCapabilityGrantInTransaction(trx, session, operation.key);
+      return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
+    });
+  }
+  return invokeGuardedCustomOperation(bound, input, context, invokeHandler);
+}
+
+async function invokeGuardedCustomOperation(
   bound: Bound,
   input: Readonly<Record<string, unknown>>,
   context: Parameters<ModuleOperationHandler>[1],
@@ -1583,6 +1630,42 @@ async function resolveControlRestSession(
   }
 }
 
+/**
+ * A capability Operation is authenticated by its grant token alone: no bearer
+ * is consulted, and the database is required because the grant row is the
+ * credential.
+ */
+async function resolveCapabilityRestSession(
+  request: FastifyRequest,
+  context: ModuleRuntimeContext,
+  operation: OperationContract,
+): Promise<TrustedSessionContext> {
+  if (!context.db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Capability grants require a database.");
+  const header = request.headers.authorization;
+  const token = grantTokenFromAuthorization(Array.isArray(header) ? header[0] : header);
+  return resolveCapabilityGrantSession(context.db, token, {
+    key: operation.key,
+    ...(operation.target ? { target: { entityName: operation.target.entityName } } : {}),
+  });
+}
+
+/**
+ * The grant names the one record; when the Operation declares a record
+ * target the runtime supplies it, so the caller cannot point the Operation
+ * at another record than the grant was issued for.
+ */
+function bindGrantSubject(
+  operation: OperationContract,
+  session: TrustedSessionContext | undefined,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  if (operation.auth.mode !== "capability" || !session?.grant) return input;
+  const field = operation.target?.inputField;
+  if (!field) return input;
+  if (field in input && input[field] !== session.grant.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
+  return { ...input, [field]: session.grant.subject.id };
+}
+
 export function registerOperationRestRoutes(
   app: FastifyInstance,
   modules: readonly RuntimeModule[],
@@ -1602,6 +1685,8 @@ export function registerOperationRestRoutes(
           ? undefined
           : entry.operation.auth.mode === "control"
           ? await resolveControlRestSession(request, context)
+          : entry.operation.auth.mode === "capability"
+          ? await resolveCapabilityRestSession(request, context, entry.operation)
           : await resolveSessionContext(headersFromFastify(request.headers), {
               db: context.db,
               failOnUnavailable:
@@ -1612,7 +1697,7 @@ export function registerOperationRestRoutes(
       }
       let input: Record<string, unknown>;
       try {
-        input = operationRestInput(request, entry.operation);
+        input = bindGrantSubject(entry.operation, session, operationRestInput(request, entry.operation));
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, false);
       }

@@ -1,0 +1,52 @@
+{
+  "openshapeforge": {
+    "Test.Admin": [
+      "Agreements.All.ReadWrite",
+      "Audit.Logs.All",
+      "Audit.Settings.Manage",
+      "CaseFile.All.ReadWrite",
+      "Cases.All.ReadWrite",
+      "Energy.All.ReadWrite",
+      "Finance.All.ReadWrite",
+      "General.All.ReadWrite",
+      "HousingAllocation.All.ReadWrite",
+      "KnowledgeBase.All",
+      "Maintenance.All.ReadWrite",
+      "Messaging.Admin",
+      "Messaging.Conversation.Assign",
+      "Messaging.Conversation.ReadAll",
+      "Messaging.Conversation.Reassign",
+      "Messaging.Conversation.ViewQueue",
+      "Messaging.OptIn.Read",
+      "Messaging.OptIn.Write",
+      "Messaging.Read",
+      "Messaging.Send",
+      "Organization.All.ReadWrite",
+      "Organization.EmployeeRoles.ReadWrite",
+      "Organization.Employees.ReadWrite",
+      "Organization.Positions.ReadWrite",
+      "Platform.ApiKeys.Manage",
+      "Platform.Jobs.Manage",
+      "ProjectDevelopment.All.ReadWrite",
+      "Quality.All.ReadWrite",
+      "RealEstate.All.ReadWrite",
+      "Relations.All.Delete",
+      "Relations.All.ReadWrite",
+      "Relations.Bsn.Read",
+      "Relations.RelationGroups.ReadWrite",
+      "Support.Issues.All",
+      "Timeline.All",
+      "Timeline.Events.ReadAll",
+      "workflow-admin"
+    ],
+    "Test.ReadOnly": [
+      "General.All.Read",
+      "Relations.All.Read"
+    ],
+    "Test.User": [
+      "General.All.Read",
+      "Relations.All.ReadWrite"
+    ]
+  },
+  "openshapeforge-control": {}
+}

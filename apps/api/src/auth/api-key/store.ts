@@ -2,16 +2,18 @@
 /**
  * Reading a presented credential back to the integration it names.
  *
- * Two reads, in this order and for this reason:
+ * Three reads, in this order and for this reason:
  *
- *   1. `platform.api_keys` by `lookup_id`. This table carries no RLS policy —
- *      the tenant is an OUTPUT of authentication, so there is no tenant context
- *      to enforce yet (see platform-schema.yaml for the full argument). It holds
- *      only what authentication needs.
- *   2. `platform.api_key_integrations` by primary key, inside
- *      `withCredentialResolutionSession` — RLS ON, scoped to the tenant step 1
- *      just produced. The client secret and the integration's state never leave
- *      that boundary.
+ *   1. `app.api_key_tenant(lookup_id)`: which tenant the presented lookup id
+ *      belongs to. The tenant is an OUTPUT of authentication, so there is no
+ *      tenant context to open a session with yet; this point lookup is the
+ *      one statement that runs without one (db/migrations/api-keys.ts). It
+ *      answers a tenant id and nothing else.
+ *   2. `platform.api_keys` by `lookup_id`, inside
+ *      `withCredentialResolutionSession` — RLS ON, scoped to that tenant. The
+ *      secret comparison and the expiry/revocation checks happen here.
+ *   3. `platform.api_key_integrations` by primary key, same session. The
+ *      client secret and the integration's state never leave that boundary.
  *
  * Nothing here decides whether the caller is authorized; it decides whether the
  * credential is real, live, and whose. Role resolution happens against Keycloak
@@ -103,14 +105,21 @@ export async function resolveApiKey(
   secret: string,
   now: Date = new Date(),
 ): Promise<ApiKeyLookupResult> {
-  const keyResult = await sql<KeyRow>`
-    select id, tenant_id, integration_id, secret_hash, role_subset, expires_at, revoked_at
-      from platform.api_keys
-     where lookup_id = ${lookupId}
-     limit 1
+  const tenantResult = await sql<{ tenant_id: string | null }>`
+    select app.api_key_tenant(${lookupId}) as tenant_id
   `.execute(db);
-
-  const row = keyResult.rows[0];
+  const tenantId = tenantResult.rows[0]?.tenant_id ?? null;
+  const row = tenantId
+    ? await withCredentialResolutionSession(db, tenantId, async (trx) => {
+        const keyResult = await sql<KeyRow>`
+          select id, tenant_id, integration_id, secret_hash, role_subset, expires_at, revoked_at
+            from platform.api_keys
+           where lookup_id = ${lookupId}
+           limit 1
+        `.execute(trx);
+        return keyResult.rows[0];
+      })
+    : undefined;
   // Compare against a decoy hash when the lookup missed, so an unknown key and
   // a wrong secret cost the same. Without this, response time distinguishes
   // "this lookup id exists" from "it does not" — an enumeration oracle over a
@@ -185,13 +194,15 @@ export async function resolveApiKey(
  */
 export async function recordApiKeyUse(
   db: OpenShapeForgeDatabase,
-  keyId: string,
+  key: { keyId: string; tenantId: string },
   now: Date = new Date(),
 ): Promise<void> {
-  await sql`
-    update platform.api_keys
-       set first_used_at = coalesce(first_used_at, ${now}),
-           last_used_at = ${now}
-     where id = ${keyId}
-  `.execute(db);
+  await withCredentialResolutionSession(db, key.tenantId, async (trx) => {
+    await sql`
+      update platform.api_keys
+         set first_used_at = coalesce(first_used_at, ${now}),
+             last_used_at = ${now}
+       where id = ${key.keyId}
+    `.execute(trx);
+  });
 }

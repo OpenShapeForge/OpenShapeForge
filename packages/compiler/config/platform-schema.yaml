@@ -475,17 +475,21 @@ tables:
   # an INSERT now and a DELETE after the grace window — a Keycloak client holds
   # exactly one secret, so key material lives here and not there.
   #
-  # tenantScoped: FALSE, deliberately, and this is the only table in this file
-  # that carries a tenant_id without an RLS policy over it. The authentication
-  # path resolves a credential BEFORE any tenant is known — `tenant_id` here is
-  # an OUTPUT of authentication, not an input to it, and `withDbSession`
-  # (correctly) refuses to open a session without a tenant and a user. The same
-  # reasoning makes platform.system_bypass_audit non-tenant-scoped.
+  # tenantScoped: FALSE, because the generated tenant policy would gate a read
+  # the authentication path has to make BEFORE any tenant is known —
+  # `tenant_id` here is an OUTPUT of authentication, not an input to it, and
+  # `withDbSession` (correctly) refuses to open a session without a tenant and
+  # a user. The table is nonetheless tenant-fenced: db/migrations/api-keys.ts
+  # enables and forces row-level security with the same predicate every other
+  # platform.* row gets, and provides `app.api_key_tenant(lookup_id)` — a point
+  # lookup answering ONE tenant for ONE lookup id — so the store can open an
+  # ordinary tenant-fenced session for the secret comparison and everything
+  # after it. Without that fence the runtime role's blanket DML made every
+  # tenant's key rows reachable from any raw-SQL path.
   #
-  # The management surface does not rely on that: every provisioning read joins
-  # through platform.api_key_integrations, whose tenant policy gates the whole
-  # join, and carries an explicit tenant_id predicate on top. What lives here is
-  # only what authentication needs — no display name, no actor, no audit trail
+  # The management surface joins through platform.api_key_integrations and
+  # carries an explicit tenant_id predicate on top. What lives here is only
+  # what authentication needs — no display name, no actor, no audit trail
   # beyond use timestamps.
   #
   # `secret_hash` is SHA-256 of the secret half; the plaintext is returned once
@@ -714,10 +718,12 @@ tables:
   # error the finally block inserts a single row with succeeded = false.
   #
   # Not tenant-scoped: bypass sessions can span tenants by design, and every
-  # bypass must be recorded even when no app.tenant_id was set. No RLS policy
-  # either — the bypass session itself is the only writer. Retention is
-  # handled out of band: these rows are operationally sensitive and belong in
-  # a long-term store (SIEM / log pipeline), not aged out of the OLTP database.
+  # bypass must be recorded even when no app.tenant_id was set. Row-level
+  # security is owned by db/migrations/api-keys.ts: anyone may append, only
+  # the bypass session may read or complete a row, nothing deletes (the
+  # runtime role's DELETE is revoked in app-role.ts). Retention is handled
+  # out of band: these rows are operationally sensitive and belong in a
+  # long-term store (SIEM / log pipeline), not aged out of the OLTP database.
   # Add an explicit compliance review before changing that.
   - schema: platform
     name: system_bypass_audit

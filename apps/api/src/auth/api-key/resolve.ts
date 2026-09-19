@@ -123,7 +123,7 @@ export async function resolveApiKeySession(
 
   // Telemetry, never a gate: a failed write here must not fail an authenticated
   // request, and nothing on the hot path reads these columns back.
-  void recordApiKeyUse(deps.db, key.keyId).catch((error: unknown) => {
+  void recordApiKeyUse(deps.db, { keyId: key.keyId, tenantId: key.tenantId }).catch((error: unknown) => {
     console.warn(
       "[auth] Recording API key use failed:",
       error instanceof Error ? error.message : String(error),

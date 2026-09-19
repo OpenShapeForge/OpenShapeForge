@@ -119,6 +119,18 @@ function idSchema(entity: CoreEntity): Record<string, unknown> {
   };
 }
 
+function statusSchema(field: Field, values: string[]): Record<string, unknown> {
+  const items = field.options?.type === "static" ? field.options.items ?? [] : [];
+  return {
+    type: "string",
+    enum: values,
+    "x-osf-i18n": {
+      title: text(field.label, field.key),
+      enum: Object.fromEntries(items.map((item) => [item.value, text(item.label, item.value)])),
+    },
+  };
+}
+
 function ruleOperation(
   entity: CoreEntity,
   field: Field,
@@ -147,7 +159,7 @@ function ruleOperation(
         required: ["id", field.key],
         properties: {
           id: idSchema(entity),
-          [field.key]: { type: "string", enum: values, "x-osf-i18n": { title: text(field.label, field.key) } },
+          [field.key]: statusSchema(field, values),
         },
       },
     },

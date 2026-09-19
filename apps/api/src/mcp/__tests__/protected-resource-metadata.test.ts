@@ -92,6 +92,23 @@ describe("protected resource metadata", () => {
       "https://mcp.example.com/api/mcp",
     );
   });
+
+  test("a configured public origin pins the resource URI regardless of Host and proxy headers", () => {
+    const saved = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://api.example.test/";
+    try {
+      const request = {
+        headers: { host: "attacker.example", "x-forwarded-proto": "http" },
+        protocol: "http",
+      } as never;
+      expect(buildProtectedResourceMetadata(request, undefined).resource).toBe(
+        "https://api.example.test/api/mcp",
+      );
+    } finally {
+      if (saved === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = saved;
+    }
+  });
 });
 
 describe("RFC 8414 path-inserted authorization server metadata", () => {

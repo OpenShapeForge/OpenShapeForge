@@ -242,6 +242,17 @@ describe("bindOrganizationResource (+ registry)", () => {
         registry,
       ),
     ).resolves.toMatchObject({ tenantId: "33333333-3333-4333-8333-333333333333" });
+    // A uuid typed in upper case by whoever set the user attribute is the
+    // same tenant — compared the way every other tid comparison is.
+    await expect(
+      bindOrganizationResource(
+        { ...zerocopterIdentity, tenantId: "33333333-3333-4333-8333-333333333333".toUpperCase() },
+        zerocopterClaims,
+        { alias: "zerocopter-dev", resource: ZEROCOPTER },
+        "openshapeforge",
+        registry,
+      ),
+    ).resolves.toMatchObject({ tenantId: "33333333-3333-4333-8333-333333333333" });
   });
 });
 

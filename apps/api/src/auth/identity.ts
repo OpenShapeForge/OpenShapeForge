@@ -32,6 +32,7 @@ import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.
 import {
   bindOrganizationResource,
   OrganizationBindingError,
+  sameTenantId,
   type OrganizationResourceBinding,
   type TenantForOrganization,
 } from "./organization-binding.js";
@@ -352,8 +353,8 @@ async function resolveHostOrganizationTenant(
   const realm = realmFromIssuer(claims.iss);
   if (!realm) return null;
   const tenantId = await lookupTenantForOrganization(db, realm, membership.id);
-  if (!tenantId || (claims.tid !== undefined &&
-      (typeof claims.tid !== "string" || claims.tid.toLowerCase() !== tenantId.toLowerCase()))) return null;
+  if (!tenantId || (claims.tid !== undefined && !sameTenantId(
+      typeof claims.tid === "string" ? claims.tid : null, tenantId))) return null;
   return tenantId;
 }
 
@@ -369,7 +370,7 @@ async function resolveScopedServiceTenant(
 ): Promise<string | null> {
   const realm = realmFromIssuer(claims.iss);
   if (!db || !realm || !identity.userId ||
-      identity.tenantId?.toLowerCase() !== credential.tenantId.toLowerCase() ||
+      !sameTenantId(identity.tenantId, credential.tenantId) ||
       claims.azp !== credential.clientId ||
       claims.preferred_username !== `service-account-${credential.clientId}`) return null;
   const row = await withDbSession(db, {
@@ -383,7 +384,7 @@ async function resolveScopedServiceTenant(
   });
   if (!row?.keycloak_organization_id || row.keycloak_realm !== realm) return null;
   const tenantId = await lookupTenantForOrganization(db, realm, row.keycloak_organization_id);
-  if (tenantId?.toLowerCase() !== credential.tenantId.toLowerCase()) return null;
+  if (!sameTenantId(tenantId, credential.tenantId)) return null;
   // If a service token also carries membership, it may not contradict the credential.
   if (claims.organization !== undefined &&
       await resolveHostOrganizationTenant(identity, claims, db) !== tenantId) return null;

@@ -37,6 +37,17 @@ import {
   organizationResourceScopes,
 } from "../mcp/organization-resource.js";
 
+/**
+ * Tenant ids are uuids and compare case-insensitively: Keycloak mints `tid`
+ * from a user attribute a human may have typed in either case, PostgreSQL
+ * renders uuids lower-case. One helper, so no comparison is left strict by
+ * accident.
+ */
+export function sameTenantId(left: string | null | undefined, right: string | null | undefined): boolean {
+  return typeof left === "string" && typeof right === "string" &&
+    left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
 export type OrganizationResourceBinding = {
   /** Keycloak Organization alias from the request path. */
   alias: string;
@@ -141,7 +152,7 @@ export async function bindOrganizationResource(
   }
   // A realm that still mints `tid` must agree with the registry; two
   // authorities that disagree is a provisioning fault, not a choice to make.
-  if (identity.tenantId && identity.tenantId !== tenantId) {
+  if (identity.tenantId && !sameTenantId(identity.tenantId, tenantId)) {
     throw new OrganizationBindingError(
       binding,
       `token tid ${identity.tenantId} disagrees with the tenant linked to organization "${binding.alias}"`,

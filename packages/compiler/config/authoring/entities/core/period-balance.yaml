@@ -11,6 +11,9 @@ filterField: dimensionsHash
 labels:
   en: Period balance
   nl: Periodesaldo
+pluralLabels:
+  en: Period balances
+  nl: Periodesaldi
 domains:
   - finance
 fields:

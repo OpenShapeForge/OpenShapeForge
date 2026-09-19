@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Encumbrance
   nl: Zekerheid
+pluralLabels:
+  en: Encumbrances
+  nl: Zekerheden
 domains:
   - asset
 fields:

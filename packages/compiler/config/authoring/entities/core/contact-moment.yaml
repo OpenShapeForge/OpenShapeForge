@@ -10,6 +10,9 @@ filterField: subject
 labels:
   en: Contact Moment
   nl: Contactmoment
+pluralLabels:
+  en: Contact moments
+  nl: Contactmomenten
 domains:
   - relations
 authorization:

@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Monitor measurement
   nl: Monitormeting
+pluralLabels:
+  en: Monitor measurements
+  nl: Monitormetingen
 domains:
   - energy
 fields:

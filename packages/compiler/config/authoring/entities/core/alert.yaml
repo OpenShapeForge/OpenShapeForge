@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Alert
   nl: Melding
+pluralLabels:
+  en: Alerts
+  nl: Meldingen
 domains:
   - crm
   - relations

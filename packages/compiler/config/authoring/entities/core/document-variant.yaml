@@ -7,6 +7,7 @@ description: One channel and language of a document's editable content, seeded f
   version's variant of the same channel and language. See docs/document-content.md.
 language: en
 labels: { en: Document variant, nl: Documentvariant }
+pluralLabels: { en: Document variants, nl: Documentvarianten }
 domains: [documents]
 authorization:
   roles:

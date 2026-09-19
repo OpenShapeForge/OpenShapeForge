@@ -10,6 +10,9 @@ filterField: slug
 labels:
   en: Tenant
   nl: Tenant
+pluralLabels:
+  en: Tenants
+  nl: Tenants
 domains:
   - core
 authorization:

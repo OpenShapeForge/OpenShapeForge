@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Research Result
   nl: Onderzoeksresultaat
+pluralLabels:
+  en: Research results
+  nl: Onderzoeksresultaten
 domains:
   - quality
 retention:

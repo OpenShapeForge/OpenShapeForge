@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Energy performance
   nl: Energieprestatie
+pluralLabels:
+  en: Energy performances
+  nl: Energieprestaties
 domains:
   - energy
 fields:

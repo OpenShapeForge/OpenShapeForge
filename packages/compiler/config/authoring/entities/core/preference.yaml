@@ -10,6 +10,9 @@ filterField: key
 labels:
   en: Preference
   nl: Voorkeur
+pluralLabels:
+  en: Preferences
+  nl: Voorkeuren
 domains:
   - core
 authorization:

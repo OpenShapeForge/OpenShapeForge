@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Space
   nl: Ruimte
+pluralLabels:
+  en: Spaces
+  nl: Ruimten
 domains:
   - asset
 fields:

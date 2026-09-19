@@ -10,6 +10,9 @@ filterField: statementNumber
 labels:
   en: Bank statement
   nl: Bankafschrift
+pluralLabels:
+  en: Bank statements
+  nl: Bankafschriften
 domains:
   - finance
 fields:

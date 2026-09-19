@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Invoice payment
   nl: Factuurbetaling
+pluralLabels:
+  en: Invoice payments
+  nl: Factuurbetalingen
 domains:
   - finance
 fields:

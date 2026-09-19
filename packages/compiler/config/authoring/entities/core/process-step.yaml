@@ -11,6 +11,9 @@ filterField: name
 labels:
   en: Process Step
   nl: Processtap
+pluralLabels:
+  en: Process steps
+  nl: Processtappen
 domains:
   - cases
   - workflow

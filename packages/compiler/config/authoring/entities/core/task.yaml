@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Task
   nl: Taak
+pluralLabels:
+  en: Tasks
+  nl: Taken
 domains:
   - tasks
 authorization:

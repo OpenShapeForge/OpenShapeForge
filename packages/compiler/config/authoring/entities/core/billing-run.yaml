@@ -11,6 +11,9 @@ filterField: idempotencyKey
 labels:
   en: Billing run
   nl: Facturatie-run
+pluralLabels:
+  en: Billing runs
+  nl: Facturatie-runs
 domains:
   - finance
 indexes:

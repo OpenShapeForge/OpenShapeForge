@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Inspection report
   nl: Inspectierapport
+pluralLabels:
+  en: Inspection reports
+  nl: Inspectierapporten
 domains:
   - maintenance
 fields:

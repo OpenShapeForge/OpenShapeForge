@@ -10,6 +10,9 @@ filterField: counterpartyName
 labels:
   en: Bank statement line
   nl: Bankafschriftregel
+pluralLabels:
+  en: Bank statement lines
+  nl: Bankafschriftregels
 domains:
   - finance
 fields:

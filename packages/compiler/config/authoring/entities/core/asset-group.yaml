@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Asset group
   nl: Objectgroep
+pluralLabels:
+  en: Asset groups
+  nl: Objectgroepen
 domains:
   - asset
 fields:

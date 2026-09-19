@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Maintenance task
   nl: Onderhoudstaak
+pluralLabels:
+  en: Maintenance tasks
+  nl: Onderhoudstaken
 domains:
   - maintenance
 fields:

@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Invoice collection item
   nl: Factuurincasso-regel
+pluralLabels:
+  en: Invoice collection items
+  nl: Factuurincasso-regels
 domains:
   - finance
 fields:

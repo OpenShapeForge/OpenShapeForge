@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Budget
   nl: Begroting
+pluralLabels:
+  en: Budgets
+  nl: Begrotingen
 domains:
   - finance
 fields:

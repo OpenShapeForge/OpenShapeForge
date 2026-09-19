@@ -10,6 +10,9 @@ filterField: linkType
 labels:
   en: Agreement link
   nl: Overeenkomstkoppeling
+pluralLabels:
+  en: Agreement links
+  nl: Overeenkomstkoppelingen
 domains:
   - contracts
 fields:

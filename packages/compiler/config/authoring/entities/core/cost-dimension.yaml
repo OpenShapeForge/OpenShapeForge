@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Cost dimension
   nl: Kostendimensie
+pluralLabels:
+  en: Cost dimensions
+  nl: Kostendimensies
 domains:
   - finance
 fields:

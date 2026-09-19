@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Org unit
   nl: Organisatorische eenheid
+pluralLabels:
+  en: Org units
+  nl: Organisatorische eenheden
 domains:
   - hr
 fields:

@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Work Queue
   nl: Werkqueue
+pluralLabels:
+  en: Work queues
+  nl: Werkqueues
 domains:
   - cases
   - service

@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Invoice VAT bucket
   nl: BTW-totaal
+pluralLabels:
+  en: Invoice VAT buckets
+  nl: BTW-totalen
 domains:
   - finance
 fields:

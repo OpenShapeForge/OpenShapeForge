@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Case Type
   nl: Zaaktype
+pluralLabels:
+  en: Case types
+  nl: Zaaktypen
 domains:
   - cases
   - governance

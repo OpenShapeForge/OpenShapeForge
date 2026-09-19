@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Asset condition
   nl: Conditie
+pluralLabels:
+  en: Asset conditions
+  nl: Condities
 domains:
   - asset
 fields:

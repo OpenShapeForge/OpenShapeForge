@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Maintenance request
   nl: Onderhoudsverzoek
+pluralLabels:
+  en: Maintenance requests
+  nl: Onderhoudsverzoeken
 domains:
   - maintenance
 fields:

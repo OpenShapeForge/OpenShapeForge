@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Agreement component
   nl: Overeenkomstcomponent
+pluralLabels:
+  en: Agreement components
+  nl: Overeenkomstcomponenten
 domains:
   - finance
   - contracts

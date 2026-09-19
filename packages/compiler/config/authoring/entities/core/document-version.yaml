@@ -11,6 +11,9 @@ filterField: versionLabel
 labels:
   en: Document Version
   nl: Documentversie
+pluralLabels:
+  en: Document versions
+  nl: Documentversies
 domains:
   - cases
   - records

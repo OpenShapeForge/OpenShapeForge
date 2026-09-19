@@ -12,6 +12,9 @@ filterField: name
 labels:
   en: Case Step Template
   nl: Zaakstapsjabloon
+pluralLabels:
+  en: Case step templates
+  nl: Zaakstapsjablonen
 domains:
   - cases
   - workflow

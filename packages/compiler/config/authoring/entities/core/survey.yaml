@@ -8,6 +8,9 @@ language: en
 labels:
   en: Survey
   nl: Vragenlijst
+pluralLabels:
+  en: Surveys
+  nl: Vragenlijsten
 domains:
   - quality
 displayTemplate: "{{title}}"

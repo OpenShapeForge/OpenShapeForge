@@ -10,6 +10,9 @@ filterField: referenceNumber
 labels:
   en: VAT return
   nl: BTW-aangifte
+pluralLabels:
+  en: VAT returns
+  nl: BTW-aangiften
 domains:
   - finance
 fields:

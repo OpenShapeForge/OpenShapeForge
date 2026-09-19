@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Case file
   nl: Dossier
+pluralLabels:
+  en: Case files
+  nl: Dossiers
 domains:
   - cases
   - records

@@ -5,6 +5,7 @@ entity: TemplateBlock
 title: Template block
 language: en
 labels: { en: Template block, nl: Templateblok }
+pluralLabels: { en: Template blocks, nl: Templateblokken }
 domains: [documents]
 baseEntity: false
 displayTemplate: "{{version}}"

@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Administrative region
   nl: Bestuurlijk gebied
+pluralLabels:
+  en: Administrative regions
+  nl: Bestuurlijke gebieden
 domains:
   - asset
 fields:

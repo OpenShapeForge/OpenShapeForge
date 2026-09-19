@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Fiscal year
   nl: Boekjaar
+pluralLabels:
+  en: Fiscal years
+  nl: Boekjaren
 domains:
   - finance
 fields:

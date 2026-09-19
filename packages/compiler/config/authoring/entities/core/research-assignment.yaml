@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Research Assignment
   nl: Onderzoeksopdracht
+pluralLabels:
+  en: Research assignments
+  nl: Onderzoeksopdrachten
 domains:
   - quality
 retention:

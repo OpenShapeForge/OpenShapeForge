@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Milestone
   nl: Mijlpaal
+pluralLabels:
+  en: Milestones
+  nl: Mijlpalen
 domains:
   - cases
   - service

@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Project objective
   nl: Projectdoelstelling
+pluralLabels:
+  en: Project objectives
+  nl: Projectdoelstellingen
 domains:
   - project
 fields:

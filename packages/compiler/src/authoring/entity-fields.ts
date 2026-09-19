@@ -40,10 +40,11 @@ export function assertEntityValueFieldPolicies(field: object, path: string, sema
   }
 }
 
-function inverseSource(entity: Pick<CoreEntity, "entity" | "labels" | "title" | "fields" | "baseEntity">): InverseCollectionSource {
+function inverseSource(entity: Pick<CoreEntity, "entity" | "labels" | "pluralLabels" | "title" | "fields" | "baseEntity">): InverseCollectionSource {
   return {
     entity: entity.entity,
     labels: entity.labels,
+    pluralLabels: entity.pluralLabels,
     title: entity.title,
     fields: entity.fields,
     valueDefinition: entity.baseEntity === false && !entity.fields.some((field) => field.key === "id"),

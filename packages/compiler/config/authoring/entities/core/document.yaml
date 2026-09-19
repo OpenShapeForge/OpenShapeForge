@@ -12,6 +12,9 @@ filterField: title
 labels:
   en: Document
   nl: Document
+pluralLabels:
+  en: Documents
+  nl: Documenten
 domains:
   - cases
   - records

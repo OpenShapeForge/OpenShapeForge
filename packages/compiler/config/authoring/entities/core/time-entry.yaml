@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Time entry
   nl: Tijdsbesteding
+pluralLabels:
+  en: Time entries
+  nl: Tijdsbestedingen
 domains:
   - hr
 fields:

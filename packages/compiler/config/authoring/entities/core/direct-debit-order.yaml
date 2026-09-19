@@ -10,6 +10,9 @@ filterField: endToEndId
 labels:
   en: Direct debit order
   nl: Incasso-opdracht
+pluralLabels:
+  en: Direct debit orders
+  nl: Incasso-opdrachten
 domains:
   - finance
 fields:

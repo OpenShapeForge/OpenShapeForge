@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Project budget line
   nl: Projectbudgetregel
+pluralLabels:
+  en: Project budget lines
+  nl: Projectbudgetregels
 domains:
   - project
 fields:

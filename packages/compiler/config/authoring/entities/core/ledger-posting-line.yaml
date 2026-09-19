@@ -11,6 +11,9 @@ filterField: description
 labels:
   en: Ledger posting line
   nl: Boekingsregel
+pluralLabels:
+  en: Ledger posting lines
+  nl: Boekingsregels
 domains:
   - finance
 fields:

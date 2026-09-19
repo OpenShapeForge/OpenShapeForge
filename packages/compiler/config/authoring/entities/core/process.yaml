@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Case Step Container
   nl: Zaakstapcontainer
+pluralLabels:
+  en: Case step containers
+  nl: Zaakstapcontainers
 domains:
   - cases
   - records

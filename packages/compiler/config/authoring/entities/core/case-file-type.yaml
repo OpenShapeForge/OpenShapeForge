@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Case file type
   nl: Dossiertype
+pluralLabels:
+  en: Case file types
+  nl: Dossiertypen
 domains:
   - cases
   - governance

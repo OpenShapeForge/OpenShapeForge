@@ -3999,8 +3999,8 @@
         {
           "key": "caseStatusEvents",
           "label": {
-            "en": "Case Status Event",
-            "nl": "Zaakstatusgebeurtenis"
+            "en": "Case status events",
+            "nl": "Zaakstatusgebeurtenissen"
           },
           "osfType": "CaseStatusEvent",
           "cardinality": "collection",
@@ -4012,8 +4012,8 @@
         {
           "key": "documentVersions",
           "label": {
-            "en": "Document Version",
-            "nl": "Documentversie"
+            "en": "Document versions",
+            "nl": "Documentversies"
           },
           "osfType": "DocumentVersion",
           "cardinality": "collection",
@@ -4025,8 +4025,8 @@
         {
           "key": "milestones",
           "label": {
-            "en": "Milestone",
-            "nl": "Mijlpaal"
+            "en": "Milestones",
+            "nl": "Mijlpalen"
           },
           "osfType": "Milestone",
           "cardinality": "collection",
@@ -4038,8 +4038,8 @@
         {
           "key": "preferences",
           "label": {
-            "en": "Preference",
-            "nl": "Voorkeur"
+            "en": "Preferences",
+            "nl": "Voorkeuren"
           },
           "osfType": "Preference",
           "cardinality": "collection",
@@ -4051,8 +4051,8 @@
         {
           "key": "supportIssues",
           "label": {
-            "en": "Support issue",
-            "nl": "Supportverzoek"
+            "en": "Support issues",
+            "nl": "Supportverzoeken"
           },
           "osfType": "SupportIssue",
           "cardinality": "collection",
@@ -4326,8 +4326,8 @@
         {
           "key": "addressAssignments",
           "label": {
-            "en": "Address Assignment",
-            "nl": "Adrestoewijzing"
+            "en": "Address assignments",
+            "nl": "Adrestoewijzingen"
           },
           "osfType": "AddressAssignment",
           "cardinality": "collection",
@@ -4339,8 +4339,8 @@
         {
           "key": "agreementParties",
           "label": {
-            "en": "Agreement party",
-            "nl": "Overeenkomstpartij"
+            "en": "Agreement parties",
+            "nl": "Overeenkomstpartijen"
           },
           "osfType": "AgreementParty",
           "cardinality": "collection",
@@ -4352,8 +4352,8 @@
         {
           "key": "buildings",
           "label": {
-            "en": "Building",
-            "nl": "Pand"
+            "en": "Buildings",
+            "nl": "Panden"
           },
           "osfType": "Building",
           "cardinality": "collection",
@@ -4533,8 +4533,8 @@
         {
           "key": "agreementParties",
           "label": {
-            "en": "Agreement party",
-            "nl": "Overeenkomstpartij"
+            "en": "Agreement parties",
+            "nl": "Overeenkomstpartijen"
           },
           "osfType": "AgreementParty",
           "cardinality": "collection",
@@ -5163,8 +5163,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -5176,8 +5176,8 @@
         {
           "key": "agreementComponents",
           "label": {
-            "en": "Agreement component",
-            "nl": "Overeenkomstcomponent"
+            "en": "Agreement components",
+            "nl": "Overeenkomstcomponenten"
           },
           "osfType": "AgreementComponent",
           "cardinality": "collection",
@@ -5189,8 +5189,8 @@
         {
           "key": "agreementMilestones",
           "label": {
-            "en": "Agreement milestone",
-            "nl": "Overeenkomstmijlpaal"
+            "en": "Agreement milestones",
+            "nl": "Overeenkomstmijlpalen"
           },
           "osfType": "AgreementMilestone",
           "cardinality": "collection",
@@ -5202,8 +5202,8 @@
         {
           "key": "billingRunItems",
           "label": {
-            "en": "Billing run item",
-            "nl": "Facturatie-run-item"
+            "en": "Billing run items",
+            "nl": "Facturatie-run-items"
           },
           "osfType": "BillingRunItem",
           "cardinality": "collection",
@@ -5215,8 +5215,8 @@
         {
           "key": "billingSchedules",
           "label": {
-            "en": "Billing schedule",
-            "nl": "Facturatieschema"
+            "en": "Billing schedules",
+            "nl": "Facturatieschema's"
           },
           "osfType": "BillingSchedule",
           "cardinality": "collection",
@@ -5241,8 +5241,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -5254,8 +5254,8 @@
         {
           "key": "ledgerPostingLines",
           "label": {
-            "en": "Ledger posting line",
-            "nl": "Boekingsregel"
+            "en": "Ledger posting lines",
+            "nl": "Boekingsregels"
           },
           "osfType": "LedgerPostingLine",
           "cardinality": "collection",
@@ -5267,8 +5267,8 @@
         {
           "key": "maintenanceOrders",
           "label": {
-            "en": "Maintenance order",
-            "nl": "Onderhoudsorder"
+            "en": "Maintenance orders",
+            "nl": "Onderhoudsorders"
           },
           "osfType": "MaintenanceOrder",
           "cardinality": "collection",
@@ -5293,8 +5293,8 @@
         {
           "key": "purchaseOrders",
           "label": {
-            "en": "Purchase order",
-            "nl": "Inkoopopdracht"
+            "en": "Purchase orders",
+            "nl": "Inkoopopdrachten"
           },
           "osfType": "PurchaseOrder",
           "cardinality": "collection",
@@ -5306,8 +5306,8 @@
         {
           "key": "quotes",
           "label": {
-            "en": "Quote",
-            "nl": "Offerte"
+            "en": "Quotes",
+            "nl": "Offertes"
           },
           "osfType": "Quote",
           "cardinality": "collection",
@@ -5319,8 +5319,8 @@
         {
           "key": "timeEntries",
           "label": {
-            "en": "Time entry",
-            "nl": "Tijdsbesteding"
+            "en": "Time entries",
+            "nl": "Tijdsbestedingen"
           },
           "osfType": "TimeEntry",
           "cardinality": "collection",
@@ -5610,8 +5610,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -5623,8 +5623,8 @@
         {
           "key": "invoiceLines",
           "label": {
-            "en": "Invoice line",
-            "nl": "Factuurregel"
+            "en": "Invoice lines",
+            "nl": "Factuurregels"
           },
           "osfType": "InvoiceLine",
           "cardinality": "collection",
@@ -5636,8 +5636,8 @@
         {
           "key": "purchaseOrderLines",
           "label": {
-            "en": "Purchase order line",
-            "nl": "Inkoopopdrachtregel"
+            "en": "Purchase order lines",
+            "nl": "Inkoopopdrachtregels"
           },
           "osfType": "PurchaseOrderLine",
           "cardinality": "collection",
@@ -5649,8 +5649,8 @@
         {
           "key": "quoteLines",
           "label": {
-            "en": "Quote line",
-            "nl": "Offerteregel"
+            "en": "Quote lines",
+            "nl": "Offerteregels"
           },
           "osfType": "QuoteLine",
           "cardinality": "collection",
@@ -6160,8 +6160,8 @@
         {
           "key": "agreementComponents",
           "label": {
-            "en": "Agreement component",
-            "nl": "Overeenkomstcomponent"
+            "en": "Agreement components",
+            "nl": "Overeenkomstcomponenten"
           },
           "osfType": "AgreementComponent",
           "cardinality": "collection",
@@ -6486,8 +6486,8 @@
         {
           "key": "billingRunItems",
           "label": {
-            "en": "Billing run item",
-            "nl": "Facturatie-run-item"
+            "en": "Billing run items",
+            "nl": "Facturatie-run-items"
           },
           "osfType": "BillingRunItem",
           "cardinality": "collection",
@@ -6837,8 +6837,8 @@
         {
           "key": "invoiceCollectionItems",
           "label": {
-            "en": "Invoice collection item",
-            "nl": "Factuurincasso-regel"
+            "en": "Invoice collection items",
+            "nl": "Factuurincasso-regels"
           },
           "osfType": "InvoiceCollectionItem",
           "cardinality": "collection",
@@ -7291,8 +7291,8 @@
         {
           "key": "appointmentRequests",
           "label": {
-            "en": "Appointment request",
-            "nl": "Afspraakverzoek"
+            "en": "Appointment requests",
+            "nl": "Afspraakverzoeken"
           },
           "osfType": "AppointmentRequest",
           "cardinality": "collection",
@@ -8093,8 +8093,8 @@
         {
           "key": "areas",
           "label": {
-            "en": "Area",
-            "nl": "Oppervlakte"
+            "en": "Areas",
+            "nl": "Oppervlakten"
           },
           "osfType": "Area",
           "cardinality": "collection",
@@ -8106,8 +8106,8 @@
         {
           "key": "assetConditions",
           "label": {
-            "en": "Asset condition",
-            "nl": "Conditie"
+            "en": "Asset conditions",
+            "nl": "Condities"
           },
           "osfType": "AssetCondition",
           "cardinality": "collection",
@@ -8132,8 +8132,8 @@
         {
           "key": "conditionAssessments",
           "label": {
-            "en": "Condition assessment",
-            "nl": "Conditiemeting"
+            "en": "Condition assessments",
+            "nl": "Conditiemetingen"
           },
           "osfType": "ConditionAssessment",
           "cardinality": "collection",
@@ -8145,8 +8145,8 @@
         {
           "key": "encumbrances",
           "label": {
-            "en": "Encumbrance",
-            "nl": "Zekerheid"
+            "en": "Encumbrances",
+            "nl": "Zekerheden"
           },
           "osfType": "Encumbrance",
           "cardinality": "collection",
@@ -8158,8 +8158,8 @@
         {
           "key": "energyPerformances",
           "label": {
-            "en": "Energy performance",
-            "nl": "Energieprestatie"
+            "en": "Energy performances",
+            "nl": "Energieprestaties"
           },
           "osfType": "EnergyPerformance",
           "cardinality": "collection",
@@ -8171,8 +8171,8 @@
         {
           "key": "inspectionReports",
           "label": {
-            "en": "Inspection report",
-            "nl": "Inspectierapport"
+            "en": "Inspection reports",
+            "nl": "Inspectierapporten"
           },
           "osfType": "InspectionReport",
           "cardinality": "collection",
@@ -8184,8 +8184,8 @@
         {
           "key": "maintenanceOrders",
           "label": {
-            "en": "Maintenance order",
-            "nl": "Onderhoudsorder"
+            "en": "Maintenance orders",
+            "nl": "Onderhoudsorders"
           },
           "osfType": "MaintenanceOrder",
           "cardinality": "collection",
@@ -8197,8 +8197,8 @@
         {
           "key": "maintenanceRequests",
           "label": {
-            "en": "Maintenance request",
-            "nl": "Onderhoudsverzoek"
+            "en": "Maintenance requests",
+            "nl": "Onderhoudsverzoeken"
           },
           "osfType": "MaintenanceRequest",
           "cardinality": "collection",
@@ -8210,8 +8210,8 @@
         {
           "key": "monitorLogs",
           "label": {
-            "en": "Monitor log",
-            "nl": "Monitorlog"
+            "en": "Monitor logs",
+            "nl": "Monitorlogs"
           },
           "osfType": "MonitorLog",
           "cardinality": "collection",
@@ -8223,8 +8223,8 @@
         {
           "key": "points",
           "label": {
-            "en": "Point",
-            "nl": "Punt"
+            "en": "Points",
+            "nl": "Punten"
           },
           "osfType": "Point",
           "cardinality": "collection",
@@ -8236,8 +8236,8 @@
         {
           "key": "valuations",
           "label": {
-            "en": "Valuation",
-            "nl": "Waardering"
+            "en": "Valuations",
+            "nl": "Waarderingen"
           },
           "osfType": "Valuation",
           "cardinality": "collection",
@@ -8249,8 +8249,8 @@
         {
           "key": "warranties",
           "label": {
-            "en": "Warranty",
-            "nl": "Garantie"
+            "en": "Warranties",
+            "nl": "Garanties"
           },
           "osfType": "Warranty",
           "cardinality": "collection",
@@ -8529,8 +8529,8 @@
         {
           "key": "assets",
           "label": {
-            "en": "Asset",
-            "nl": "Object"
+            "en": "Assets",
+            "nl": "Objecten"
           },
           "osfType": "Asset",
           "cardinality": "collection",
@@ -9143,8 +9143,8 @@
         {
           "key": "bankStatementLines",
           "label": {
-            "en": "Bank statement line",
-            "nl": "Bankafschriftregel"
+            "en": "Bank statement lines",
+            "nl": "Bankafschriftregels"
           },
           "osfType": "BankStatementLine",
           "cardinality": "collection",
@@ -9346,8 +9346,8 @@
         {
           "key": "bankReconciliations",
           "label": {
-            "en": "Bank reconciliation",
-            "nl": "Aflettering"
+            "en": "Bank reconciliations",
+            "nl": "Afletteringen"
           },
           "osfType": "BankReconciliation",
           "cardinality": "collection",
@@ -9359,8 +9359,8 @@
         {
           "key": "invoicePayments",
           "label": {
-            "en": "Invoice payment",
-            "nl": "Factuurbetaling"
+            "en": "Invoice payments",
+            "nl": "Factuurbetalingen"
           },
           "osfType": "InvoicePayment",
           "cardinality": "collection",
@@ -9665,8 +9665,8 @@
         {
           "key": "billingRunItems",
           "label": {
-            "en": "Billing run item",
-            "nl": "Facturatie-run-item"
+            "en": "Billing run items",
+            "nl": "Facturatie-run-items"
           },
           "osfType": "BillingRunItem",
           "cardinality": "collection",
@@ -10171,8 +10171,8 @@
         {
           "key": "billingRunItems",
           "label": {
-            "en": "Billing run item",
-            "nl": "Facturatie-run-item"
+            "en": "Billing run items",
+            "nl": "Facturatie-run-items"
           },
           "osfType": "BillingRunItem",
           "cardinality": "collection",
@@ -10565,8 +10565,8 @@
         {
           "key": "budgetLines",
           "label": {
-            "en": "Budget line",
-            "nl": "Begrotingsregel"
+            "en": "Budget lines",
+            "nl": "Begrotingsregels"
           },
           "osfType": "BudgetLine",
           "cardinality": "collection",
@@ -10851,8 +10851,8 @@
         {
           "key": "areas",
           "label": {
-            "en": "Area",
-            "nl": "Oppervlakte"
+            "en": "Areas",
+            "nl": "Oppervlakten"
           },
           "osfType": "Area",
           "cardinality": "collection",
@@ -10864,8 +10864,8 @@
         {
           "key": "assets",
           "label": {
-            "en": "Asset",
-            "nl": "Object"
+            "en": "Assets",
+            "nl": "Objecten"
           },
           "osfType": "Asset",
           "cardinality": "collection",
@@ -10877,8 +10877,8 @@
         {
           "key": "buildingParts",
           "label": {
-            "en": "Building part",
-            "nl": "Bouwdeel"
+            "en": "Building parts",
+            "nl": "Bouwdelen"
           },
           "osfType": "BuildingPart",
           "cardinality": "collection",
@@ -10890,8 +10890,8 @@
         {
           "key": "points",
           "label": {
-            "en": "Point",
-            "nl": "Punt"
+            "en": "Points",
+            "nl": "Punten"
           },
           "osfType": "Point",
           "cardinality": "collection",
@@ -10903,8 +10903,8 @@
         {
           "key": "spaces",
           "label": {
-            "en": "Space",
-            "nl": "Ruimte"
+            "en": "Spaces",
+            "nl": "Ruimten"
           },
           "osfType": "Space",
           "cardinality": "collection",
@@ -11883,8 +11883,8 @@
         {
           "key": "qualityMeasurementRequests",
           "label": {
-            "en": "Quality Measurement Request",
-            "nl": "Kwaliteitsmetingsverzoek"
+            "en": "Quality measurement requests",
+            "nl": "Kwaliteitsmetingsverzoeken"
           },
           "osfType": "QualityMeasurementRequest",
           "cardinality": "collection",
@@ -13699,8 +13699,8 @@
         {
           "key": "caseStepActions",
           "label": {
-            "en": "Case Step Action",
-            "nl": "Zaakstapactie"
+            "en": "Case step actions",
+            "nl": "Zaakstapacties"
           },
           "osfType": "CaseStepAction",
           "cardinality": "collection",
@@ -13981,8 +13981,8 @@
         {
           "key": "processes",
           "label": {
-            "en": "Case Step Container",
-            "nl": "Zaakstapcontainer"
+            "en": "Case step containers",
+            "nl": "Zaakstapcontainers"
           },
           "osfType": "Process",
           "cardinality": "collection",
@@ -15143,8 +15143,8 @@
         {
           "key": "communicationPreferences",
           "label": {
-            "en": "Communication Preference",
-            "nl": "Communicatievoorkeur"
+            "en": "Communication preferences",
+            "nl": "Communicatievoorkeuren"
           },
           "osfType": "CommunicationPreference",
           "cardinality": "collection",
@@ -15384,8 +15384,8 @@
         {
           "key": "qualityMeasurementRequests",
           "label": {
-            "en": "Quality Measurement Request",
-            "nl": "Kwaliteitsmetingsverzoek"
+            "en": "Quality measurement requests",
+            "nl": "Kwaliteitsmetingsverzoeken"
           },
           "osfType": "QualityMeasurementRequest",
           "cardinality": "collection",
@@ -15513,8 +15513,8 @@
         {
           "key": "agreementComponentTypes",
           "label": {
-            "en": "Agreement component type",
-            "nl": "Overeenkomstcomponenttype"
+            "en": "Agreement component types",
+            "nl": "Overeenkomstcomponenttypen"
           },
           "osfType": "AgreementComponentType",
           "cardinality": "collection",
@@ -15526,8 +15526,8 @@
         {
           "key": "budgetLines",
           "label": {
-            "en": "Budget line",
-            "nl": "Begrotingsregel"
+            "en": "Budget lines",
+            "nl": "Begrotingsregels"
           },
           "osfType": "BudgetLine",
           "cardinality": "collection",
@@ -15552,8 +15552,8 @@
         {
           "key": "maintenanceSpendings",
           "label": {
-            "en": "Maintenance spending",
-            "nl": "Onderhoudsbesteding"
+            "en": "Maintenance spendings",
+            "nl": "Onderhoudsbestedingen"
           },
           "osfType": "MaintenanceSpending",
           "cardinality": "collection",
@@ -15565,8 +15565,8 @@
         {
           "key": "projectBudgetLines",
           "label": {
-            "en": "Project budget line",
-            "nl": "Projectbudgetregel"
+            "en": "Project budget lines",
+            "nl": "Projectbudgetregels"
           },
           "osfType": "ProjectBudgetLine",
           "cardinality": "collection",
@@ -15578,8 +15578,8 @@
         {
           "key": "projectSpendings",
           "label": {
-            "en": "Project spending",
-            "nl": "Projectbesteding"
+            "en": "Project spendings",
+            "nl": "Projectbestedingen"
           },
           "osfType": "ProjectSpending",
           "cardinality": "collection",
@@ -15591,8 +15591,8 @@
         {
           "key": "projects",
           "label": {
-            "en": "Project",
-            "nl": "Project"
+            "en": "Projects",
+            "nl": "Projecten"
           },
           "osfType": "Project",
           "cardinality": "collection",
@@ -15604,8 +15604,8 @@
         {
           "key": "vatRates",
           "label": {
-            "en": "VAT rate",
-            "nl": "BTW-tarief"
+            "en": "VAT rates",
+            "nl": "BTW-tarieven"
           },
           "osfType": "VatRate",
           "cardinality": "collection",
@@ -16430,8 +16430,8 @@
         {
           "key": "debtors",
           "label": {
-            "en": "Debtor",
-            "nl": "Debiteur"
+            "en": "Debtors",
+            "nl": "Debiteuren"
           },
           "osfType": "Debtor",
           "cardinality": "collection",
@@ -16443,8 +16443,8 @@
         {
           "key": "directDebitOrders",
           "label": {
-            "en": "Direct debit order",
-            "nl": "Incasso-opdracht"
+            "en": "Direct debit orders",
+            "nl": "Incasso-opdrachten"
           },
           "osfType": "DirectDebitOrder",
           "cardinality": "collection",
@@ -16456,8 +16456,8 @@
         {
           "key": "invoiceCollectionItems",
           "label": {
-            "en": "Invoice collection item",
-            "nl": "Factuurincasso-regel"
+            "en": "Invoice collection items",
+            "nl": "Factuurincasso-regels"
           },
           "osfType": "InvoiceCollectionItem",
           "cardinality": "collection",
@@ -16469,8 +16469,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -17134,8 +17134,8 @@
         {
           "key": "agreements",
           "label": {
-            "en": "Agreement",
-            "nl": "Overeenkomst"
+            "en": "Agreements",
+            "nl": "Overeenkomsten"
           },
           "osfType": "Agreement",
           "cardinality": "collection",
@@ -17147,8 +17147,8 @@
         {
           "key": "quotes",
           "label": {
-            "en": "Quote",
-            "nl": "Offerte"
+            "en": "Quotes",
+            "nl": "Offertes"
           },
           "osfType": "Quote",
           "cardinality": "collection",
@@ -17817,8 +17817,8 @@
         {
           "key": "documents",
           "label": {
-            "en": "Document",
-            "nl": "Document"
+            "en": "Documents",
+            "nl": "Documenten"
           },
           "osfType": "Document",
           "cardinality": "collection",
@@ -18001,8 +18001,8 @@
         {
           "key": "employeeBudgets",
           "label": {
-            "en": "Employee budget",
-            "nl": "Medewerkerbudget"
+            "en": "Employee budgets",
+            "nl": "Medewerkerbudgetten"
           },
           "osfType": "EmployeeBudget",
           "cardinality": "collection",
@@ -18040,8 +18040,8 @@
         {
           "key": "timeEntries",
           "label": {
-            "en": "Time entry",
-            "nl": "Tijdsbesteding"
+            "en": "Time entries",
+            "nl": "Tijdsbestedingen"
           },
           "osfType": "TimeEntry",
           "cardinality": "collection",
@@ -18495,8 +18495,8 @@
         {
           "key": "employeeRoles",
           "label": {
-            "en": "Employee role",
-            "nl": "Medewerkerrol"
+            "en": "Employee roles",
+            "nl": "Medewerkerrollen"
           },
           "osfType": "EmployeeRole",
           "cardinality": "collection",
@@ -18858,8 +18858,8 @@
         {
           "key": "energyPerformanceMeasurements",
           "label": {
-            "en": "Energy performance measurement",
-            "nl": "Energieprestatiemeting"
+            "en": "Energy performance measurements",
+            "nl": "Energieprestatiemetingen"
           },
           "osfType": "EnergyPerformanceMeasurement",
           "cardinality": "collection",
@@ -19130,8 +19130,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -19143,8 +19143,8 @@
         {
           "key": "budgetLines",
           "label": {
-            "en": "Budget line",
-            "nl": "Begrotingsregel"
+            "en": "Budget lines",
+            "nl": "Begrotingsregels"
           },
           "osfType": "BudgetLine",
           "cardinality": "collection",
@@ -19156,8 +19156,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -19169,8 +19169,8 @@
         {
           "key": "ledgerPostings",
           "label": {
-            "en": "Ledger posting",
-            "nl": "Boeking"
+            "en": "Ledger postings",
+            "nl": "Boekingen"
           },
           "osfType": "LedgerPosting",
           "cardinality": "collection",
@@ -19182,8 +19182,8 @@
         {
           "key": "periodBalances",
           "label": {
-            "en": "Period balance",
-            "nl": "Periodesaldo"
+            "en": "Period balances",
+            "nl": "Periodesaldi"
           },
           "osfType": "PeriodBalance",
           "cardinality": "collection",
@@ -19195,8 +19195,8 @@
         {
           "key": "projectBudgetLines",
           "label": {
-            "en": "Project budget line",
-            "nl": "Projectbudgetregel"
+            "en": "Project budget lines",
+            "nl": "Projectbudgetregels"
           },
           "osfType": "ProjectBudgetLine",
           "cardinality": "collection",
@@ -19208,8 +19208,8 @@
         {
           "key": "vatReturns",
           "label": {
-            "en": "VAT return",
-            "nl": "BTW-aangifte"
+            "en": "VAT returns",
+            "nl": "BTW-aangiften"
           },
           "osfType": "VatReturn",
           "cardinality": "collection",
@@ -19336,8 +19336,8 @@
         {
           "key": "budgets",
           "label": {
-            "en": "Budget",
-            "nl": "Begroting"
+            "en": "Budgets",
+            "nl": "Begrotingen"
           },
           "osfType": "Budget",
           "cardinality": "collection",
@@ -19349,8 +19349,8 @@
         {
           "key": "fiscalPeriods",
           "label": {
-            "en": "Fiscal period",
-            "nl": "Boekjaarperiode"
+            "en": "Fiscal periods",
+            "nl": "Boekjaarperioden"
           },
           "osfType": "FiscalPeriod",
           "cardinality": "collection",
@@ -19489,8 +19489,8 @@
         {
           "key": "conditionAssessments",
           "label": {
-            "en": "Condition assessment",
-            "nl": "Conditiemeting"
+            "en": "Condition assessments",
+            "nl": "Conditiemetingen"
           },
           "osfType": "ConditionAssessment",
           "cardinality": "collection",
@@ -19938,8 +19938,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -19951,8 +19951,8 @@
         {
           "key": "agreementMilestones",
           "label": {
-            "en": "Agreement milestone",
-            "nl": "Overeenkomstmijlpaal"
+            "en": "Agreement milestones",
+            "nl": "Overeenkomstmijlpalen"
           },
           "osfType": "AgreementMilestone",
           "cardinality": "collection",
@@ -19964,8 +19964,8 @@
         {
           "key": "billingRunItems",
           "label": {
-            "en": "Billing run item",
-            "nl": "Facturatie-run-item"
+            "en": "Billing run items",
+            "nl": "Facturatie-run-items"
           },
           "osfType": "BillingRunItem",
           "cardinality": "collection",
@@ -19977,8 +19977,8 @@
         {
           "key": "invoiceCollectionItems",
           "label": {
-            "en": "Invoice collection item",
-            "nl": "Factuurincasso-regel"
+            "en": "Invoice collection items",
+            "nl": "Factuurincasso-regels"
           },
           "osfType": "InvoiceCollectionItem",
           "cardinality": "collection",
@@ -19990,8 +19990,8 @@
         {
           "key": "invoiceLines",
           "label": {
-            "en": "Invoice line",
-            "nl": "Factuurregel"
+            "en": "Invoice lines",
+            "nl": "Factuurregels"
           },
           "osfType": "InvoiceLine",
           "cardinality": "collection",
@@ -20003,8 +20003,8 @@
         {
           "key": "invoicePayments",
           "label": {
-            "en": "Invoice payment",
-            "nl": "Factuurbetaling"
+            "en": "Invoice payments",
+            "nl": "Factuurbetalingen"
           },
           "osfType": "InvoicePayment",
           "cardinality": "collection",
@@ -20016,8 +20016,8 @@
         {
           "key": "invoiceVatBuckets",
           "label": {
-            "en": "Invoice VAT bucket",
-            "nl": "BTW-totaal"
+            "en": "Invoice VAT buckets",
+            "nl": "BTW-totalen"
           },
           "osfType": "InvoiceVatBucket",
           "cardinality": "collection",
@@ -20029,8 +20029,8 @@
         {
           "key": "maintenanceRequestSettlements",
           "label": {
-            "en": "Maintenance request settlement",
-            "nl": "Onderhoudsverzoek-verrekening"
+            "en": "Maintenance request settlements",
+            "nl": "Onderhoudsverzoek-verrekeningen"
           },
           "osfType": "MaintenanceRequestSettlement",
           "cardinality": "collection",
@@ -20567,8 +20567,8 @@
         {
           "key": "bankReconciliations",
           "label": {
-            "en": "Bank reconciliation",
-            "nl": "Aflettering"
+            "en": "Bank reconciliations",
+            "nl": "Afletteringen"
           },
           "osfType": "BankReconciliation",
           "cardinality": "collection",
@@ -20580,8 +20580,8 @@
         {
           "key": "paymentPlanInstalments",
           "label": {
-            "en": "Payment plan instalment",
-            "nl": "Termijn"
+            "en": "Payment plan instalments",
+            "nl": "Termijnen"
           },
           "osfType": "PaymentPlanInstalment",
           "cardinality": "collection",
@@ -21335,8 +21335,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -21348,8 +21348,8 @@
         {
           "key": "budgetLines",
           "label": {
-            "en": "Budget line",
-            "nl": "Begrotingsregel"
+            "en": "Budget lines",
+            "nl": "Begrotingsregels"
           },
           "osfType": "BudgetLine",
           "cardinality": "collection",
@@ -21374,8 +21374,8 @@
         {
           "key": "creditors",
           "label": {
-            "en": "Creditor",
-            "nl": "Crediteur"
+            "en": "Creditors",
+            "nl": "Crediteuren"
           },
           "osfType": "Creditor",
           "cardinality": "collection",
@@ -21387,8 +21387,8 @@
         {
           "key": "debtors",
           "label": {
-            "en": "Debtor",
-            "nl": "Debiteur"
+            "en": "Debtors",
+            "nl": "Debiteuren"
           },
           "osfType": "Debtor",
           "cardinality": "collection",
@@ -21400,8 +21400,8 @@
         {
           "key": "invoiceLines",
           "label": {
-            "en": "Invoice line",
-            "nl": "Factuurregel"
+            "en": "Invoice lines",
+            "nl": "Factuurregels"
           },
           "osfType": "InvoiceLine",
           "cardinality": "collection",
@@ -21413,8 +21413,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -21426,8 +21426,8 @@
         {
           "key": "ledgerPostingLines",
           "label": {
-            "en": "Ledger posting line",
-            "nl": "Boekingsregel"
+            "en": "Ledger posting lines",
+            "nl": "Boekingsregels"
           },
           "osfType": "LedgerPostingLine",
           "cardinality": "collection",
@@ -21439,8 +21439,8 @@
         {
           "key": "maintenanceSpendings",
           "label": {
-            "en": "Maintenance spending",
-            "nl": "Onderhoudsbesteding"
+            "en": "Maintenance spendings",
+            "nl": "Onderhoudsbestedingen"
           },
           "osfType": "MaintenanceSpending",
           "cardinality": "collection",
@@ -21452,8 +21452,8 @@
         {
           "key": "periodBalances",
           "label": {
-            "en": "Period balance",
-            "nl": "Periodesaldo"
+            "en": "Period balances",
+            "nl": "Periodesaldi"
           },
           "osfType": "PeriodBalance",
           "cardinality": "collection",
@@ -21465,8 +21465,8 @@
         {
           "key": "projectBudgetLines",
           "label": {
-            "en": "Project budget line",
-            "nl": "Projectbudgetregel"
+            "en": "Project budget lines",
+            "nl": "Projectbudgetregels"
           },
           "osfType": "ProjectBudgetLine",
           "cardinality": "collection",
@@ -21478,8 +21478,8 @@
         {
           "key": "projectSpendings",
           "label": {
-            "en": "Project spending",
-            "nl": "Projectbesteding"
+            "en": "Project spendings",
+            "nl": "Projectbestedingen"
           },
           "osfType": "ProjectSpending",
           "cardinality": "collection",
@@ -21491,8 +21491,8 @@
         {
           "key": "purchaseOrderLines",
           "label": {
-            "en": "Purchase order line",
-            "nl": "Inkoopopdrachtregel"
+            "en": "Purchase order lines",
+            "nl": "Inkoopopdrachtregels"
           },
           "osfType": "PurchaseOrderLine",
           "cardinality": "collection",
@@ -21504,8 +21504,8 @@
         {
           "key": "quoteLines",
           "label": {
-            "en": "Quote line",
-            "nl": "Offerteregel"
+            "en": "Quote lines",
+            "nl": "Offerteregels"
           },
           "osfType": "QuoteLine",
           "cardinality": "collection",
@@ -21517,8 +21517,8 @@
         {
           "key": "vatRates",
           "label": {
-            "en": "VAT rate",
-            "nl": "BTW-tarief"
+            "en": "VAT rates",
+            "nl": "BTW-tarieven"
           },
           "osfType": "VatRate",
           "cardinality": "collection",
@@ -21698,8 +21698,8 @@
         {
           "key": "ledgerPostingLines",
           "label": {
-            "en": "Ledger posting line",
-            "nl": "Boekingsregel"
+            "en": "Ledger posting lines",
+            "nl": "Boekingsregels"
           },
           "osfType": "LedgerPostingLine",
           "cardinality": "collection",
@@ -21711,8 +21711,8 @@
         {
           "key": "ledgerPostings",
           "label": {
-            "en": "Ledger posting",
-            "nl": "Boeking"
+            "en": "Ledger postings",
+            "nl": "Boekingen"
           },
           "osfType": "LedgerPosting",
           "cardinality": "collection",
@@ -21929,8 +21929,8 @@
         {
           "key": "bankReconciliations",
           "label": {
-            "en": "Bank reconciliation",
-            "nl": "Aflettering"
+            "en": "Bank reconciliations",
+            "nl": "Afletteringen"
           },
           "osfType": "BankReconciliation",
           "cardinality": "collection",
@@ -22416,8 +22416,8 @@
         {
           "key": "maintenanceOrderParties",
           "label": {
-            "en": "Maintenance order party",
-            "nl": "Partij op onderhoudsorder"
+            "en": "Maintenance order parties",
+            "nl": "Partijen op onderhoudsorder"
           },
           "osfType": "MaintenanceOrderParty",
           "cardinality": "collection",
@@ -22429,8 +22429,8 @@
         {
           "key": "maintenanceSpendings",
           "label": {
-            "en": "Maintenance spending",
-            "nl": "Onderhoudsbesteding"
+            "en": "Maintenance spendings",
+            "nl": "Onderhoudsbestedingen"
           },
           "osfType": "MaintenanceSpending",
           "cardinality": "collection",
@@ -22442,8 +22442,8 @@
         {
           "key": "maintenanceTasks",
           "label": {
-            "en": "Maintenance task",
-            "nl": "Onderhoudstaak"
+            "en": "Maintenance tasks",
+            "nl": "Onderhoudstaken"
           },
           "osfType": "MaintenanceTask",
           "cardinality": "collection",
@@ -22899,8 +22899,8 @@
         {
           "key": "maintenanceOrders",
           "label": {
-            "en": "Maintenance order",
-            "nl": "Onderhoudsorder"
+            "en": "Maintenance orders",
+            "nl": "Onderhoudsorders"
           },
           "osfType": "MaintenanceOrder",
           "cardinality": "collection",
@@ -22912,8 +22912,8 @@
         {
           "key": "maintenanceRequestSettlements",
           "label": {
-            "en": "Maintenance request settlement",
-            "nl": "Onderhoudsverzoek-verrekening"
+            "en": "Maintenance request settlements",
+            "nl": "Onderhoudsverzoek-verrekeningen"
           },
           "osfType": "MaintenanceRequestSettlement",
           "cardinality": "collection",
@@ -23348,8 +23348,8 @@
         {
           "key": "maintenanceTaskCalculations",
           "label": {
-            "en": "Maintenance task calculation",
-            "nl": "Onderhoudstaak voorcalculatie"
+            "en": "Maintenance task calculations",
+            "nl": "Onderhoudstaak voorcalculaties"
           },
           "osfType": "MaintenanceTaskCalculation",
           "cardinality": "collection",
@@ -23805,8 +23805,8 @@
         {
           "key": "monitorMeasurements",
           "label": {
-            "en": "Monitor measurement",
-            "nl": "Monitormeting"
+            "en": "Monitor measurements",
+            "nl": "Monitormetingen"
           },
           "osfType": "MonitorMeasurement",
           "cardinality": "collection",
@@ -23948,8 +23948,8 @@
         {
           "key": "monitorLogEntries",
           "label": {
-            "en": "Monitor log entry",
-            "nl": "Monitorlogregel"
+            "en": "Monitor log entries",
+            "nl": "Monitorlogregels"
           },
           "osfType": "MonitorLogEntry",
           "cardinality": "collection",
@@ -23961,8 +23961,8 @@
         {
           "key": "monitorMeasurements",
           "label": {
-            "en": "Monitor measurement",
-            "nl": "Monitormeting"
+            "en": "Monitor measurements",
+            "nl": "Monitormetingen"
           },
           "osfType": "MonitorMeasurement",
           "cardinality": "collection",
@@ -24169,8 +24169,8 @@
         {
           "key": "monitorReadings",
           "label": {
-            "en": "Monitor reading",
-            "nl": "Monitorwaarde"
+            "en": "Monitor readings",
+            "nl": "Monitorwaarden"
           },
           "osfType": "MonitorReading",
           "cardinality": "collection",
@@ -24989,8 +24989,8 @@
         {
           "key": "orgUnits",
           "label": {
-            "en": "Org unit",
-            "nl": "Organisatorische eenheid"
+            "en": "Org units",
+            "nl": "Organisatorische eenheden"
           },
           "osfType": "OrgUnit",
           "cardinality": "collection",
@@ -25015,8 +25015,8 @@
         {
           "key": "positions",
           "label": {
-            "en": "Position",
-            "nl": "Functie"
+            "en": "Positions",
+            "nl": "Functies"
           },
           "osfType": "Position",
           "cardinality": "collection",
@@ -25054,8 +25054,8 @@
         {
           "key": "vacancies",
           "label": {
-            "en": "Vacancy",
-            "nl": "Vacature"
+            "en": "Vacancies",
+            "nl": "Vacatures"
           },
           "osfType": "Vacancy",
           "cardinality": "collection",
@@ -25476,8 +25476,8 @@
         {
           "key": "agreementParties",
           "label": {
-            "en": "Agreement party",
-            "nl": "Overeenkomstpartij"
+            "en": "Agreement parties",
+            "nl": "Overeenkomstpartijen"
           },
           "osfType": "AgreementParty",
           "cardinality": "collection",
@@ -25608,8 +25608,8 @@
         {
           "key": "agreementParties",
           "label": {
-            "en": "Agreement party",
-            "nl": "Overeenkomstpartij"
+            "en": "Agreement parties",
+            "nl": "Overeenkomstpartijen"
           },
           "osfType": "AgreementParty",
           "cardinality": "collection",
@@ -25621,8 +25621,8 @@
         {
           "key": "creditors",
           "label": {
-            "en": "Creditor",
-            "nl": "Crediteur"
+            "en": "Creditors",
+            "nl": "Crediteuren"
           },
           "osfType": "Creditor",
           "cardinality": "collection",
@@ -25634,8 +25634,8 @@
         {
           "key": "debtors",
           "label": {
-            "en": "Debtor",
-            "nl": "Debiteur"
+            "en": "Debtors",
+            "nl": "Debiteuren"
           },
           "osfType": "Debtor",
           "cardinality": "collection",
@@ -25647,8 +25647,8 @@
         {
           "key": "invoiceCollectionItems",
           "label": {
-            "en": "Invoice collection item",
-            "nl": "Factuurincasso-regel"
+            "en": "Invoice collection items",
+            "nl": "Factuurincasso-regels"
           },
           "osfType": "InvoiceCollectionItem",
           "cardinality": "collection",
@@ -25660,8 +25660,8 @@
         {
           "key": "invoicePayments",
           "label": {
-            "en": "Invoice payment",
-            "nl": "Factuurbetaling"
+            "en": "Invoice payments",
+            "nl": "Factuurbetalingen"
           },
           "osfType": "InvoicePayment",
           "cardinality": "collection",
@@ -25673,8 +25673,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -25686,8 +25686,8 @@
         {
           "key": "paymentOrders",
           "label": {
-            "en": "Payment order",
-            "nl": "Betaalopdracht"
+            "en": "Payment orders",
+            "nl": "Betaalopdrachten"
           },
           "osfType": "PaymentOrder",
           "cardinality": "collection",
@@ -25699,8 +25699,8 @@
         {
           "key": "supplierRoles",
           "label": {
-            "en": "Supplier",
-            "nl": "Leverancier"
+            "en": "Suppliers",
+            "nl": "Leveranciers"
           },
           "osfType": "SupplierRole",
           "cardinality": "collection",
@@ -25858,8 +25858,8 @@
         {
           "key": "directDebitOrders",
           "label": {
-            "en": "Direct debit order",
-            "nl": "Incasso-opdracht"
+            "en": "Direct debit orders",
+            "nl": "Incasso-opdrachten"
           },
           "osfType": "DirectDebitOrder",
           "cardinality": "collection",
@@ -26038,8 +26038,8 @@
         {
           "key": "paymentPlanInstalments",
           "label": {
-            "en": "Payment plan instalment",
-            "nl": "Termijn"
+            "en": "Payment plan instalments",
+            "nl": "Termijnen"
           },
           "osfType": "PaymentPlanInstalment",
           "cardinality": "collection",
@@ -26712,8 +26712,8 @@
         {
           "key": "vacancies",
           "label": {
-            "en": "Vacancy",
-            "nl": "Vacature"
+            "en": "Vacancies",
+            "nl": "Vacatures"
           },
           "osfType": "Vacancy",
           "cardinality": "collection",
@@ -27437,8 +27437,8 @@
         {
           "key": "caseStepActions",
           "label": {
-            "en": "Case Step Action",
-            "nl": "Zaakstapactie"
+            "en": "Case step actions",
+            "nl": "Zaakstapacties"
           },
           "osfType": "CaseStepAction",
           "cardinality": "collection",
@@ -27463,8 +27463,8 @@
         {
           "key": "processRoles",
           "label": {
-            "en": "Process role",
-            "nl": "Procesrol"
+            "en": "Process roles",
+            "nl": "Procesrollen"
           },
           "osfType": "ProcessRole",
           "cardinality": "collection",
@@ -28174,8 +28174,8 @@
         {
           "key": "caseStepActions",
           "label": {
-            "en": "Case Step Action",
-            "nl": "Zaakstapactie"
+            "en": "Case step actions",
+            "nl": "Zaakstapacties"
           },
           "osfType": "CaseStepAction",
           "cardinality": "collection",
@@ -28438,8 +28438,8 @@
         {
           "key": "projectBudgetLines",
           "label": {
-            "en": "Project budget line",
-            "nl": "Projectbudgetregel"
+            "en": "Project budget lines",
+            "nl": "Projectbudgetregels"
           },
           "osfType": "ProjectBudgetLine",
           "cardinality": "collection",
@@ -28451,8 +28451,8 @@
         {
           "key": "projectObjectives",
           "label": {
-            "en": "Project objective",
-            "nl": "Projectdoelstelling"
+            "en": "Project objectives",
+            "nl": "Projectdoelstellingen"
           },
           "osfType": "ProjectObjective",
           "cardinality": "collection",
@@ -28464,8 +28464,8 @@
         {
           "key": "projectOrders",
           "label": {
-            "en": "Project order",
-            "nl": "Projectopdracht"
+            "en": "Project orders",
+            "nl": "Projectopdrachten"
           },
           "osfType": "ProjectOrder",
           "cardinality": "collection",
@@ -28477,8 +28477,8 @@
         {
           "key": "projectPhases",
           "label": {
-            "en": "Project phase",
-            "nl": "Projectfase"
+            "en": "Project phases",
+            "nl": "Projectfasen"
           },
           "osfType": "ProjectPhase",
           "cardinality": "collection",
@@ -28490,8 +28490,8 @@
         {
           "key": "projectRoles",
           "label": {
-            "en": "Project role",
-            "nl": "Projectrol"
+            "en": "Project roles",
+            "nl": "Projectrollen"
           },
           "osfType": "ProjectRole",
           "cardinality": "collection",
@@ -28503,8 +28503,8 @@
         {
           "key": "projectSpendings",
           "label": {
-            "en": "Project spending",
-            "nl": "Projectbesteding"
+            "en": "Project spendings",
+            "nl": "Projectbestedingen"
           },
           "osfType": "ProjectSpending",
           "cardinality": "collection",
@@ -28516,8 +28516,8 @@
         {
           "key": "projectTasks",
           "label": {
-            "en": "Project task",
-            "nl": "Projecttaak"
+            "en": "Project tasks",
+            "nl": "Projecttaken"
           },
           "osfType": "ProjectTask",
           "cardinality": "collection",
@@ -28529,8 +28529,8 @@
         {
           "key": "projects",
           "label": {
-            "en": "Project",
-            "nl": "Project"
+            "en": "Projects",
+            "nl": "Projecten"
           },
           "osfType": "Project",
           "cardinality": "collection",
@@ -29179,8 +29179,8 @@
         {
           "key": "projectPhaseDecisions",
           "label": {
-            "en": "Project phase decision",
-            "nl": "Projectfasebesluit"
+            "en": "Project phase decisions",
+            "nl": "Projectfasebesluiten"
           },
           "osfType": "ProjectPhaseDecision",
           "cardinality": "collection",
@@ -29192,8 +29192,8 @@
         {
           "key": "projectTasks",
           "label": {
-            "en": "Project task",
-            "nl": "Projecttaak"
+            "en": "Project tasks",
+            "nl": "Projecttaken"
           },
           "osfType": "ProjectTask",
           "cardinality": "collection",
@@ -29925,8 +29925,8 @@
         {
           "key": "projectSpendings",
           "label": {
-            "en": "Project spending",
-            "nl": "Projectbesteding"
+            "en": "Project spendings",
+            "nl": "Projectbestedingen"
           },
           "osfType": "ProjectSpending",
           "cardinality": "collection",
@@ -30176,8 +30176,8 @@
         {
           "key": "projectOrders",
           "label": {
-            "en": "Project order",
-            "nl": "Projectopdracht"
+            "en": "Project orders",
+            "nl": "Projectopdrachten"
           },
           "osfType": "ProjectOrder",
           "cardinality": "collection",
@@ -30189,8 +30189,8 @@
         {
           "key": "purchaseOrderLines",
           "label": {
-            "en": "Purchase order line",
-            "nl": "Inkoopopdrachtregel"
+            "en": "Purchase order lines",
+            "nl": "Inkoopopdrachtregels"
           },
           "osfType": "PurchaseOrderLine",
           "cardinality": "collection",
@@ -30733,8 +30733,8 @@
         {
           "key": "qualityMeasurementResults",
           "label": {
-            "en": "Quality Measurement Result",
-            "nl": "Kwaliteitsmetingsresultaat"
+            "en": "Quality measurement results",
+            "nl": "Kwaliteitsmetingsresultaten"
           },
           "osfType": "QualityMeasurementResult",
           "cardinality": "collection",
@@ -30954,8 +30954,8 @@
         {
           "key": "qualityMeasurementRequests",
           "label": {
-            "en": "Quality Measurement Request",
-            "nl": "Kwaliteitsmetingsverzoek"
+            "en": "Quality measurement requests",
+            "nl": "Kwaliteitsmetingsverzoeken"
           },
           "osfType": "QualityMeasurementRequest",
           "cardinality": "collection",
@@ -31224,8 +31224,8 @@
         {
           "key": "quoteLines",
           "label": {
-            "en": "Quote line",
-            "nl": "Offerteregel"
+            "en": "Quote lines",
+            "nl": "Offerteregels"
           },
           "osfType": "QuoteLine",
           "cardinality": "collection",
@@ -31839,8 +31839,8 @@
         {
           "key": "agreementParties",
           "label": {
-            "en": "Agreement party",
-            "nl": "Overeenkomstpartij"
+            "en": "Agreement parties",
+            "nl": "Overeenkomstpartijen"
           },
           "osfType": "AgreementParty",
           "cardinality": "collection",
@@ -31865,8 +31865,8 @@
         {
           "key": "appointmentRequests",
           "label": {
-            "en": "Appointment request",
-            "nl": "Afspraakverzoek"
+            "en": "Appointment requests",
+            "nl": "Afspraakverzoeken"
           },
           "osfType": "AppointmentRequest",
           "cardinality": "collection",
@@ -31878,8 +31878,8 @@
         {
           "key": "appointments",
           "label": {
-            "en": "Appointment",
-            "nl": "Afspraak"
+            "en": "Appointments",
+            "nl": "Afspraken"
           },
           "osfType": "Appointment",
           "cardinality": "collection",
@@ -31891,8 +31891,8 @@
         {
           "key": "assetConditions",
           "label": {
-            "en": "Asset condition",
-            "nl": "Conditie"
+            "en": "Asset conditions",
+            "nl": "Condities"
           },
           "osfType": "AssetCondition",
           "cardinality": "collection",
@@ -31930,8 +31930,8 @@
         {
           "key": "caseParties",
           "label": {
-            "en": "Case Party",
-            "nl": "Zaakbetrokkene"
+            "en": "Case parties",
+            "nl": "Zaakbetrokkenen"
           },
           "osfType": "CaseParty",
           "cardinality": "collection",
@@ -31956,8 +31956,8 @@
         {
           "key": "comments",
           "label": {
-            "en": "Comment",
-            "nl": "Opmerking"
+            "en": "Comments",
+            "nl": "Opmerkingen"
           },
           "osfType": "Comment",
           "cardinality": "collection",
@@ -31982,8 +31982,8 @@
         {
           "key": "conditionAssessments",
           "label": {
-            "en": "Condition assessment",
-            "nl": "Conditiemeting"
+            "en": "Condition assessments",
+            "nl": "Conditiemetingen"
           },
           "osfType": "ConditionAssessment",
           "cardinality": "collection",
@@ -32034,8 +32034,8 @@
         {
           "key": "creditors",
           "label": {
-            "en": "Creditor",
-            "nl": "Crediteur"
+            "en": "Creditors",
+            "nl": "Crediteuren"
           },
           "osfType": "Creditor",
           "cardinality": "collection",
@@ -32047,8 +32047,8 @@
         {
           "key": "debtors",
           "label": {
-            "en": "Debtor",
-            "nl": "Debiteur"
+            "en": "Debtors",
+            "nl": "Debiteuren"
           },
           "osfType": "Debtor",
           "cardinality": "collection",
@@ -32060,8 +32060,8 @@
         {
           "key": "directDebitMandates",
           "label": {
-            "en": "Direct debit mandate",
-            "nl": "Incassomachtiging"
+            "en": "Direct debit mandates",
+            "nl": "Incassomachtigingen"
           },
           "osfType": "DirectDebitMandate",
           "cardinality": "collection",
@@ -32086,8 +32086,8 @@
         {
           "key": "employees",
           "label": {
-            "en": "Employee",
-            "nl": "Medewerker"
+            "en": "Employees",
+            "nl": "Medewerkers"
           },
           "osfType": "Employee",
           "cardinality": "collection",
@@ -32099,8 +32099,8 @@
         {
           "key": "encumbrances",
           "label": {
-            "en": "Encumbrance",
-            "nl": "Zekerheid"
+            "en": "Encumbrances",
+            "nl": "Zekerheden"
           },
           "osfType": "Encumbrance",
           "cardinality": "collection",
@@ -32125,8 +32125,8 @@
         {
           "key": "inspectionReports",
           "label": {
-            "en": "Inspection report",
-            "nl": "Inspectierapport"
+            "en": "Inspection reports",
+            "nl": "Inspectierapporten"
           },
           "osfType": "InspectionReport",
           "cardinality": "collection",
@@ -32138,8 +32138,8 @@
         {
           "key": "invoices",
           "label": {
-            "en": "Invoice",
-            "nl": "Factuur"
+            "en": "Invoices",
+            "nl": "Facturen"
           },
           "osfType": "Invoice",
           "cardinality": "collection",
@@ -32151,8 +32151,8 @@
         {
           "key": "ledgerPostingLines",
           "label": {
-            "en": "Ledger posting line",
-            "nl": "Boekingsregel"
+            "en": "Ledger posting lines",
+            "nl": "Boekingsregels"
           },
           "osfType": "LedgerPostingLine",
           "cardinality": "collection",
@@ -32164,8 +32164,8 @@
         {
           "key": "legalEntities",
           "label": {
-            "en": "Legal Entity",
-            "nl": "Rechtspersoon"
+            "en": "Legal entities",
+            "nl": "Rechtspersonen"
           },
           "osfType": "LegalEntity",
           "cardinality": "collection",
@@ -32177,8 +32177,8 @@
         {
           "key": "maintenanceOrderParties",
           "label": {
-            "en": "Maintenance order party",
-            "nl": "Partij op onderhoudsorder"
+            "en": "Maintenance order parties",
+            "nl": "Partijen op onderhoudsorder"
           },
           "osfType": "MaintenanceOrderParty",
           "cardinality": "collection",
@@ -32190,8 +32190,8 @@
         {
           "key": "maintenanceRequestSettlements",
           "label": {
-            "en": "Maintenance request settlement",
-            "nl": "Onderhoudsverzoek-verrekening"
+            "en": "Maintenance request settlements",
+            "nl": "Onderhoudsverzoek-verrekeningen"
           },
           "osfType": "MaintenanceRequestSettlement",
           "cardinality": "collection",
@@ -32203,8 +32203,8 @@
         {
           "key": "maintenanceRequests",
           "label": {
-            "en": "Maintenance request",
-            "nl": "Onderhoudsverzoek"
+            "en": "Maintenance requests",
+            "nl": "Onderhoudsverzoeken"
           },
           "osfType": "MaintenanceRequest",
           "cardinality": "collection",
@@ -32216,8 +32216,8 @@
         {
           "key": "naturalPersons",
           "label": {
-            "en": "Natural Person",
-            "nl": "Natuurlijk Persoon"
+            "en": "Natural persons",
+            "nl": "Natuurlijke personen"
           },
           "osfType": "NaturalPerson",
           "cardinality": "collection",
@@ -32242,8 +32242,8 @@
         {
           "key": "paymentPlans",
           "label": {
-            "en": "Payment plan",
-            "nl": "Betalingsregeling"
+            "en": "Payment plans",
+            "nl": "Betalingsregelingen"
           },
           "osfType": "PaymentPlan",
           "cardinality": "collection",
@@ -32255,8 +32255,8 @@
         {
           "key": "preferences",
           "label": {
-            "en": "Preference",
-            "nl": "Voorkeur"
+            "en": "Preferences",
+            "nl": "Voorkeuren"
           },
           "osfType": "Preference",
           "cardinality": "collection",
@@ -32268,8 +32268,8 @@
         {
           "key": "processRoles",
           "label": {
-            "en": "Process role",
-            "nl": "Procesrol"
+            "en": "Process roles",
+            "nl": "Procesrollen"
           },
           "osfType": "ProcessRole",
           "cardinality": "collection",
@@ -32281,8 +32281,8 @@
         {
           "key": "projectOrders",
           "label": {
-            "en": "Project order",
-            "nl": "Projectopdracht"
+            "en": "Project orders",
+            "nl": "Projectopdrachten"
           },
           "osfType": "ProjectOrder",
           "cardinality": "collection",
@@ -32294,8 +32294,8 @@
         {
           "key": "projectPhaseDecisions",
           "label": {
-            "en": "Project phase decision",
-            "nl": "Projectfasebesluit"
+            "en": "Project phase decisions",
+            "nl": "Projectfasebesluiten"
           },
           "osfType": "ProjectPhaseDecision",
           "cardinality": "collection",
@@ -32307,8 +32307,8 @@
         {
           "key": "projectRoles",
           "label": {
-            "en": "Project role",
-            "nl": "Projectrol"
+            "en": "Project roles",
+            "nl": "Projectrollen"
           },
           "osfType": "ProjectRole",
           "cardinality": "collection",
@@ -32320,8 +32320,8 @@
         {
           "key": "projectTasks",
           "label": {
-            "en": "Project task",
-            "nl": "Projecttaak"
+            "en": "Project tasks",
+            "nl": "Projecttaken"
           },
           "osfType": "ProjectTask",
           "cardinality": "collection",
@@ -32333,8 +32333,8 @@
         {
           "key": "purchaseOrders",
           "label": {
-            "en": "Purchase order",
-            "nl": "Inkoopopdracht"
+            "en": "Purchase orders",
+            "nl": "Inkoopopdrachten"
           },
           "osfType": "PurchaseOrder",
           "cardinality": "collection",
@@ -32346,8 +32346,8 @@
         {
           "key": "qualityMeasurementRequests",
           "label": {
-            "en": "Quality Measurement Request",
-            "nl": "Kwaliteitsmetingsverzoek"
+            "en": "Quality measurement requests",
+            "nl": "Kwaliteitsmetingsverzoeken"
           },
           "osfType": "QualityMeasurementRequest",
           "cardinality": "collection",
@@ -32359,8 +32359,8 @@
         {
           "key": "quotes",
           "label": {
-            "en": "Quote",
-            "nl": "Offerte"
+            "en": "Quotes",
+            "nl": "Offertes"
           },
           "osfType": "Quote",
           "cardinality": "collection",
@@ -32385,8 +32385,8 @@
         {
           "key": "relationGroups",
           "label": {
-            "en": "Relation Group",
-            "nl": "Relatiegroep"
+            "en": "Relation groups",
+            "nl": "Relatiegroepen"
           },
           "osfType": "RelationGroup",
           "cardinality": "collection",
@@ -32398,8 +32398,8 @@
         {
           "key": "researchAssignments",
           "label": {
-            "en": "Research Assignment",
-            "nl": "Onderzoeksopdracht"
+            "en": "Research assignments",
+            "nl": "Onderzoeksopdrachten"
           },
           "osfType": "ResearchAssignment",
           "cardinality": "collection",
@@ -32424,8 +32424,8 @@
         {
           "key": "supplierRoles",
           "label": {
-            "en": "Supplier",
-            "nl": "Leverancier"
+            "en": "Suppliers",
+            "nl": "Leveranciers"
           },
           "osfType": "SupplierRole",
           "cardinality": "collection",
@@ -32437,8 +32437,8 @@
         {
           "key": "supportIssues",
           "label": {
-            "en": "Support issue",
-            "nl": "Supportverzoek"
+            "en": "Support issues",
+            "nl": "Supportverzoeken"
           },
           "osfType": "SupportIssue",
           "cardinality": "collection",
@@ -32450,8 +32450,8 @@
         {
           "key": "surveyAnswers",
           "label": {
-            "en": "Survey Answer",
-            "nl": "Vragenlijstantwoord"
+            "en": "Survey answers",
+            "nl": "Vragenlijstantwoorden"
           },
           "osfType": "SurveyAnswer",
           "cardinality": "collection",
@@ -32476,8 +32476,8 @@
         {
           "key": "valuations",
           "label": {
-            "en": "Valuation",
-            "nl": "Waardering"
+            "en": "Valuations",
+            "nl": "Waarderingen"
           },
           "osfType": "Valuation",
           "cardinality": "collection",
@@ -32489,8 +32489,8 @@
         {
           "key": "warranties",
           "label": {
-            "en": "Warranty",
-            "nl": "Garantie"
+            "en": "Warranties",
+            "nl": "Garanties"
           },
           "osfType": "Warranty",
           "cardinality": "collection",
@@ -32858,8 +32858,8 @@
         {
           "key": "caseTemplates",
           "label": {
-            "en": "Case Template",
-            "nl": "Zaaksjabloon"
+            "en": "Case templates",
+            "nl": "Zaaksjablonen"
           },
           "osfType": "CaseTemplate",
           "cardinality": "collection",
@@ -32884,8 +32884,8 @@
         {
           "key": "processSteps",
           "label": {
-            "en": "Process Step",
-            "nl": "Processtap"
+            "en": "Process steps",
+            "nl": "Processtappen"
           },
           "osfType": "ProcessStep",
           "cardinality": "collection",
@@ -32897,8 +32897,8 @@
         {
           "key": "relations",
           "label": {
-            "en": "Relation",
-            "nl": "Relatie"
+            "en": "Relations",
+            "nl": "Relaties"
           },
           "osfType": "Relation",
           "cardinality": "collection",
@@ -32910,8 +32910,8 @@
         {
           "key": "workQueues",
           "label": {
-            "en": "Work Queue",
-            "nl": "Werkqueue"
+            "en": "Work queues",
+            "nl": "Werkqueues"
           },
           "osfType": "WorkQueue",
           "cardinality": "collection",
@@ -33355,8 +33355,8 @@
         {
           "key": "caseParties",
           "label": {
-            "en": "Case Party",
-            "nl": "Zaakbetrokkene"
+            "en": "Case parties",
+            "nl": "Zaakbetrokkenen"
           },
           "osfType": "CaseParty",
           "cardinality": "collection",
@@ -33633,8 +33633,8 @@
         {
           "key": "qualityMeasurementResults",
           "label": {
-            "en": "Quality Measurement Result",
-            "nl": "Kwaliteitsmetingsresultaat"
+            "en": "Quality measurement results",
+            "nl": "Kwaliteitsmetingsresultaten"
           },
           "osfType": "QualityMeasurementResult",
           "cardinality": "collection",
@@ -33646,8 +33646,8 @@
         {
           "key": "researchResults",
           "label": {
-            "en": "Research Result",
-            "nl": "Onderzoeksresultaat"
+            "en": "Research results",
+            "nl": "Onderzoeksresultaten"
           },
           "osfType": "ResearchResult",
           "cardinality": "collection",
@@ -33763,8 +33763,8 @@
         {
           "key": "researchAssignments",
           "label": {
-            "en": "Research Assignment",
-            "nl": "Onderzoeksopdracht"
+            "en": "Research assignments",
+            "nl": "Onderzoeksopdrachten"
           },
           "osfType": "ResearchAssignment",
           "cardinality": "collection",
@@ -34185,8 +34185,8 @@
         {
           "key": "areas",
           "label": {
-            "en": "Area",
-            "nl": "Oppervlakte"
+            "en": "Areas",
+            "nl": "Oppervlakten"
           },
           "osfType": "Area",
           "cardinality": "collection",
@@ -34198,8 +34198,8 @@
         {
           "key": "assets",
           "label": {
-            "en": "Asset",
-            "nl": "Object"
+            "en": "Assets",
+            "nl": "Objecten"
           },
           "osfType": "Asset",
           "cardinality": "collection",
@@ -34396,8 +34396,8 @@
         {
           "key": "maintenanceTaskCalculations",
           "label": {
-            "en": "Maintenance task calculation",
-            "nl": "Onderhoudstaak voorcalculatie"
+            "en": "Maintenance task calculations",
+            "nl": "Onderhoudstaak voorcalculaties"
           },
           "osfType": "MaintenanceTaskCalculation",
           "cardinality": "collection",
@@ -35232,8 +35232,8 @@
         {
           "key": "researchAssignments",
           "label": {
-            "en": "Research Assignment",
-            "nl": "Onderzoeksopdracht"
+            "en": "Research assignments",
+            "nl": "Onderzoeksopdrachten"
           },
           "osfType": "ResearchAssignment",
           "cardinality": "collection",
@@ -36664,8 +36664,8 @@
         {
           "key": "caseStepActions",
           "label": {
-            "en": "Case Step Action",
-            "nl": "Zaakstapactie"
+            "en": "Case step actions",
+            "nl": "Zaakstapacties"
           },
           "osfType": "CaseStepAction",
           "cardinality": "collection",
@@ -36772,8 +36772,8 @@
         {
           "key": "variants",
           "label": {
-            "en": "Template variant",
-            "nl": "Template variant"
+            "en": "Template variants",
+            "nl": "Templatevarianten"
           },
           "osfType": "TemplateVariant",
           "cardinality": "collection",
@@ -38451,8 +38451,8 @@
         {
           "key": "agreementComponentCumulatives",
           "label": {
-            "en": "Component cumulative",
-            "nl": "Component cumulatief"
+            "en": "Component cumulatives",
+            "nl": "Componentcumulatieven"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -38464,8 +38464,8 @@
         {
           "key": "agreementComponents",
           "label": {
-            "en": "Agreement component",
-            "nl": "Overeenkomstcomponent"
+            "en": "Agreement components",
+            "nl": "Overeenkomstcomponenten"
           },
           "osfType": "AgreementComponent",
           "cardinality": "collection",
@@ -38477,8 +38477,8 @@
         {
           "key": "invoiceLines",
           "label": {
-            "en": "Invoice line",
-            "nl": "Factuurregel"
+            "en": "Invoice lines",
+            "nl": "Factuurregels"
           },
           "osfType": "InvoiceLine",
           "cardinality": "collection",
@@ -38490,8 +38490,8 @@
         {
           "key": "invoiceVatBuckets",
           "label": {
-            "en": "Invoice VAT bucket",
-            "nl": "BTW-totaal"
+            "en": "Invoice VAT buckets",
+            "nl": "BTW-totalen"
           },
           "osfType": "InvoiceVatBucket",
           "cardinality": "collection",
@@ -38503,8 +38503,8 @@
         {
           "key": "purchaseOrderLines",
           "label": {
-            "en": "Purchase order line",
-            "nl": "Inkoopopdrachtregel"
+            "en": "Purchase order lines",
+            "nl": "Inkoopopdrachtregels"
           },
           "osfType": "PurchaseOrderLine",
           "cardinality": "collection",
@@ -38516,8 +38516,8 @@
         {
           "key": "quoteLines",
           "label": {
-            "en": "Quote line",
-            "nl": "Offerteregel"
+            "en": "Quote lines",
+            "nl": "Offerteregels"
           },
           "osfType": "QuoteLine",
           "cardinality": "collection",
@@ -39153,8 +39153,8 @@
         {
           "key": "caseStepTemplates",
           "label": {
-            "en": "Case Step Template",
-            "nl": "Zaakstapsjabloon"
+            "en": "Case step templates",
+            "nl": "Zaakstapsjablonen"
           },
           "osfType": "CaseStepTemplate",
           "cardinality": "collection",
@@ -39166,8 +39166,8 @@
         {
           "key": "caseTemplates",
           "label": {
-            "en": "Case Template",
-            "nl": "Zaaksjabloon"
+            "en": "Case templates",
+            "nl": "Zaaksjablonen"
           },
           "osfType": "CaseTemplate",
           "cardinality": "collection",
@@ -39218,8 +39218,8 @@
         {
           "key": "slaPolicies",
           "label": {
-            "en": "SLA Policy",
-            "nl": "SLA-beleid"
+            "en": "SLA policies",
+            "nl": "SLA-beleidsregels"
           },
           "osfType": "SlaPolicy",
           "cardinality": "collection",
@@ -39231,8 +39231,8 @@
         {
           "key": "tasks",
           "label": {
-            "en": "Task",
-            "nl": "Taak"
+            "en": "Tasks",
+            "nl": "Taken"
           },
           "osfType": "Task",
           "cardinality": "collection",

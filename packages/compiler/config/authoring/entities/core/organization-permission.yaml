@@ -10,6 +10,9 @@ filterField: permissionName
 labels:
   en: Organization permission
   nl: Organisatierecht
+pluralLabels:
+  en: Organization permissions
+  nl: Organisatierechten
 domains:
   - core
   - hr

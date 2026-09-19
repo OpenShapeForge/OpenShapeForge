@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: VAT rate
   nl: BTW-tarief
+pluralLabels:
+  en: VAT rates
+  nl: BTW-tarieven
 domains:
   - finance
 fields:

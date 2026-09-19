@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Monitor interval
   nl: Monitorinterval
+pluralLabels:
+  en: Monitor intervals
+  nl: Monitorintervallen
 domains:
   - energy
 fields:

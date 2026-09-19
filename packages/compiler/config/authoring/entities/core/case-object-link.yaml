@@ -10,6 +10,9 @@ filterField: objectLabel
 labels:
   en: Case Object Link
   nl: Zaakobjectkoppeling
+pluralLabels:
+  en: Case object links
+  nl: Zaakobjectkoppelingen
 domains:
   - cases
 authorization:

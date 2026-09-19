@@ -11,6 +11,9 @@ filterField: creditorNumber
 labels:
   en: Creditor
   nl: Crediteur
+pluralLabels:
+  en: Creditors
+  nl: Crediteuren
 domains:
   - finance
 fields:

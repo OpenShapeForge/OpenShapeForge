@@ -11,6 +11,9 @@ filterField: roleKind
 labels:
   en: Employee role
   nl: Medewerkerrol
+pluralLabels:
+  en: Employee roles
+  nl: Medewerkerrollen
 domains:
   - hr
 fields:

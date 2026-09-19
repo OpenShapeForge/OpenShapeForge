@@ -20,6 +20,7 @@ import { fieldCardinality, pluralize, uncapitalize } from "./compiler/helpers.js
 export interface InverseCollectionSource {
   entity: string;
   labels?: LocalizedText | undefined;
+  pluralLabels?: LocalizedText | undefined;
   title?: string | undefined;
   fields: readonly Field[];
   /** Value definitions store no rows of their own, so nothing can point back at them. */
@@ -31,9 +32,17 @@ export function defaultInverseKey(childEntity: string): string {
   return pluralize(uncapitalize(childEntity));
 }
 
-/** The child entity's own labels; a plural form is an authored override. */
-export function defaultInverseLabel(child: Pick<InverseCollectionSource, "entity" | "labels" | "title">): LocalizedText {
-  return child.labels ?? { en: child.title ?? child.entity };
+/**
+ * The child entity's authored `pluralLabels`, or each of its `labels`
+ * pluralised the way `defaultInverseKey` pluralises the key: a collection
+ * of Appointment records is "Appointments", never "Appointment".
+ */
+export function defaultInverseLabel(
+  child: Pick<InverseCollectionSource, "entity" | "labels" | "pluralLabels" | "title">,
+): LocalizedText {
+  if (child.pluralLabels) return child.pluralLabels;
+  const singular = child.labels ?? { en: child.title ?? child.entity };
+  return Object.fromEntries(Object.entries(singular).map(([lang, text]) => [lang, pluralize(text)]));
 }
 
 /**

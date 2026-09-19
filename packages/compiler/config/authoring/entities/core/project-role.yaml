@@ -10,6 +10,9 @@ filterField: roleType
 labels:
   en: Project role
   nl: Projectrol
+pluralLabels:
+  en: Project roles
+  nl: Projectrollen
 domains:
   - project
 fields:

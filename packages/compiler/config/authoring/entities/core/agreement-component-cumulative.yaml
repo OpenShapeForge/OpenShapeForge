@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Component cumulative
   nl: Component cumulatief
+pluralLabels:
+  en: Component cumulatives
+  nl: Componentcumulatieven
 domains:
   - finance
   - contracts

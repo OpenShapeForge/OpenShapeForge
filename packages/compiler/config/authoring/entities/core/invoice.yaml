@@ -10,6 +10,9 @@ filterField: invoiceNumber
 labels:
   en: Invoice
   nl: Factuur
+pluralLabels:
+  en: Invoices
+  nl: Facturen
 domains:
   - finance
 fields:

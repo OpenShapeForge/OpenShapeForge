@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Appointment request
   nl: Afspraakverzoek
+pluralLabels:
+  en: Appointment requests
+  nl: Afspraakverzoeken
 domains:
   - crm
   - relations

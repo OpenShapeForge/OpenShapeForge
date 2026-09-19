@@ -10,6 +10,9 @@ filterField: type
 labels:
   en: Relation Role
   nl: Relatierol
+pluralLabels:
+  en: Relation roles
+  nl: Relatierollen
 domains:
   - relations
 authorization:

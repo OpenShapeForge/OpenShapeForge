@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Quality Measurement Request
   nl: Kwaliteitsmetingsverzoek
+pluralLabels:
+  en: Quality measurement requests
+  nl: Kwaliteitsmetingsverzoeken
 domains:
   - quality
 retention:

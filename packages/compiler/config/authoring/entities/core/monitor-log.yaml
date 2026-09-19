@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Monitor log
   nl: Monitorlog
+pluralLabels:
+  en: Monitor logs
+  nl: Monitorlogs
 domains:
   - energy
 fields:

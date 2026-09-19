@@ -10,6 +10,9 @@ filterField: value
 labels:
   en: Contact Detail
   nl: Contactgegeven
+pluralLabels:
+  en: Contact details
+  nl: Contactgegevens
 domains:
   - relations
 authorization:

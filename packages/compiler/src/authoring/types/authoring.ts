@@ -746,6 +746,8 @@ export interface CoreEntity {
   description?: string | LocalizedText;
   language: string;
   labels?: LocalizedText;
+  /** Plural labels; a derived inverse collection carries these, or the pluralised `labels` when absent. */
+  pluralLabels?: LocalizedText;
   domains?: string[];
   retention?: RetentionPolicy;
   baseEntity?: boolean;

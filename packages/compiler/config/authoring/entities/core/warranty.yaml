@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Warranty
   nl: Garantie
+pluralLabels:
+  en: Warranties
+  nl: Garanties
 domains:
   - maintenance
 fields:

@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Ledger account
   nl: Grootboekrekening
+pluralLabels:
+  en: Ledger accounts
+  nl: Grootboekrekeningen
 domains:
   - finance
 fields:

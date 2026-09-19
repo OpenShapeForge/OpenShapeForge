@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Maintenance task calculation
   nl: Onderhoudstaak voorcalculatie
+pluralLabels:
+  en: Maintenance task calculations
+  nl: Onderhoudstaak voorcalculaties
 domains:
   - maintenance
 fields:

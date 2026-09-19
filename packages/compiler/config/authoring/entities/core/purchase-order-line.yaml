@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Purchase order line
   nl: Inkoopopdrachtregel
+pluralLabels:
+  en: Purchase order lines
+  nl: Inkoopopdrachtregels
 domains:
   - finance
 fields:

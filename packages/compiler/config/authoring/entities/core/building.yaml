@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Building
   nl: Pand
+pluralLabels:
+  en: Buildings
+  nl: Panden
 domains:
   - asset
 fields:

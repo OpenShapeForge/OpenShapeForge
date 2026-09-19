@@ -10,6 +10,9 @@ filterField: username
 labels:
   en: Account
   nl: Account
+pluralLabels:
+  en: Accounts
+  nl: Accounts
 domains:
   - relations
 authorization:

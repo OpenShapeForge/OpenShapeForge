@@ -10,6 +10,9 @@ filterField: answer
 labels:
   en: Survey Answer
   nl: Vragenlijstantwoord
+pluralLabels:
+  en: Survey answers
+  nl: Vragenlijstantwoorden
 domains:
   - quality
 retention:

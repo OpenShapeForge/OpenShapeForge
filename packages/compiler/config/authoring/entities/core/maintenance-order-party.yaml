@@ -10,6 +10,9 @@ filterField: roleType
 labels:
   en: Maintenance order party
   nl: Partij op onderhoudsorder
+pluralLabels:
+  en: Maintenance order parties
+  nl: Partijen op onderhoudsorder
 domains:
   - maintenance
 fields:

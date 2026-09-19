@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: SLA Policy
   nl: SLA-beleid
+pluralLabels:
+  en: SLA policies
+  nl: SLA-beleidsregels
 domains:
   - cases
   - service

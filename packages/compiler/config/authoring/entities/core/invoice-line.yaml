@@ -11,6 +11,9 @@ filterField: description
 labels:
   en: Invoice line
   nl: Factuurregel
+pluralLabels:
+  en: Invoice lines
+  nl: Factuurregels
 domains:
   - finance
 fields:

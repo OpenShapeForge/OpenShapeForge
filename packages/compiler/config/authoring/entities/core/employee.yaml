@@ -10,6 +10,9 @@ filterField: employeeNumber
 labels:
   en: Employee
   nl: Medewerker
+pluralLabels:
+  en: Employees
+  nl: Medewerkers
 domains:
   - hr
 fields:

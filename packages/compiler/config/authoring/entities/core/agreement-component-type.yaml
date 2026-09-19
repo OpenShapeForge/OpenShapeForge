@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Agreement component type
   nl: Overeenkomstcomponenttype
+pluralLabels:
+  en: Agreement component types
+  nl: Overeenkomstcomponenttypen
 domains:
   - finance
   - contracts

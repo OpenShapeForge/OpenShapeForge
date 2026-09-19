@@ -11,6 +11,9 @@ filterField: instalmentNumber
 labels:
   en: Payment plan instalment
   nl: Termijn
+pluralLabels:
+  en: Payment plan instalments
+  nl: Termijnen
 domains:
   - finance
 fields:

@@ -37,6 +37,9 @@ function expectedRootOrder() {
       ...sortedFields(generatedEntityMutationFields),
       ...sortedFields(`${connectorMutationFields}\n${connectorNamespaceMutationFields}`),
       ...sortedFields(apiKeyMutationFields),
+      // Likewise the core `osf-transitions` and `osf-jobs` Operations: the
+      // operation contribution keeps catalog order (sorted by key).
+      "agreementMilestoneTrigger",
       "jobRetry",
     ],
   };

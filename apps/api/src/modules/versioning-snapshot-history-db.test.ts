@@ -30,28 +30,32 @@ describe("published snapshots against PostgreSQL", () => {
   beforeAll(openScratch, 120_000);
   afterAll(closeScratch);
 
-  test("a version never embeds earlier versions, so identical content hashes identically", async () => {
+  test("a version never embeds earlier versions, so identical content hashes identically and is not stored twice", async () => {
     const { context } = platformFor(editor);
     const ids = await seedTemplate();
-    for (let publish = 0; publish < 3; publish += 1) await publishTemplate(context, ids.template);
-    const stored = await versions(ids.template);
-    expect(stored.map((row) => row.version_number)).toEqual([1, 2, 3]);
+    const first = await publishTemplate(context, ids.template);
+    // Nothing about the head changed, so the same version is reused: three publishes, one row.
+    for (let publish = 0; publish < 2; publish += 1) expect(await publishTemplate(context, ids.template)).toBe(first);
+    let stored = await versions(ids.template);
+    expect(stored.map((row) => row.version_number)).toEqual([1]);
 
-    const third = parseSnapshot(stored[2]!.snapshot);
-    expect(third.entity).toBe("Template");
-    expect(tables(third.head)).toEqual(["template_variants", "blocks"]);
-    expect(JSON.stringify(third)).not.toContain("template_versions");
-    // Nothing about the head changed between publishes, so every snapshot is the same content.
-    expect(new Set(stored.map((row) => row.content_hash)).size).toBe(1);
-    expect(JSON.stringify(stored[2]!.snapshot).length).toBe(JSON.stringify(stored[0]!.snapshot).length);
-
-    // Content that does change hashes differently, and identical content republished hashes the same again.
+    // Content that does change is a new version with a different hash; the first version is not embedded in it.
     await sql`update erp.blocks set "values" = '{"text":"Changed"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
+    stored = await versions(ids.template);
+    expect(stored.map((row) => row.version_number)).toEqual([1, 2]);
+    const second = parseSnapshot(stored[1]!.snapshot);
+    expect(second.entity).toBe("Template");
+    expect(tables(second.head)).toEqual(["template_variants", "blocks"]);
+    expect(JSON.stringify(second)).not.toContain("template_versions");
+    expect(stored[1]!.content_hash).not.toBe(stored[0]!.content_hash);
+
+    // Identical content republished hashes the same as the first version again, as a third row (the latest differs).
     await sql`update erp.blocks set "values" = '{"text":"Second"}'::jsonb where id = ${ids.second}::uuid`.execute(privileged());
     await publishTemplate(context, ids.template);
     const hashes = (await versions(ids.template)).map((row) => row.content_hash);
-    expect(hashes[3]).not.toBe(hashes[0]);
-    expect(hashes[4]).toBe(hashes[0]);
+    expect(hashes).toHaveLength(3);
+    expect(hashes[2]).toBe(hashes[0]);
+    expect(hashes[1]).not.toBe(hashes[0]);
   });
 });

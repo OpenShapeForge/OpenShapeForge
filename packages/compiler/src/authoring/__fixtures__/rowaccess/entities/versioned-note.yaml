@@ -1,0 +1,75 @@
+# Test fixture — a published-snapshot head in a module of its own (schema `notes`), so the
+# manifest binds version storage outside the core schema. Not part of the shipped slice.
+schemaVersion: 3
+kind: coreEntity
+module: notes
+entity: VersionedNote
+title: Versioned note
+language: en
+labels: { en: Versioned note, nl: Versioned note }
+domains: [documents]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{name}}"
+filterField: name
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: VersionedNoteVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+  - key: body
+    osfType: string
+    label: { en: Body, nl: Inhoud }
+    persisted: { column: body, storageClass: core }
+operations:
+  list:
+    name: List versioned notes
+    description: Read accessible versioned note records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read versioned note
+    description: Read one accessible versioned note record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create versioned note
+    description: Create a versioned note record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update versioned note
+    description: Update a versioned note draft.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete versioned note
+    description: Delete a versioned note with its versions.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

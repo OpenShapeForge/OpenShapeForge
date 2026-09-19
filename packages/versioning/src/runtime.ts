@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash, randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
-import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule } from "@openshapeforge/plugin-runtime";
+import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule, RuntimeVersioningBinding } from "@openshapeforge/plugin-runtime";
 import { publishFollowers, type PublishedVersionRow } from "./followers.js";
 
 type RawQuery = { sql: string; parameters: readonly unknown[]; query: { kind: "RawNode"; sqlFragments: readonly string[]; parameters: readonly unknown[] }; queryId: { queryId: string } };
@@ -25,14 +25,8 @@ function identifier(value: string): string {
   if (!IDENTIFIER.test(value)) fail("OPERATION_UNAVAILABLE", "Compiled version storage contains an invalid identifier.");
   return `"${value}"`;
 }
-function snake(value: string): string {
-  return value.replace(/([A-Z])/g, "_$1").toLowerCase().replace(/^_/, "");
-}
-function tableName(entity: string): string {
-  const value = snake(entity);
-  if (value.endsWith("s") || value.endsWith("sh") || value.endsWith("ch") || value.endsWith("x") || value.endsWith("z")) return `${value}es`;
-  if (value.endsWith("y") && !["ay", "ey", "iy", "oy", "uy"].some((ending) => value.endsWith(ending))) return `${value.slice(0, -1)}ies`;
-  return `${value}s`;
+function qualified(schema: string, table: string): string {
+  return `${identifier(schema)}.${identifier(table)}`;
 }
 function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
@@ -75,19 +69,53 @@ export function orderSnapshotChildren(found: readonly Row[], ownerColumns: reado
   });
 }
 
-async function snapshotNode(executor: unknown, schema: string, table: string, row: Row): Promise<SnapshotNode> {
+type Storage = { schema: string; table: string };
+
+/**
+ * A snapshot is content, and its hash is the hash of content: republishing an
+ * unchanged head must hash identically. Row bookkeeping the compiler adds to
+ * every table is dropped (the version row carries its own `published_at`),
+ * and so are the head's pointers into its own version table, which this
+ * handler writes below and which would otherwise make version N describe
+ * version N-1.
+ */
+const BOOKKEEPING = ["created_at", "updated_at"];
+const PUBLICATION = ["latest_version", "latest_version_id", "published_version", "published_version_id", "lifecycle_status"];
+function content(row: Row, ...excluded: readonly string[][]): Row {
+  const omit = new Set(excluded.flat());
+  return Object.fromEntries(Object.entries(row).filter(([column]) => !omit.has(column)));
+}
+
+/**
+ * The version table is itself a child of the head when its head reference is
+ * owned, so an unfiltered walk would embed every earlier version in the next
+ * one. The compiler-bound version table is excluded at every level: a
+ * snapshot describes content, never publication history.
+ */
+async function snapshotNode(executor: unknown, schema: string, table: string, row: Row, excluded: Storage): Promise<SnapshotNode> {
   const relations = await rows<ChildRelation>(executor, CHILD_RELATIONS, [schema, table]);
   const children: Record<string, SnapshotNode[]> = {};
   for (const relation of relations) {
+    if (relation.schema_name === excluded.schema && relation.table_name === excluded.table) continue;
     if (relation.child_columns.length !== relation.parent_columns.length) fail("OPERATION_UNAVAILABLE", "Compiled ownership relation is incomplete.");
     const predicates = relation.child_columns.map((column, index) => `${identifier(column)} = $${index + 1}`).join(" and ");
     const values = relation.parent_columns.map((column) => row[column]);
     const found = await rows<{ row: Row }>(executor,
-      `select to_jsonb(child_row.*) as row from ${identifier(relation.schema_name)}.${identifier(relation.table_name)} child_row where ${predicates} for share`, values);
+      `select to_jsonb(child_row.*) as row from ${qualified(relation.schema_name, relation.table_name)} child_row where ${predicates} for share`, values);
     const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.child_columns);
-    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row)));
+    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row, excluded)));
   }
-  return { table, row, children };
+  return { table, row: content(row, BOOKKEEPING), children };
+}
+
+/**
+ * The handler key `publish<Source>To<Version>` is the compiler's; the storage
+ * behind it comes from the compiler-bound registry, never from the names.
+ */
+function binding(context: ModuleOperationContext, sourceEntity: string, versionEntity: string): RuntimeVersioningBinding {
+  const bound = context.platform?.schemas.versioning?.get(sourceEntity);
+  if (!bound || bound.versionEntity !== versionEntity) fail("OPERATION_UNAVAILABLE", `No compiled version storage is bound for ${sourceEntity}.`);
+  return bound;
 }
 
 function publish(sourceEntity: string, versionEntity: string): ModuleOperationHandler {
@@ -96,29 +124,30 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
     const session = context.session;
     const id = input.id;
     if (typeof id !== "string" || !UUID.test(id)) fail("VALIDATION", "A valid source id is required.");
-    const sourceTable = tableName(sourceEntity);
-    const versionTable = tableName(versionEntity);
-    const sourceColumn = `${snake(sourceEntity)}_id`;
+    const { head, version } = binding(context, sourceEntity, versionEntity);
+    const headTable = qualified(head.schema, head.table);
+    const versionTable = qualified(version.schema, version.table);
+    const headColumn = identifier(version.headColumn);
     return context.platform.db.withSession(session, async (transaction) => {
       const source = (await rows<{ row: Row }>(transaction,
-        `select to_jsonb(source_row.*) as row from "erp".${identifier(sourceTable)} source_row where tenant_id = app.current_tenant() and id = $1::uuid for update`, [id]))[0]?.row;
+        `select to_jsonb(source_row.*) as row from ${headTable} source_row where tenant_id = app.current_tenant() and id = $1::uuid for update`, [id]))[0]?.row;
       if (!source) fail("NOT_FOUND", "The editable source no longer exists.");
       // Transaction-local marker for database guards that otherwise refuse a
       // direct write to the version table (documents: core-invariants.ts).
       await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
-      const tree = await snapshotNode(transaction, "erp", sourceTable, source);
-      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: tree };
+      const tree = await snapshotNode(transaction, head.schema, head.table, source, version);
+      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: { ...tree, row: content(tree.row, PUBLICATION) } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");
       const inserted = (await rows<{ row: Row }>(transaction, `
-        insert into "erp".${identifier(versionTable)}
-          (id, tenant_id, ${identifier(sourceColumn)}, version_number, status, snapshot, content_hash, published_by, published_at)
+        insert into ${versionTable}
+          (id, tenant_id, ${headColumn}, version_number, status, snapshot, content_hash, published_by, published_at)
         select gen_random_uuid(), app.current_tenant(), $1::uuid,
           coalesce(max(version_number), 0) + 1, 'published', $2::text::jsonb, $3, $4::uuid, now()
-        from "erp".${identifier(versionTable)} where tenant_id = app.current_tenant() and ${identifier(sourceColumn)} = $1::uuid
-        returning to_jsonb(${identifier(versionTable)}.*) as row`, [id, canonical, contentHash, session.userId]))[0]?.row;
+        from ${versionTable} where tenant_id = app.current_tenant() and ${headColumn} = $1::uuid
+        returning to_jsonb(${identifier(version.table)}.*) as row`, [id, canonical, contentHash, session.userId]))[0]?.row;
       if (!inserted) fail("OPERATION_UNAVAILABLE", "The immutable version could not be stored.");
-      await rows(transaction, `update "erp".${identifier(sourceTable)} set
+      await rows(transaction, `update ${headTable} set
         latest_version = $2, latest_version_id = $3::uuid,
         published_version = $2, published_version_id = $3::uuid,
         lifecycle_status = 'published', updated_at = now()

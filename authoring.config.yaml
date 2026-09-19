@@ -20,6 +20,10 @@ plugins:
   - "@openshapeforge/versioning"
   - "@openshapeforge/documents"
   - ./examples/plugins/entity-docs.ts
+  # A versioned entity pair in its own schema (`notebook`), authored through
+  # the plugin's layer: proves the generic publish runtime binds storage from
+  # the compiled manifest rather than assuming the core schema.
+  - ./examples/plugins/notebook/index.ts
   # Workflow node catalogs: contributes the platform workflow catalog tables,
   # emits the api-side workflow artifacts (web-side ones only when apps/web
   # exists), and ships its own authoring layer (workflow-nodes/** plus a

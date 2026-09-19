@@ -886,6 +886,40 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
   }
 }
 
+/**
+ * Bind the exact storage of every published-snapshot pair onto the head
+ * table's source. The versioning runtime reads schema, table and the head
+ * foreign key from here and derives nothing from entity names, so a plugin
+ * entity in its own schema publishes exactly like a core one. Runs after
+ * field relations are lowered, so the head column is already a reference to
+ * the head and the binding cannot name a column that does not point there.
+ */
+function bindVersioningStorage(candidates: CompiledCandidate[], tables: TableDefinition[]): void {
+  const byEntity = new Map(candidates.map((candidate, index) => [candidate.contract.entity.name, { candidate, table: tables[index]! }]));
+  for (const { candidate, table } of byEntity.values()) {
+    const versioning = candidate.contract.versioning;
+    if (!versioning) continue;
+    const head = candidate.contract.entity.name;
+    const version = byEntity.get(versioning.versionEntity);
+    if (!version) throw new Error(`${head}: versioning.versionEntity ${versioning.versionEntity} has no storage in this manifest.`);
+    const inverse = candidate.contract.model.relationships.find((relationship) =>
+      relationship.kind === "hasMany" && relationship.key === versioning.versionsField && relationship.target === versioning.versionEntity);
+    if (!inverse?.foreignKey) throw new Error(`${head}: versioning.versionsField ${versioning.versionsField} is not an owned collection of ${versioning.versionEntity}.`);
+    const column = version.table.columns.find((column) => column.name === inverse.foreignKey);
+    const reference = column?.references;
+    if (!reference || reference.schema !== table.schema || reference.table !== table.name) {
+      throw new Error(`${head}: ${versioning.versionEntity}.${inverse.foreignKey} must reference ${table.schema}.${table.name}.`);
+    }
+    table.source!.versioning = {
+      ...versioning,
+      storage: {
+        head: { schema: table.schema, table: table.name },
+        version: { schema: version.table.schema, table: version.table.name, headColumn: column.name },
+      },
+    };
+  }
+}
+
 /** Resolve field relations only after all tables exist, including cyclic references. */
 function compileFieldRelationStorage(
   candidates: CompiledCandidate[],
@@ -1324,7 +1358,6 @@ export function compileAuthoringBackendManifest(
           ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
           : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
-        ...(candidate.contract.versioning ? { versioning: candidate.contract.versioning } : {}),
         crud: { operations: crudOperations },
         ...(() => {
           const secureInput = candidate.contract.entityOperations.create
@@ -1419,6 +1452,7 @@ export function compileAuthoringBackendManifest(
   });
 
   const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
+  bindVersioningStorage(physicalCandidates, tables);
 
   return {
     version: 1,

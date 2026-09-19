@@ -12,6 +12,7 @@ import { APP_ROLE } from "../db/migrations/app-role.js";
 import { withDbSession } from "../db/session.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { generatedEntityValues } from "./entity-value-registry.js";
+import { generatedVersioning } from "./versioning-registry.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
 
 /**
@@ -56,7 +57,7 @@ const authorizations: string[] = [];
 function context(): ModuleOperationContext {
   const platform = {
     records: { async assertAccess(_session: unknown, request: { entityName: string; id: string }) { authorizations.push(`${request.entityName}:${request.id}`); } },
-    schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas, entityValues: generatedEntityValues },
+    schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas, entityValues: generatedEntityValues, versioning: generatedVersioning },
     db: { withSession: (actor: typeof session, work: (trx: unknown) => Promise<unknown>) => withDbSession(restricted.db, actor, (trx) => work(trx)) },
     operations: {
       list: async () => ["TemplateVersion", "Chip"].map((entityName) => ({ id: `${entityName}.get`, entityName, intent: "get", effects: { data: "read", external: "none" } })),

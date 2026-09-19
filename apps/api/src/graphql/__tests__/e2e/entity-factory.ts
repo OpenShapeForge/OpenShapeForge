@@ -11,6 +11,7 @@ import {
   createGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
+  isOperationWrittenColumn,
   isWritableColumn,
 } from "../../generated-crud.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
@@ -66,16 +67,18 @@ export function fieldName(column: Column): string {
 }
 
 /**
- * Delegates to the engine's own predicate rather than restating it, so the
+ * Delegates to the engine's own predicates rather than restating them, so the
  * suite cannot drift from the API. `create` is the right default here: the
  * factory's job is building rows, and a column authored `immutable` is settable
- * exactly then (#177). Tests that build an update body ask for "update".
+ * exactly then (#177). Tests that build an update body ask for "update". A
+ * column written by a named Operation (a versioned head's lifecycle status)
+ * is never a caller's to set, whatever the intent.
  */
 export function isMutableColumn(
   column: Column,
   operation: "create" | "update" = "create",
 ): boolean {
-  return isWritableColumn(column, operation);
+  return isWritableColumn(column, operation) && !isOperationWrittenColumn(column);
 }
 
 /** FK column name -> target table name (e.g. relation_group_id -> erp.relation_groups). */

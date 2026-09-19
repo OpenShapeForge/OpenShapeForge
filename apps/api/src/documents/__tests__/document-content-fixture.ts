@@ -21,6 +21,7 @@ import { runMigrationChain } from "../../db/migration-chain.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
+import { generatedVersioning } from "../../modules/versioning-registry.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
 import { RecordAccessRuntime } from "../../modules/record-access.js";
 import { createCollectionMutationExecutor } from "../../operations/entity/collection-mutations.js";
@@ -100,7 +101,7 @@ export function platformFor(who: Session) {
     records,
     events: { async append(_session: unknown, event: (typeof events)[number]) { events.push(event); } },
     errors: { classifyDatabase: () => undefined },
-    schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas, entityValues: generatedEntityValues },
+    schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas, entityValues: generatedEntityValues, versioning: generatedVersioning },
     artifacts: {
       async stage(_session: unknown, data: { fileName: string; source: AsyncIterable<Uint8Array> }) {
         const chunks: Uint8Array[] = [];

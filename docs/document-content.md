@@ -193,3 +193,23 @@ the same routine under the `link` command.
 children ordered by the owning key's position column
 (`packages/versioning/src/snapshot.ts`). Materializing a published document
 snapshot to rendered text is not in this slice.
+
+A snapshot is content, and `contentHash` is the SHA-256 of its canonical JSON,
+so publishing an unchanged head again yields a new version with the same hash.
+Three things are therefore left out of every snapshot:
+
+- the version table itself, even where the version entity's head reference is
+  owned (`template_versions.template_id` cascades): the walk excludes the
+  table the compiler bound as the version storage, so version N never embeds
+  versions 1..N-1;
+- the head's own publication pointers (`latestVersion(Id)`,
+  `publishedVersion(Id)`, `lifecycleStatus`), which `publish` writes after
+  taking the snapshot and which describe the previous publication;
+- `createdAt` and `updatedAt` on every row; the version row carries its own
+  `publishedAt`.
+
+Which tables `publish` reads and writes is bound by the compiler into the head
+table's manifest source (`source.versioning.storage`) and served to the
+runtime as `platform.schemas.versioning`; nothing is derived from the entity
+name, so a plugin entity in its own schema publishes the same way
+([plugins.md](plugins.md#shipped-example-3-notebook)).

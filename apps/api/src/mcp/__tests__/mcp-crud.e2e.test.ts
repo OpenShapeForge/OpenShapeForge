@@ -24,6 +24,7 @@ import {
   eligibleTables,
   fieldName,
   foreignKeyTargets,
+  isMutableColumn,
   nextMarker,
   pluginCreateInput,
   sampleValue,
@@ -419,8 +420,7 @@ async function buildCreateArgs(
   const marker = nextMarker();
   const args: Record<string, unknown> = {};
   for (const column of table.columns) {
-    if (!column.required || column.primaryKey) continue;
-    if (["tenant_id", "created_at", "updated_at"].includes(column.name)) continue;
+    if (!column.required || !isMutableColumn(column)) continue;
     const target = fkTargets.get(column.name);
     if (target) {
       args[fieldName(column)] = await createForeignKeyTarget(target, identity, depth + 1);

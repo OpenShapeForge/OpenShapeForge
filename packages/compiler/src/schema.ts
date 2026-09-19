@@ -319,6 +319,12 @@ export type LocalizedTextManifest = {
   fr?: string;
 };
 
+/** Compiler-bound storage of a published-snapshot pair; consumed verbatim by the versioning runtime. */
+export type VersioningStorageBinding = {
+  head: { schema: string; table: string };
+  version: { schema: string; table: string; headColumn: string };
+};
+
 export type TableSourceDefinition = {
   blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
   path?: string;
@@ -333,6 +339,13 @@ export type TableSourceDefinition = {
     versionsField: string;
     snapshot: { ownedRelationships: "recursive" };
     publishOperation: string;
+    /**
+     * Exact storage of both sides, bound here so the versioning runtime never
+     * derives a schema or table name: the head is this table, the version
+     * table holds the snapshots and `headColumn` is its foreign key back to
+     * the head (the persisted `versionsField` inverse).
+     */
+    storage: VersioningStorageBinding;
   };
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",

@@ -43,23 +43,28 @@ export function sameStatefulMcpAuthorization(
 }
 
 /**
- * Carry only server-derived, request-fresh domain memberships into the live
- * session. They are intentionally excluded from the token-claim equality
- * tuple: membership revocation must take effect without forcing the MCP
- * transport to reinitialize.
+ * Carry only server-derived, request-fresh state into the live session: the
+ * domain memberships, and the identity ↔ Relation link (which Relation the
+ * person acts as, and their roles here — auth/identity-link.ts). Both are
+ * intentionally excluded from the token-claim equality tuple: a membership
+ * revocation or an administrator re-linking the person must take effect on
+ * the next request without forcing the MCP transport to reinitialize. A link
+ * snapshot taken at initialize would outlive exactly those changes.
  */
-type RelationGroupRequestScope = {
+type RequestScope = {
   active: boolean;
   ids: readonly string[];
+  relation: TrustedSessionContext["relation"];
 };
 
-const freshRelationGroups = new AsyncLocalStorage<RelationGroupRequestScope>();
+const freshRequestScope = new AsyncLocalStorage<RequestScope>();
 const NO_RELATION_GROUPS = Object.freeze([]) as readonly string[];
 
 /**
  * One stable session object for the lifetime of an MCP transport. Its domain
- * memberships are a request-scoped getter, so two concurrent requests cannot
- * overwrite each other's authority by mutating a shared captured session.
+ * memberships and its Relation link are request-scoped accessors, so two
+ * concurrent requests cannot overwrite each other's authority by mutating a
+ * shared captured session.
  */
 export function createStatefulMcpSessionContext(
   established: TrustedSessionContext,
@@ -72,23 +77,39 @@ export function createStatefulMcpSessionContext(
     // group authority. In particular, callbacks cannot retain the initializer's
     // memberships after a later revocation.
     get: () => {
-      const request = freshRelationGroups.getStore();
+      const request = freshRequestScope.getStore();
       return request?.active ? request.ids : NO_RELATION_GROUPS;
+    },
+  });
+  Object.defineProperty(stateful, "relation", {
+    enumerable: true,
+    configurable: false,
+    get: () => {
+      const request = freshRequestScope.getStore();
+      return request?.active ? request.relation : null;
+    },
+    // The identity-link tools update the session's link after confirm_my_link
+    // and link_identity so the rest of THAT request sees it; the next request
+    // resolves it afresh from the row (the cache entry was invalidated).
+    set: (value: TrustedSessionContext["relation"]) => {
+      const request = freshRequestScope.getStore();
+      if (request?.active) request.relation = value;
     },
   });
   return stateful;
 }
 
-/** Run one transport request with its freshly resolved domain memberships. */
+/** Run one transport request with its freshly resolved memberships and link. */
 export async function withFreshRelationGroupMemberships<T>(
   current: TrustedSessionContext,
   work: () => Promise<T> | T,
 ): Promise<T> {
-  const request = {
+  const request: RequestScope = {
     active: true,
     ids: Object.freeze([...(current.relationGroupIds ?? [])]),
+    relation: current.relation ?? null,
   };
-  return freshRelationGroups.run(request, async () => {
+  return freshRequestScope.run(request, async () => {
     try {
       return await work();
     } finally {

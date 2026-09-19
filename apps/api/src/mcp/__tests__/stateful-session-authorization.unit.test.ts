@@ -100,6 +100,42 @@ describe("sameStatefulMcpAuthorization", () => {
     expect(await lateRead).toEqual([]);
   });
 
+  it("carries the identity ↔ Relation link per request, never from the initialize snapshot", async () => {
+    const link = (relationId: string): NonNullable<TrustedSessionContext["relation"]> => ({
+      identityId: "44444444-4444-4444-8444-444444444444",
+      issuer: "http://kc/realms/r",
+      subject: "22222222-2222-4222-8222-222222222222",
+      status: "linked",
+      relationId,
+      displayName: "Someone",
+      relationType: "person",
+      candidateRelationId: null,
+      linkedBy: "jit",
+      needsRoleAssignment: false,
+      roles: ["General.All.Read"],
+    });
+    const established = { ...authorization(), relation: link("relation-at-initialize") } as TrustedSessionContext;
+    const stateful = createStatefulMcpSessionContext(established);
+    // No request: no link authority, and the initialize snapshot is not it.
+    expect(stateful.relation).toBeNull();
+
+    // An administrator re-linked the person between two requests; the second
+    // request resolved the new link, and that is what the session answers.
+    const relinked = { ...authorization(), relation: link("relation-after-relink") } as TrustedSessionContext;
+    await withFreshRelationGroupMemberships(relinked, async () => {
+      expect(stateful.relation?.relationId).toBe("relation-after-relink");
+      // A tool updating the link mid-request (confirm_my_link) is seen by the
+      // rest of that request only.
+      stateful.relation = link("relation-confirmed-now");
+      expect(stateful.relation?.relationId).toBe("relation-confirmed-now");
+    });
+    expect(stateful.relation).toBeNull();
+    const unlinked = { ...authorization(), relation: null } as TrustedSessionContext;
+    await withFreshRelationGroupMemberships(unlinked, async () => {
+      expect(stateful.relation).toBeNull();
+    });
+  });
+
   it("accepts access-token renewal within the same login session", () => {
     expect(
       sameStatefulMcpAuthorization(

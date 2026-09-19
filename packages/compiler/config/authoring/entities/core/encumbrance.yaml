@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Encumbrance
   nl: Zekerheid
+pluralLabels:
+  en: Encumbrances
+  nl: Zekerheden
 domains:
   - asset
 fields:
@@ -235,6 +238,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

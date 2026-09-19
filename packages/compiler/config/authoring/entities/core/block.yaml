@@ -5,6 +5,7 @@ entity: Block
 title: Block
 language: en
 labels: { en: Block, nl: Block }
+pluralLabels: { en: Blocks, nl: Blocks }
 domains: [documents]
 authorization:
   roles:

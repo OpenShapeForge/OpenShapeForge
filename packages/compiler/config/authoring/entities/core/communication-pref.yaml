@@ -11,6 +11,9 @@ filterField: type
 labels:
   en: Communication Preference
   nl: Communicatievoorkeur
+pluralLabels:
+  en: Communication preferences
+  nl: Communicatievoorkeuren
 domains:
   - relations
 authorization:
@@ -266,6 +269,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

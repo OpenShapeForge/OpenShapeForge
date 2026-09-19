@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Budget
   nl: Begroting
+pluralLabels:
+  en: Budgets
+  nl: Begrotingen
 domains:
   - finance
 fields:
@@ -189,6 +192,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

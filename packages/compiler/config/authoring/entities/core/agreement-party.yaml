@@ -10,6 +10,9 @@ filterField: partyRole
 labels:
   en: Agreement party
   nl: Overeenkomstpartij
+pluralLabels:
+  en: Agreement parties
+  nl: Overeenkomstpartijen
 domains:
   - contracts
 authorization:

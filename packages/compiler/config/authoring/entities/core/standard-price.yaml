@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Standard price
   nl: Standaardprijs
+pluralLabels:
+  en: Standard prices
+  nl: Standaardprijzen
 domains:
   - maintenance
 fields:
@@ -213,6 +216,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

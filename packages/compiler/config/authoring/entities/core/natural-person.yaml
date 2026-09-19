@@ -11,6 +11,9 @@ filterField: lastName
 labels:
   en: Natural Person
   nl: Natuurlijk Persoon
+pluralLabels:
+  en: Natural persons
+  nl: Natuurlijke personen
 domains:
   - relations
 authorization:
@@ -309,6 +312,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

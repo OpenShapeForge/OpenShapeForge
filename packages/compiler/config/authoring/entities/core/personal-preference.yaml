@@ -9,6 +9,7 @@ language: en
 displayTemplate: "{{key}}"
 filterField: key
 labels: { en: Personal preference, nl: Persoonlijke voorkeur }
+pluralLabels: { en: Personal preferences, nl: Persoonlijke voorkeuren }
 indexes:
   - name: personal_preferences_owner_key_uidx
     fields: [ tenantId, ownerUserId, namespace, key ]

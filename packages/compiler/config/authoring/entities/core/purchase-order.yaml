@@ -11,6 +11,9 @@ filterField: purchaseOrderNumber
 labels:
   en: Purchase order
   nl: Inkoopopdracht
+pluralLabels:
+  en: Purchase orders
+  nl: Inkoopopdrachten
 domains:
   - finance
 fields:
@@ -260,6 +263,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

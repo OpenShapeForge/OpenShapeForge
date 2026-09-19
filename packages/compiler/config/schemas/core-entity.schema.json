@@ -75,6 +75,10 @@
     "labels": {
       "$ref": "#/$defs/localizedText"
     },
+    "pluralLabels": {
+      "description": "Plural form of labels; carried by derived inverse collections. Absent: each label is pluralised.",
+      "$ref": "#/$defs/localizedText"
+    },
     "domains": {
       "type": "array",
       "description": "Optional domain tags used to group entities independently from contexts or profiles.",

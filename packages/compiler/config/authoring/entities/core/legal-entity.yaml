@@ -11,6 +11,9 @@ filterField: name
 labels:
   en: Legal Entity
   nl: Rechtspersoon
+pluralLabels:
+  en: Legal entities
+  nl: Rechtspersonen
 domains:
   - relations
 authorization:
@@ -200,6 +203,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

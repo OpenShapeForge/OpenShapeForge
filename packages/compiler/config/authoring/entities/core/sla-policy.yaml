@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: SLA Policy
   nl: SLA-beleid
+pluralLabels:
+  en: SLA policies
+  nl: SLA-beleid
 domains:
   - cases
   - service
@@ -246,6 +249,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

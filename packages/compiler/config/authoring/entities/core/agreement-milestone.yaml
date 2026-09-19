@@ -14,6 +14,9 @@ filterField: description
 labels:
   en: Agreement milestone
   nl: Overeenkomstmijlpaal
+pluralLabels:
+  en: Agreement milestones
+  nl: Overeenkomstmijlpalen
 domains:
   - finance
   - contracts

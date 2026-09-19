@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Energy performance measurement
   nl: Energieprestatiemeting
+pluralLabels:
+  en: Energy performance measurements
+  nl: Energieprestatiemetingen
 domains:
   - energy
 fields:
@@ -167,6 +170,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

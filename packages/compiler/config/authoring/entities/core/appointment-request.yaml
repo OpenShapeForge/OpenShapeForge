@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Appointment request
   nl: Afspraakverzoek
+pluralLabels:
+  en: Appointment requests
+  nl: Afspraakverzoeken
 domains:
   - crm
   - relations
@@ -256,6 +259,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

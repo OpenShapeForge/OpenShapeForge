@@ -5,6 +5,7 @@ entity: TextBlock
 title: Text block
 language: en
 labels: { en: Text, nl: Tekst }
+pluralLabels: { en: Texts, nl: Teksten }
 domains: [documents]
 # The Block placement supplies identity. This definition supplies its fields.
 baseEntity: false

@@ -12,6 +12,9 @@ filterField: code
 labels:
   en: Agreement
   nl: Overeenkomst
+pluralLabels:
+  en: Agreements
+  nl: Overeenkomsten
 domains:
   - contracts
 authorization:

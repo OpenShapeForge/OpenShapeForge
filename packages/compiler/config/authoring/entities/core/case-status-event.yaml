@@ -10,6 +10,9 @@ filterField: actorId
 labels:
   en: Case Status Event
   nl: Zaakstatusgebeurtenis
+pluralLabels:
+  en: Case status events
+  nl: Zaakstatusgebeurtenissen
 domains:
   - cases
 authorization:
@@ -211,6 +214,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

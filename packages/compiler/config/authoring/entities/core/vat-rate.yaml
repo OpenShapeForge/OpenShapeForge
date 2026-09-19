@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: VAT rate
   nl: BTW-tarief
+pluralLabels:
+  en: VAT rates
+  nl: BTW-tarieven
 domains:
   - finance
 fields:
@@ -222,6 +225,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

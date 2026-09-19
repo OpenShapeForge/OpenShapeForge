@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Payment method
   nl: Betaalwijze
+pluralLabels:
+  en: Payment methods
+  nl: Betaalwijzen
 domains:
   - finance
 fields:
@@ -176,6 +179,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

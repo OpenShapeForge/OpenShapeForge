@@ -10,6 +10,9 @@ filterField: supplierNumber
 labels:
   en: Supplier
   nl: Leverancier
+pluralLabels:
+  en: Suppliers
+  nl: Leveranciers
 domains:
   - relations
 fields:
@@ -327,6 +330,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

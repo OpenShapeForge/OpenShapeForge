@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Fiscal period
   nl: Boekjaarperiode
+pluralLabels:
+  en: Fiscal periods
+  nl: Boekjaarperioden
 domains:
   - finance
 fields:
@@ -198,6 +201,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

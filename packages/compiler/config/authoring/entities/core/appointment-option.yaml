@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Appointment option
   nl: Afspraakoptie
+pluralLabels:
+  en: Appointment options
+  nl: Afspraakopties
 domains:
   - crm
   - relations
@@ -200,6 +203,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

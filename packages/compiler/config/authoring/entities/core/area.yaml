@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Area
   nl: Oppervlakte
+pluralLabels:
+  en: Areas
+  nl: Oppervlakten
 domains:
   - asset
 fields:
@@ -203,6 +206,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Bank reconciliation
   nl: Aflettering
+pluralLabels:
+  en: Bank reconciliations
+  nl: Afletteringen
 domains:
   - finance
 fields:
@@ -161,6 +164,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Maintenance request settlement
   nl: Onderhoudsverzoek-verrekening
+pluralLabels:
+  en: Maintenance request settlements
+  nl: Onderhoudsverzoek-verrekeningen
 domains:
   - maintenance
 fields:
@@ -173,6 +176,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

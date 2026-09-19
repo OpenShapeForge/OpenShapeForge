@@ -10,6 +10,9 @@ filterField: invoiceNumber
 labels:
   en: Invoice
   nl: Factuur
+pluralLabels:
+  en: Invoices
+  nl: Facturen
 domains:
   - finance
 fields:
@@ -396,6 +399,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

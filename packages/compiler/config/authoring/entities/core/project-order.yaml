@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Project order
   nl: Projectopdracht
+pluralLabels:
+  en: Project orders
+  nl: Projectopdrachten
 domains:
   - project
 fields:
@@ -217,6 +220,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

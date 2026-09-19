@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Building part
   nl: Bouwdeel
+pluralLabels:
+  en: Building parts
+  nl: Bouwdelen
 domains:
   - asset
 fields:
@@ -195,6 +198,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

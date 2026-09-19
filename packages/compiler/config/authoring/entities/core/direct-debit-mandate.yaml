@@ -10,6 +10,9 @@ filterField: mandateReference
 labels:
   en: Direct debit mandate
   nl: Incassomachtiging
+pluralLabels:
+  en: Direct debit mandates
+  nl: Incassomachtigingen
 domains:
   - finance
 fields:
@@ -223,6 +226,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

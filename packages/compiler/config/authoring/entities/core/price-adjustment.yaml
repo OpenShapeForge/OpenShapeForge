@@ -11,6 +11,9 @@ filterField: code
 labels:
   en: Price adjustment
   nl: Prijsaanpassing
+pluralLabels:
+  en: Price adjustments
+  nl: Prijsaanpassingen
 domains:
   - finance
 fields:
@@ -203,6 +206,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

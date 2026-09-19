@@ -206,3 +206,32 @@ describe("collection locks and reference versions", () => {
     expect(() => normalizeEntityFields(owned, corpus())).toThrow("single reference only");
   });
 });
+
+describe("derived inverse collection labels", () => {
+  test("pluralises each authored label, and prefers authored pluralLabels per locale", async () => {
+    const { defaultInverseLabel } = await import("./inverse-collections.js");
+    expect(defaultInverseLabel({ entity: "Appointment", labels: { en: "Appointment", nl: "Afspraak" } }))
+      .toEqual({ en: "Appointments", nl: "Afspraaks" });
+    expect(defaultInverseLabel({ entity: "Appointment", labels: { en: "Appointment", nl: "Afspraak" }, pluralLabels: { nl: "Afspraken" } }))
+      .toEqual({ en: "Appointments", nl: "Afspraken" });
+    expect(defaultInverseLabel({ entity: "AgreementParty", title: "Agreement party" })).toEqual({ en: "Agreement parties" });
+  });
+
+  test("the compiled inverse collection carries the plural through the catalog projection", () => {
+    const relation: CoreEntity = {
+      schemaVersion: 3, kind: "coreEntity", module: "core", entity: "Relation", title: "Relation", language: "en",
+      labels: { en: "Relation", nl: "Relatie" }, pluralLabels: { en: "Relations", nl: "Relaties" },
+      fields: [{ key: "id", osfType: "string" }],
+    } as CoreEntity;
+    const appointment: CoreEntity = {
+      schemaVersion: 3, kind: "coreEntity", module: "core", entity: "Appointment", title: "Appointment", language: "en",
+      labels: { en: "Appointment", nl: "Afspraak" }, pluralLabels: { en: "Appointments", nl: "Afspraken" },
+      fields: [{ key: "id", osfType: "string" }, { key: "relationId", osfType: "Relation" }],
+    } as CoreEntity;
+    const catalog = deriveEntityOsfTypes([relation, appointment], {});
+    expect(catalog.Appointment?.pluralLabel).toEqual({ en: "Appointments", nl: "Afspraken" });
+    const relationFields = normalizeEntityFields(relation, catalog).fields;
+    const appointments = relationFields.find((field) => field.key === "appointments");
+    expect(appointments?.label).toEqual({ en: "Appointments", nl: "Afspraken" });
+  });
+});

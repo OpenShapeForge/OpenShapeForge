@@ -11,6 +11,9 @@ filterField: name
 labels:
   en: Process Step
   nl: Processtap
+pluralLabels:
+  en: Process steps
+  nl: Processtappen
 domains:
   - cases
   - workflow
@@ -437,6 +440,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

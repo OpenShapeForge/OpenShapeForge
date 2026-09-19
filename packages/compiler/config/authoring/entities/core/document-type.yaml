@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Document Type
   nl: Documenttype
+pluralLabels:
+  en: Document types
+  nl: Documenttypen
 domains:
   - cases
   - governance

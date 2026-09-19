@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Project spending
   nl: Projectbesteding
+pluralLabels:
+  en: Project spendings
+  nl: Projectbestedingen
 domains:
   - project
 fields:
@@ -183,6 +186,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

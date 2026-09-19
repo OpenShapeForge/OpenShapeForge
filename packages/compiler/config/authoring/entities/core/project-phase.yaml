@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Project phase
   nl: Projectfase
+pluralLabels:
+  en: Project phases
+  nl: Projectfasen
 domains:
   - project
 fields:
@@ -212,6 +215,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

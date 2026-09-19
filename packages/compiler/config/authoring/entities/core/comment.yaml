@@ -11,6 +11,9 @@ filterField: body
 labels:
   en: Comment
   nl: Opmerking
+pluralLabels:
+  en: Comments
+  nl: Opmerkingen
 domains:
   - comments
 authorization:
@@ -166,6 +169,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

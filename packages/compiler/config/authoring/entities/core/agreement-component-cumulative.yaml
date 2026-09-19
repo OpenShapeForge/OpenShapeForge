@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Component cumulative
   nl: Component cumulatief
+pluralLabels:
+  en: Component cumulatives
+  nl: Cumulatieven per component
 domains:
   - finance
   - contracts
@@ -299,6 +302,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

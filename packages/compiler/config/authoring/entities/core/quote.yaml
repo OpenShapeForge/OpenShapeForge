@@ -10,6 +10,9 @@ filterField: quoteNumber
 labels:
   en: Quote
   nl: Offerte
+pluralLabels:
+  en: Quotes
+  nl: Offertes
 domains:
   - finance
 fields:

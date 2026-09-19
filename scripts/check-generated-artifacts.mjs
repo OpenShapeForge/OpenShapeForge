@@ -19,7 +19,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // these entities (isGeneratedCrudUiEnabled requires every operation to be
 // true). Schema-3 entities with an explicit complete CRUD and Web contract do
 // retain their generated pages; partial contracts use the Web manifest only.
-const expectedGeneratedCrudEntityCount = 118;
+const expectedGeneratedCrudEntityCount = 117;
 
 /**
  * The realms this repository authors, by name.

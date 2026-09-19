@@ -87,6 +87,8 @@ export type GeneratedCrudTable = {
   generatedCrud: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
+  /** Compiler- and plugin-owned table constraints, as the manifest carries them. */
+  constraints?: Array<{ name: string; kind: string; expression?: string; columns?: string[] }>;
   realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
     blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };

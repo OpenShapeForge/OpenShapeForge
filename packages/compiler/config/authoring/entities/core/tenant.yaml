@@ -135,6 +135,11 @@ fields:
     persisted:
       column: external_code
       storageClass: core
+# The registry row has exactly one write path: tenant provisioning
+# (apps/api/src/control/provisioning.ts) inserts it beside the platform row,
+# with id = tenant_id = the platform tenant's id, which CHECK (id = tenant_id)
+# holds. No generic create or delete: a tenant neither creates nor removes
+# itself, and a second creator would fight the check and the provisioner.
 operations:
   list:
     name: List Tenant
@@ -164,20 +169,6 @@ operations:
         mode: natural
     confirmation:
       mode: none
-  create:
-    name: Create Tenant
-    description: Create Tenant records.
-    implementation:
-      type: entity
-      action: create
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
   update:
     name:
       en: Edit
@@ -194,24 +185,6 @@ operations:
         mode: none
     confirmation:
       mode: none
-  delete:
-    name:
-      en: Delete
-      nl: Verwijderen
-    description:
-      en: Are you sure?
-      nl: Weet je het zeker?
-    implementation:
-      type: entity
-      action: delete
-    effects:
-      data: delete
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: acknowledgement
 interfaces:
   graphql: {}
   workflow:
@@ -246,16 +219,12 @@ interfaces:
           read:
             en: /tenants/:id
             nl: /tenants/:id
-          create:
-            en: /tenants/create
-            nl: /tenants/aanmaken
         title: "{{name}}"
         subtitle: "{{slug}}"
         badges:
           - status
         actions:
           - update
-          - delete
         layout:
           tabs:
             - id: overview
@@ -278,20 +247,6 @@ interfaces:
                 nl: Instellingen
               relationship: tenantSettings
         modes:
-          create:
-            title:
-              en: Create tenant
-              nl: Tenant aanmaken
-            groups:
-              - title:
-                  en: Tenant details
-                  nl: Tenantgegevens
-                fields:
-                  - slug
-                  - name
-                  - status
-                  - description
-                  - avatarStorageLocation
           update:
             title:
               en: Edit tenant

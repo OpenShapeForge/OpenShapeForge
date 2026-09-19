@@ -74,6 +74,13 @@ export function fieldName(column: Column): string {
  * column written by a named Operation (a versioned head's lifecycle status)
  * is never a caller's to set, whatever the intent.
  */
+/** Whether every row of `table` is its own tenant, so the row for an identity is the provisioned one. */
+export function isTenantRegistry(table: GeneratedTable): boolean {
+  return (table.constraints ?? []).some(
+    (constraint) => constraint.kind === "check" && constraint.expression === "id = tenant_id",
+  );
+}
+
 export function isMutableColumn(
   column: Column,
   operation: "create" | "update" = "create",
@@ -225,6 +232,14 @@ export async function createRow(
     throw new Error(`FK dependency chain too deep while creating ${table.name}`);
   }
   const graphql = table.source?.graphql;
+
+  // A tenant registry (CHECK (id = tenant_id)) has one write path,
+  // provisioning, and the harness provisions each run's tenant row once
+  // (ensureTenantRows). The fixture for it IS that row: a second insert
+  // would collide on the tenant's own id.
+  if (isTenantRegistry(table)) {
+    return identity.tenantId;
+  }
 
   // A plugin-backed create has an input contract of its own, and its
   // database may refuse a direct insert outright (a document must be created

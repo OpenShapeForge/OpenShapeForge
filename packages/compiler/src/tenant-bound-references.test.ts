@@ -115,4 +115,21 @@ describe("tenant-bound references", () => {
     ensureCompositeReferenceKeys(input);
     expect(customers.indexes).toEqual([{ name: "customers_identity_uidx", columns: ["tenant_id", "id"], unique: true }]);
   });
+
+  it("scopes ON DELETE SET NULL to the reference column of a composite key and refuses it on a NOT NULL column", () => {
+    const orders = tenantTable("orders", [
+      { name: "customer_id", type: "uuid", references: { ...composite("customer_id", "customers"), onDelete: "SET NULL" } },
+      { name: "catalog_id", type: "uuid", references: { schema: "platform", table: "catalogs", column: "id", onDelete: "SET NULL" } },
+    ]);
+    const catalogs: TableDefinition = {
+      schema: "platform", name: "catalogs", tenantScoped: false, columns: [{ name: "id", type: "uuid", primaryKey: true }],
+    };
+    const sql = schemaSql(manifest(orders, catalogs, tenantTable("customers")));
+    expect(sql).toContain('REFERENCES "erp"."customers"("tenant_id", "id") ON DELETE SET NULL ("customer_id");');
+    expect(sql).toContain('REFERENCES "platform"."catalogs"("id") ON DELETE SET NULL;');
+    orders.columns.find((column) => column.name === "customer_id")!.required = true;
+    expect(() => schemaSql(manifest(orders, catalogs, tenantTable("customers")))).toThrow(
+      "erp.orders.customer_id is NOT NULL and cannot use ON DELETE SET NULL",
+    );
+  });
 });

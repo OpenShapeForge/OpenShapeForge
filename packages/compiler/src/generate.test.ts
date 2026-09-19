@@ -2203,7 +2203,7 @@ tables:
       expect(sql).toContain(
         'ADD CONSTRAINT "tenants_relation_id_fkey" FOREIGN KEY ("id", "relation_id")',
       );
-      expect(sql).toContain('REFERENCES "erp"."relations"("tenant_id", "id") ON DELETE SET NULL;');
+      expect(sql).toContain('REFERENCES "erp"."relations"("tenant_id", "id") ON DELETE SET NULL ("relation_id");');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

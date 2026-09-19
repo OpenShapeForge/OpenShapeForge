@@ -15,9 +15,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
-import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
+import { createGeneratedEntity, updateGeneratedEntity } from "../../operations/entity/mutations.js";
 import {
-  closeScratch, collections, createDocument, dbInput, document, editor, linked, openScratch, platformFor, privileged, publishDocument, publishTemplate,
+  closeScratch, collections, createDocument, dbInput, document, editor, fails, linked, openScratch, platformFor, privileged, publishDocument, publishTemplate,
   restricted, seedTemplate, tableName, tenant, variant, variantBlocks,
 } from "./document-content-fixture.js";
 
@@ -171,6 +171,13 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     await updateGeneratedEntity(restricted(), session, { table: blocks, id: ids.first, values: { values: { text: "Template edit" } } });
     expect((await template(ids.template)).lifecycle_status).toBe("draft");
     expect((await document(documentId)).lifecycle_status).toBe("published");
+
+    // A block is never created generically: an owned child enters its collection through the owner's insert
+    // Operation only, which drafts the head (above); the generic create is refused before any row is written.
+    await sql`update erp.templates set lifecycle_status = 'published' where id = ${ids.template}::uuid`.execute(privileged());
+    const beforeCreate = await template(ids.template);
+    await fails(createGeneratedEntity(restricted(), session, { table: blocks, values: { variant: ids.variant, definitionKey: "TextBlock", values: { text: "Created generically" } } }), "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    expect(await template(ids.template)).toEqual(beforeCreate);
 
     // The document block's row has the other owner set: only the Document is drafted.
     await sql`update erp.templates set lifecycle_status = 'published' where id = ${ids.template}::uuid`.execute(privileged());

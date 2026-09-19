@@ -269,6 +269,10 @@ async function insertGeneratedRowInTransaction(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  // A new row under a versioned head is a content change of that head. The
+  // public create refuses an owned child (collectionMutationError), so this
+  // covers the in-transaction create the collection insert runs.
+  await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
   await appendGeneratedCrudEvent(trx, table, {
     aggregateId: generatedCrudAggregateId(table, row),
     eventType: "created",
@@ -423,7 +427,7 @@ async function applyGeneratedRowUpdate(
 
     const row = result.rows[0]?.row ?? null;
     if (!row) return unchangedRow();
-    await draftOwningHead(trx, getGeneratedCrudTables(), table, row);
+    await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",

@@ -1112,9 +1112,10 @@ tables:
       - { name: created_at, type: timestamptz, required: true, default: now() }
 
   # blueprint_copies: provenance of a record a tenant created from a
-  # blueprint — which version, from which blueprint tenant. The composite
+  # blueprint — which version, from which blueprint tenant. The four-column
   # reference into blueprint_versions and the two-tenants-differ check are
-  # in blueprints.ts; the manifest expresses single-column references only.
+  # in blueprints.ts: the manifest's column references pair a column with a
+  # tenant, and this key spans three business columns beside the tenant.
   - schema: platform
     name: blueprint_copies
     tenantScoped: false

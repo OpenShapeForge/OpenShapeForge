@@ -33,9 +33,9 @@ function assertNames({ table, name }: Constraint): void {
  * The DO block that adds `definition` under `name` unless it already exists.
  *
  * With `columns`, a constraint of that name whose key columns differ is
- * dropped first: the generated schema emits a single-column foreign key
- * under the same name a core invariant later widens to a tenant-qualified
- * compound key, and the generated DO block — which guards by name alone —
+ * dropped first: the generated schema emits a tenant-qualified foreign key
+ * under the same name a core invariant later widens further (the document
+ * current-version pointer), and the generated DO block — which guards by name alone —
  * then leaves the compound one in place on every later apply.
  */
 function ensureConstraintSql(

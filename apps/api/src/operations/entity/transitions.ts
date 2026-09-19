@@ -53,8 +53,9 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
 
+/** Strictly nullish: a stored empty string is a present value, as the contract says. */
 function present(value: unknown): boolean {
-  return value !== null && value !== undefined && value !== "";
+  return value !== null && value !== undefined;
 }
 
 /**

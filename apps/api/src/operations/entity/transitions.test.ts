@@ -46,6 +46,11 @@ describe("status transition binding", () => {
       message: "trigger requires producedInvoiceId to be empty.",
     });
     expect(transitionRefusal(binding, { status: "pending", expected_at: "2026-01-01", produced_invoice_id: null })).toBeUndefined();
+    // Strictly nullish: an empty string is present, so it satisfies `present: true` and fails `present: false`.
+    expect(transitionRefusal(binding, { status: "pending", expected_at: "", produced_invoice_id: null })).toBeUndefined();
+    expect(transitionRefusal(binding, { status: "pending", expected_at: "2026-01-01", produced_invoice_id: "" })).toMatchObject({
+      message: "trigger requires producedInvoiceId to be empty.",
+    });
     expect(table.columns.find((column) => column.name === "status")?.writtenBy?.[0]?.operation).toBe(trigger.key);
   });
 });

@@ -162,11 +162,11 @@ required, must carry a `defaultValue` (it leaves the create input, so without
 one no record could ever be created); and neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
-present or absent — and richer checks belong in an authored plugin Operation.
+present (not null) or absent (null); an empty string is a present value — and
+richer checks belong in an authored plugin Operation.
 
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
 `pending` to `triggered` and stamps `triggeredAt` with the transaction time
 and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
 `cancelled`. `invoiced` is still written by the milestone billing run until
 that run is a described Operation.
-

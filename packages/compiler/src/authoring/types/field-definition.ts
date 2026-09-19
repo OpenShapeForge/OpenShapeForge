@@ -76,8 +76,9 @@ export interface FieldDefinitionTransitionRule {
   auth?: { roles?: string[]; recordPermission?: "edit" };
   /**
    * Record facts that must hold besides the current status. Deliberately a
-   * small vocabulary: a field is present (not null) or absent. Anything
-   * richer belongs in an authored plugin Operation.
+   * small vocabulary: a field is present (not null) or absent (null); an
+   * empty string is present. Anything richer belongs in an authored plugin
+   * Operation.
    */
   preconditions?: Array<{ field: string; present: boolean }>;
   /** Fields this transition, and only this transition, may set from its input. */

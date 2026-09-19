@@ -182,8 +182,10 @@ fields:
       en: Triggered by
       nl: Getriggerd door
     description:
-      en: User account, workflow instance id, or system process that triggered the milestone.
-      nl: Gebruikersaccount, workflow-instantie-id of systeemproces dat de mijlpaal heeft getriggerd.
+      en: The identity of the session that triggered the milestone, stamped by the server when the trigger
+        transition runs; never supplied by the caller.
+      nl: De identiteit van de sessie die de mijlpaal heeft getriggerd, door de server vastgelegd wanneer de
+        trigger-transitie loopt; nooit door de aanroeper opgegeven.
     validation:
       maxLength: 200
     persisted:

@@ -19,8 +19,9 @@ import { mintApiKey } from "./api-key/format.js";
 import { __resetExchangeCacheForTests } from "./api-key/exchange.js";
 import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";
 import {
-  __resetSessionResolverForTests, __setTenantForOrganizationForTests, resolveSessionContext,
+  __resetSessionResolverForTests, __setIdentityLinkForTests, __setTenantForOrganizationForTests, resolveSessionContext,
 } from "./identity.js";
+import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const ISSUER = "https://identity.example.test/realms/host";
 const RESOURCE = "https://api.example.test/api/mcp";
@@ -69,6 +70,7 @@ beforeEach(() => {
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/jwks", server.url).href;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
   __resetSessionResolverForTests();
+  stubLinkedMembershipForTests();
   __resetExchangeCacheForTests();
   exchangeCalls = 0;
   lookups.length = 0;
@@ -182,19 +184,40 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(request)).tenantId).toBe(TENANT_A);
   });
 
-  test("a person's client roles never reach the session; realm roles do, organization-local grants are never flattened", async () => {
+  test("a person cannot be admitted on a surface without a database, in either mode", async () => {
     // A client role on the Keycloak user is user-wide: whatever organization
     // the token selects, it would be there. A person's organization roles come
     // from the membership row (auth/identity-link.ts), which needs a database;
-    // without one the session holds realm roles only, in either mode.
+    // without one there is no session at all — never one from the token.
+    __setIdentityLinkForTests(null);
     const request = await headers({
       realm_access: { roles: ["realm-reader"] },
       resource_access: { api: { roles: ["Records.Read"] }, sibling: { roles: ["Records.Admin"] } },
       organization: { alpha: { id: "org-a", realm_access: { roles: ["nested-admin"] } } },
     });
-    expect((await resolveSessionContext(request)).roles).toEqual(["realm-reader"]);
+    await expect(resolveSessionContext(request)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
     process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
-    expect((await resolveSessionContext(request)).roles).toEqual(["realm-reader"]);
+    await expect(resolveSessionContext(request)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
+  });
+
+  test("a service-account token is not a person: it keeps its client roles and never enters admission", async () => {
+    // Keycloak names a client-credentials principal service-account-<clientId>
+    // and makes that client the authorized party — verified claims, both.
+    process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "off";
+    __setIdentityLinkForTests(null);
+    const request = await headers({
+      organization: undefined, tid: TENANT_A, azp: "automation", preferred_username: "service-account-automation",
+      realm_access: { roles: ["realm-reader"] },
+      resource_access: { api: { roles: ["Records.Read"] } },
+    });
+    const session = await resolveSessionContext(request);
+    expect(session.tenantId).toBe(TENANT_A);
+    expect(session.roles).toEqual(["Records.Read", "realm-reader"]);
+    expect(session.relation).toBeNull();
+    // The same shape with a person's username is a person, and is refused here.
+    await expect(
+      resolveSessionContext(await headers({ organization: undefined, tid: TENANT_A, azp: "automation", preferred_username: "hans" })),
+    ).rejects.toMatchObject({ status: 503 });
   });
 
   test("strict mode refuses signed trusted context, including with an invalid bearer", async () => {
@@ -221,6 +244,7 @@ describe("host organization binding through real bearer verification and resolve
     expect((await resolveSessionContext(await headers(), { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = RESOURCE;
     __resetSessionResolverForTests();
+    stubLinkedMembershipForTests();
     __setTenantForOrganizationForTests(async () => TENANT_A);
     expect((await resolveSessionContext(await headers({ aud: RESOURCE }), { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);
     expect((await resolveSessionContext(await headers({ aud: "api" }), { requiredAudience: "api" })).credential).toBe("none");
@@ -229,6 +253,7 @@ describe("host organization binding through real bearer verification and resolve
   test("dynamic client azp is accepted only in host mode with a verified required resource audience", async () => {
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "web";
     __resetSessionResolverForTests();
+    stubLinkedMembershipForTests();
     __setTenantForOrganizationForTests(async () => TENANT_A);
     const dynamic = await headers({ azp: "dynamically-registered-client" });
     expect((await resolveSessionContext(dynamic, { requiredAudience: RESOURCE })).tenantId).toBe(TENANT_A);

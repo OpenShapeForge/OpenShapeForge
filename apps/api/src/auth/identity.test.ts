@@ -245,48 +245,63 @@ describe("personSessionRoles (a person's effective roles in the selected organiz
     ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
   });
 
-  test("a membership row with nothing recorded yet yields the just-in-time minimum only", () => {
+  test("a membership row with nothing recorded yet yields the just-in-time minimum beside the realm roles", () => {
     expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true }, realm)).toEqual([
       "General.All.Read",
-    ]);
-  });
-
-  test("without a membership row (no database) only realm roles remain", () => {
-    expect(personSessionRoles(identity, null, realm)).toEqual([
       "Platform.ApiKeys.Manage",
       "default-roles-openshapeforge",
     ]);
   });
 
-  test("a persona on the row expands through the realm's composites, transitively, for that realm only", () => {
+  test("the shipped realm expands the personas the invitation path records", () => {
+    // From the generated artifact, i.e. the base authorization.yaml: what an
+    // invited administrator and employee actually hold.
+    expect(expandRoleComposites(realm, ["org_admin"])).toEqual([
+      "General.All.Read",
+      "General.All.ReadWrite",
+      "Organization.All.Read",
+      "Organization.All.ReadWrite",
+      "Platform.ApiKeys.Manage",
+      "Platform.Jobs.Manage",
+      "Relations.All.Read",
+      "Relations.All.ReadWrite",
+      "org_admin",
+    ]);
+    expect(expandRoleComposites(realm, ["org_employee"])).toEqual([
+      "General.All.Read",
+      "Relations.All.Read",
+      "org_employee",
+    ]);
+    // The dev layer's administrator composite, transitively.
+    expect(expandRoleComposites(realm, ["Test.Admin"])).toContain("Relations.All.ReadWrite");
+    // A realm the artifact does not know expands nothing.
+    expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
+    expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
+  });
+
+  test("expansion follows each member into its own namespace, never a same-named role of another client", () => {
     __setRoleCompositesForTests({
       [realm]: {
-        org_admin: ["Organization.All.ReadWrite", "General.All.ReadWrite"],
-        "General.All.ReadWrite": ["Relations.All.ReadWrite", "General.All.Read"],
+        realm: { reader: [{ client: "erp-provider", role: "Records.Read" }] },
+        clients: {
+          "erp-provider": {
+            org_admin: [{ realm: "reader" }, { client: "other", role: "org_admin" }],
+          },
+          other: {
+            // The persona of ANOTHER client named org_admin: reachable only
+            // as a member, and its own members are other's, not erp-provider's.
+            org_admin: [{ client: "other", role: "x" }],
+            "Records.Read": [{ client: "other", role: "leak" }],
+          },
+        },
       },
     });
     try {
-      expect(expandRoleComposites(realm, ["org_admin"])).toEqual([
-        "General.All.Read",
-        "General.All.ReadWrite",
-        "Organization.All.ReadWrite",
-        "Relations.All.ReadWrite",
-        "org_admin",
-      ]);
-      expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
-      expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
-      expect(
-        personSessionRoles({ roles: [] }, { roles: ["org_admin"], needsRoleAssignment: false }, realm),
-      ).toContain("Relations.All.ReadWrite");
+      expect(expandRoleComposites(realm, ["org_admin"])).toEqual(["Records.Read", "org_admin", "reader", "x"]);
+      expect(expandRoleComposites(realm, ["org_admin"], "other")).toEqual(["org_admin", "x"]);
     } finally {
       __setRoleCompositesForTests(null);
     }
-  });
-
-  test("the generated artifact carries the realm export's composites", () => {
-    // Test.Admin is the dev layer's administrator composite in the shipped
-    // realm; what Keycloak expanded into resource_access is what this expands.
-    expect(expandRoleComposites("openshapeforge", ["Test.Admin"])).toContain("Relations.All.ReadWrite");
   });
 });
 

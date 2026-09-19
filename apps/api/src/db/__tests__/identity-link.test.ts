@@ -15,7 +15,7 @@ import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
-import { __setRoleCompositesForTests, personSessionRoles } from "../../auth/person-roles.js";
+import { personSessionRoles } from "../../auth/person-roles.js";
 import {
   __resetIdentityLinkForTests,
   confirmPendingLink,
@@ -429,51 +429,77 @@ describe("identity ↔ Relation link", () => {
   test(
     "an invited org_admin holds what the realm's composite says, and can update a Relation with it",
     async () => {
-      // What Keycloak used to expand into resource_access for the persona,
-      // now expanded by the API from the generated realm composites.
-      __setRoleCompositesForTests({
-        openshapeforge: {
-          org_admin: ["Organization.All.ReadWrite", "Relations.All.ReadWrite"],
-          org_employee: ["Relations.All.Read"],
-        },
-      });
-      try {
-        await withScratchDb(async (appDb, adminDb) => {
-          await seedTenants(adminDb);
-          const gina = person("gina");
-          const hal = person("hal");
-          await invite(adminDb, tenantA, "gina@example.com", "org_admin");
-          await invite(adminDb, tenantA, "hal@example.com", "org_employee");
-          const relationId = await existingRelation(adminDb, tenantA, "Some Client", "client@example.com");
+      // The generated realm composites of the shipped base authorization —
+      // the same artifact production runs on, no injected table.
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const gina = person("gina");
+        const hal = person("hal");
+        await invite(adminDb, tenantA, "gina@example.com", "org_admin");
+        await invite(adminDb, tenantA, "hal@example.com", "org_employee");
+        const relationId = await existingRelation(adminDb, tenantA, "Some Client", "client@example.com");
 
-          const admin = await signIn(appDb, gina, tenantA);
-          const adminRoles = personSessionRoles({ roles: [] }, admin.state, "openshapeforge");
-          expect(adminRoles).toEqual([
-            "Organization.All.ReadWrite",
-            "Relations.All.ReadWrite",
-            "org_admin",
-          ]);
-          const updated = await updateGeneratedEntity(
+        const admin = await signIn(appDb, gina, tenantA);
+        const adminRoles = personSessionRoles({ roles: [] }, admin.state!, "openshapeforge");
+        expect(adminRoles).toContain("Relations.All.ReadWrite");
+        expect(adminRoles).toContain("Organization.All.ReadWrite");
+        expect(adminRoles).toContain("org_admin");
+        const updated = await updateGeneratedEntity(
+          appDb,
+          { tenantId: tenantA, userId: gina.claims.subject, roles: adminRoles, groups: [], scope: "tenant" },
+          { table: "erp.relations", id: relationId, values: { displayName: "Renamed Client" } },
+        );
+        expect(updated).toMatchObject({ display_name: "Renamed Client" });
+
+        const employee = await signIn(appDb, hal, tenantA);
+        const employeeRoles = personSessionRoles({ roles: [] }, employee.state!, "openshapeforge");
+        expect(employeeRoles).toEqual(["General.All.Read", "Relations.All.Read", "org_employee"]);
+        await expect(
+          updateGeneratedEntity(
             appDb,
-            { tenantId: tenantA, userId: gina.claims.subject, roles: adminRoles, groups: [], scope: "tenant" },
-            { table: "erp.relations", id: relationId, values: { displayName: "Renamed Client" } },
-          );
-          expect(updated).toMatchObject({ display_name: "Renamed Client" });
+            { tenantId: tenantA, userId: hal.claims.subject, roles: employeeRoles, groups: [], scope: "tenant" },
+            { table: "erp.relations", id: relationId, values: { displayName: "Nope" } },
+          ),
+        ).rejects.toThrow(/Not authorized to update Relation/);
+      });
+    },
+    TEST_TIMEOUT,
+  );
 
-          const employee = await signIn(appDb, hal, tenantA);
-          const employeeRoles = personSessionRoles({ roles: [] }, employee.state, "openshapeforge");
-          expect(employeeRoles).toEqual(["General.All.Read", "Relations.All.Read", "org_employee"]);
-          await expect(
-            updateGeneratedEntity(
-              appDb,
-              { tenantId: tenantA, userId: hal.claims.subject, roles: employeeRoles, groups: [], scope: "tenant" },
-              { table: "erp.relations", id: relationId, values: { displayName: "Nope" } },
-            ),
-          ).rejects.toThrow(/Not authorized to update Relation/);
-        });
-      } finally {
-        __setRoleCompositesForTests(null);
-      }
+  test(
+    "the invitation is claimed at admission: a revoke in between refuses, a role change in between wins",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        // Revoked after the lookup but before the claim: simulated by revoking
+        // right away — the claim (UPDATE ... RETURNING) is what decides, and
+        // it finds nothing pending. Nothing is created.
+        const ian = person("ian");
+        await invite(adminDb, tenantA, "ian@example.com", "org_admin");
+        await sql`
+          update platform.employee_invitations set status = 'revoked', revoked_at = now()
+           where tenant_id = ${tenantA} and lower(email) = 'ian@example.com'
+        `.execute(adminDb);
+        await expect(signIn(appDb, ian, tenantA)).rejects.toMatchObject({ code: "NOT_INVITED" });
+        expect(await linkRows(adminDb, tenantA)).toEqual([]);
+        expect(
+          (await sql<{ n: string }>`select count(*)::text as n from erp.relations where tenant_id = ${tenantA}`.execute(adminDb)).rows[0]!.n,
+        ).toBe("0");
+
+        // The role recorded is the role the row holds when it is claimed.
+        const jo = person("jo");
+        await invite(adminDb, tenantA, "jo@example.com", "org_admin");
+        await sql`
+          update platform.employee_invitations set role = 'org_employee'
+           where tenant_id = ${tenantA} and lower(email) = 'jo@example.com' and status = 'pending'
+        `.execute(adminDb);
+        const { state } = await signIn(appDb, jo, tenantA);
+        expect(state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(await invitationRows(adminDb, tenantA)).toMatchObject([
+          { email: "ian@example.com", status: "revoked" },
+          { email: "jo@example.com", role: "org_employee", status: "accepted" },
+        ]);
+      });
     },
     TEST_TIMEOUT,
   );
@@ -781,6 +807,11 @@ describe("identity ↔ Relation link", () => {
         const jackFirst = await signIn(appDb, jack, tenantA);
         expect(jackFirst.state!.status).toBe("pending_confirmation");
         expect(jackFirst.state!.needsRoleAssignment).toBe(false);
+        // Roles cannot be recorded on an unconfirmed link: nobody verified
+        // that Relation is theirs yet.
+        await expect(
+          setMembershipRoles(appDb, adminInA.session, jackFirst.state!.identityId, ["org_admin"]),
+        ).rejects.toMatchObject({ code: "IDENTITY_NOT_LINKED" });
         const confirmed = await confirmPendingLink(appDb, jackFirst.session);
         expect(confirmed).toMatchObject({ status: "linked", roles: [], needsRoleAssignment: true });
 

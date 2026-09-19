@@ -273,15 +273,19 @@ export async function setMembershipRoles(
     );
   }
   const state = await withDbSession(db, session, async (trx) => {
-    await writeMembershipRoles(trx, session.tenantId, identityId, roles);
-    const row = await readLinkRow(trx, identityId, session.tenantId);
-    if (!row) {
+    const written = await writeMembershipRoles(trx, session.tenantId, identityId, roles);
+    if (!written) {
+      // No linked row for this identity here: unknown, or still pending
+      // confirmation — roles on an unconfirmed link would be honoured the
+      // moment the person confirms, for a Relation nobody verified is theirs.
       throw new HttpError(
-        404,
-        "IDENTITY_NOT_FOUND",
-        "No such identity has a link in this organization.",
+        409,
+        "IDENTITY_NOT_LINKED",
+        "That identity is not linked to a Relation in this organization; link it first (link_identity or confirm_my_link).",
       );
     }
+    const row = await readLinkRow(trx, identityId, session.tenantId);
+    if (!row) throw new HttpError(500, "INTERNAL", "The link vanished while writing its roles.");
     return toState(row, { issuer: row.issuer, subject: row.subject });
   });
   invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
@@ -295,9 +299,13 @@ export async function identityIdForRelation(
   relationId: string,
 ): Promise<string | null> {
   return withDbSession(db, session, async (trx) => {
+    // Several identities may be linked to one Relation (a re-link keeps the
+    // old one); the most recently linked is the one an administrator means.
     const result = await sql<{ identity_id: string }>`
       select identity_id from platform.identity_relations
        where tenant_id = ${session.tenantId} and relation_id = ${relationId} and status = 'linked'
+       order by linked_at desc nulls last, identity_id
+       limit 1
     `.execute(trx);
     return result.rows[0]?.identity_id ?? null;
   });

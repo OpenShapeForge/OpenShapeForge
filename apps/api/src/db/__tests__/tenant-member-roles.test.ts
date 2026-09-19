@@ -9,10 +9,15 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { __resetIdentityLinkForTests, resolveIdentityLink } from "../../auth/identity-link.js";
+import { __resetIdentityLinkForTests, confirmPendingLink, resolveIdentityLink } from "../../auth/identity-link.js";
 import type { KeycloakTenantMemberAdminClient } from "../../control/keycloak-organization-members.js";
 import type { PlatformAdministrator } from "../../control/platform-admin.js";
-import { changeTenantMemberRoles, getTenantMember, listTenantMembers } from "../../control/tenant-member-admin.js";
+import {
+  changeTenantMemberRoles,
+  getTenantMember,
+  listTenantMembers,
+  removeTenantMembership,
+} from "../../control/tenant-member-admin.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
@@ -134,6 +139,35 @@ describe("tenant member roles from the control plane", () => {
         expect(removed.roles).toEqual(["General.All.Read", "org_employee"]);
         // Nothing in Keycloak was asked to grant anything: the stub has no such method.
         expect("grantClientRoles" in deps.members).toBe(false);
+
+        // Removing the membership removes the row and its roles in acme — and
+        // only there — so a later invitation starts from nothing; a second
+        // removal is a no-op, not an error.
+        const gone = await removeTenantMembership(deps, "acme", subject);
+        expect(gone).toMatchObject({ removed: true, membershipRowRemoved: true });
+        expect(
+          (await sql<{ tenant_id: string }>`
+            select tenant_id from platform.identity_relations ir
+              join platform.identities i on i.id = ir.identity_id
+             where i.subject = ${subject} order by 1
+          `.execute(adminDb)).rows.map((row) => row.tenant_id),
+        ).toEqual([OTHER_TENANT]);
+        expect(await removeTenantMembership(deps, "acme", subject)).toMatchObject({ membershipRowRemoved: false });
+        // Her Relation stays in the tenant's records, so the next sign-in is
+        // a pending confirmation with no roles — not the old persona. Once
+        // re-invited and confirmed, the invitation is what she holds.
+        const noraSession = { tenantId: TENANT, userId: subject, roles: [], groups: [], scope: "self" as const };
+        __resetIdentityLinkForTests();
+        const back = await resolveIdentityLink(appDb, noraSession, claims);
+        expect(back).toMatchObject({ status: "pending_confirmation", roles: [] });
+        await sql`
+          insert into platform.employee_invitations (tenant_id, email, role, invited_by)
+          values (${TENANT}, 'nora@example.com', 'org_admin', 'test-admin')
+        `.execute(adminDb);
+        await confirmPendingLink(appDb, { ...noraSession, relation: back });
+        __resetIdentityLinkForTests();
+        const again = await resolveIdentityLink(appDb, noraSession, claims);
+        expect(again!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
       });
     },
     TEST_TIMEOUT,

@@ -5,13 +5,22 @@ provider asserts WHO signs in and WHICH organizations they belong to; what a
 person may do in one of them is recorded by that organization, in
 `platform.identity_relations.roles`, per (identity, tenant): the persona the
 invitation admitted them as (`org_admin`, `org_employee`) and the OSF
-baseline beside it. The invitation path writes it on first sign-in, in the
-same transaction as the link; `set_member_role` and the platform operator's
-member-role operations replace it. A person's session expands the row's
-names through the realm's composites (`generated/compiler/role-composites.json`,
+baseline beside it. The invitation path writes it on first sign-in, in one
+transaction with the Relation, the link and the claim of the invitation
+(auth/identity-link-admission.ts — the invitation is claimed with
+`UPDATE … RETURNING role`, so a revoke or role change in between wins);
+`set_member_role` and the platform operator's member-role operations replace
+it, on linked rows only, and removing a member clears the row. A person's
+session expands the row's names through the realm's composites
+(`generated/compiler/role-composites.json`, per realm and per owning client;
 auth/person-roles.ts) exactly as Keycloak expanded a composite into
-`resource_access`, unions the token's realm roles, and never reads
-`resource_access`. A Keycloak client role on the user is user-wide and would
+`resource_access` — the base `authorization.yaml` declares what `org_admin`
+and `org_employee` expand to, a host widens them with an authorization patch —
+unions the token's realm roles, and never reads `resource_access`. A person
+whose membership row cannot be read (a surface without a database) gets no
+session: 503, never a token-only one. A client-credentials token
+(`preferred_username = service-account-<azp>`) is not a person and keeps its
+client roles. A Keycloak client role on the user is user-wide and would
 apply in every organization the account is a member of, so nothing in this
 runtime writes one for a person any more (see `identity-link.ts`,
 `employee-invitations.ts`). Service identities — configured service accounts

@@ -389,30 +389,33 @@ export async function findPendingInvitation(
 }
 
 /**
- * Mark the invitation `accepted`, inside the caller's transaction. The caller
- * (identity-link.ts) runs it on a DELIBERATELY ELEVATED session together with
- * the write of the invited roles onto the membership row: the invitation
- * table's RLS `with check` demands `Organization.All.ReadWrite`, and the
- * person signing in has nothing of the sort; it is the RUNTIME that records
- * "this invitation has now been used", on behalf of the administrator who
- * created it. One transaction, so a person is never linked without the roles
- * they were invited as, and an invitation is never spent on a link that did
- * not land.
+ * Claim the invitation: flip it from `pending` to `accepted` inside the
+ * caller's transaction and return the role it holds AT THAT MOMENT, or null
+ * when it is no longer pending (revoked, or already spent). The caller
+ * (identity-link-admission.ts) records the roles for the returned role in
+ * the same transaction, so an administrator's revoke or role change between
+ * the lookup and the claim is never overwritten with what was read earlier.
+ * The invitation table's RLS `with check` demands `Organization.All.ReadWrite`;
+ * the caller runs this on the runtime's elevated session, on behalf of the
+ * administrator who invited.
  */
-export async function recordAcceptedInvitation(
+export async function claimPendingInvitation(
   trx: Transaction<DB>,
   tenantId: string,
-  invitation: PendingInvitationMatch,
-): Promise<void> {
-  await sql`
+  invitationId: string,
+): Promise<EmployeeInvitationRole | null> {
+  const result = await sql<{ role: string }>`
     update platform.employee_invitations
        set status = 'accepted',
            accepted_at = now(),
            updated_at = now()
-     where id = ${invitation.id}
+     where id = ${invitationId}
        and tenant_id = ${tenantId}
        and status = 'pending'
+    returning role
   `.execute(trx);
+  const role = result.rows[0]?.role;
+  return role && isEmployeeInvitationRole(role) ? role : null;
 }
 
 export type RevokeInvitationInput = { email: string };

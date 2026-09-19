@@ -14,7 +14,7 @@ import { moduleOperationId } from "./operation-catalog.js";
 import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
 import { assertEntityValueDefinition } from "./entity-values.js";
 import { materializeCollectionOperations } from "./collection-operations.js";
-import { constrainedReferenceCreateOperationId } from "../generate-operations.js";
+import { constrainedReferenceCreateOperationId, withOperationControls } from "../generate-operations.js";
 import { fieldOptionSource } from "./web-field-options.js";
 import type {
   CompiledEntityContract,
@@ -149,7 +149,13 @@ function operation(
     description: localized(source.description, ""),
     implementation: source.implementation,
     target: source.target,
-    input: source.input,
+    input: {
+      kind: "json-schema",
+      schema: withOperationControls(source.input.schema, {
+        ...(source.concurrency ? { concurrency: source.concurrency } : {}),
+        confirmation: source.interaction.confirmation,
+      }),
+    },
     output: source.output,
     effects: source.effects,
     reliability: source.reliability,
@@ -202,7 +208,11 @@ function customOperation(
         ? { inputField: definition.target.inputField }
         : {}),
     },
-    input: { kind: "json-schema", schema: definition.input.schema },
+    // The same control-augmented schema the API catalog validates against:
+    // the browser must send expectedVersion/leaseToken where the executor
+    // requires them, and a closed schema that omits them makes the battery
+    // drop those keys before the wire.
+    input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     effects: definition.effects,
@@ -991,7 +1001,7 @@ function projectStandalone(
         key,
         name: localized(definition.name, key),
         description: localized(definition.description, ""),
-        input: { kind: "json-schema", schema: definition.input!.schema },
+        input: { kind: "json-schema", schema: compiled.inputSchema },
         output: { kind: "json-schema", schema: definition.output!.schema },
         effects: definition.effects,
         reliability: {

@@ -735,6 +735,55 @@ describe("web manifest projection", () => {
     ]);
   });
 
+  test("hands the Web the same mutation controls the API catalog validates against", () => {
+    // The API augments an authored input with expectedVersion/leaseToken and
+    // confirmation controls. A Web manifest that only carried the authored
+    // schema (closed with additionalProperties: false) made the browser drop
+    // those keys before the wire, and every versioned custom Operation failed
+    // with "Operation input does not match its canonical schema".
+    const deal = entity("Deal", "deal", [
+      field("id", { required: true, readOnly: true }),
+      field("updatedAt", { baseType: "datetime", readOnly: true }),
+    ], coreView());
+    deal.contract.authoringVersion = 2;
+    deal.contract.interfaces = { web: { operations: { list: true, get: true } } };
+    const definition = (key: string, extra: Record<string, unknown>) => ({
+      id: `example.deal.${key}`,
+      name: text(key, key),
+      description: text(key, key),
+      implementation: { type: "plugin" as const, plugin: "example", handler: key },
+      target: { scope: "record" as const, inputField: "id" },
+      input: { schema: { type: "object", required: ["id"], properties: { id: { type: "string", "x-osf-i18n": { title: text("Record", "Record") } } }, additionalProperties: false } },
+      output: { schema: { type: "object", additionalProperties: true } },
+      errors: [],
+      auth: { mode: "session" as const, roles: ["Deals.Publish"] },
+      tenancy: { mode: "required" as const },
+      effects: { data: "write" as const, external: "none" as const },
+      reliability: { idempotency: { mode: "natural" as const } },
+      confirmation: { mode: "none" as const },
+      ...extra,
+    });
+    deal.contract.pluginOperations = [
+      { key: "publish", id: "example.deal.publish", entityId: "example.Deal", entityName: "Deal",
+        definition: definition("publish", { concurrency: { version: { mode: "required", field: "updatedAt" } } }),
+        interfaces: { rest: { method: "POST", path: "/api/example/deals/:id/publish", response: { kind: "json" } }, web: {} } },
+      { key: "archive", id: "example.deal.archive", entityId: "example.Deal", entityName: "Deal",
+        definition: definition("archive", {
+          concurrency: { version: { mode: "required", field: "updatedAt" }, editLease: { mode: "required", expiresAfterInactivity: "PT15M" } },
+          confirmation: { mode: "acknowledgement" },
+        }),
+        interfaces: { rest: { method: "POST", path: "/api/example/deals/:id/archive", response: { kind: "json" } }, web: {} } },
+    ] as never;
+
+    const projected = buildWebManifest([deal], { requireTranslations: true }).entities.Deal!;
+    const publish = projected.operations.publish as unknown as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
+    expect(publish.input.schema.required).toEqual(["id", "expectedVersion"]);
+    expect(publish.input.schema.properties.expectedVersion).toMatchObject({ type: "string", format: "date-time" });
+    const archive = projected.operations.archive as unknown as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
+    expect(archive.input.schema.required).toEqual(["id", "expectedVersion", "leaseToken"]);
+    expect(Object.keys(archive.input.schema.properties)).toEqual(["id", "expectedVersion", "leaseToken", "confirmed"]);
+  });
+
   test("does not widen the legacy v1 WebManifest beyond REST exposure", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
     delete relation.contract.rest;
@@ -1138,6 +1187,12 @@ describe("standalone Operation pages", () => {
   test("refuses a placement whose contract was not compiled", () => {
     expect(() => buildWebManifest([], {}, { catalogs: [controlCatalog], operations: [] }))
       .toThrow(/"control.get-tenant" has a web placement but no compiled contract/);
+  });
+
+  test("projects standalone Operations with the compiled, control-augmented input schema", () => {
+    const manifest = buildWebManifest([], { requireTranslations: true }, standalone(controlCatalog));
+    const update = manifest.operations!["control.update-tenant"] as unknown as { input: { schema: { properties: Record<string, unknown> } } };
+    expect(Object.keys(update.input.schema.properties)).toEqual(["slug", "name", "confirmed"]);
   });
 
   test("requires both languages for page copy and Operation names under strict translations", () => {

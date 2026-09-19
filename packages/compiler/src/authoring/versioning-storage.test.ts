@@ -13,7 +13,7 @@ import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 
 const fixtureDir = join(import.meta.dir, "__fixtures__", "rowaccess");
-const slugs = ["versioned-note", "versioned-note-version"];
+const slugs = ["versioned-note", "versioned-note-version", "versioned-note-line"];
 const compile = (mutate: (contract: CompiledEntityContract) => void = () => {}, entityAllowlist = slugs) =>
   compileAuthoringBackendManifest(fixtureDir, {
     mode: "promote",
@@ -35,9 +35,13 @@ describe("published-snapshot storage binding", () => {
       versionsField: "versions",
       snapshot: { ownedRelationships: "recursive" },
       publishOperation: "VersionedNote.publish",
+      onEdit: { field: "lifecycleStatus", value: "draft" },
       storage: {
         head: { schema: "notes", table: "versioned_notes" },
         version: { schema: "notes", table: "versioned_note_versions", headColumn: "note_id" },
+        // The authored ownership tree a snapshot walks: the owned lines, never
+        // the version table although its head reference cascades as well.
+        owned: [{ schema: "notes", table: "versioned_note_lines", childColumns: ["tenant_id", "note_id"], parentColumns: ["tenant_id", "id"], children: [] }],
       },
     });
     expect(version.source?.versioning).toBeUndefined();
@@ -53,6 +57,23 @@ describe("published-snapshot storage binding", () => {
   });
 
   it("refuses a version entity that is not in the manifest", () => {
-    expect(() => compile(() => {}, ["versioned-note"])).toThrow("VersionedNote: versioning.versionEntity VersionedNoteVersion has no storage in this manifest.");
+    expect(() => compile(() => {}, ["versioned-note", "versioned-note-line"])).toThrow("VersionedNote: versioning.versionEntity VersionedNoteVersion has no storage in this manifest.");
+  });
+
+  it("binds an empty ownership tree for a head that owns nothing but its versions", () => {
+    const manifest = compile(() => {}, ["versioned-note", "versioned-note-version"]);
+    const head = manifest.tables.find((table) => table.source?.authoringEntityName === "VersionedNote")!;
+    expect(head.source?.versioning?.storage.owned).toEqual([]);
+  });
+
+  it("leaves a referenced (not owned) collection out of the ownership tree", () => {
+    const manifest = compile((contract) => {
+      if (contract.entity.name === "VersionedNote") {
+        const lines = contract.model.relationships.find((relationship) => relationship.key === "lines")!;
+        lines.ownership = "reference";
+      }
+    });
+    const head = manifest.tables.find((table) => table.source?.authoringEntityName === "VersionedNote")!;
+    expect(head.source?.versioning?.storage.owned).toEqual([]);
   });
 });

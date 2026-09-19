@@ -7,13 +7,25 @@
  * name, so a plugin entity in its own schema binds like a core one.
  */
 import { readFileSync } from "node:fs";
-import type { RuntimeVersioningBinding, RuntimeVersioningRegistry } from "@openshapeforge/plugin-runtime";
+import type { RuntimeVersioningBinding, RuntimeVersioningOwnedChild, RuntimeVersioningRegistry } from "@openshapeforge/plugin-runtime";
 
 const identifier = /^[a-z_][a-z0-9_]*$/;
 const entityName = /^[A-Z][A-Za-z0-9]*$/;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const matches = (value: unknown, pattern: RegExp): boolean => typeof value === "string" && pattern.test(value);
 const invalid = (): never => { throw new Error("The generated versioning registry is invalid."); };
+
+/** The owned tree, frozen level by level; a child with mismatched key columns is a broken manifest. */
+function ownedChildren(value: unknown, depth = 0): readonly RuntimeVersioningOwnedChild[] {
+  if (!Array.isArray(value) || depth > 16) return invalid();
+  return Object.freeze(value.map((child: unknown) => {
+    if (!record(child) || !matches(child.schema, identifier) || !matches(child.table, identifier)) return invalid();
+    const columns = (names: unknown) => Array.isArray(names) && names.length > 0 && names.every((name) => matches(name, identifier)) ? Object.freeze([...names] as string[]) : invalid();
+    const childColumns = columns(child.childColumns), parentColumns = columns(child.parentColumns);
+    if (childColumns.length !== parentColumns.length) invalid();
+    return Object.freeze({ schema: child.schema as string, table: child.table as string, childColumns, parentColumns, children: ownedChildren(child.children, depth + 1) });
+  }));
+}
 
 /** Accepts generated manifest tables only, never authored or tenant input. */
 export function createVersioningRegistry(tables: unknown): RuntimeVersioningRegistry {
@@ -26,7 +38,7 @@ export function createVersioningRegistry(tables: unknown): RuntimeVersioningRegi
     if (!record(versioning) || !matches(table.source.authoringEntityName, entityName) ||
         !matches(versioning.versionEntity, entityName) || !record(versioning.storage) ||
         !record(versioning.storage.head) || !record(versioning.storage.version)) invalid();
-    const storage = (versioning as Record<string, unknown>).storage as { head: Record<string, unknown>; version: Record<string, unknown> };
+    const storage = (versioning as Record<string, unknown>).storage as { head: Record<string, unknown>; version: Record<string, unknown>; owned: unknown };
     if (![storage.head.schema, storage.head.table, storage.version.schema, storage.version.table, storage.version.headColumn]
       .every((name) => matches(name, identifier))) invalid();
     // The head binding is the table it sits on; a mismatch means the manifest was assembled wrong.
@@ -40,6 +52,7 @@ export function createVersioningRegistry(tables: unknown): RuntimeVersioningRegi
       version: Object.freeze({
         schema: storage.version.schema as string, table: storage.version.table as string, headColumn: storage.version.headColumn as string,
       }),
+      owned: ownedChildren(storage.owned),
     }));
   }
   return Object.freeze({ get: (sourceEntity: string) => bindings.get(sourceEntity) });

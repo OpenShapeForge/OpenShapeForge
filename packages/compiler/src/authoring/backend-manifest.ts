@@ -21,6 +21,7 @@ import type {
   ColumnSensitivity,
   PlatformSchemaManifest,
   ReferenceDefinition,
+  VersioningOwnedChild,
   RelationshipRegisterEntry,
   RetentionAction,
   RetentionDefinition,
@@ -933,9 +934,50 @@ function bindVersioningStorage(candidates: CompiledCandidate[], tables: TableDef
       storage: {
         head: { schema: table.schema, table: table.name },
         version: { schema: version.table.schema, table: version.table.name, headColumn: column.name },
+        owned: ownedChildren(byEntity, head, version.table, [head]),
       },
     };
   }
+}
+
+/**
+ * The owned collections under one entity, as authored (`ownership: owned` on
+ * the inverse), lowered to the child table's foreign-key columns. Recursive
+ * because `snapshot.ownedRelationships: recursive` is; the version table is
+ * left out at every level (a snapshot is content, never publication history)
+ * and a cycle through ownership is refused rather than walked.
+ */
+function ownedChildren(
+  byEntity: Map<string, { candidate: CompiledCandidate; table: TableDefinition }>,
+  entityName: string,
+  versionTable: TableDefinition,
+  path: string[],
+): VersioningOwnedChild[] {
+  const { candidate } = byEntity.get(entityName)!;
+  const owned: VersioningOwnedChild[] = [];
+  for (const relationship of candidate.contract.model.relationships) {
+    if (relationship.kind !== "hasMany" || relationship.ownership !== "owned" || relationship.through || relationship.provider) continue;
+    const child = byEntity.get(relationship.target);
+    if (!child) continue;
+    if (child.table.schema === versionTable.schema && child.table.name === versionTable.name) continue;
+    if (path.includes(relationship.target)) {
+      throw new Error(`${path[0]}: versioning snapshot ownership cycles through ${[...path, relationship.target].join(" -> ")}.`);
+    }
+    const column = child.table.columns.find((column) => column.name === relationship.foreignKey);
+    const reference = column?.references;
+    const parent = byEntity.get(entityName)!.table;
+    if (!column || !reference || reference.schema !== parent.schema || reference.table !== parent.name) {
+      throw new Error(`${entityName}.${relationship.key}: owned collection has no lowered foreign key on ${relationship.target}.`);
+    }
+    owned.push({
+      schema: child.table.schema,
+      table: child.table.name,
+      childColumns: reference.localColumns ?? [column.name],
+      parentColumns: reference.targetColumns ?? [reference.column],
+      children: ownedChildren(byEntity, relationship.target, versionTable, [...path, relationship.target]),
+    });
+  }
+  return owned.sort((left, right) => `${left.schema}.${left.table}`.localeCompare(`${right.schema}.${right.table}`));
 }
 
 /** Resolve field relations only after all tables exist, including cyclic references. */

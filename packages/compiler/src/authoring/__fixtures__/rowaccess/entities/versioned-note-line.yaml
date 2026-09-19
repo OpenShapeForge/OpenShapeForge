@@ -1,0 +1,67 @@
+# Test fixture — an owned child of versioned-note.yaml, so the manifest binds an
+# ownership tree under the head. Not part of the shipped slice.
+schemaVersion: 3
+kind: coreEntity
+module: notes
+entity: VersionedNoteLine
+title: Versioned note line
+language: en
+labels: { en: Versioned note line, nl: Versioned note line }
+domains: [documents]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+displayTemplate: "{{text}}"
+fields:
+  - key: note
+    osfType: VersionedNote
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: lines
+        label: { en: Lines, nl: Regels }
+        ownership: owned
+        sortable: true
+  - key: text
+    osfType: string
+    required: true
+    label: { en: Text, nl: Tekst }
+    persisted: { column: text, storageClass: core }
+operations:
+  list:
+    name: List versioned note lines
+    description: Read accessible versioned note line records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read versioned note line
+    description: Read one accessible versioned note line record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create versioned note line
+    description: Create a versioned note line record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update versioned note line
+    description: Update a versioned note line.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

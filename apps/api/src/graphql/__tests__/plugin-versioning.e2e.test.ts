@@ -35,6 +35,7 @@ describe("plugin entity versioning (notebook schema)", () => {
     expect(notebook.source?.versioning?.storage).toEqual({
       head: { schema: "notebook", table: "notebooks" },
       version: { schema: "notebook", table: "notebook_versions", headColumn: "notebook_id" },
+      owned: [],
     });
   });
 

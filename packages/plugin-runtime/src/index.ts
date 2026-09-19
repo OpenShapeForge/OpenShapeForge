@@ -212,11 +212,22 @@ export type RuntimeEntityValueRegistry = {
  * and the immutable version table, with the version table's foreign key back
  * to the head. The versioning runtime executes against exactly these names.
  */
+/** One owned child table of a snapshot, with its own owned children. */
+export type RuntimeVersioningOwnedChild = {
+  readonly schema: string;
+  readonly table: string;
+  readonly childColumns: readonly string[];
+  readonly parentColumns: readonly string[];
+  readonly children: readonly RuntimeVersioningOwnedChild[];
+};
+
 export type RuntimeVersioningBinding = {
   readonly sourceEntity: string;
   readonly versionEntity: string;
   readonly head: { readonly schema: string; readonly table: string };
   readonly version: { readonly schema: string; readonly table: string; readonly headColumn: string };
+  /** The authored ownership tree a snapshot walks; nothing outside it is content. */
+  readonly owned: readonly RuntimeVersioningOwnedChild[];
 };
 
 /** Metadata only. A binding grants no record or Operation access. */

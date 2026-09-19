@@ -720,6 +720,8 @@ export interface CompiledEntityContract {
     versionsField: string;
     snapshot: { ownedRelationships: "recursive" };
     publishOperation: string;
+    /** The head field every content edit resets, and the value it resets to (the draft rule). */
+    onEdit: { field: string; value: string };
   };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;

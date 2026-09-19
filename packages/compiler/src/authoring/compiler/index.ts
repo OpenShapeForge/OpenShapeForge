@@ -233,6 +233,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         versionsField: coreEntity.versioning.versionsField,
         snapshot: { ownedRelationships: coreEntity.versioning.snapshot?.ownedRelationships ?? "recursive" },
         publishOperation: `${coreEntity.entity}.publish`,
+        // The draft rule: a content edit of the head, or of anything it owns,
+        // resets the lifecycle field the managed fields above declare.
+        onEdit: { field: "lifecycleStatus", value: "draft" },
       },
     } : {}),
     crud,

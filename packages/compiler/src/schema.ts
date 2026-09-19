@@ -313,9 +313,28 @@ export type LocalizedTextManifest = {
 };
 
 /** Compiler-bound storage of a published-snapshot pair; consumed verbatim by the versioning runtime. */
+/**
+ * One owned child table of a snapshot: the child's foreign-key columns and
+ * the parent columns they reference, plus the child's own owned children.
+ */
+export type VersioningOwnedChild = {
+  schema: string;
+  table: string;
+  childColumns: string[];
+  parentColumns: string[];
+  children: VersioningOwnedChild[];
+};
+
 export type VersioningStorageBinding = {
   head: { schema: string; table: string };
   version: { schema: string; table: string; headColumn: string };
+  /**
+   * The owned-relationship tree under the head, as authored
+   * (`relationship.inverse.ownership: owned`), version table excluded. A
+   * snapshot walks exactly this: a cascading foreign key from a bookkeeping
+   * table is not content and never enters one.
+   */
+  owned: VersioningOwnedChild[];
 };
 
 export type TableSourceDefinition = {
@@ -332,6 +351,7 @@ export type TableSourceDefinition = {
     versionsField: string;
     snapshot: { ownedRelationships: "recursive" };
     publishOperation: string;
+    onEdit: { field: string; value: string };
     /**
      * Exact storage of both sides, bound here so the versioning runtime never
      * derives a schema or table name: the head is this table, the version

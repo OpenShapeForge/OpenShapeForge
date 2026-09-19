@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash, randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
-import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule, RuntimeVersioningBinding } from "@openshapeforge/plugin-runtime";
+import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule, RuntimeVersioningBinding, RuntimeVersioningOwnedChild } from "@openshapeforge/plugin-runtime";
 import { publishFollowers, type PublishedVersionRow } from "./followers.js";
 
 type RawQuery = { sql: string; parameters: readonly unknown[]; query: { kind: "RawNode"; sqlFragments: readonly string[]; parameters: readonly unknown[] }; queryId: { queryId: string } };
@@ -34,24 +34,6 @@ function stable(value: unknown): string {
   return JSON.stringify(value);
 }
 
-type ChildRelation = { schema_name: string; table_name: string; child_columns: string[]; parent_columns: string[] };
-const CHILD_RELATIONS = `
-  select child_ns.nspname as schema_name, child.relname as table_name,
-    array_agg(child_att.attname order by keys.ordinality) as child_columns,
-    array_agg(parent_att.attname order by keys.ordinality) as parent_columns
-  from pg_constraint constraint_row
-  join pg_class parent on parent.oid = constraint_row.confrelid
-  join pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
-  join pg_class child on child.oid = constraint_row.conrelid
-  join pg_namespace child_ns on child_ns.oid = child.relnamespace
-  join lateral unnest(constraint_row.conkey, constraint_row.confkey) with ordinality as keys(child_attnum, parent_attnum, ordinality) on true
-  join pg_attribute child_att on child_att.attrelid = child.oid and child_att.attnum = keys.child_attnum
-  join pg_attribute parent_att on parent_att.attrelid = parent.oid and parent_att.attnum = keys.parent_attnum
-  where constraint_row.contype = 'f' and constraint_row.confdeltype = 'c'
-    and parent_ns.nspname = $1 and parent.relname = $2
-  group by child_ns.nspname, child.relname
-  order by child_ns.nspname, child.relname`;
-
 /**
  * The frozen order is what a materialized version hashes, so it must be
  * canonical: owned-collection position first, then id. Without the id
@@ -69,8 +51,6 @@ export function orderSnapshotChildren(found: readonly Row[], ownerColumns: reado
   });
 }
 
-type Storage = { schema: string; table: string };
-
 /**
  * A snapshot is content, and its hash is the hash of content: republishing an
  * unchanged head must hash identically. Row bookkeeping the compiler adds to
@@ -87,23 +67,22 @@ function content(row: Row, ...excluded: readonly string[][]): Row {
 }
 
 /**
- * The version table is itself a child of the head when its head reference is
- * owned, so an unfiltered walk would embed every earlier version in the next
- * one. The compiler-bound version table is excluded at every level: a
+ * The walk follows the ownership tree the compiler bound from the authored
+ * `ownership: owned` collections (`snapshot.ownedRelationships: recursive`),
+ * never the catalog: a cascading foreign key from a bookkeeping table is not
+ * content, and the version table is left out of the tree at every level so a
  * snapshot describes content, never publication history.
  */
-async function snapshotNode(executor: unknown, schema: string, table: string, row: Row, excluded: Storage): Promise<SnapshotNode> {
-  const relations = await rows<ChildRelation>(executor, CHILD_RELATIONS, [schema, table]);
+async function snapshotNode(executor: unknown, table: string, row: Row, owned: readonly RuntimeVersioningOwnedChild[]): Promise<SnapshotNode> {
   const children: Record<string, SnapshotNode[]> = {};
-  for (const relation of relations) {
-    if (relation.schema_name === excluded.schema && relation.table_name === excluded.table) continue;
-    if (relation.child_columns.length !== relation.parent_columns.length) fail("OPERATION_UNAVAILABLE", "Compiled ownership relation is incomplete.");
-    const predicates = relation.child_columns.map((column, index) => `${identifier(column)} = $${index + 1}`).join(" and ");
-    const values = relation.parent_columns.map((column) => row[column]);
+  for (const relation of owned) {
+    if (relation.childColumns.length !== relation.parentColumns.length) fail("OPERATION_UNAVAILABLE", "Compiled ownership relation is incomplete.");
+    const predicates = relation.childColumns.map((column, index) => `${identifier(column)} = $${index + 1}`).join(" and ");
+    const values = relation.parentColumns.map((column) => row[column]);
     const found = await rows<{ row: Row }>(executor,
-      `select to_jsonb(child_row.*) as row from ${qualified(relation.schema_name, relation.table_name)} child_row where ${predicates} for share`, values);
-    const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.child_columns);
-    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row, excluded)));
+      `select to_jsonb(child_row.*) as row from ${qualified(relation.schema, relation.table)} child_row where ${predicates} for share`, values);
+    const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.childColumns);
+    children[relation.table] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.table, row, relation.children)));
   }
   return { table, row: content(row, BOOKKEEPING), children };
 }
@@ -124,7 +103,7 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
     const session = context.session;
     const id = input.id;
     if (typeof id !== "string" || !UUID.test(id)) fail("VALIDATION", "A valid source id is required.");
-    const { head, version } = binding(context, sourceEntity, versionEntity);
+    const { head, version, owned } = binding(context, sourceEntity, versionEntity);
     const headTable = qualified(head.schema, head.table);
     const versionTable = qualified(version.schema, version.table);
     const headColumn = identifier(version.headColumn);
@@ -135,7 +114,7 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       // Transaction-local marker for database guards that otherwise refuse a
       // direct write to the version table (documents: core-invariants.ts).
       await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
-      const tree = await snapshotNode(transaction, head.schema, head.table, source, version);
+      const tree = await snapshotNode(transaction, head.table, source, owned);
       const snapshot = { schemaVersion: 1, entity: sourceEntity, head: { ...tree, row: content(tree.row, PUBLICATION) } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");

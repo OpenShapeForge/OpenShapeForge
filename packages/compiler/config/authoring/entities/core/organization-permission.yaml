@@ -115,10 +115,6 @@ fields:
     osfType: Tenant
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Organization permissions
-          nl: Organisatierechten
   - key: targetOrgUnitId
     label:
       en: Target org unit
@@ -129,10 +125,6 @@ fields:
     osfType: OrgUnit
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Organization permissions
-          nl: Organisatierechten
 operations:
   list:
     name: List Organization Permission

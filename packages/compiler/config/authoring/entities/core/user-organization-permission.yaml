@@ -130,10 +130,6 @@ fields:
     osfType: Tenant
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: User organization permissions
-          nl: Gebruikersrechten per organisatie
   - key: targetOrgUnitId
     label:
       en: Target org unit
@@ -144,10 +140,6 @@ fields:
     osfType: OrgUnit
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: User organization permissions
-          nl: Gebruikersrechten per organisatie
 operations:
   list:
     name: List User Organization Permission

@@ -286,10 +286,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Agreements
-          nl: Overeenkomsten
   - key: caseId
     label:
       en: Case
@@ -300,10 +296,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Agreements
-          nl: Overeenkomsten
   - key: parentAgreementId
     label:
       en: Parent agreement

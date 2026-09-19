@@ -105,10 +105,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Address assignments
-          nl: Adrestoewijzingen
   - key: addressId
     label:
       en: Address
@@ -129,10 +125,6 @@ fields:
     osfType: RelationRole
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Address assignments
-          nl: Adrestoewijzingen
 operations:
   list:
     name: List Address Assignment

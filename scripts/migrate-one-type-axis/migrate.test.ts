@@ -100,7 +100,7 @@ describe("inverse collections", () => {
 
   test("a collection matching the derived defaults folds to nothing", () => {
     const defaults = entity("Parent", `  - key: childs
-    label: { en: Childs, nl: Childs }
+    label: { en: Childs, nl: Child }
     semanticType: Child
     cardinality: collection
     relationship: { inverse: parentId }
@@ -238,6 +238,15 @@ relationships:
     expect(output["a/entities/child.yaml"]).toContain("# The parent this child belongs to.\n  - key: parentId");
     expect(report.legacy.fieldsCreated).toEqual([{ entity: "Child", key: "parentId", column: "parent_id", required: true, provenance: "baseline" }]);
     expect(report.legacy.hasManyRemoved).toEqual(["Parent.kids"]);
+  });
+
+  test("a hasMany label equal to the child's derived plural folds to nothing, one equal to the owner's does not", () => {
+    const matchingChild = legacyParent.replace("label: { en: Kids, nl: Kinderen }", "label: { en: Childs, nl: Kind }");
+    const matchingOwner = legacyParent.replace("label: { en: Kids, nl: Kinderen }", "label: { en: Parents, nl: Ouder }");
+    const folded = migrated({ "a/entities/child.yaml": legacyChild, "a/entities/parent.yaml": matchingChild });
+    expect(folded.parsed["a/entities/child.yaml"].fields[1].relationship).toEqual({ inverse: { key: "kids" } });
+    const kept = migrated({ "a/entities/child.yaml": legacyChild, "a/entities/parent.yaml": matchingOwner });
+    expect(kept.parsed["a/entities/child.yaml"].fields[1].relationship).toEqual({ inverse: { key: "kids", label: { en: "Parents", nl: "Ouder" } } });
   });
 
   test("without a baseline the created field is optional and reported as unknown", () => {

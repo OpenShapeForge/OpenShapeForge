@@ -336,6 +336,23 @@ describe("platform.jobs", () => {
     expect((await rawStatus(second.id)).status).toBe("queued");
   });
 
+  test("jobs.list pages on the insertion sequence, so jobs of one transaction never straddle a page", async () => {
+    const ids = await appSession(sessionA, async (trx) => {
+      const created: string[] = [];
+      for (let i = 0; i < 5; i += 1) created.push((await enqueueJob(trx, { tenantId: tenantA, actorId: actor, kind: "test.page", payload: { i } })).id);
+      return created;
+    });
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await appSession(sessionA, (trx) => listJobs(trx, { kind: "test.page", limit: 2, ...(cursor ? { cursor } : {}) }));
+      seen.push(...page.items.map((job) => job.id));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(seen).toEqual([...ids].reverse());
+    await expect(appSession(sessionA, (trx) => listJobs(trx, { limit: 2, cursor: "2024-01-01T00:00:00.000Z|x" }))).rejects.toThrow(/cursor/);
+  });
+
   test("two modules registering one kind fail composition", () => {
     const handler: ModuleJobHandler = async () => undefined;
     expect(() => composeJobHandlers([

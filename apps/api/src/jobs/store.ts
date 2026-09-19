@@ -38,6 +38,8 @@ export type JobActorSession = {
 
 export type JobRecord = {
   id: string;
+  /** Monotonic insertion order across tenants; the list cursor. */
+  sequence: string;
   tenantId: string;
   actorId: string;
   actorSession: JobActorSession;
@@ -161,6 +163,7 @@ function boundedError(error: RuntimeJobError): RuntimeJobError {
 
 export type Row = {
   id: string;
+  sequence: string | number | bigint;
   tenant_id: string;
   actor_id: string;
   actor_session: unknown;
@@ -182,7 +185,7 @@ export type Row = {
 };
 
 export const ROW_COLUMNS = [
-  "id", "tenant_id", "actor_id", "actor_session", "kind", "payload", "delivery_key", "status", "attempts", "max_attempts",
+  "id", "sequence", "tenant_id", "actor_id", "actor_session", "kind", "payload", "delivery_key", "status", "attempts", "max_attempts",
   "available_at", "lease_until", "last_error", "result", "subject_entity", "subject_id",
   "created_at", "updated_at", "completed_at",
 ] as const;
@@ -192,6 +195,7 @@ export function toRecord(row: Row): JobRecord {
   const lastError = row.last_error ? jsonRecord(row.last_error) : null;
   return {
     id: row.id,
+    sequence: String(row.sequence),
     tenantId: row.tenant_id,
     actorId: row.actor_id,
     actorSession: actorSessionOf(jsonRecord(row.actor_session)),

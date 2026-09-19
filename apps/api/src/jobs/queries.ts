@@ -42,10 +42,17 @@ export type ListJobsInput = {
   status?: JobStatus;
   subject?: RuntimeJobSubject;
   limit: number;
-  /** The `createdAt|id` of the last row seen. */
+  /** The `sequence` of the last row seen. */
   cursor?: string;
 };
 
+const CURSOR = /^[1-9][0-9]{0,18}$/;
+
+/**
+ * Newest first, paged on the insertion `sequence`: a bigint identity, so two
+ * jobs enqueued in one transaction — which share `created_at` — never
+ * straddle a page boundary unseen.
+ */
 export async function listJobs(db: JobExecutor, input: ListJobsInput): Promise<{ items: JobRecord[]; nextCursor: string | null }> {
   let query = db.selectFrom("platform.jobs").select(ROW_COLUMNS);
   if (input.kind) query = query.where("kind", "=", input.kind);
@@ -54,16 +61,15 @@ export async function listJobs(db: JobExecutor, input: ListJobsInput): Promise<{
     query = query.where("subject_entity", "=", input.subject.entity).where("subject_id", "=", input.subject.id);
   }
   if (input.cursor) {
-    const [createdAt, id] = input.cursor.split("|");
-    if (!createdAt || !id || Number.isNaN(Date.parse(createdAt))) throw new Error("Invalid jobs cursor.");
-    query = query.where(sql`(created_at, id)`, "<", sql`(${new Date(createdAt)}, ${id}::uuid)`);
+    if (!CURSOR.test(input.cursor)) throw new Error("Invalid jobs cursor.");
+    query = query.where("sequence", "<", input.cursor);
   }
-  const rows = await query.orderBy("created_at", "desc").orderBy("id", "desc").limit(input.limit + 1).execute();
+  const rows = await query.orderBy("sequence", "desc").limit(input.limit + 1).execute();
   const items = rows.slice(0, input.limit).map((row) => toRecord(row as Row));
   const last = items[items.length - 1];
   return {
     items,
-    nextCursor: rows.length > input.limit && last ? `${last.createdAt.toISOString()}|${last.id}` : null,
+    nextCursor: rows.length > input.limit && last ? last.sequence : null,
   };
 }
 

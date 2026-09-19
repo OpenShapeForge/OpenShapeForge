@@ -8,6 +8,9 @@ describe("the x-osf-choice annotation", () => {
     expect(() => ajv.compile({ type: "string", "x-osf-choice": "field" })).not.toThrow();
     expect(() => ajv.compile({ type: "string", "x-osf-choice": { kind: "operation", scope: "record" } })).not.toThrow();
     expect(() => ajv.compile({ type: "string", "x-osf-choice": "widget" })).toThrow();
+    expect(() => ajv.compile({ type: "string", "x-osf-choice": { kind: "operation", scope: "collection" } })).not.toThrow();
     expect(() => ajv.compile({ type: "string", "x-osf-choice": { kind: "field" } })).toThrow();
+    // Unscoped is the string form; an object without a scope is a mistake.
+    expect(() => ajv.compile({ type: "string", "x-osf-choice": { kind: "operation" } })).toThrow();
   });
 });

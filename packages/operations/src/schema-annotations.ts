@@ -74,7 +74,7 @@ export const operationChoiceKeyword = {
     anyOf: [
       { type: "string", enum: ["field", "sortableField", "relationship", "operation", "renderer", "component"] },
       {
-        type: "object", additionalProperties: false, required: ["kind"],
+        type: "object", additionalProperties: false, required: ["kind", "scope"],
         properties: {
           kind: { type: "string", enum: ["operation"] },
           scope: { type: "string", enum: ["collection", "record"] },

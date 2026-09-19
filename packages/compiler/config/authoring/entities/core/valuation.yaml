@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Valuation
   nl: Waardering
+pluralLabels:
+  en: Valuations
+  nl: Waarderingen
 domains:
   - asset
 fields:
@@ -208,6 +211,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

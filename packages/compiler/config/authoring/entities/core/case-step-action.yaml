@@ -10,6 +10,9 @@ filterField: actionKey
 labels:
   en: Case Step Action
   nl: Zaakstapactie
+pluralLabels:
+  en: Case step actions
+  nl: Zaakstapacties
 domains:
   - cases
   - workflow

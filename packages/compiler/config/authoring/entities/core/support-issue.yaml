@@ -10,6 +10,9 @@ filterField: subject
 labels:
   en: Support issue
   nl: Supportverzoek
+pluralLabels:
+  en: Support issues
+  nl: Supportverzoeken
 domains:
   - support
 authorization:
@@ -316,6 +319,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

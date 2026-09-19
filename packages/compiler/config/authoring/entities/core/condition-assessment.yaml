@@ -11,6 +11,9 @@ filterField: id
 labels:
   en: Condition assessment
   nl: Conditiemeting
+pluralLabels:
+  en: Condition assessments
+  nl: Conditiemetingen
 domains:
   - quality
 fields:
@@ -203,6 +206,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

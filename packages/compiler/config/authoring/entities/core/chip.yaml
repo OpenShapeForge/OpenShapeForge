@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Chip
   nl: Chip
+pluralLabels:
+  en: Chips
+  nl: Chips
 domains:
   - core
 indexes:
@@ -197,6 +200,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

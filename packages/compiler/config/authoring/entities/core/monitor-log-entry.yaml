@@ -10,6 +10,9 @@ filterField: message
 labels:
   en: Monitor log entry
   nl: Monitorlogregel
+pluralLabels:
+  en: Monitor log entries
+  nl: Monitorlogregels
 domains:
   - energy
 fields:
@@ -156,6 +159,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

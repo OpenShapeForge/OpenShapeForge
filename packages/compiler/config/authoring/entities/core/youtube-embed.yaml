@@ -5,6 +5,7 @@ entity: YouTubeEmbed
 title: YouTube embed
 language: en
 labels: { en: YouTube video, nl: YouTube-video }
+pluralLabels: { en: YouTube videos, nl: "YouTube-video's" }
 domains: [documents]
 baseEntity: false
 displayTemplate: "{{title}}"

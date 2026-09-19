@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Employee budget
   nl: Medewerkerbudget
+pluralLabels:
+  en: Employee budgets
+  nl: Medewerkerbudgetten
 domains:
   - hr
 fields:
@@ -223,6 +226,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

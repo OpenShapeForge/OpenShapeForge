@@ -10,6 +10,9 @@ filterField: permissionName
 labels:
   en: Organization permission
   nl: Organisatierecht
+pluralLabels:
+  en: Organization permissions
+  nl: Organisatierechten
 domains:
   - core
   - hr
@@ -202,6 +205,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

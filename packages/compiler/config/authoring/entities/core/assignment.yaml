@@ -10,6 +10,9 @@ filterField: reason
 labels:
   en: Assignment
   nl: Toewijzing
+pluralLabels:
+  en: Assignments
+  nl: Toewijzingen
 domains:
   - cases
   - service
@@ -222,6 +225,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

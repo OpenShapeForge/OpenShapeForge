@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Point
   nl: Punt
+pluralLabels:
+  en: Points
+  nl: Punten
 domains:
   - asset
 fields:
@@ -181,6 +184,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

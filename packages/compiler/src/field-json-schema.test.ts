@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
+import { operationReferenceKeyword } from "@openshapeforge/operations";
 import type { CompiledField } from "./authoring/types.js";
 import {
   compiledFieldSchema,
@@ -81,6 +82,25 @@ describe("compiled field JSON Schema projection", () => {
       key: "customer", osfType: "Relation",
       relationship: { kind: "belongsTo", target: "Relation", constraints },
     }))["x-osf-reference"]).toEqual({ entity: "Relation", valueField: "id", constraints });
+  });
+  it("what the compiler emits into x-osf-reference is what the runtime keyword accepts", () => {
+    // The keyword's meta-schema lives in packages/operations and every runtime
+    // validator registers it; a shape emitted here that it refuses makes Ajv
+    // throw for the whole operation schema (collection mutations, document
+    // create schemas). #592 added constraints to the emitter alone.
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationReferenceKeyword);
+    const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { customer: schema } });
+    expect(compile(compiledFieldSchema(field({
+      key: "customer", osfType: "Relation",
+      relationship: { kind: "belongsTo", target: "Relation", constraints: {
+        relationType: { eq: "organization" }, active: { eq: true }, rank: { eq: 3 },
+        groupMemberships: { any: { relationGroupId: { eq: "10000000-0000-4000-8000-000000000099" } } },
+      } },
+    })))).not.toThrow();
+    expect(compile(compiledFieldSchema(field({ key: "category", options: { type: "entity", source: "Category", valueField: "code" } })))).not.toThrow();
+    // A constraint the runtime does not evaluate stays refused.
+    expect(compile({ type: "string", "x-osf-reference": { entity: "Relation", constraints: { relationType: { in: ["organization"] } } } })).toThrow(/x-osf-reference/);
   });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {

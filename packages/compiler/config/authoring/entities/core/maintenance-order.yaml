@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Maintenance order
   nl: Onderhoudsorder
+pluralLabels:
+  en: Maintenance orders
+  nl: Onderhoudsorders
 domains:
   - maintenance
 fields:
@@ -308,6 +311,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

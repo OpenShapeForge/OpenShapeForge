@@ -10,6 +10,9 @@ filterField: key
 labels:
   en: Tenant Setting
   nl: Tenantinstelling
+pluralLabels:
+  en: Tenant settings
+  nl: Tenantinstellingen
 domains:
   - core
 authorization:

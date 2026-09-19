@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Project task
   nl: Projecttaak
+pluralLabels:
+  en: Project tasks
+  nl: Projecttaken
 domains:
   - project
 fields:
@@ -257,6 +260,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

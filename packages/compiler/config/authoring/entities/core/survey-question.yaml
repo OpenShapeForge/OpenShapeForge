@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Survey Question
   nl: Vragenlijstregel
+pluralLabels:
+  en: Survey questions
+  nl: Vragenlijstregels
 domains:
   - quality
 retention:
@@ -253,6 +256,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

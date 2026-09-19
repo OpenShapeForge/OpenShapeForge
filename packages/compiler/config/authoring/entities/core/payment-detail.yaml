@@ -10,6 +10,9 @@ filterField: iban
 labels:
   en: Payment Detail
   nl: Betaalgegevens
+pluralLabels:
+  en: Payment details
+  nl: Betaalgegevens
 domains:
   - relations
 authorization:

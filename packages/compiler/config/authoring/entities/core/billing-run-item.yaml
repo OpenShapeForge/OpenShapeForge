@@ -12,6 +12,9 @@ filterField: idempotencyKey
 labels:
   en: Billing run item
   nl: Facturatie-run-item
+pluralLabels:
+  en: Billing run items
+  nl: Facturatie-run-items
 domains:
   - finance
 indexes:
@@ -314,6 +317,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

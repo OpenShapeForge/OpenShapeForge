@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Payment plan
   nl: Betalingsregeling
+pluralLabels:
+  en: Payment plans
+  nl: Betalingsregelingen
 domains:
   - finance
 fields:
@@ -209,6 +212,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

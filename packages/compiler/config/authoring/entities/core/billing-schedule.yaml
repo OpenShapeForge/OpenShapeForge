@@ -12,6 +12,9 @@ filterField: period
 labels:
   en: Billing schedule
   nl: Facturatieschema
+pluralLabels:
+  en: Billing schedules
+  nl: "Facturatieschema's"
 domains:
   - finance
   - contracts
@@ -232,6 +235,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

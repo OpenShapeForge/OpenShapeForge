@@ -10,6 +10,9 @@ filterField: fileName
 labels:
   en: Attachment
   nl: Bijlage
+pluralLabels:
+  en: Attachments
+  nl: Bijlagen
 domains:
   - attachments
 authorization:
@@ -189,6 +192,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

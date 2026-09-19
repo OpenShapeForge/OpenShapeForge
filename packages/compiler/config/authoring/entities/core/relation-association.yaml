@@ -10,6 +10,9 @@ filterField: associationKind
 labels:
   en: Relation Association
   nl: Relatiekoppeling
+pluralLabels:
+  en: Relation associations
+  nl: Relatiekoppelingen
 domains:
   - relations
 authorization:
@@ -229,6 +232,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

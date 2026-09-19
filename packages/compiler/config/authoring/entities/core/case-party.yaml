@@ -10,6 +10,9 @@ filterField: displayName
 labels:
   en: Case Party
   nl: Zaakbetrokkene
+pluralLabels:
+  en: Case parties
+  nl: Zaakbetrokkenen
 domains:
   - cases
 authorization:
@@ -196,6 +199,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

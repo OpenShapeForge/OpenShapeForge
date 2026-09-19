@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Maintenance spending
   nl: Onderhoudsbesteding
+pluralLabels:
+  en: Maintenance spendings
+  nl: Onderhoudsbestedingen
 domains:
   - maintenance
 fields:
@@ -187,6 +190,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

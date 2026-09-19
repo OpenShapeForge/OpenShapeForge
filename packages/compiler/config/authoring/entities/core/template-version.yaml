@@ -5,6 +5,7 @@ entity: TemplateVersion
 title: Template version
 language: en
 labels: { en: Template version, nl: Template version }
+pluralLabels: { en: Template versions, nl: Templateversies }
 domains: [documents]
 authorization:
   roles:

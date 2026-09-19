@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Research Result
   nl: Onderzoeksresultaat
+pluralLabels:
+  en: Research results
+  nl: Onderzoeksresultaten
 domains:
   - quality
 retention:
@@ -156,6 +159,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

@@ -11,6 +11,9 @@ filterField: kind
 labels:
   en: Invoice sequence
   nl: Factuurreeks
+pluralLabels:
+  en: Invoice sequences
+  nl: Factuurreeksen
 domains:
   - finance
 fields:
@@ -210,6 +213,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

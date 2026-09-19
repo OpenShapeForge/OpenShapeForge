@@ -10,6 +10,9 @@ filterField: role
 labels:
   en: Address Assignment
   nl: Adrestoewijzing
+pluralLabels:
+  en: Address assignments
+  nl: Adrestoewijzingen
 domains:
   - relations
 authorization:
@@ -208,6 +211,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

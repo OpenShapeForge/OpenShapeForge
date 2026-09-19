@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Asset group
   nl: Objectgroep
+pluralLabels:
+  en: Asset groups
+  nl: Objectgroepen
 domains:
   - asset
 fields:
@@ -178,6 +181,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

@@ -12,6 +12,9 @@ filterField: displayName
 labels:
   en: Relation
   nl: Relatie
+pluralLabels:
+  en: Relations
+  nl: Relaties
 domains:
   - relations
 authorization:

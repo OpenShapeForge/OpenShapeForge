@@ -10,6 +10,9 @@ filterField: id
 labels:
   en: Monitor reading
   nl: Monitorwaarde
+pluralLabels:
+  en: Monitor readings
+  nl: Monitorwaarden
 domains:
   - energy
 fields:
@@ -153,6 +156,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

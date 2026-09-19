@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Budget line
   nl: Begrotingsregel
+pluralLabels:
+  en: Budget lines
+  nl: Begrotingsregels
 domains:
   - finance
 fields:
@@ -185,6 +188,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

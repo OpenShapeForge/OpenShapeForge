@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Vacancy
   nl: Vacature
+pluralLabels:
+  en: Vacancies
+  nl: Vacatures
 domains:
   - hr
 fields:
@@ -222,6 +225,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

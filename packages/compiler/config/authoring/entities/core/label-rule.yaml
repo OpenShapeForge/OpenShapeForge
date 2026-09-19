@@ -9,6 +9,9 @@ displayTemplate: "{{name}}"
 labels:
   en: Label Rule
   nl: Labelregel
+pluralLabels:
+  en: Label rules
+  nl: Labelregels
 domains:
   - core
 authorization:

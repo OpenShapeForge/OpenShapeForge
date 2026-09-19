@@ -10,6 +10,9 @@ filterField: street
 labels:
   en: Address
   nl: Adres
+pluralLabels:
+  en: Addresses
+  nl: Adressen
 domains:
   - relations
 authorization:

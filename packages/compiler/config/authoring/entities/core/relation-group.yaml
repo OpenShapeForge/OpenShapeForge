@@ -12,6 +12,9 @@ blueprint:
 labels:
   en: Relation Group
   nl: Relatiegroep
+pluralLabels:
+  en: Relation groups
+  nl: Relatiegroepen
 domains:
   - relations
 authorization:

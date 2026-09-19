@@ -10,6 +10,9 @@ filterField: name
 labels:
   en: Milestone
   nl: Mijlpaal
+pluralLabels:
+  en: Milestones
+  nl: Mijlpalen
 domains:
   - cases
   - service
@@ -241,6 +244,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

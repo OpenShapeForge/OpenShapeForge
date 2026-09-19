@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Quality Measurement Result
   nl: Kwaliteitsmetingsresultaat
+pluralLabels:
+  en: Quality measurement results
+  nl: Kwaliteitsmetingsresultaten
 domains:
   - quality
 retention:
@@ -238,6 +241,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

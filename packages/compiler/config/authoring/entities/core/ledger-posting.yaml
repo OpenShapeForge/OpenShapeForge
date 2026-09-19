@@ -11,6 +11,9 @@ filterField: description
 labels:
   en: Ledger posting
   nl: Boeking
+pluralLabels:
+  en: Ledger postings
+  nl: Boekingen
 domains:
   - finance
 fields:
@@ -211,6 +214,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

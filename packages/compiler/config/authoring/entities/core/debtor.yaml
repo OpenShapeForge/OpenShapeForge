@@ -11,6 +11,9 @@ filterField: debtorNumber
 labels:
   en: Debtor
   nl: Debiteur
+pluralLabels:
+  en: Debtors
+  nl: Debiteuren
 domains:
   - finance
 fields:
@@ -310,6 +313,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

@@ -10,6 +10,9 @@ filterField: description
 labels:
   en: Quote line
   nl: Offerteregel
+pluralLabels:
+  en: Quote lines
+  nl: Offerteregels
 domains:
   - finance
 fields:

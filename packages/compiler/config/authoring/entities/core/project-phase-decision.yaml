@@ -10,6 +10,9 @@ filterField: outcome
 labels:
   en: Project phase decision
   nl: Projectfasebesluit
+pluralLabels:
+  en: Project phase decisions
+  nl: Projectfasebesluiten
 domains:
   - project
 fields:
@@ -182,6 +185,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

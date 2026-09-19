@@ -10,6 +10,9 @@ filterField: code
 labels:
   en: Position
   nl: Functie
+pluralLabels:
+  en: Positions
+  nl: Functies
 domains:
   - hr
 fields:
@@ -211,6 +214,7 @@ operations:
     confirmation:
       mode: acknowledgement
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

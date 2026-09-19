@@ -10,6 +10,9 @@ filterField: title
 labels:
   en: Quality Measurement Request
   nl: Kwaliteitsmetingsverzoek
+pluralLabels:
+  en: Quality measurement requests
+  nl: Kwaliteitsmetingsverzoeken
 domains:
   - quality
 retention:
@@ -263,6 +266,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   workflow:
     nodes:

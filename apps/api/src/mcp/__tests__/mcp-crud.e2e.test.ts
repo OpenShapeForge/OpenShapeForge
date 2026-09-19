@@ -27,7 +27,8 @@ import {
   isMutableColumn,
   nextMarker,
   pluginCreateInput,
-  sampleValue,
+  contractSample,
+  schemaSample,
   tables,
   tablesByName,
   untrackRow,
@@ -380,30 +381,6 @@ function createSchemaProperties(
     (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> })
       .properties ?? {}
   );
-}
-
-/**
- * A sample the advertised schema accepts: an allowed enum value, else the
- * column sample cut to the advertised length (a three-letter currency code
- * cannot carry a marker). The server enforces what it advertises.
- */
-function schemaSample(
-  column: (typeof tables)[number]["columns"][number],
-  schema: { enum?: unknown[]; maxLength?: number; pattern?: string } | undefined,
-  marker: string,
-): unknown {
-  if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
-  const rawSample = sampleValue(column, marker);
-  if (typeof rawSample !== "string") return rawSample;
-  let sample: string = rawSample;
-  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
-    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
-    if (!new RegExp(schema.pattern).test(identifier)) {
-      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
-    }
-    sample = identifier;
-  }
-  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
 }
 
 /** Sample create arguments: required scalars plus real rows for required FKs.
@@ -1011,6 +988,45 @@ describe("generated MCP server", () => {
     });
 
     if (isEntityBackedCreate(table)) {
+      const optionField = Object.entries(createSchemaProperties(table))
+        .find(([, schema]) => Array.isArray(schema.enum) && schema.enum.length > 0)?.[0];
+      if (optionField) {
+        test(`${prefix}: an out-of-options ${optionField} is the canonical VALIDATION answer with a field violation`, async () => {
+          // The same envelope REST and GraphQL return: the runtime judges the
+          // authored values once, for every interface, and MCP relays it.
+          const valid = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", { ...valid, [optionField]: "not-an-option" });
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            retryable: false,
+            violations: [{ field: optionField, code: "NOT_IN_OPTIONS" }],
+          });
+        });
+      }
+
+      // A required scalar, not a foreign key: the factory creates parents for
+      // those, and their absence is a reference question, not this one.
+      const foreignKeyFields = new Set(
+        table.columns.filter((column) => foreignKeyTargets(table).has(column.name)).map(fieldName),
+      );
+      const requiredField = ((catalogTool(table, "create").inputSchema as { required?: string[] }).required ?? [])
+        .find((field) => !foreignKeyFields.has(field));
+      if (requiredField) {
+        test(`${prefix}: a create missing ${requiredField} is the canonical VALIDATION answer with a REQUIRED violation`, async () => {
+          // The edge holds the envelope only; the missing authored field is
+          // the runtime's finding, so it arrives as a field violation and not
+          // as ajv's verdict on the advertised argument object.
+          const { [requiredField]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", incomplete);
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            violations: expect.arrayContaining([{ field: requiredField, code: "REQUIRED", message: expect.any(String) }]),
+          });
+        });
+      }
+
       test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
         // The schema says additionalProperties:false; the server must agree.
         const valid = await createArgs(table, tenantA);
@@ -1028,6 +1044,18 @@ describe("generated MCP server", () => {
         });
         expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
         expect(toolError(body)).toMatch(/\bid\b/);
+      });
+    } else {
+      test(`${prefix}: a plugin-backed create is held to its advertised tool schema as a whole`, async () => {
+        // A plugin Operation owns its nested input contract; the edge keeps
+        // validating the full advertised schema, not a reduced envelope.
+        const schema = catalogTool(table, "create").inputSchema as { required?: string[] };
+        const missing = schema.required?.[0];
+        if (!missing) return;
+        const { [missing]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+        const { body } = await call(tenantA, "create", incomplete);
+        expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+        expect(toolError(body)).toMatch(new RegExp(`required property '${missing}'`));
       });
     }
 
@@ -1197,7 +1225,7 @@ describe("generated MCP server", () => {
 
       test(`${prefix}: ${offeredOnCreate ? `accepts ${field} on create and ` : ""}refuses ${field} on update`, async () => {
         const valueFor = async () =>
-          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : sampleValue(immutable, nextMarker());
+          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : contractSample(table, immutable, nextMarker());
         const created = await call(
           tenantA,
           "create",

@@ -68,6 +68,43 @@ function assertIdentifier(value: unknown, label: string): asserts value is strin
   }
 }
 
+/**
+ * `localColumns`/`targetColumns` widen a reference to a compound key; both
+ * name the same number of distinct identifiers, the local list includes the
+ * declaring column and only names columns of its table. Whether the pair
+ * binds the tenant is decided against the merged manifest in
+ * generateArtifacts, where the target table is known.
+ */
+function assertCompositeReference(
+  reference: Record<string, unknown>,
+  columnName: string,
+  columnNames: Set<string>,
+  label: string,
+): void {
+  const { localColumns, targetColumns } = reference;
+  if (localColumns === undefined && targetColumns === undefined) return;
+  if (!Array.isArray(localColumns) || !Array.isArray(targetColumns)) {
+    throw new Error(`${label}.references must declare localColumns and targetColumns together.`);
+  }
+  for (const [list, name] of [[localColumns, "localColumns"], [targetColumns, "targetColumns"]] as const) {
+    list.forEach((entry, index) => assertIdentifier(entry, `${label}.references.${name}[${index}]`));
+    if (new Set(list).size !== list.length) {
+      throw new Error(`${label}.references.${name} repeats a column.`);
+    }
+  }
+  if (localColumns.length === 0 || localColumns.length !== targetColumns.length) {
+    throw new Error(`${label}.references.localColumns and targetColumns must pair the same number of columns.`);
+  }
+  if (!localColumns.includes(columnName)) {
+    throw new Error(`${label}.references.localColumns must include ${columnName}.`);
+  }
+  for (const entry of localColumns) {
+    if (!columnNames.has(entry)) {
+      throw new Error(`${label}.references.localColumns names unknown column ${entry}.`);
+    }
+  }
+}
+
 function tableKey(schema: string, table: string) {
   return `${schema}.${table}`;
 }
@@ -523,6 +560,11 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       }
     }
     tableColumns.set(currentTableKey, columnNames);
+    for (const column of table.columns) {
+      if (isRecord(column) && isRecord(column.references)) {
+        assertCompositeReference(column.references, String(column.name), columnNames, `${currentTableKey}.${column.name}`);
+      }
+    }
     if (!hasTenantId) {
       throw new Error(`Tenant-scoped table ${currentTableKey} must include tenant_id.`);
     }

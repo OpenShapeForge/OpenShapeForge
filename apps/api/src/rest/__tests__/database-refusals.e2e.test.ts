@@ -34,7 +34,7 @@ import {
   foreignKeyTargets,
   isMutableColumn,
   nextMarker,
-  sampleValue,
+  contractSample,
   tables,
   tablesByName,
   textColumnFor,
@@ -170,7 +170,7 @@ async function createBody(
       }
       continue;
     }
-    if (column.required) body[field] = sampleValue(column, nextMarker());
+    if (column.required) body[field] = contractSample(table!, column, nextMarker());
   }
   return { ...body, ...overrides };
 }
@@ -272,7 +272,7 @@ describe("a system constraint violation", () => {
         if (column.required) body[field] = await createRow(tablesByName.get(target)!, tenantA);
         continue;
       }
-      if (column.required) body[field] = sampleValue(column, nextMarker());
+      if (column.required) body[field] = contractSample(withOptionalFk, column, nextMarker());
     }
     body[fieldName(fkColumn)] = randomUUID();
     const response = await inject(

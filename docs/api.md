@@ -79,6 +79,22 @@ Engine semantics (`src/graphql/generated-crud.ts`):
   `tenant_id`, `created_at`, and `updated_at`. Create injects `tenant_id`
   from the session; update always sets `updated_at = now()`; delete returns
   `true` only when a row (visible to this tenant) was actually removed.
+- **The compiled write contract is enforced once, for every interface.**
+  `executeEntityOperation` validates create and update `values` against the
+  Operation's compiled `inputSchema` (`operations/entity/input-validation.ts`)
+  before any SQL runs, so an authored `options` list, `validation.pattern`,
+  length or range bound holds over REST, GraphQL and MCP alike. A refusal is
+  the canonical `VALIDATION` error (REST 422) with one `violations[]` entry per
+  field: `{ field, code, message }`, codes such as `NOT_IN_OPTIONS`,
+  `PATTERN_MISMATCH`, `INVALID_TYPE`, `TOO_LONG`, `REQUIRED`, `UNKNOWN_FIELD`.
+  An update validates only the keys it carries; `null` clears a nullable
+  column and is a type violation on a required one. MCP checks only the argument
+  envelope (identity, controls, fields its session's tool advertises) at its
+  edge and relays this failure as it is. Collection Operations and blueprint
+  creates (the merged record) go through the same check.
+  The database carries `CHECK` constraints for static options and the
+  POSIX-safe subset of patterns (see [migrations.md](migrations.md)) as a
+  backstop; the runtime check is the one that names the field.
 
 ## The generated REST surface
 

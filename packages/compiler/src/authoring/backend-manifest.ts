@@ -35,6 +35,8 @@ import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
 import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
+import { assertDefaultSatisfiesContract, fieldValueCheckConstraints } from "./field-value-checks.js";
+import { TENANT_IDENTITY_CHECK_EXPRESSION, hasTenantIdentityCheck, tenantIdentityCheckName } from "../tenant-bound-references.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -200,19 +202,27 @@ function defaultSql(field: Field | undefined, column: ColumnDefinition): string 
     return field.defaultValue ? "true" : "false";
   }
   if (
-    (column.type === "integer" || column.type === "bigint") &&
+    (column.type === "integer" || column.type === "bigint" || column.type === "numeric") &&
     typeof field.defaultValue === "number" &&
-    Number.isFinite(field.defaultValue)
+    Number.isFinite(field.defaultValue) &&
+    (column.type === "numeric" || Number.isInteger(field.defaultValue))
   ) {
     return String(field.defaultValue);
   }
   if (column.type === "jsonb") {
     return `${quoteSqlString(JSON.stringify(field.defaultValue))}::jsonb`;
   }
-  if (typeof field.defaultValue === "string") {
+  if (typeof field.defaultValue === "string" && column.type !== "boolean" &&
+    column.type !== "integer" && column.type !== "bigint" && column.type !== "numeric") {
     return quoteSqlString(field.defaultValue);
   }
-  return undefined;
+  // An authored default the column cannot carry is a contract the database
+  // would silently drop: a required numeric with `defaultValue: 1` compiled to
+  // NOT NULL with no default, and every insert that relied on it failed.
+  throw new Error(
+    `Field ${field.key} declares defaultValue ${JSON.stringify(field.defaultValue)}, ` +
+      `which cannot be rendered as a SQL default for ${column.type} column ${column.name}.`,
+  );
 }
 
 function isRelationshipRegistered(
@@ -543,6 +553,11 @@ function retentionReview(
  * Resolve authored entity-level indexes (field keys) into TableDefinition
  * indexes (column names). `tenantId` is accepted directly for tenant-scoped
  * tables since the compiler auto-attaches a `tenant_id` column.
+ *
+ * A unique index on a tenant-scoped table is unique per tenant: `tenant_id`
+ * leads it whether or not the author wrote `tenantId`, so `unique: [code]`
+ * never makes one tenant's code block another's, and the index doubles as
+ * the tenant-leading lookup the row-level policy wants.
  */
 function compileEntityIndexes(
   candidate: CompiledCandidate,
@@ -565,6 +580,9 @@ function compileEntityIndexes(
         );
       }
       resolvedColumns.push(column.name);
+    }
+    if (index.unique && tenantScoped && !resolvedColumns.includes("tenant_id")) {
+      resolvedColumns.unshift("tenant_id");
     }
     compiled.push({
       name: index.name,
@@ -972,6 +990,29 @@ function compileFieldRelationStorage(
     if (tenancyIdentity && (unique || onDelete)) {
       throw new Error(`Server-managed tenant identity ${tableKey(source)}.${column.name} cannot be owned or unique through a relationship.`);
     }
+    // A tenant column pointing at a tenant-scoped registry is bound only if
+    // that registry's rows ARE their tenant: the compiler stamps
+    // CHECK (id = tenant_id) on the target, which the emitter requires
+    // before it accepts the single-column key (tenant-bound-references.ts).
+    if (tenancyIdentity && target.tenantScoped && !hasTenantIdentityCheck(target)) {
+      const constraints = target.constraints ??= [];
+      const name = tenantIdentityCheckName(target);
+      if (constraints.some((constraint) => constraint.name === name)) {
+        throw new Error(`Tenant identity check collides with ${tableKey(target)}.${name}.`);
+      }
+      constraints.push({
+        compilerOwned: true,
+        version: `0001_tenant-identity-${target.name.replaceAll("_", "-")}`,
+        name,
+        kind: "check",
+        expression: TENANT_IDENTITY_CHECK_EXPRESSION,
+      });
+      // A registry row's id IS its tenant, so it comes from the verified
+      // session rather than a random default: a generic create that supplies
+      // only tenant_id then satisfies the check without knowing about it.
+      const identity = target.columns.find((candidate) => candidate.name === "id")!;
+      identity.default = "app.current_tenant()";
+    }
     const composite = source.tenantScoped && target.tenantScoped && !tenancyIdentity;
     const deleteAction = onDelete ?? previous?.onDelete;
     column.references = {
@@ -1002,7 +1043,6 @@ function compileFieldRelationStorage(
   };
 
   for (const { candidate, table } of byEntity.values()) {
-    if (Number(candidate.contract.authoringVersion) !== 3) continue;
     for (const relationship of candidate.contract.model.relationships) {
       // Provider-backed: no storage on either side, nothing to reference.
       if (relationship.provider) continue;
@@ -1024,15 +1064,6 @@ function compileFieldRelationStorage(
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
         attachReference(table, column, target.table, relationship.unique);
       } else if (relationship.kind === "hasMany") {
-        // A derived collection never lowers a foreign key the referencing
-        // field's own compilation did not: a pre-v3 referencing entity keeps
-        // its legacy policy (cross-module references stay unregistered and
-        // are owned by hand-written SQL).
-        if (Number(target.candidate.contract.authoringVersion) !== 3) {
-          const skipped = table.source?.relationshipStatus?.skippedReferences;
-          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity keeps its own foreign-key policy)`);
-          continue;
-        }
         const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
         if (relationship.through) {
@@ -1209,6 +1240,7 @@ export function compileAuthoringBackendManifest(
           ? { writtenBy: fieldWriters.get(storageColumn.field)! }
           : {}),
       };
+      if (field) assertDefaultSatisfiesContract(field);
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
         column.default = defaultValue;
@@ -1220,7 +1252,12 @@ export function compileAuthoringBackendManifest(
     const idIndex = columns.findIndex((column) => column.name === "id");
     const existingTenantColumn = columns.find((column) => column.name === "tenant_id");
     if (tenantScoped && existingTenantColumn) {
+      // The tenant column is the row's identity under row-level security and
+      // the leading half of every key into this table; an authored
+      // `required: false` on it would leave those keys unchecked (a NULL
+      // half passes MATCH SIMPLE). Required, whatever the field says.
       existingTenantColumn.type = "uuid";
+      existingTenantColumn.required = true;
     }
     if (tenantScoped && !columns.some((column) => column.name === "tenant_id")) {
       const tenantColumn: ColumnDefinition = { name: "tenant_id", type: "uuid", required: true };
@@ -1243,47 +1280,8 @@ export function compileAuthoringBackendManifest(
       });
     }
 
-    const columnsByName = new Map(columns.map((column) => [column.name, column]));
-    for (const relationship of candidate.contract.model.relationships) {
-      if (Number(candidate.contract.authoringVersion) === 3) continue;
-      if (relationship.kind !== "belongsTo" || !relationship.foreignKey) {
-        continue;
-      }
-      const column = columnsByName.get(relationship.foreignKey);
-      if (!column) {
-        continue;
-      }
-      const target = byEntityName.get(relationship.target);
-      if (!target) {
-        skippedReferences.push(`${relationship.foreignKey}->${relationship.target}.id (target not allowlisted)`);
-        continue;
-      }
-      const targetSchema =
-        schemaByModule[target.contract.entity.module] ?? snakeCase(target.contract.entity.module);
-      const reference: ReferenceDefinition = {
-        schema: targetSchema,
-        table: target.contract.storage.table,
-        column: "id",
-      };
-      const sameModule = target.contract.entity.module === candidate.contract.entity.module;
-      const registered = isRelationshipRegistered(
-        relationshipRegister,
-        { schema, table: name, column: relationship.foreignKey },
-        reference,
-      );
-      if (!sameModule && !registered) {
-        skippedReferences.push(
-          `${relationship.foreignKey}->${reference.schema}.${reference.table}.${reference.column} (cross-module unregistered)`,
-        );
-        continue;
-      }
-      column.type = "uuid";
-      column.references = reference;
-      emittedReferences.push(
-        `${relationship.foreignKey}->${reference.schema}.${reference.table}.${reference.column}`,
-      );
-    }
-
+    // Relationships are lowered once every table exists, in
+    // compileFieldRelationStorage, for every authoring version alike.
     const columnsByNameWithOperational = new Map(columns.map((column) => [column.name, column]));
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 
@@ -1336,6 +1334,10 @@ export function compileAuthoringBackendManifest(
       candidate.contract.entity.name,
       columnsByNameWithOperational,
     );
+    const valueChecks = fieldValueCheckConstraints(schema, name, candidate.contract.storage.columns.map((storageColumn) => ({
+      field: candidate.fieldsByKey.get(storageColumn.field),
+      column: columnsByField.get(storageColumn.field)!,
+    })));
 
     return {
       schema,
@@ -1348,6 +1350,7 @@ export function compileAuthoringBackendManifest(
       columns,
       ...(rowScope ? { rowScope } : {}),
       ...(compiledIndexes.length > 0 ? { indexes: compiledIndexes } : {}),
+      ...(valueChecks.length > 0 ? { constraints: valueChecks } : {}),
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,

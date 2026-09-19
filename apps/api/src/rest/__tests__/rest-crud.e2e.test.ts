@@ -39,7 +39,7 @@ import {
   nextMarker,
   pluginCreateInput,
   redactableColumnFor,
-  sampleValue,
+  contractSample,
   tables,
   tablesByName,
   textColumnFor,
@@ -225,7 +225,7 @@ async function buildColumnBody(
       continue;
     }
     if (column.required) {
-      body[field] = sampleValue(column, nextMarker());
+      body[field] = contractSample(table, column, nextMarker());
     }
   }
   return body;
@@ -915,7 +915,7 @@ for (const table of restTables) {
 
   /** A value the column will accept: a real parent row for an FK, else a sample. */
   const valueFor = async (identity: Identity) => {
-    if (!fkTarget) return sampleValue(immutable, nextMarker());
+    if (!fkTarget) return contractSample(table, immutable, nextMarker());
     return createForeignKeyTarget(fkTarget, identity);
   };
   // Only an entity-backed create offers the column as input; a plugin create

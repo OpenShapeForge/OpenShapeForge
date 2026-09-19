@@ -39,12 +39,19 @@ async function readPublished(db: OpenShapeForgeDatabase, session: DbSessionInput
     select * from app.read_blueprints(${nameOf(table)}, ${blueprintId}, ${search}, ${limit}, ${offset})
   `.execute(trx)).rows);
 }
-export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string, values: Record<string, unknown>) {
+/**
+ * `validate` sees the merged record (blueprint values under the caller's) as a
+ * full create, so a stored value the contract no longer allows fails as
+ * VALIDATION naming the field rather than at a database CHECK.
+ */
+export async function createFromBlueprint(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, blueprintId: string, values: Record<string, unknown>, validate: (merged: Record<string, unknown>) => void = () => {}) {
   requireEntityOperation(table, "create", session);
   return withDbSession(db, session, async trx => {
     const source = (await readPublished(db, session, table, blueprintId))[0];
     if (!source) throw generatedCrudError("Blueprint is unavailable.", "NOT_FOUND");
-    const row = await createGeneratedEntity(db, session, { table: table.name, values: { ...allowedValues(table, source.values_json), ...values } });
+    const merged = { ...allowedValues(table, source.values_json), ...values };
+    validate(merged);
+    const row = await createGeneratedEntity(db, session, { table: table.name, values: merged });
     await sql`insert into platform.blueprint_copies (tenant_id, entity_name, record_id, blueprint_tenant_id, blueprint_id, source_version)
       values (${session.tenantId}::uuid, ${nameOf(table)}, ${String(row[table.primaryKey!])}::uuid, ${source.tenant_id}::uuid, ${source.blueprint_id}, ${source.version})`.execute(trx);
     return row;

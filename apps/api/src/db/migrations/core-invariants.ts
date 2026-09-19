@@ -7,8 +7,8 @@ import { WORKER_ROLE } from "./worker-role.js";
 
 /**
  * The core's own database invariants on manifest tables: functions,
- * triggers, compound foreign keys and partial indexes the manifest cannot
- * express. Applied after the generated step on every migrate, idempotently —
+ * triggers, foreign keys wider than a tenant pair and partial indexes the
+ * manifest cannot express. Applied after the generated step on every migrate, idempotently —
  * `create or replace`, `if not exists`, and a pg_constraint guard for each
  * constraint — with no ledger and no version. A database is built from the
  * manifest plus this file; there is no history to replay.
@@ -18,18 +18,20 @@ import { WORKER_ROLE } from "./worker-role.js";
  *   1. ORG-UNIT CLOSURE. platform.org_unit_closure is the transitive closure
  *      of platform.org_unit that group-predicated RLS resolves a session's
  *      groups through. The trigger keeps it exact on every insert, reparent
- *      and delete, refuses a parent from another tenant (the self-referential
- *      FK cannot carry a tenant qualifier, so a foreign-tenant parent would
- *      otherwise become a silent phantom root) and refuses a reparent into
- *      the node's own subtree (a cycle would otherwise surface as an opaque
- *      unique-key violation). SECURITY DEFINER so the closure DML is not
+ *      and delete, refuses a parent from another tenant a second time (the
+ *      generated (tenant_id, parent_id) key already makes one unexpressible;
+ *      the trigger names the case rather than leaving a phantom root should
+ *      the key ever be relaxed) and refuses a reparent into the node's own
+ *      subtree (a cycle would otherwise surface as an opaque unique-key
+ *      violation). SECURITY DEFINER so the closure DML is not
  *      blocked by RLS on the closure table; tenant_id always comes from
  *      NEW/OLD, never from the session.
  *
  *   2. DOCUMENT AUTHORITY. Document is the stable container and
- *      DocumentVersion the sole artifact truth. The two references between
- *      them are tenant-qualified compound keys, replacing the single-column
- *      references the generated schema emits under the same names; a
+ *      DocumentVersion the sole artifact truth. The current-version pointer
+ *      is a three-column key (tenant, document, version) that the generated
+ *      (tenant_id, current_version_id) pair under the same name cannot say —
+ *      a document may only point at one of its own versions; a
  *      Document's type is a managed DocumentType of the same tenant; and the
  *      runtime role cannot write a DocumentVersion directly, create a
  *      Document without its first version, or move the current-version
@@ -189,18 +191,12 @@ async function applyOrgUnitClosure(db: OpenShapeForgeDatabase): Promise<void> {
 }
 
 async function applyDocumentAuthority(db: OpenShapeForgeDatabase): Promise<void> {
-  // The generated schema references these two under the same names with a
-  // single column each; the tenant-qualified key is what makes a version's
-  // tenant and its document's tenant provably one. The helper drops the
-  // single-column constraint when it finds it and is a no-op once the
-  // compound one is in place, and the generated DO block sees the name and
-  // leaves it alone on every later apply.
-  await ensureForeignKey(db, {
-    table: "erp.document_versions",
-    name: "document_versions_document_id_fkey",
-    columns: ["tenant_id", "document_id"],
-    references: { table: "erp.documents", columns: ["tenant_id", "id"] },
-  });
+  // The generated schema binds current_version_id to a version of the same
+  // tenant; this widens the same-named key so the version is also one of
+  // THIS document's. The helper drops the generated two-column constraint
+  // when it finds it and is a no-op once the three-column one is in place,
+  // and the generated DO block sees the name and leaves it alone on every
+  // later apply.
   await ensureForeignKey(db, {
     table: "erp.documents",
     name: "documents_current_version_id_fkey",

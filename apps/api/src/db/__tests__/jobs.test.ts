@@ -86,6 +86,10 @@ beforeAll(async () => {
   await admin.unsafe(`create database "${name}"`);
   const root = createDatabaseRuntime({ databaseUrl: scratchUrl(name), maxConnections: 2 });
   await root.db.connection().execute((conn) => runMigrationChain(conn));
+  // A job belongs to a registered tenant; the key on tenant_id says so.
+  for (const [id, slug] of [[tenantA, "jobs-a"], [tenantB, "jobs-b"]] as const) {
+    await sql`insert into platform.tenants (id, slug, name, status) values (${id}::uuid, ${slug}, ${slug}, 'active')`.execute(root.db);
+  }
   suite = {
     admin,
     name,

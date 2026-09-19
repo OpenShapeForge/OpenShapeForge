@@ -14,7 +14,6 @@ import {
   renderQueryFields,
   renderTypeDefinition,
   splitCanonicalGraphqlMutationInput,
-  usesCanonicalGraphqlOperations,
 } from "../generated-entity-schema.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
@@ -161,7 +160,6 @@ describe("generated GraphQL CRUD exposure", () => {
       delete: true,
     });
 
-    expect(usesCanonicalGraphqlOperations(table)).toBe(true);
     expect(renderQueryFields(table)).toContain("relation(id: ID!): RelationOperationResult");
     expect(renderQueryFields(table)).toContain(
       "relations(filter: RelationFilter, sort: RelationSort, first: Int, after: String): RelationCollectionOperationResult",
@@ -247,7 +245,7 @@ describe("generated GraphQL CRUD exposure", () => {
     });
   });
 
-  test("legacy GraphQL keeps its direct CRUD response shape", () => {
+  test("every generated entity projects the canonical envelope, whatever its authoring version", () => {
     const table = withOperations({
       list: true,
       get: true,
@@ -255,13 +253,12 @@ describe("generated GraphQL CRUD exposure", () => {
       update: true,
       delete: true,
     });
-    const { authoringVersion: _authoringVersion, ...legacySource } = table.source!;
-    table.source = legacySource;
+    const { authoringVersion: _authoringVersion, ...unversionedSource } = table.source!;
+    table.source = unversionedSource;
 
-    expect(usesCanonicalGraphqlOperations(table)).toBe(false);
-    expect(renderGeneratedQueryFields(table)[0]).toContain(": Relation");
+    expect(renderGeneratedQueryFields(table)[0]).toContain(": RelationOperationResult");
     expect(renderGeneratedMutationFields(table)).toContain(
-      "      deleteRelation(id: ID!): Boolean!",
+      "      deleteRelation(input: DeleteRelationInput!): RelationDeleteOperationResult",
     );
   });
 });

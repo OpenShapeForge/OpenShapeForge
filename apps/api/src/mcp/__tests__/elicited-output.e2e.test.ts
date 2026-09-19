@@ -631,6 +631,28 @@ test.skipIf(remoteUrl)(
 );
 
 test.skipIf(remoteUrl)(
+  "an elicited create holds the model's own fields to the write contract before anyone is asked",
+  async () => {
+    // ownerScope is an options field; the secure form must not open for a
+    // create the contract already refuses, and the refusal is the canonical
+    // VALIDATION answer with the field named.
+    const marker = `invalid-${seed}`;
+    const refused = await callTool(tenantA, "elicited_output_test_create", {
+      ...values(marker, false),
+      ownerScope: "banana",
+    });
+    expect(refused.isError).toBe(true);
+    // The fixture tools advertise no outputSchema, so the answer takes the
+    // legacy body (code, message, detail); the detail still names the field.
+    expect(refused.payload.error).toMatchObject({
+      code: "VALIDATION",
+      detail: expect.stringContaining("ownerScope must be one of"),
+    });
+    expect((await rowsWithKey(marker)).rows).toHaveLength(0);
+  },
+);
+
+test.skipIf(remoteUrl)(
   "recursive stored envelopes never cross create, get or list outputs",
   async () => {
     const ordinaryObject = {

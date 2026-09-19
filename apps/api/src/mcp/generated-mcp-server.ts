@@ -110,6 +110,7 @@ import {
   requireCreateOperationConfirmation,
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
+import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -1682,8 +1683,11 @@ async function runtimeRowByFilter(
 }
 
 // The advertised JSON Schema IS the contract: what tools/list promises,
-// tools/call enforces. Without this, enum/pattern/length constraints are
-// decoration and `status: "banana"` persists with a 200.
+// tools/call enforces. The edge holds the argument envelope and the derived
+// and composed tools to it; an entity tool's authored values are judged by
+// executeEntityOperation, the one validator every interface shares
+// (operations/entity/input-validation.ts), so `status: "banana"` comes back
+// as VALIDATION with a per-field violation here as it does over REST.
 const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false });
 // ajv-formats is CJS; under NodeNext the default import is typed as the
 // module namespace rather than the callable it is at runtime.
@@ -1742,6 +1746,48 @@ function assertSchemaValid(
   } finally {
     ajv.removeSchema(schema);
   }
+}
+
+const ENVELOPE_KEYS = new Set([
+  "id",
+  "blueprintId",
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
+/**
+ * The tool schema with the authored values taken out: an update's `values`
+ * becomes a bare object, a create keeps only its transport controls and
+ * admits the fields as additional properties. Reads and deletes carry no
+ * values and validate as advertised.
+ */
+function envelopeSchema(
+  schema: Record<string, unknown>,
+  operation: string,
+): Record<string, unknown> {
+  if (operation !== "create" && operation !== "update") return schema;
+  const { required: advertisedRequired, ...rest } = schema;
+  const properties = (rest.properties ?? {}) as Record<string, unknown>;
+  if (operation === "update") {
+    return { ...schema, properties: { ...properties, values: { type: "object" } } };
+  }
+  // `required` is always replaced: a create reduced to its controls must not
+  // keep the advertised field list, or ajv answers for the missing field
+  // before the runtime can name it as a REQUIRED violation.
+  const required = Array.isArray(advertisedRequired)
+    ? (advertisedRequired as unknown[]).filter((key) => typeof key === "string" && ENVELOPE_KEYS.has(key))
+    : [];
+  return {
+    ...rest,
+    properties: Object.fromEntries(
+      Object.entries(properties).filter(([key]) => ENVELOPE_KEYS.has(key)),
+    ),
+    ...(required.length ? { required } : {}),
+    additionalProperties: true,
+  };
 }
 
 /**
@@ -3073,16 +3119,6 @@ async function invokeTool(
             ),
           )
         : requireArguments(args);
-      if (canonical) {
-        requireCreateOperationConfirmation(
-          entityOperationContract(operationRef("create").id),
-          {
-            ...(typeof args.confirmed === "boolean"
-              ? { confirmed: args.confirmed }
-              : {}),
-          },
-        );
-      }
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -3095,6 +3131,20 @@ async function invokeTool(
       assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
+      // The model's payload against the write contract BEFORE the
+      // acknowledgement: an invalid create answers VALIDATION, never
+      // CONFIRMATION_REQUIRED. The completed-elicitation write below does not
+      // pass through executeEntityOperation, so this is its contract check.
+      assertEntityValuesValid(operation, table, modelValues, {
+        partial: typeof args.blueprintId === "string",
+      });
+      if (canonical) {
+        requireCreateOperationConfirmation(operation, {
+          ...(typeof args.confirmed === "boolean"
+            ? { confirmed: args.confirmed }
+            : {}),
+        });
+      }
       await assertPublishableWrite(db, session, tables, table, values);
       if (elicitationCompleted && elicitField) {
         const row = await createGeneratedEntityAfterElicitation(db, session, {
@@ -6734,6 +6784,24 @@ function buildServer(
         // the target field is discarded before the person is asked.
         delete modelArguments[elicit.into];
 
+        // Before anyone is asked for a secret: the model's own fields must
+        // already satisfy the write contract, or the person fills a secure
+        // form for a create that was going to answer VALIDATION anyway.
+        {
+          const contract = match.operationId
+            ? getEntityOperationContracts().find((operation) => operation.id === match.operationId)
+            : undefined;
+          if (contract && table) {
+            const modelFields = Object.fromEntries(
+              Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key)),
+            );
+            assertOperationWrittenFields(modelFields, table);
+            assertDeclaredProperties(match.inputSchema, modelFields, "field");
+            assertEntityValuesValid(contract, table, modelFields, {
+              partial: typeof modelArguments.blueprintId === "string",
+            });
+          }
+        }
         const sourceId = modelArguments[elicit.sourceField];
         const sourceTable = tables.get(elicit.sourceTable);
         let sourceRow: Record<string, unknown> | null = null;
@@ -6942,13 +7010,36 @@ function buildServer(
             : toValidate,
           table,
         );
-        const expectedVersionField = match.operationId
+        const contract = match.operationId
           ? getEntityOperationContracts().find(
               (operation) => operation.id === match.operationId,
-            )?.concurrency?.version?.field
+            )
           : undefined;
+        const expectedVersionField = contract?.concurrency?.version?.field;
+        // An entity create's or update's authored values are the runtime's to
+        // judge, once, for every interface, so MCP gets the same VALIDATION +
+        // violations[] answer REST and GraphQL do instead of a private ajv
+        // verdict. A plugin Operation owns its input contract (a document
+        // with its version and artifact), so its tool is held to the
+        // advertised schema as a whole.
+        const entityBacked = contract !== undefined && contract.implementation?.type !== "plugin";
+        // A field this session's tool does not advertise (immutable on update,
+        // withheld, server-managed) is refused by name before anything else,
+        // so the answer names the field whatever else the call is missing.
+        if (entityBacked && match.operation === "update") {
+          if (toValidate.values && typeof toValidate.values === "object" && !Array.isArray(toValidate.values)) {
+            assertDeclaredProperties(
+              (match.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
+              toValidate.values as Record<string, unknown>,
+              "field",
+            );
+          }
+        } else if (entityBacked && match.operation === "create") {
+          assertDeclaredProperties(match.inputSchema, toValidate, "field");
+        }
+        // The edge checks the ENVELOPE (identity, controls, their types).
         assertSchemaValid(
-          match.inputSchema,
+          entityBacked ? envelopeSchema(match.inputSchema, match.operation) : match.inputSchema,
           toValidate,
           "arguments",
           expectedVersionField,

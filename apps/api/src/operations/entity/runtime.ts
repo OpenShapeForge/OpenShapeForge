@@ -54,6 +54,8 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
+import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
+import { assertNoCallerElicitedOutput, assertNoOperationWrittenValues } from "./write-policy.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -165,6 +167,22 @@ function requireValues(input: EntityOperationInput | undefined): Record<string, 
     throw generatedCrudError("Entity operation requires values.", "BAD_USER_INPUT");
   }
   return input.values;
+}
+
+/**
+ * The compiled write contract, enforced once for every interface. The
+ * operation-written and elicited refusals run first so a field that exists but
+ * is not the caller's to set is named as such, not as an unknown field.
+ */
+function requireContractValues(
+  operation: EntityOperationContract,
+  table: GeneratedCrudTable,
+  values: Record<string, unknown>,
+  options: EntityValuesValidation,
+): void {
+  assertNoCallerElicitedOutput(table, values);
+  assertNoOperationWrittenValues(table, values);
+  assertEntityValuesValid(operation, table, values, options);
 }
 
 function requireControl(
@@ -747,6 +765,10 @@ export async function executeEntityOperation(
           "INTERNAL_SERVER_ERROR",
         );
       }
+      // The payload before prerequisites, the same order as the entity path:
+      // an invalid request answers VALIDATION, not a prerequisite it would
+      // only fail after.
+      assertOperationInputValid(operation, request.input ?? {});
       await requireOperationPrerequisites(db, session, operation);
       if (operation.intent === "delete") {
         const data = await executeEntityPlugin(
@@ -848,15 +870,22 @@ export async function executeEntityOperation(
         };
       }
       case "create": {
+        const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
+        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // The payload first: an invalid create must answer VALIDATION, never
+        // a prerequisite or CONFIRMATION_REQUIRED it would only fail after. A
+        // blueprint create completes the caller's overlay from the blueprint
+        // before the row is written; the merged record is what the contract
+        // has to hold for, so it is validated in full once merged.
+        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const data = typeof request.input?.blueprintId === "string"
-          ? await createFromBlueprint(db, session, table, request.input.blueprintId, request.input.values ?? {})
-          : await createGeneratedEntity(db, session, {
-              table: table.name, values: requireValues(request.input),
-            });
+        const data = blueprintId !== undefined
+          ? await createFromBlueprint(db, session, table, blueprintId, values,
+              (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }))
+          : await createGeneratedEntity(db, session, { table: table.name, values });
         return {
           intent: "create",
           data,
@@ -875,6 +904,10 @@ export async function executeEntityOperation(
           );
         }
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        // Before any confirmation or lease work: an illegal payload must not
+        // start a challenge it can only fail on the confirmed retry.
+        const values = requireValues(request.input);
+        requireContractValues(operation, table, values, { partial: true });
         const confirmation = await prepareMutationConfirmation(
           db,
           session,
@@ -899,7 +932,7 @@ export async function executeEntityOperation(
         const data = await updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
-          values: requireValues(request.input),
+          values,
           ...(guard ? { guard } : {}),
         });
         return {

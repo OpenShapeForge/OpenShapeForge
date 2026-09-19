@@ -16,6 +16,7 @@ import { describe, expect, test } from "bun:test";
 import { buildSchema } from "graphql";
 import { getGeneratedCrudTables, isWritableColumn } from "../generated-crud.js";
 import {
+  entityOperationSharedTypeDefs,
   generatedEntityTypeDefs,
   renderTypeDefinition,
 } from "../generated-entity-schema.js";
@@ -170,8 +171,7 @@ describe("renderTypeDefinition", () => {
     ]);
     expect(() => buildSchema(`
       scalar JSON
-      type PageInfo { hasNextPage: Boolean, endCursor: String }
-      type AggregateResult { count: Int! }
+      ${entityOperationSharedTypeDefs}
       ${sdl}
     `)).not.toThrow();
   });
@@ -193,8 +193,7 @@ describe("renderTypeDefinition", () => {
     );
     const schema = buildSchema(`
       scalar JSON
-      type PageInfo { hasNextPage: Boolean, endCursor: String }
-      type AggregateResult { count: Int! }
+      ${entityOperationSharedTypeDefs}
       ${sdl}
     `);
 

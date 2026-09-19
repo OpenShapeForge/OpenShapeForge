@@ -19,7 +19,7 @@ The runtime-owned platform bookkeeping (`platform.identities`,
 `platform.update_notices`, `platform.operation_execution_receipts`, the
 blueprint tables, `platform.system_bypass_audit`, …) is declared in
 `platform-schema.yaml` like every other table. What the manifest cannot
-express — check constraints, compound and cross-module foreign keys,
+express — check constraints, foreign keys over anything but a tenant pair,
 expression indexes, functions, triggers, `SECURITY DEFINER` ownership and
 every bespoke row-level policy — lives in idempotent DDL under
 `apps/api/src/db/migrations/`, applied after the generated step on every run.
@@ -45,8 +45,10 @@ the DDL itself:
 1. **App helpers** — the `app` schema and the RLS helper functions every
    policy references.
 2. **Generated schema** — `schema.sql`: every table, index, generated policy
-   and single-column foreign key, from the one declaration. On a built
-   database this is the checksum no-op, or the refusal (below).
+   and foreign key, from the one declaration. A key into a tenant-scoped
+   table is always `(tenant, column) -> (tenant_id, id)`; the compiler
+   refuses any other shape (`packages/compiler/src/tenant-bound-references.ts`).
+   On a built database this is the checksum no-op, or the refusal (below).
 3. **Invariants** — plain idempotent DDL, no ledger, no version:
    - `core-invariants.ts`: the org-unit closure trigger, the document
      authority guards and tenant-qualified compound keys, the logical
@@ -60,7 +62,17 @@ the DDL itself:
      blocks) and its free-form `schemaMigrations`, which the plugin must
      write idempotently — every registry entry runs on every migrate, in
      plugin-then-version order, each in its own transaction, and nothing
-     records that it ran.
+     records that it ran;
+   - compiler-owned value checks, through the same registry under
+     `osf-compiler` (`authoring/field-value-checks.ts`): `CHECK (col IN (...))`
+     for a single-valued field whose `options` are static items, and
+     `CHECK (col ~ '<pattern>')` for a `validation.pattern` PostgreSQL reads
+     the way ECMA-262 does (no lookarounds, backreferences, `\b`, unicode
+     escapes or lazy quantifiers — those stay runtime-only). Text columns
+     only; a referentiedata options source is data, not schema. Each is named
+     `<table>_<column>_options_check` or `_pattern_check`; a changed options
+     list changes the manifest checksum, so a built database is rebuilt
+     rather than left with a stale CHECK.
 4. **Grants** — the app role's whole-schema DML sweep, the blueprint
    re-narrowing, then the worker role's enumerated grants, re-evaluated from
    the manifest on every run.

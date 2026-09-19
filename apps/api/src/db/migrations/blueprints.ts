@@ -41,8 +41,9 @@ export async function applyBlueprintsMigration(db: OpenShapeForgeDatabase) {
     name: "blueprint_versions_values_json_check",
     expression: "jsonb_typeof(values_json) = 'object'",
   });
-  // A copy records the exact published version it was taken from; the
-  // manifest expresses single-column references only.
+  // A copy records the exact published version it was taken from: a
+  // four-column key the manifest's tenant-paired column references cannot
+  // spell.
   await ensureForeignKey(db, {
     table: "platform.blueprint_copies",
     name: "blueprint_copies_source_version_fkey",

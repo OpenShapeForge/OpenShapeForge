@@ -185,11 +185,12 @@ repo bundling this package needs to do the same.
   internals by relative path (`../../../../packages/compiler/src/…`); they
   demonstrate the contract but would need packaging work before a host repo
   could register them from node_modules.
-- **Relationships only resolve inside the compile.** Entity relationships
-  may only target entities present in the host's resolved authoring tree;
-  anything else is skipped (recorded in
-  `relationshipStatus.skippedReferences`), and cross-module FKs additionally
-  require `relationshipRegister` entries in the platform schema.
+- **Relationships only resolve inside the compile.** A single reference may
+  only target an entity present in the host's resolved authoring tree; one
+  that is absent fails the build. An inverse collection whose referencing
+  entity is absent is not lowered (recorded in
+  `relationshipStatus.skippedReferences`). Cross-module FKs between entities
+  are registered by the compiler itself.
 - **Retention is advisory metadata; there is no enforcement runtime.** The
   compiler emits a `retention` block (clock, rules, legal hold, review gates,
   crypto-delete key, erasure cascades) into the DB manifest, but nothing reads

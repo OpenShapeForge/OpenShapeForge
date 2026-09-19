@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { parse, Kind } from "graphql";
-import { renderTypeDefinition, usesCanonicalGraphqlOperations } from "../../graphql/generated-entity-schema.js";
+import { renderTypeDefinition } from "../../graphql/generated-entity-schema.js";
 import { __describeToolForTests as describeTool } from "../../mcp/generated-mcp-server.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 
@@ -11,7 +11,6 @@ test("schema-3 GraphQL exposes a relation once, not both scalar and entity under
   table.source!.authoringVersion = 3;
   table.columns.push({ name: "owner_id", sourceField: "owner", type: "uuid", required: false, primaryKey: false, generated: null });
   table.source!.graphql!.relationships = [{ name: "owner", fieldKey: "owner", kind: "belongsTo", type: "Relation", target: "Relation", resolve: "belongsTo", foreignKey: "owner_id" }];
-  expect(usesCanonicalGraphqlOperations(table)).toBe(true);
   const definition = parse(renderTypeDefinition(table)).definitions.find((definition) => definition.kind === Kind.OBJECT_TYPE_DEFINITION && definition.name.value === "Relation");
   if (!definition || definition.kind !== Kind.OBJECT_TYPE_DEFINITION) throw new Error("Missing Relation type");
   const owners = definition.fields!.filter((field) => field.name.value === "owner");

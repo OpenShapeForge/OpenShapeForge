@@ -9,6 +9,7 @@
  * it is rebuilt (docs/migrations.md).
  */
 import type { TableConstraintDefinition, TableDefinition } from "./schema.js";
+import { renderOnDeleteSql } from "./tenant-bound-references.js";
 
 const constraintNamePattern = /^[a-z][a-z0-9_]*$/;
 const relationNamePattern = /^[a-z_][a-z0-9_]*$/;
@@ -20,8 +21,14 @@ function quoteIdent(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
-function assertSingleCheckExpression(expression: string, label: string): void {
-  let depth = 0;
+/**
+ * The expression with every quoted span (single, double or dollar quoted)
+ * blanked, so the structural checks below see only the SQL that PostgreSQL
+ * will parse as SQL. A `--` inside an option value or a pattern literal is
+ * text, not a comment.
+ */
+function outsideQuotes(expression: string, label: string): string {
+  let bare = "";
   for (let index = 0; index < expression.length; index += 1) {
     const character = expression[index]!;
     if (character === "'" || character === '"') {
@@ -31,6 +38,7 @@ function assertSingleCheckExpression(expression: string, label: string): void {
         if (expression[index + 1] === quote) index += 1;
         else break;
       }
+      bare += " ";
       continue;
     }
     if (character === "$") {
@@ -43,9 +51,18 @@ function assertSingleCheckExpression(expression: string, label: string): void {
           throw new Error(`${label} has an unterminated dollar-quoted string.`);
         }
         index = closing + delimiter.length - 1;
+        bare += " ";
         continue;
       }
     }
+    bare += character;
+  }
+  return bare;
+}
+
+function assertSingleCheckExpression(expression: string, label: string): void {
+  let depth = 0;
+  for (const character of outsideQuotes(expression, label)) {
     if (character === "(") depth += 1;
     if (character === ")") {
       if (depth === 0) {
@@ -102,13 +119,13 @@ function renderConstraintDefinition(
     if (constraint.expression.trim().length === 0) {
       throw new Error(`${label} has an empty expression.`);
     }
-    if (/;|--|\/\*|\*\//.test(constraint.expression)) {
+    if (constraint.expression.includes(blockTag)) {
+      throw new Error(`${label} must not contain the ${blockTag} quote tag.`);
+    }
+    if (/;|--|\/\*|\*\//.test(outsideQuotes(constraint.expression, label))) {
       throw new Error(
         `${label} must not contain a statement terminator or comment. Use schemaMigrations for free-form SQL.`,
       );
-    }
-    if (constraint.expression.includes(blockTag)) {
-      throw new Error(`${label} must not contain the ${blockTag} quote tag.`);
     }
     assertSingleCheckExpression(constraint.expression, label);
     return `CHECK (${constraint.expression})`;
@@ -131,7 +148,9 @@ function renderConstraintDefinition(
       `Foreign key ${table.schema}.${table.name}.${constraint.name} is initially deferred but not deferrable.`,
     );
   }
-  const onDelete = constraint.onDelete ? ` ON DELETE ${constraint.onDelete}` : "";
+  const onDelete = renderOnDeleteSql(
+    table, `Foreign key ${table.schema}.${table.name}.${constraint.name}`, constraint.columns, constraint.onDelete,
+  );
   const deferred = constraint.deferrable
     ? ` DEFERRABLE${constraint.initiallyDeferred ? " INITIALLY DEFERRED" : ""}`
     : "";

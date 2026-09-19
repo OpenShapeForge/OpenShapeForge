@@ -318,7 +318,8 @@ describe("canonical operation runtime", () => {
         operation.implementation?.type === "constrained-reference-create" ||
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control" ||
-        operation.plugin === "osf-grants"
+        operation.plugin === "osf-grants" ||
+        operation.plugin === "osf-jobs"
       ),
     ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.

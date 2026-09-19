@@ -40,8 +40,9 @@ export type { CompiledPluginOperation } from "./plugins.js";
 /**
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
- * blueprint Operations, `osf-control` the platform's own administration and
- * `osf-jobs` the durable job queue.
+ * blueprint Operations, `osf-control` the platform's own administration,
+ * `osf-grants` the operator side of capability grants and `osf-jobs` the
+ * durable job queue.
  */
 export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-grants", "osf-jobs"];
 

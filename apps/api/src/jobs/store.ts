@@ -20,13 +20,27 @@ import { sql, type Kysely, type Transaction } from "kysely";
 import type { RuntimeJobEnqueueResult, RuntimeJobError, RuntimeJobSubject } from "@openshapeforge/plugin-runtime";
 import type { DB } from "../generated/db/types.js";
 import { JOB_STATUSES, type JobStatus } from "../db/migrations/jobs.js";
+import type { DbSessionScope } from "../db/session.js";
 
 export type JobExecutor = Kysely<DB> | Transaction<DB>;
+
+/**
+ * The enqueuing person's effective session beyond tenant and user, persisted
+ * on the row and replayed when the job runs. Everything here is what the
+ * verified session carried at enqueue; the worker adds nothing to it.
+ */
+export type JobActorSession = {
+  roles: readonly string[];
+  groups: readonly string[];
+  relationGroupIds: readonly string[];
+  scope: DbSessionScope;
+};
 
 export type JobRecord = {
   id: string;
   tenantId: string;
   actorId: string;
+  actorSession: JobActorSession;
   kind: string;
   payload: Record<string, unknown>;
   deliveryKey: string | null;
@@ -48,6 +62,8 @@ export type ClaimedJob = JobRecord & { claimToken: string };
 export type EnqueueJobInput = {
   tenantId: string;
   actorId: string;
+  /** Omitted: no roles, no groups, scope `self` — the least a session can be. */
+  actorSession?: Partial<JobActorSession>;
   kind: string;
   payload: Record<string, unknown>;
   deliveryKey?: string;
@@ -111,6 +127,30 @@ function jsonRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+const SESSION_SCOPES: readonly DbSessionScope[] = ["tenant", "group", "self"];
+const MAX_SESSION_LIST = 4096;
+
+function stringList(value: unknown, label: string): readonly string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_SESSION_LIST || !value.every((entry) => typeof entry === "string")) {
+    throw new Error(`Job actor session ${label} must be a list of strings.`);
+  }
+  return [...new Set(value as string[])].sort();
+}
+
+/** Normalise the persisted shape: sorted, deduplicated lists and a known scope. */
+export function actorSessionOf(value: Partial<JobActorSession> | Record<string, unknown> | null | undefined): JobActorSession {
+  const input = (value ?? {}) as Record<string, unknown>;
+  const scope = input.scope ?? "self";
+  if (!SESSION_SCOPES.includes(scope as DbSessionScope)) throw new Error(`Job actor session scope "${String(scope)}" is unknown.`);
+  return {
+    roles: stringList(input.roles, "roles"),
+    groups: stringList(input.groups, "groups"),
+    relationGroupIds: stringList(input.relationGroupIds, "relationGroupIds"),
+    scope: scope as DbSessionScope,
+  };
+}
+
 function boundedError(error: RuntimeJobError): RuntimeJobError {
   return {
     message: String(error.message ?? "").slice(0, MAX_ERROR_MESSAGE),
@@ -123,6 +163,7 @@ export type Row = {
   id: string;
   tenant_id: string;
   actor_id: string;
+  actor_session: unknown;
   kind: string;
   payload: unknown;
   delivery_key: string | null;
@@ -141,7 +182,7 @@ export type Row = {
 };
 
 export const ROW_COLUMNS = [
-  "id", "tenant_id", "actor_id", "kind", "payload", "delivery_key", "status", "attempts", "max_attempts",
+  "id", "tenant_id", "actor_id", "actor_session", "kind", "payload", "delivery_key", "status", "attempts", "max_attempts",
   "available_at", "lease_until", "last_error", "result", "subject_entity", "subject_id",
   "created_at", "updated_at", "completed_at",
 ] as const;
@@ -153,6 +194,7 @@ export function toRecord(row: Row): JobRecord {
     id: row.id,
     tenantId: row.tenant_id,
     actorId: row.actor_id,
+    actorSession: actorSessionOf(jsonRecord(row.actor_session)),
     kind: row.kind,
     payload: jsonRecord(row.payload),
     deliveryKey: row.delivery_key,
@@ -194,16 +236,20 @@ function assertEnqueueInput(input: EnqueueJobInput) {
  */
 export async function enqueueJob(db: JobExecutor, input: EnqueueJobInput): Promise<RuntimeJobEnqueueResult> {
   assertEnqueueInput(input);
+  const actorSession = actorSessionOf(input.actorSession);
   const inserted = await db
     .insertInto("platform.jobs")
     .values({
       tenant_id: input.tenantId,
       actor_id: input.actorId,
+      actor_session: JSON.stringify(actorSession),
       kind: input.kind,
       payload: JSON.stringify(input.payload),
       delivery_key: input.deliveryKey ?? null,
       max_attempts: input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
-      available_at: input.availableAt ?? new Date(),
+      // The database clock, which is also the one the claim compares against;
+      // a process clock ahead of it would hide the job for the difference.
+      available_at: input.availableAt ?? sql<Date>`now()`,
       subject_entity: input.subject?.entity ?? null,
       subject_id: input.subject?.id ?? null,
     })
@@ -291,6 +337,23 @@ export async function claimJobs(trx: Transaction<DB>, input: ClaimJobsInput): Pr
     claimed.push({ ...toRecord(row as Row), claimToken });
   }
   return claimed;
+}
+
+/**
+ * Lock the claimed row for the rest of the calling transaction, proving the
+ * claim still holds. The handler's own transaction calls this before it does
+ * anything: a claim whose lease expired and was handed to another worker
+ * matches nothing here, so the stale holder stops before any effect — and
+ * while the lock is held, `claimJobs` (`skip locked`) cannot hand the job to
+ * anyone else, however long the run takes.
+ */
+export async function lockClaimedJob(trx: Transaction<DB>, input: { id: string; claimToken: string }): Promise<boolean> {
+  const held = await sql<{ present: number }>`
+    select 1 as present from platform.jobs
+    where id = ${input.id}::uuid and status = 'running' and claim_token_hash = ${hashClaimToken(input.claimToken)}
+    for update
+  `.execute(trx);
+  return held.rows.length === 1;
 }
 
 /**

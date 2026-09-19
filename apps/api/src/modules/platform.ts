@@ -382,8 +382,16 @@ export class ModulePlatformRuntime {
           }
           const tenantId = session.tenantId;
           const actorId = session.userId;
+          // The whole effective session goes on the row: the job runs later
+          // as this person, with what this request could reach — not more.
+          const actorSession = {
+            roles: session.roles,
+            groups: session.groups,
+            relationGroupIds: session.relationGroupIds ?? [],
+            scope: session.scope,
+          };
           return this.services.db.withSession(session, (trx) =>
-            enqueueJob(trx, { ...input, tenantId, actorId }),
+            enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
           );
         },
       },

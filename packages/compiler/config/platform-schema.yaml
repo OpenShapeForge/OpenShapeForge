@@ -949,6 +949,11 @@ tables:
       # under a tenant session for this user, so every row the handler touches
       # is fenced as if that person had written it.
       - { name: actor_id, type: uuid, required: true }
+      # The rest of that person's effective session at enqueue — roles,
+      # org-unit groups, RelationGroup memberships and scope — replayed when
+      # the job runs, so the handler reaches exactly what the enqueuing
+      # request could and nothing a later role change would add or remove.
+      - { name: actor_session, type: jsonb, required: true, default: "'{}'::jsonb" }
       - { name: payload, type: jsonb, required: true, default: "'{}'::jsonb" }
       - { name: delivery_key, type: text }
       - { name: status, type: text, required: true, default: "'queued'" }

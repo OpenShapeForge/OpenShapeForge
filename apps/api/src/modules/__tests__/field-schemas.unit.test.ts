@@ -94,6 +94,15 @@ test("presentation keyword support remains strict and preserves local reference 
   for (const invalid of [{ type: "object", "x-osf-contorl": "artifact-upload" }, { type: "object", "x-osf-control": {} }]) {
     expect(runtimeJsonSchemas.validate(invalid, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
   }
+  // The authoring editor's choice marker (#646) reaches generated schemas through the field
+  // definition's render.component; it is metadata here, never a constraint.
+  const marked = { type: "object", properties: {
+    render: { type: "object", properties: { component: { type: "string", minLength: 1, "x-osf-choice": "component" } } },
+    actions: { type: "array", items: { type: "string", "x-osf-choice": { kind: "operation", scope: "record" } } },
+  } };
+  expect(runtimeJsonSchemas.validate(marked, { render: { component: "Textarea" }, actions: ["archive"] })).toEqual({ valid: true });
+  expect(runtimeJsonSchemas.validate(marked, { render: { component: "" } })).toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+  expect(runtimeJsonSchemas.validate({ type: "object", "x-osf-choice": 3 }, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
 });
 
 test("host-projected FieldDefinition values retain recursive local references", () => {

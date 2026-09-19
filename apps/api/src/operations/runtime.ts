@@ -155,6 +155,7 @@ function operationAjv(coerceTypes = false) {
   // or authorize a value, but strict AJV must recognize the canonical keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
   instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
+  instance.addKeyword({ keyword: "x-osf-choice", schemaType: ["string", "object"], valid: true });
   instance.addKeyword(operationReferenceKeyword);
   instance.addKeyword(operationI18nKeyword);
   instance.addKeyword(operationInputFieldsKeyword);

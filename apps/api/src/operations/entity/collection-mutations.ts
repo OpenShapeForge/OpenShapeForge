@@ -37,6 +37,7 @@ ajv.addKeyword(operationInputFieldsKeyword);
 ajv.addKeyword(operationReferenceKeyword);
 ajv.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
 ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
+ajv.addKeyword({ keyword: "x-osf-choice", schemaType: ["string", "object"], valid: true });
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const unsupported = (message: string): never => { throw generatedCrudError(message, "RELATION_COLLECTION_MUTATION_UNSUPPORTED"); };
 const invalid = (message: string): never => { throw generatedCrudError(message, "BAD_USER_INPUT"); };

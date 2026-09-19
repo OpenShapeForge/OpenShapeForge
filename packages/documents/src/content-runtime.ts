@@ -188,6 +188,73 @@ export function blockMaterializer(context: ModuleOperationContext, carrier: Runt
   };
 }
 
+export type ContentScope = {
+  readonly tenantId: string;
+  readonly channel: string;
+  readonly locale: string;
+  readonly carrier: RuntimeEntityValueCarrier;
+  /** The template variant collection's allowlist, applied to every frozen template version. */
+  readonly allowedDefinitions: readonly string[];
+  readonly read: CanonicalReader;
+};
+
+/**
+ * The resolvers one materialization runs with: frozen template versions,
+ * chips, entity references, parameter and block validation, block
+ * materialization. Another entry point (a document head) reuses the set and
+ * replaces only what its root resolves to.
+ */
+export function contentResolvers(context: ModuleOperationContext, trx: unknown, scope: ContentScope): ContentResolvers {
+  const { platform, session } = contextServices(context);
+  const { tenantId, channel, locale, carrier, read } = scope;
+  const parameterFields = new Map<string, readonly Record<string, unknown>[]>();
+  return {
+    async resolveTemplateVersion(id): Promise<ContentTemplateVersion | null> {
+      uuid(id, "template version");
+      // The version row is the only live read: it is immutable, so sharing
+      // it pins nothing that can change. Variants and blocks come from the
+      // frozen snapshot on that row, never from their live tables, which may
+      // have been edited or deleted since publish.
+      const locked = (await rows<{ id: string }>(trx,
+        "select id from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
+      if (!locked) return null;
+      const version = await read("TemplateVersion", id);
+      if (!version) return null;
+      const templateId = uuid(version.template, "template");
+      await platform.records.assertAccess(session, { entityName: "Template", id: templateId, intent: "get" });
+      const frozen = templateSnapshotContent(version.snapshot, {
+        tenantId, templateId, channel, locale, carrier, allowedDefinitions: scope.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
+      });
+      parameterFields.set(id, frozen.parameterFields);
+      return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: frozen.variants };
+    },
+    resolveGlobalVariable: chipResolver(trx, tenantId, read),
+    resolveEntity: entityResolver(tenantId, read),
+    validateParameters(version, values) {
+      const fields = parameterFields.get(version.id);
+      if (!fields) refuse("INVALID_DEFINITION", "Template parameter definitions are unavailable.");
+      const valid = platform.schemas.fields.validateObject(fields!, values);
+      if (!valid.valid) throw operationFailure(valid.error);
+    },
+    validateBlockValues(name, values) { validatedValues(context, name, values); },
+    materializeBlock: blockMaterializer(context, carrier, channel, locale),
+  };
+}
+
+/** The compiled block collection of `entityName`, whose allowlist governs what a variant of it may hold. */
+export function blockCollection(context: ModuleOperationContext, carrier: RuntimeEntityValueCarrier, entityName: "TemplateVariant" | "DocumentVariant"): { readonly allowedDefinitions: readonly string[] } {
+  const { platform } = contextServices(context);
+  const collection = platform.schemas.entityValues?.collection(entityName, "blocks");
+  if (!collection || collection.targetEntity !== carrier.entityName) refuse("INVALID_DEFINITION", `The compiled ${entityName === "TemplateVariant" ? "template" : "document"} block collection is unavailable.`);
+  return collection!;
+}
+
+/** Engine failures are Operation failures; anything else is a runtime fault and propagates as is. */
+export function contentFailure(error: unknown): never {
+  if (error instanceof TemplateContentError) throw operationFailure({ code: error.code, message: error.message, retryable: false });
+  throw error;
+}
+
 export const materializeTemplate: ModuleOperationHandler = async (input, context) => {
   const { platform, session } = contextServices(context);
   if (!session.tenantId) refuse("UNAUTHENTICATED", "Template materialization requires a tenant session.");
@@ -196,49 +263,16 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   const channel = text(input.channel, "channel");
   const locale = text(input.locale, "locale");
   const carrier = contentCarrier(context);
-  const collection = platform.schemas.entityValues?.collection("TemplateVariant", "blocks");
-  if (!collection || collection.targetEntity !== carrier.entityName) refuse("INVALID_DEFINITION", "The compiled template block collection is unavailable.");
+  const collection = blockCollection(context, carrier, "TemplateVariant");
   const registry = await compiledContentRegistry(context, carrier);
   const read = canonicalReader(context, await platform.operations.list(session));
-  const parameterFields = new Map<string, readonly Record<string, unknown>[]>();
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => materializeTemplateContent({
       tenantId, templateVersionId, channel, locale,
       ...(input.parameters === undefined ? {} : { parameters: immutableContent(object(input.parameters, "parameters")) as JsonObject }),
-    }, registry, {
-      async resolveTemplateVersion(id): Promise<ContentTemplateVersion | null> {
-        uuid(id, "template version");
-        // The version row is the only live read: it is immutable, so sharing
-        // it pins nothing that can change. Variants and blocks come from the
-        // frozen snapshot on that row, never from their live tables, which may
-        // have been edited or deleted since publish.
-        const locked = (await rows<{ id: string }>(trx,
-          "select id from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, id]))[0];
-        if (!locked) return null;
-        const version = await read("TemplateVersion", id);
-        if (!version) return null;
-        const templateId = uuid(version.template, "template");
-        await platform.records.assertAccess(session, { entityName: "Template", id: templateId, intent: "get" });
-        const frozen = templateSnapshotContent(version.snapshot, {
-          tenantId, templateId, channel, locale, carrier, allowedDefinitions: collection!.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
-        });
-        parameterFields.set(id, frozen.parameterFields);
-        return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: frozen.variants };
-      },
-      resolveGlobalVariable: chipResolver(trx, tenantId, read),
-      resolveEntity: entityResolver(tenantId, read),
-      validateParameters(version, values) {
-        const fields = parameterFields.get(version.id);
-        if (!fields) refuse("INVALID_DEFINITION", "Template parameter definitions are unavailable.");
-        const valid = platform.schemas.fields.validateObject(fields!, values);
-        if (!valid.valid) throw operationFailure(valid.error);
-      },
-      validateBlockValues(name, values) { validatedValues(context, name, values); },
-      materializeBlock: blockMaterializer(context, carrier, channel, locale),
-    }));
+    }, registry, contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: collection.allowedDefinitions, read })));
     return { value: snapshot };
   } catch (error) {
-    if (error instanceof TemplateContentError) throw operationFailure({ code: error.code, message: error.message, retryable: false });
-    throw error;
+    contentFailure(error);
   }
 };

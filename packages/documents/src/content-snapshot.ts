@@ -77,22 +77,37 @@ function references(carrier: RuntimeEntityValueCarrier, definitionKey: string, r
   }));
 }
 
-function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapshotSelection): ContentBlock {
+export type BlockRowSelection = {
+  readonly tenantId: string;
+  readonly carrier: RuntimeEntityValueCarrier;
+  /** Physical column of the Block entity's `definitionVersion` field. */
+  readonly definitionVersionColumn: string;
+};
+
+/**
+ * Converts one physical block row (a frozen snapshot row or a live `erp.blocks`
+ * row) to the engine's block. `owner` names the owning foreign key the row
+ * must carry; `origin` only labels the failure messages.
+ */
+export function contentBlockFromRow(row: Record<string, unknown>, owner: { readonly column: string; readonly id: string }, selection: BlockRowSelection, origin = "frozen"): ContentBlock {
   const { carrier } = selection;
-  const row = entry.row;
   const id = uuid(row.id, "block");
-  if (row.tenant_id !== selection.tenantId || row[BLOCK_OWNER_COLUMN] !== variantId) invalid("The frozen block belongs to another variant or tenant.");
+  if (row.tenant_id !== selection.tenantId || row[owner.column] !== owner.id) invalid(`The ${origin} block belongs to another variant or tenant.`);
   const definitionKey = row[carrier.definitionColumn];
-  if (typeof definitionKey !== "string" || !definitionKey) invalid("The frozen block has no definition key.");
+  if (typeof definitionKey !== "string" || !definitionKey) invalid(`The ${origin} block has no definition key.`);
   const version = Number(row[selection.definitionVersionColumn]);
-  if (!Number.isInteger(version) || version < 1) invalid("The frozen block has no definition version.");
+  if (!Number.isInteger(version) || version < 1) invalid(`The ${origin} block has no definition version.`);
   const stored = row[carrier.valuesColumn];
-  if (!isObject(stored)) invalid("The frozen block has no values.");
+  if (!isObject(stored)) invalid(`The ${origin} block has no values.`);
   const bound = references(carrier, definitionKey as string, row);
   // Reference slots live in their own columns; a stray key in the JSON body
   // must not be able to smuggle a second binding for the same field.
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
   return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound };
+}
+
+function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapshotSelection): ContentBlock {
+  return contentBlockFromRow(entry.row, { column: BLOCK_OWNER_COLUMN, id: variantId }, selection);
 }
 
 /**

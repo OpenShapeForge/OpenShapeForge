@@ -7,6 +7,7 @@ import { createDocumentFromTemplate } from "./template-document.js";
 import { renderSnapshot } from "./render-runtime.js";
 import { followTemplatePublish } from "./document-follow.js";
 import { linkTemplate } from "./document-link.js";
+import { materializeDocument } from "./document-materialize.js";
 
 let unregisterFollower: (() => void) | undefined;
 
@@ -33,6 +34,7 @@ const module = {
     createDocumentFromTemplate,
     renderSnapshot,
     linkTemplate,
+    materializeDocument,
   },
 } satisfies RuntimeModule;
 

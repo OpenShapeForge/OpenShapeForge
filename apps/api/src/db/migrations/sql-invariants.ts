@@ -166,6 +166,12 @@ export async function ensureForeignKey(
   for (const column of [...constraint.columns, ...constraint.references.columns]) {
     if (!identifier.test(column)) throw new Error(`Invalid column name: ${column}`);
   }
+  // A bare SET NULL nulls every key column, tenant_id included. The compiler
+  // scopes it to the nullable pointer (tenant-bound-references.ts); an
+  // invariant that needs SET NULL declares the reference in the manifest.
+  if (constraint.onDelete === "set null") {
+    throw new Error(`${constraint.name}: on delete set null is not supported here; declare the reference in the manifest.`);
+  }
   const actions = [
     constraint.onUpdate ? ` on update ${constraint.onUpdate}` : "",
     constraint.onDelete ? ` on delete ${constraint.onDelete}` : "",

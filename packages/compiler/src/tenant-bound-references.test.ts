@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { generateArtifacts } from "./generate.js";
-import type { ColumnDefinition, PlatformSchemaManifest, TableDefinition } from "./schema.js";
-import { assertTenantBoundReferences, ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
+import type { ColumnDefinition, PlatformSchemaManifest, TableConstraintDefinition, TableDefinition } from "./schema.js";
+import { renderConstraintSql } from "./render-constraint-sql.js";
+import {
+  TENANT_IDENTITY_CHECK_EXPRESSION, assertTenantBoundReferences, ensureCompositeReferenceKeys,
+  hasTenantIdentityCheck, tenantIdentityCheckName,
+} from "./tenant-bound-references.js";
 
 const tenantTable = (name: string, extra: ColumnDefinition[] = []): TableDefinition => ({
   schema: "erp",
@@ -131,5 +135,46 @@ describe("tenant-bound references", () => {
     expect(() => schemaSql(manifest(orders, catalogs, tenantTable("customers")))).toThrow(
       "erp.orders.customer_id is NOT NULL and cannot use ON DELETE SET NULL",
     );
+  });
+
+  it("holds a table-level foreignKey constraint to the same rule", () => {
+    const orders = tenantTable("orders", [{ name: "customer_id", type: "uuid" }]);
+    const constraints: TableConstraintDefinition[] = [{
+      version: "0001_orders-customer-fk", name: "orders_customer_fk", kind: "foreignKey",
+      columns: ["customer_id"], references: { schema: "erp", table: "customers", columns: ["id"] },
+    }];
+    orders.constraints = constraints;
+    expect(() => assertTenantBoundReferences(manifest(orders, tenantTable("customers")))).toThrow(
+      "Foreign key erp.orders.orders_customer_fk references tenant-scoped erp.customers by (customer_id) alone; " +
+        "a tenant-scoped row must reuse its own tenant: set references.localColumns: [tenant_id, customer_id] " +
+        "and references.targetColumns: [tenant_id, id].",
+    );
+    constraints[0] = {
+      ...constraints[0]!, kind: "foreignKey", onDelete: "SET NULL",
+      columns: ["tenant_id", "customer_id"], references: { schema: "erp", table: "customers", columns: ["tenant_id", "id"] },
+    };
+    expect(() => assertTenantBoundReferences(manifest(orders, tenantTable("customers")))).not.toThrow();
+    expect(renderConstraintSql(orders, constraints[0]!)).toContain(
+      'REFERENCES "erp"."customers" ("tenant_id", "id") ON DELETE SET NULL ("customer_id")',
+    );
+    orders.columns.find((column) => column.name === "customer_id")!.required = true;
+    expect(() => renderConstraintSql(orders, constraints[0]!)).toThrow(
+      "Foreign key erp.orders.orders_customer_fk is NOT NULL and cannot use ON DELETE SET NULL",
+    );
+  });
+
+  it("accepts a tenant column referencing a registry only when the registry proves id = tenant_id", () => {
+    const registry = tenantTable("tenants");
+    const settings = tenantTable("settings");
+    settings.columns.find((column) => column.name === "tenant_id")!.references = { schema: "erp", table: "tenants", column: "id" };
+    expect(() => assertTenantBoundReferences(manifest(registry, settings))).toThrow(
+      "erp.settings.tenant_id is the row's tenant identity but erp.tenants does not prove id = tenant_id",
+    );
+    registry.constraints = [{
+      compilerOwned: true, version: "0001_tenant-identity-tenants", name: tenantIdentityCheckName(registry),
+      kind: "check", expression: TENANT_IDENTITY_CHECK_EXPRESSION,
+    }];
+    expect(hasTenantIdentityCheck(registry)).toBe(true);
+    expect(() => assertTenantBoundReferences(manifest(registry, settings))).not.toThrow();
   });
 });

@@ -248,7 +248,7 @@ describe("schema-3 field relationship storage", () => {
     expect(() => sql(missingUnique)).toThrow("requires a matching unique index");
     const unpaired = compileRelations();
     delete source(unpaired).columns.find((column) => column.name === "owner_id")!.references!.targetColumns;
-    expect(() => sql(unpaired)).toThrow("by (owner_id) alone");
+    expect(() => sql(unpaired)).toThrow("Invalid composite foreign key");
   });
 
   it("migrated fixtures cannot retain the legacy missing-target fallback", () => {

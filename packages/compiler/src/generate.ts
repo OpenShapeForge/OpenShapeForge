@@ -11,7 +11,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
-import { assertTenantBoundReferences } from "./tenant-bound-references.js";
+import { assertTenantBoundReferences, renderOnDeleteSql } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
@@ -562,28 +562,6 @@ function renderTableSql(table: TableDefinition): string {
   return lines.join("\n");
 }
 
-/**
- * `ON DELETE SET NULL` nulls every column of the key unless told which. On a
- * tenant-bound key that would be the row's NOT NULL tenant_id, or the
- * registry's own primary key, so the action names the nullable reference
- * column alone (`SET NULL (column)`, PostgreSQL 15+). A NOT NULL reference
- * column cannot carry SET NULL at all: the delete would fail instead of
- * clearing the pointer.
- */
-function renderOnDelete(table: TableDefinition, column: ColumnDefinition, localColumns: string[]): string {
-  const action = column.references?.onDelete;
-  if (!action) return "";
-  if (action !== "SET NULL") return ` ON DELETE ${action}`;
-  if (column.required || column.primaryKey) {
-    throw new Error(
-      `${table.schema}.${table.name}.${column.name} is NOT NULL and cannot use ON DELETE SET NULL; ` +
-        "make the column nullable or choose CASCADE or RESTRICT.",
-    );
-  }
-  if (localColumns.length === 1) return " ON DELETE SET NULL";
-  return ` ON DELETE SET NULL (${quoteIdent(column.name)})`;
-}
-
 function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinition): string | undefined {
   if (!column.references) {
     return undefined;
@@ -602,7 +580,7 @@ function renderColumnForeignKeySql(table: TableDefinition, column: ColumnDefinit
   ) {
     throw new Error(`Invalid composite foreign key ${table.schema}.${table.name}.${column.name}.`);
   }
-  const onDelete = renderOnDelete(table, column, localColumns);
+  const onDelete = renderOnDeleteSql(table, `${table.schema}.${table.name}.${column.name}`, localColumns, reference.onDelete);
 
   return [
     "DO $openshapeforge_fk$",

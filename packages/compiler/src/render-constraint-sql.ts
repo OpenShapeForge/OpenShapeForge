@@ -9,6 +9,7 @@
  * it is rebuilt (docs/migrations.md).
  */
 import type { TableConstraintDefinition, TableDefinition } from "./schema.js";
+import { renderOnDeleteSql } from "./tenant-bound-references.js";
 
 const constraintNamePattern = /^[a-z][a-z0-9_]*$/;
 const relationNamePattern = /^[a-z_][a-z0-9_]*$/;
@@ -131,7 +132,9 @@ function renderConstraintDefinition(
       `Foreign key ${table.schema}.${table.name}.${constraint.name} is initially deferred but not deferrable.`,
     );
   }
-  const onDelete = constraint.onDelete ? ` ON DELETE ${constraint.onDelete}` : "";
+  const onDelete = renderOnDeleteSql(
+    table, `Foreign key ${table.schema}.${table.name}.${constraint.name}`, constraint.columns, constraint.onDelete,
+  );
   const deferred = constraint.deferrable
     ? ` DEFERRABLE${constraint.initiallyDeferred ? " INITIALLY DEFERRED" : ""}`
     : "";

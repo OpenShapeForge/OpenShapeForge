@@ -93,7 +93,7 @@ async function lockedRows(
   const result = await sql<{ id: string; row: GeneratedEntityRow }>`
     select ${sql.id(table.primaryKey!)}::text as id, to_jsonb(${sql.id(table.table)}.*) as row
     from ${sql.id(table.schema, table.table)}
-    where ${sql.id(table.primaryKey!)}::text = any(${[...ids]}::text[])
+    where ${sql.id(table.primaryKey!)}::text in (${sql.join([...ids])})
       ${tenantWhere}
     ${lock ? sql`for update` : sql``}
   `.execute(trx);

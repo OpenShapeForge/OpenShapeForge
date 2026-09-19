@@ -48,23 +48,50 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   const artifacts = await collectAllArtifacts(root);
   const tenants = active.manifest.tables.find(table => table.schema === "erp" && table.name === "tenants")!;
 
-  // The contract itself: no create, no delete, and no role that could grant either.
+  // The contract: no create, no delete, and no role that could grant either.
   expect(tenants.source?.crud?.operations).toEqual({ list: true, get: true, create: false, update: true, delete: false });
   expect(tenants.source?.graphql?.operations).toMatchObject({ create: false, delete: false });
   expect(tenants.source?.authorization?.roles).toMatchObject({ create: [], delete: [] });
 
-  // GraphQL, MCP and REST all gate an entity's operations on those flags
-  // (graphql/generated-entity-schema.ts, mcp/generated-mcp-server.ts,
-  // rest/generated-rest-routes.ts); the runtime manifest carries them.
+  // Database: the registry mark, and the restrictive policies emitted beside it.
   const manifest = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("manifest.json"))!.contents);
   const runtimeTable = manifest.tables.find((table: { name: string }) => table.name === "erp.tenants");
   expect(runtimeTable.source.crud.operations).toMatchObject({ create: false, delete: false });
   expect(runtimeTable.constraints).toContainEqual(expect.objectContaining({ expression: "id = tenant_id" }));
-  const openapi = artifacts.groups.db.find(artifact => artifact.path.endsWith("openapi.json"))!.contents;
-  expect(openapi).not.toMatch(/"operationId": "(create|delete)Tenant"/);
+  const schema = artifacts.groups.db.find(artifact => artifact.path.endsWith("schema.sql"))!.contents;
+  expect(schema).toContain('CREATE POLICY "tenants_registry_insert" ON "erp"."tenants"\n  AS RESTRICTIVE FOR INSERT\n  WITH CHECK (app.bypass_rls());');
+  expect(schema).toContain('CREATE POLICY "tenants_registry_delete" ON "erp"."tenants"\n  AS RESTRICTIVE FOR DELETE\n  USING (app.bypass_rls());');
 
-  // Web: no generated page or action shard, and no role list that would light a create or delete control.
-  expect(artifacts.groups.ui.some(artifact => /\/(tenant)\.tsx?$|\/tenant\//.test(artifact.path))).toBe(false);
+  // MCP: the tool catalog carries one entry per entity operation
+  // (osf_create/osf_get/... with an `entity`); Tenant contributes none at
+  // all — it has no mcp: block — so there is no create or delete to find.
+  const tools = JSON.parse(artifacts.groups.mcp.find(artifact => artifact.path.endsWith("tools.json"))!.contents);
+  expect((tools.entities as Array<{ entity: string }>).some(entry => entry.entity === "Tenant")).toBe(false);
+  const entityTools = (tools.tools as Array<{ name: string; entity?: string; operation?: string }>)
+    .filter(tool => tool.entity === "Tenant");
+  expect(entityTools).toEqual([]);
+  expect((tools.tools as Array<{ entity?: string; operation?: string }>)
+    .some(tool => tool.entity === "Tenant" && ["create", "delete"].includes(tool.operation ?? ""))).toBe(false);
+
+  // REST: Tenant has no REST projection (no rest: block, and aab4e7b0 keeps
+  // it off tenant REST); the only /tenants paths are the control plane's
+  // provisioning routes, none of them a tenant-scoped POST or DELETE on the
+  // registry row.
+  const openapi = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("openapi.json"))!.contents);
+  const tenantPaths = Object.keys(openapi.paths).filter(path => /\/tenants(\/|$)/.test(path));
+  expect(tenantPaths.length).toBeGreaterThan(0);
+  expect(tenantPaths.every(path => path.startsWith("/api/control/"))).toBe(true);
+  expect(Object.keys(openapi.paths).some(path => path.startsWith("/api/rest/") && /tenants/.test(path))).toBe(false);
+  expect(JSON.stringify(openapi)).not.toMatch(/"operationId":"(create|delete)Tenant"/);
+
+  // Web: no page or action shard for the entity, no page configs, and the
+  // entity manifest grants no create or delete role.
+  expect(artifacts.groups.ui.some(artifact => /\/tenant\.tsx?$|\/tenant\//.test(artifact.path))).toBe(false);
+  const pageConfigs = JSON.parse(artifacts.groups.ui.find(artifact => artifact.path.endsWith("entity-page-configs.seed.json"))!.contents);
+  expect(pageConfigs.rows.filter((row: { entitySlug: string }) => row.entitySlug === "tenant")).toEqual([]);
   const webManifest = artifacts.groups.ui.find(artifact => artifact.path.endsWith("compiler/entity-manifest.ts"))!.contents;
-  expect(webManifest).toContain('"tenant": {\n    "slug": "tenant",\n    "entity": "Tenant",\n    "required": {\n      "read": [\n        "Organization.All.Read",\n        "Organization.All.ReadWrite"\n      ],\n      "create": [],');
+  const webEntry = webManifest.match(/"tenant": \{[\s\S]*?\n  \}/)![0];
+  expect(webEntry).toContain('"create": []');
+  expect(webEntry).toContain('"delete": []');
+  expect(webEntry).toContain('"update": [\n        "Organization.All.ReadWrite"\n      ]');
 }, 30_000);

@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Generic immutable published-snapshot versioning for OpenShapeForge entities.",
   "license": "BUSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git",
+    "directory": "packages/versioning"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

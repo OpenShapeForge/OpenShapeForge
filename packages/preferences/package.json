@@ -4,7 +4,7 @@
   "type": "module",
   "license": "BUSL-1.1",
   "publishConfig": { "registry": "https://npm.pkg.github.com" },
-  "repository": { "type": "git", "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git", "directory": "packages/preferences" },
   "exports": { ".": "./src/index.ts", "./runtime": "./src/runtime.ts", "./seed": "./src/seed.ts", "./package.json": "./package.json" },
   "files": ["src", "authoring", "!src/**/*.test.ts"],
   "scripts": { "test": "bun test src", "typecheck": "tsc --noEmit -p tsconfig.json" },

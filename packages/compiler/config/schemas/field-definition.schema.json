@@ -105,7 +105,7 @@
     "inverseCollection": {
       "type": "object",
       "additionalProperties": false,
-      "description": "How a single entity reference shapes the collection the compiler derives for it on the target entity. Every property is optional: the key defaults to the lower-camel plural of the referencing entity and the label to that entity's pluralLabels (or its labels, English pluralised).",
+      "description": "How a single entity reference shapes the collection the compiler derives for it on the target entity. Every property is optional: the key defaults to the lower-camel plural of the referencing entity and the label to that entity's pluralLabels (absent: the English label pluralised, other locales keep their singular).",
       "properties": {
         "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "label": { "$ref": "#/$defs/localizedText" },

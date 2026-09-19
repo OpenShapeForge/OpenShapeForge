@@ -144,7 +144,7 @@ fields:
     required: false
     label: {en: Tenant, nl: Tenant}
     persisted: {column: tenant_id, storageClass: core}
-    relationship: {ownership: reference, inverse: {label: {en: Tenant settings, nl: Tenantinstellingen}}}
+    relationship: {ownership: reference}
 operations: {}
 interfaces:
   graphql: {}

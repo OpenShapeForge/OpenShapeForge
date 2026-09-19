@@ -37847,13 +37847,7 @@
             "storageClass": "core"
           },
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tenant settings",
-                "nl": "Tenantinstellingen"
-              }
-            }
+            "ownership": "reference"
           }
         }
       ],

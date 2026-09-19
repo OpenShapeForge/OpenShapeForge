@@ -52,8 +52,10 @@ describe("plugin entity versioning (notebook schema)", () => {
     const head = await fetchRecord(tenantA, notebook, id, "id updatedAt lifecycleStatus latestVersion publishedVersion publishedVersionId");
     expect(head).toMatchObject({ lifecycleStatus: "published", latestVersion: 1, publishedVersion: 1, publishedVersionId: published.id });
 
+    // An unchanged head republished is the same content: a new version, the same hash.
     const second = (await expectData(tenantA, PUBLISH, { input: { id, expectedVersion: head.updatedAt } })).notebookPublish;
     expect(second.version_number).toBe(2);
+    expect(second.content_hash).toBe(published.content_hash);
 
     const listed = await gql(tenantA, VERSIONS, { filter: { notebook: id } });
     const versions = [...collectionOf(notebookVersion, listed, notebookVersion.source!.graphql!.listQueryName).items]
@@ -62,5 +64,10 @@ describe("plugin entity versioning (notebook schema)", () => {
     const snapshot = versions[1].snapshot;
     expect(snapshot).toMatchObject({ schemaVersion: 1, entity: "Notebook", head: { table: "notebooks", children: {} } });
     expect(snapshot.head.row).toMatchObject({ id, name: "Field notes", body: "First draft" });
+    // Content only: no publication pointers, no bookkeeping, no earlier versions.
+    for (const column of ["latest_version", "published_version_id", "lifecycle_status", "created_at", "updated_at"]) {
+      expect(snapshot.head.row).not.toHaveProperty(column);
+    }
+    expect(JSON.stringify(snapshot)).not.toContain("notebook_versions");
   });
 });

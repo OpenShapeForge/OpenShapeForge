@@ -69,19 +69,43 @@ export function orderSnapshotChildren(found: readonly Row[], ownerColumns: reado
   });
 }
 
-async function snapshotNode(executor: unknown, schema: string, table: string, row: Row): Promise<SnapshotNode> {
+type Storage = { schema: string; table: string };
+
+/**
+ * A snapshot is content, and its hash is the hash of content: republishing an
+ * unchanged head must hash identically. Row bookkeeping the compiler adds to
+ * every table is dropped (the version row carries its own `published_at`),
+ * and so are the head's pointers into its own version table, which this
+ * handler writes below and which would otherwise make version N describe
+ * version N-1.
+ */
+const BOOKKEEPING = ["created_at", "updated_at"];
+const PUBLICATION = ["latest_version", "latest_version_id", "published_version", "published_version_id", "lifecycle_status"];
+function content(row: Row, ...excluded: readonly string[][]): Row {
+  const omit = new Set(excluded.flat());
+  return Object.fromEntries(Object.entries(row).filter(([column]) => !omit.has(column)));
+}
+
+/**
+ * The version table is itself a child of the head when its head reference is
+ * owned, so an unfiltered walk would embed every earlier version in the next
+ * one. The compiler-bound version table is excluded at every level: a
+ * snapshot describes content, never publication history.
+ */
+async function snapshotNode(executor: unknown, schema: string, table: string, row: Row, excluded: Storage): Promise<SnapshotNode> {
   const relations = await rows<ChildRelation>(executor, CHILD_RELATIONS, [schema, table]);
   const children: Record<string, SnapshotNode[]> = {};
   for (const relation of relations) {
+    if (relation.schema_name === excluded.schema && relation.table_name === excluded.table) continue;
     if (relation.child_columns.length !== relation.parent_columns.length) fail("OPERATION_UNAVAILABLE", "Compiled ownership relation is incomplete.");
     const predicates = relation.child_columns.map((column, index) => `${identifier(column)} = $${index + 1}`).join(" and ");
     const values = relation.parent_columns.map((column) => row[column]);
     const found = await rows<{ row: Row }>(executor,
       `select to_jsonb(child_row.*) as row from ${qualified(relation.schema_name, relation.table_name)} child_row where ${predicates} for share`, values);
     const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.child_columns);
-    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row)));
+    children[relation.table_name] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.schema_name, relation.table_name, row, excluded)));
   }
-  return { table, row, children };
+  return { table, row: content(row, BOOKKEEPING), children };
 }
 
 /**
@@ -111,8 +135,8 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       // Transaction-local marker for database guards that otherwise refuse a
       // direct write to the version table (documents: core-invariants.ts).
       await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
-      const tree = await snapshotNode(transaction, head.schema, head.table, source);
-      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: tree };
+      const tree = await snapshotNode(transaction, head.schema, head.table, source, version);
+      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: { ...tree, row: content(tree.row, PUBLICATION) } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");
       const inserted = (await rows<{ row: Row }>(transaction, `

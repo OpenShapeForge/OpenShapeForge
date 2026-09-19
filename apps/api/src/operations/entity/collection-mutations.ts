@@ -209,6 +209,10 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         await permission(trx, session, target, childId, createOp, "view");
         ordered.push(childId);
       }
+      // Whether any row was written: a same-value child update or a move to
+      // the child's own place writes nothing, touches no owner, drafts no
+      // head and journals no event.
+      let changed = Boolean(createOp);
       if (editing) {
         await permission(trx, session, target, childId, updateOp!, "edit");
         const current = rows.find((row) => row.id === childId)!;
@@ -216,11 +220,18 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           const prepared = await prepareEntityValueWriteInTransaction(trx, session, target, normalizeWritableValues(target, request.values!, "update", entityValues), "update", current, { registry: entityValues, tables: catalog.tables });
           await assertRelationshipConstraintsInTransaction(trx, session, target, prepared);
           const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
-          const updated = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(target.schema, target.table)} set ${sql.join([...assignments, sql`updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')`])}
-            where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
-          const row = updated.rows[0]?.row;
-          if (!row) throw generatedCrudError("Child update was refused.", "FORBIDDEN");
-          await appendGeneratedCrudEvent(trx, target, { aggregateId: childId, eventType: "updated", row }, entityValues);
+          const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);
+          if (changes.length) {
+            const updated = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(target.schema, target.table)} set ${sql.join([...assignments, sql`updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')`])}
+              where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid and (${sql.join(changes, sql` or `)}) returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
+            const row = updated.rows[0]?.row;
+            if (row) {
+              changed = true;
+              await appendGeneratedCrudEvent(trx, target, { aggregateId: childId, eventType: "updated", row }, entityValues);
+            } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
+              throw generatedCrudError("Child update was refused.", "FORBIDDEN");
+            }
+          }
         } else {
           const deleted = await sql<{ row: GeneratedEntityRow }>`delete from ${sql.id(target.schema, target.table)}
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
@@ -228,6 +239,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
           await appendGeneratedCrudEvent(trx, target, { aggregateId: childId, eventType: "deleted", row }, entityValues);
           ordered.splice(ordered.indexOf(childId), 1);
+          changed = true;
         }
       }
       if (!editing && request.beforeId !== childId) {
@@ -245,7 +257,11 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
         const row = result.rows[0]?.row;
         if (!row) throw generatedCrudError("Child update was refused.", "FORBIDDEN");
+        changed = true;
         await appendGeneratedCrudEvent(trx, target, { aggregateId: id, eventType: "updated", row }, entityValues);
+      }
+      if (!changed) {
+        return { parent: projectGeneratedEntityRow(owner, session, locked.rows[0].row, entityValues), childId, orderedIds: relation.sortable ? ordered : [...ordered].sort() };
       }
       const touched = await sql<{ row: GeneratedEntityRow }>`update ${sql.id(owner.schema, owner.table)} set updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
         where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid returning to_jsonb(${sql.id(owner.table)}.*) as row`.execute(trx);

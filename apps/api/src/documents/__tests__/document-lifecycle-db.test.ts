@@ -93,11 +93,16 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     const session = dbInput(editor);
     const documents = tableName("Document");
 
-    // PATCH {} writes nothing: neither the version token nor the lifecycle move.
+    // PATCH {} and a field supplied with its stored value write nothing: neither the version token, the lifecycle
+    // move nor an event.
     const head = await document(documentId);
     expect(head.lifecycle_status).toBe("published");
+    const journal = async () => (await sql<{ n: number }>`select count(*)::int as n from platform.entity_events where tenant_id = ${tenant}::uuid`.execute(privileged())).rows[0]!.n;
+    const before = await journal();
     await updateGeneratedEntity(restricted(), session, { table: documents, id: documentId, values: {} });
+    await updateGeneratedEntity(restricted(), session, { table: documents, id: documentId, values: { title: "Welcome letter", isExternal: false } });
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", updated_at: head.updated_at });
+    expect(await journal()).toBe(before);
 
     // A field edit drafts the head.
     await updateGeneratedEntity(restricted(), session, { table: documents, id: documentId, values: { title: "Welcome letter, revised" } });
@@ -120,7 +125,17 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: await version(), childId: inserted.childId, values: { values: { text: "Local note, edited" } } });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 
+    // A move to the block's own place and an update with its stored values change nothing: no owner touch, no draft, no event.
     await sql`update erp.documents set lifecycle_status = 'published' where id = ${documentId}::uuid`.execute(privileged());
+    const unchangedVersion = await version();
+    const unchangedJournal = await journal();
+    const stayed = await collections(restricted(), session, documentBinding("move"), { id: nl.id, expectedVersion: unchangedVersion, childId: inserted.childId, beforeId: inserted.orderedIds[0]! });
+    expect(stayed.orderedIds[0]).toBe(inserted.childId);
+    await collections(restricted(), session, documentBinding("update"), { id: nl.id, expectedVersion: unchangedVersion, childId: inserted.childId, values: { values: { text: "Local note, edited" } } });
+    expect(await version()).toBe(unchangedVersion);
+    expect((await document(documentId)).lifecycle_status).toBe("published");
+    expect(await journal()).toBe(unchangedJournal);
+
     await collections(restricted(), session, documentBinding("remove"), { id: nl.id, expectedVersion: await version(), childId: inserted.childId });
     expect((await document(documentId)).lifecycle_status).toBe("draft");
 

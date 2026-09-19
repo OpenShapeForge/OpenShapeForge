@@ -160,14 +160,17 @@ compiler emits beside the managed lifecycle fields
 (`source.versioning.onEdit: { field: lifecycleStatus, value: draft }`) and the
 runtime reads from the manifest (`apps/api/src/operations/entity/versioned-head.ts`):
 
-- a generic update that changes at least one content column; `PATCH {}` or a
-  value already stored writes nothing at all, neither the version token nor
-  the lifecycle;
+- a generic update that changes at least one content column, compared in the
+  database against the stored row; `PATCH {}` or a value supplied as stored
+  writes nothing at all, neither the version token, the lifecycle nor an
+  event;
 - an owned-collection Operation (`insert`, `update`, `move`, `remove`) on the
   head or on anything the head owns, walking the bound ownership tree up to
   the head (`DocumentVariant.insertBlock` drafts the `Document`,
   `TemplateVariant.insertBlock` drafts the `Template`), as does a generic
-  update of an owned child;
+  update of an owned child; a child update with its stored values or a move
+  to the child's own place is the same no-op (no owner touch, no draft, no
+  event);
 - a follow that actually re-seeds, diverges, inserts, removes or moves a block;
   a follow that only moves the pin (a head-only template change) leaves a
   published document published.

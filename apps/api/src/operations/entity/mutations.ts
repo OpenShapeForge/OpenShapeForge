@@ -381,13 +381,16 @@ async function applyGeneratedRowUpdate(
     const prepared = await prepareEntityValueWriteInTransaction(trx, session, table, values, "update", current ?? undefined, entityValues);
     await assertRelationshipConstraintsInTransaction(trx, session, table, prepared);
     const assignments = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} = ${value}`);
-    // No content column changes: nothing is written, neither the version
-    // token nor the draft rule, and the unchanged row is returned below.
+    // A write happens only when a content column actually changes, compared
+    // in the database against the locked row: a value supplied as stored, or
+    // no value at all, leaves the version token, the draft rule and the
+    // event journal alone and returns the row as it is.
+    const changes = [...prepared.entries()].map(([column, value]) => sql`${sql.id(column.name)} is distinct from ${value}`);
     const draft = assignments.length ? draftRule(table) : undefined;
     if (draft) assignments.push(sql`${sql.id(draft.column)} = ${draft.value}`);
     if (updatedAt && assignments.length) assignments.push(sql`${sql.id(updatedAt.name)} = ${carriers.length ? sql`greatest(clock_timestamp(), ${sql.id(updatedAt.name)} + interval '1 microsecond')` : sql`now()`}`);
 
-    if (assignments.length === 0) {
+    const unchangedRow = async (): Promise<GeneratedEntityRow | null> => {
       const unchanged = await sql<{ row: GeneratedEntityRow }>`
         select to_jsonb(${sql.id(table.table)}.*) as row
         from ${sql.id(table.schema, table.table)}
@@ -406,29 +409,20 @@ async function applyGeneratedRowUpdate(
         );
       }
       return null;
-    }
+    };
+    if (changes.length === 0) return unchangedRow();
     const result = await sql<{ row: GeneratedEntityRow }>`
       update ${sql.id(table.schema, table.table)}
       set ${sql.join(assignments)}
       where ${sql.id(table.primaryKey!)}::text = ${id}
         ${tenantWhere}
         ${expectedVersionWhere}
+        and (${sql.join(changes, sql` or `)})
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
 
     const row = result.rows[0]?.row ?? null;
-    if (!row) {
-      const current = guard
-        ? await fetchGeneratedRowInTransaction(trx, session, table, id)
-        : null;
-      if (current) {
-        throw generatedCrudError(
-          "The record has changed since it was loaded. Reload it before saving.",
-          "VERSION_CONFLICT",
-        );
-      }
-      return null;
-    }
+    if (!row) return unchangedRow();
     await draftOwningHead(trx, getGeneratedCrudTables(), table, row);
     await appendGeneratedCrudEvent(trx, table, {
       aggregateId: generatedCrudAggregateId(table, row),

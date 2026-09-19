@@ -80,6 +80,13 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select coalesce(current_setting('app.bypass_rls', true) = 'true', false)
     $$;
 
+    -- Whether the session holds any of the roles; the compiler's owner-axis
+    -- read policies (authorization.ownerAxis) call it with the role names the
+    -- manifest carries.
+    create or replace function app.has_any_role(candidates text[]) returns boolean
+    language sql stable
+    as $$ select app.bypass_rls() or coalesce(string_to_array(current_setting('app.roles', true), ',') && candidates, false) $$;
+
     create or replace function app.current_worker_role() returns text
     language sql stable parallel safe as $$
       select nullif(current_setting('app.worker_role', true), '')

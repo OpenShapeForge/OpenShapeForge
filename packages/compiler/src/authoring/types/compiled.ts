@@ -645,6 +645,8 @@ export interface CompiledAuthorization {
   compositeRoles: CompiledAuthorizationRole[];
   fieldAuthorizations: CompiledFieldAuthorization[];
   profileAuthorizations: Record<string, { readRoles: string[] }>;
+  /** Owning references whose target's read roles gate the rows they carry; lowered to a restrictive policy in the backend manifest. */
+  ownerAxis?: { fields: string[]; command?: { setting: string; values: string[] } };
   rowAccess?: {
     enabled: boolean;
     empty: "public" | "restricted";

@@ -2,6 +2,7 @@
 import { readFile } from "node:fs/promises";
 import YAML from "yaml";
 import type {
+  OwnerAxisPolicy,
   PlatformSchemaManifest,
   RetentionAction,
   RetentionDefinition,
@@ -382,6 +383,31 @@ function loadRetention(
 
 const groupExpansionModes = new Set(["descendants", "ancestors", "exact"]);
 
+/** An owner-axis policy: at least two owner columns, each with the role names it lends, and an optional command setting. */
+function loadOwnerAxis(value: unknown, label: string, columnNames: Set<string>): OwnerAxisPolicy {
+  if (!isRecord(value) || !Array.isArray(value.axes) || value.axes.length < 2) {
+    throw new Error(`${label} must declare at least two owner axes.`);
+  }
+  const axes = value.axes.map((axis, index) => {
+    if (!isRecord(axis)) throw new Error(`${label}.axes[${index}] must be an object.`);
+    assertIdentifier(axis.column, `${label}.axes[${index}].column`);
+    if (!columnNames.has(axis.column)) throw new Error(`${label}.axes[${index}] references unknown column ${axis.column}.`);
+    if (!Array.isArray(axis.roles) || axis.roles.length === 0 || axis.roles.some((role) => typeof role !== "string" || !/^[A-Za-z][A-Za-z0-9._-]*$/.test(role))) {
+      throw new Error(`${label}.axes[${index}].roles must be a non-empty list of role names.`);
+    }
+    return { column: axis.column, roles: [...(axis.roles as string[])] };
+  });
+  let command: OwnerAxisPolicy["command"];
+  if (value.command !== undefined) {
+    if (!isRecord(value.command) || typeof value.command.setting !== "string" || !/^app\.[a-z_]+$/.test(value.command.setting) ||
+        !Array.isArray(value.command.values) || value.command.values.length === 0 || value.command.values.some((entry) => typeof entry !== "string" || !/^[a-z_]+$/.test(entry))) {
+      throw new Error(`${label}.command must name an app.* setting and its values.`);
+    }
+    command = { setting: value.command.setting, values: [...(value.command.values as string[])] };
+  }
+  return { axes, ...(command ? { command } : {}) };
+}
+
 function loadRowScope(
   value: unknown,
   label: string,
@@ -624,6 +650,11 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         `${currentTableKey}.rowScope`,
         columnNames,
       );
+    }
+
+    if (table.ownerAxis !== undefined) {
+      if (!table.tenantScoped) throw new Error(`${currentTableKey}.ownerAxis requires tenantScoped: true.`);
+      table.ownerAxis = loadOwnerAxis(table.ownerAxis, `${currentTableKey}.ownerAxis`, columnNames);
     }
 
     // workerAccess names the worker role permitted to read this table ACROSS

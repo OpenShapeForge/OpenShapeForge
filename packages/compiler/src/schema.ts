@@ -94,6 +94,18 @@ export type TableConstraintDefinition = {
  * composite index emitted in the same migration. The compiler emits those
  * indexes automatically (see deriveRowScopeIndexes).
  */
+/**
+ * A restrictive select policy for a table owned through several references:
+ * a row is readable with the read roles of the entity its set owner column
+ * references. Lowered from `authorization.ownerAxis`; the emitter renders it
+ * beside the tenant policy and never derives a role name itself.
+ */
+export type OwnerAxisPolicy = {
+  axes: Array<{ column: string; roles: string[] }>;
+  /** A transaction-local setting whose listed values admit every owner's rows (server-side commands). */
+  command?: { setting: string; values: string[] };
+};
+
 export type RowScopePolicy = {
   /**
    * The group axis. Optional — entities that only use tenant + user axes
@@ -569,6 +581,8 @@ export type TableDefinition = {
    * the supporting composite indexes. Requires `tenantScoped: true`.
    */
   rowScope?: RowScopePolicy;
+  /** Owner-axis read restriction (`authorization.ownerAxis`); requires `tenantScoped: true`. */
+  ownerAxis?: OwnerAxisPolicy;
   /**
    * The worker role permitted to reach this table ACROSS tenants — rendered as
    * an extra disjunct in the emitted policy, next to the existing

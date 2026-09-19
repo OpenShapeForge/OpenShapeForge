@@ -113,9 +113,20 @@ export interface RowAccessConfig {
   recordPermissions?: RowAccessRecordPermissionsConfig;
 }
 
+/**
+ * Owner-axis read policy: the rows an owning reference carries are readable
+ * with the owner entity's read roles; a command marks its transaction to
+ * read every owner's rows. See docs/document-content.md.
+ */
+export interface OwnerAxisConfig {
+  fields: string[];
+  command?: { setting: string; values: string[] };
+}
+
 export interface AuthorizationConfig {
   roles: AuthorizationRoles;
   rowAccess?: RowAccessConfig;
+  ownerAxis?: OwnerAxisConfig;
 }
 
 export interface FieldAuthorizationConfig {

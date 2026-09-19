@@ -19,6 +19,7 @@ import type {
 import type {
   ColumnDefinition,
   ColumnSensitivity,
+  OwnerAxisPolicy,
   PlatformSchemaManifest,
   ReferenceDefinition,
   VersioningOwnedChild,
@@ -941,6 +942,36 @@ function bindVersioningStorage(candidates: CompiledCandidate[], tables: TableDef
 }
 
 /**
+ * Lower `authorization.ownerAxis` once every reference is a column: each
+ * owning reference becomes an axis of the referenced entity's read roles, as
+ * that entity authors them, so a host renaming a role renames the policy.
+ */
+function bindOwnerAxes(candidates: CompiledCandidate[], tables: TableDefinition[]): void {
+  const byEntity = new Map(candidates.map((candidate, index) => [candidate.contract.entity.name, { candidate, table: tables[index]! }]));
+  for (const { candidate, table } of byEntity.values()) {
+    const ownerAxis = candidate.contract.authorization?.ownerAxis;
+    if (!ownerAxis) continue;
+    const entity = candidate.contract.entity.name;
+    if (!table.tenantScoped) throw new Error(`${entity}: authorization.ownerAxis requires a tenant-scoped entity.`);
+    const axes: OwnerAxisPolicy["axes"] = [];
+    for (const key of ownerAxis.fields) {
+      const relationship = candidate.contract.model.relationships.find((relationship) => relationship.kind === "belongsTo" && (relationship.fieldKey ?? relationship.key) === key);
+      const column = relationship?.foreignKey ? table.columns.find((column) => column.name === relationship.foreignKey) : undefined;
+      if (!relationship || !column?.references) throw new Error(`${entity}: authorization.ownerAxis.fields "${key}" has no lowered owner foreign key.`);
+      if (column.required) throw new Error(`${entity}: authorization.ownerAxis.fields "${key}" must be optional; a row has exactly one of several owners.`);
+      const owner = byEntity.get(relationship.target);
+      const roles = owner?.candidate.contract.authorization?.roles.read ?? [];
+      if (!owner || !roles.length) throw new Error(`${entity}: authorization.ownerAxis.fields "${key}" references ${relationship.target}, which has no read roles in this manifest.`);
+      const owned = owner.candidate.contract.model.relationships.some((inverse) =>
+        inverse.kind === "hasMany" && inverse.target === entity && inverse.foreignKey === column.name && inverse.ownership === "owned");
+      if (!owned) throw new Error(`${entity}: authorization.ownerAxis.fields "${key}" must be an owning reference (relationship.inverse.ownership: owned).`);
+      axes.push({ column: column.name, roles: [...new Set(roles)].sort() });
+    }
+    table.ownerAxis = { axes, ...(ownerAxis.command ? { command: { setting: ownerAxis.command.setting, values: [...ownerAxis.command.values] } } : {}) };
+  }
+}
+
+/**
  * The owned collections under one entity, as authored (`ownership: owned` on
  * the inverse), lowered to the child table's foreign-key columns. Recursive
  * because `snapshot.ownedRelationships: recursive` is; the version table is
@@ -1498,6 +1529,7 @@ export function compileAuthoringBackendManifest(
 
   const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
   bindVersioningStorage(physicalCandidates, tables);
+  bindOwnerAxes(physicalCandidates, tables);
 
   return {
     version: 1,

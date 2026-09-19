@@ -218,6 +218,30 @@
             }
           }
         },
+        "ownerAxis": {
+          "type": "object",
+          "description": "Owner-axis read policy for an entity owned through more than one reference (one table, several owners). Each listed reference lends its owner entity's `authorization.roles.read` to the rows it owns, and the compiler emits a RESTRICTIVE select policy so a session holding none of an owner's read roles never sees that owner's rows, whatever the entity's own read roles say. `command` names a transaction-local setting and the values a server-side command marks its transaction with to read every owner's rows (a template publisher re-seeding the documents that track the template).",
+          "additionalProperties": false,
+          "required": ["fields"],
+          "properties": {
+            "fields": {
+              "type": "array",
+              "description": "Owning reference fields of this entity (each `relationship.inverse.ownership: owned`). The target entity's read roles gate the rows that reference carries.",
+              "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "minItems": 2,
+              "uniqueItems": true
+            },
+            "command": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["setting", "values"],
+              "properties": {
+                "setting": { "type": "string", "pattern": "^app\\.[a-z_]+$", "description": "Transaction-local setting the command sets (set_config(..., true))." },
+                "values": { "type": "array", "items": { "type": "string", "pattern": "^[a-z_]+$" }, "minItems": 1, "uniqueItems": true }
+              }
+            }
+          }
+        },
         "rowAccess": {
           "type": "object",
           "description": "Row-level access filtering. When enabled, the compiler emits a Postgres RLS policy (`FORCE ROW LEVEL SECURITY`) alongside the tenant predicate. Add an `owner` axis to make each row visible only to the user recorded in its owner column, and/or a `group` axis to make each row visible only within the org-unit hierarchy recorded in its group column; without any axis the policy is plain tenant scoping. Owner and group axes are independently combinable (both emit OR-branches). The platform-admin bypass (app.bypass_rls()) and tenant scope (app.has_scope('tenant')) always short-circuit the policy.",

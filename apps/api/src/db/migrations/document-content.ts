@@ -6,16 +6,18 @@
  *   template_block_id, diverged, locked) are written by commands only, so a
  *   document editor cannot unlock a block or forge its template provenance;
  * - the document's pinned template version and follow problem are written by
- *   commands only;
- * - who may read which blocks: a template-owned block needs a template role,
- *   a document-owned block needs a document role, as a restrictive policy
- *   beside the generated tenant policy.
+ *   commands only.
+ *
+ * Who may read which blocks (a template-owned block needs a template role, a
+ * document-owned block a document role) is the compiler's: block.yaml authors
+ * `authorization.ownerAxis` and schema.sql carries the restrictive policy
+ * blocks_owner_read with the role names the owner entities declare, so
+ * nothing here restates a role name.
  *
  * The documents module marks its own commands with the transaction-local
  * setting `app.document_command` (link | follow); the generated CRUD never
  * sets it. Messages open with the public code so the API classifies them
- * (db/database-refusals.ts) instead of redacting them. Role names mirror
- * entities/core/block.yaml and document-variant.yaml.
+ * (db/database-refusals.ts) instead of redacting them.
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
@@ -40,10 +42,6 @@ export async function applyDocumentContentGuards(db: OpenShapeForgeDatabase): Pr
     create or replace function app.document_command() returns text
     language sql stable
     as $$ select nullif(current_setting('app.document_command', true), '') $$;
-
-    create or replace function app.has_any_role(candidates text[]) returns boolean
-    language sql stable
-    as $$ select app.bypass_rls() or coalesce(string_to_array(current_setting('app.roles', true), ',') && candidates, false) $$;
 
     create or replace function app.guard_document_content_write()
     returns trigger
@@ -97,18 +95,5 @@ export async function applyDocumentContentGuards(db: OpenShapeForgeDatabase): Pr
       before insert or update or delete on erp.blocks
       for each row execute function app.guard_document_block_write();
 
-    drop policy if exists blocks_owner_read on erp.blocks;
-    -- Policies are created after the functions above; the setting itself is
-    -- transaction-local and never set by generated CRUD.
-    create policy blocks_owner_read on erp.blocks as restrictive for select
-      using (
-        app.bypass_rls()
-        -- A documents command (link | follow) runs on the caller's session; a
-        -- template publisher need not hold a document role to re-seed the
-        -- documents that track the template.
-        or app.document_command() in ('link', 'follow')
-        or (document_variant_id is not null and app.has_any_role(array['CaseFile.All.Read', 'CaseFile.All.ReadWrite']))
-        or (variant_id is not null and app.has_any_role(array['Templates.Read', 'Organization.All.ReadWrite', 'General.All.Read', 'General.All.ReadWrite']))
-      );
   `.execute(db);
 }

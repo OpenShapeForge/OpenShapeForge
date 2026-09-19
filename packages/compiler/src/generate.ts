@@ -447,6 +447,43 @@ function renderRowScopePredicate(
   return `app.bypass_rls()${workerAccess} OR (${tenant}${rowAxes}${acl})`;
 }
 
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/**
+ * The restrictive owner-axis read policy: beside the permissive tenant
+ * policy, a row is readable only with the read roles of the entity its set
+ * owner column references, by a platform bypass, or inside a transaction a
+ * server-side command marked with the authored setting. The role names come
+ * from the manifest, never from a migration.
+ */
+function renderOwnerAxisPolicy(table: TableDefinition): string[] {
+  const policy = table.ownerAxis;
+  if (!policy) return [];
+  if (!table.tenantScoped) {
+    throw new Error(`Table ${table.schema}.${table.name} declares ownerAxis but is not tenant-scoped.`);
+  }
+  const present = columnNames(table);
+  const branches = ["app.bypass_rls()"];
+  if (policy.command) {
+    branches.push(`nullif(current_setting(${quoteSqlLiteral(policy.command.setting)}, true), '') IN (${policy.command.values.map(quoteSqlLiteral).join(", ")})`);
+  }
+  for (const axis of policy.axes) {
+    if (!present.has(axis.column)) {
+      throw new Error(`Table ${table.schema}.${table.name} declares ownerAxis column "${axis.column}" but the column is not defined.`);
+    }
+    branches.push(`(${quoteIdent(axis.column)} IS NOT NULL AND app.has_any_role(ARRAY[${axis.roles.map(quoteSqlLiteral).join(", ")}]))`);
+  }
+  const policyName = quoteIdent(`${table.name}_owner_read`);
+  return [
+    "",
+    `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
+    `CREATE POLICY ${policyName} ON ${tableIdent(table)} AS RESTRICTIVE FOR SELECT`,
+    `  USING (${branches.join(" OR ")});`,
+  ];
+}
+
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
   name: string;
   columns: string[];
@@ -551,6 +588,7 @@ function renderTableSql(table: TableDefinition): string {
     // is the exception, and says so with `tenantIdentityColumn`.
     lines.push(...tenantRegistryPolicy);
   }
+  lines.push(...renderOwnerAxisPolicy(table));
   lines.push(...renderTenantRegistryWritePolicies(table));
 
   for (const index of deriveRowScopeIndexes(table)) {

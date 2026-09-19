@@ -331,6 +331,26 @@ export function buildAuthorization(
     rowAccess = undefined;
   }
 
+  let ownerAxis: CompiledAuthorization["ownerAxis"];
+  if (authConfig.ownerAxis) {
+    for (const key of authConfig.ownerAxis.fields) {
+      // Ownership is the derived inverse collection's; the backend manifest checks it once the target is known.
+      const field = coreEntity.fields.find((candidate) => candidate.key === key);
+      if (!field?.relationship || field.relationship.kind !== "belongsTo" || isCollectionField(field) || field.required) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.ownerAxis.fields "${key}" must be an optional single entity reference.`,
+        );
+      }
+    }
+    ownerAxis = {
+      fields: [...authConfig.ownerAxis.fields],
+      ...(authConfig.ownerAxis.command
+        ? { command: { setting: authConfig.ownerAxis.command.setting, values: [...authConfig.ownerAxis.command.values] } }
+        : {}),
+    };
+  }
+
   return {
     entitySlug: slug,
     roles,
@@ -338,6 +358,7 @@ export function buildAuthorization(
     fieldAuthorizations,
     profileAuthorizations,
     rowAccess,
+    ...(ownerAxis ? { ownerAxis } : {}),
   };
 }
 

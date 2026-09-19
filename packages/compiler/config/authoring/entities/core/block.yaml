@@ -9,9 +9,9 @@ pluralLabels: { en: Blocks, nl: Blocks }
 domains: [documents]
 authorization:
   roles:
-    # Document roles read document-owned blocks only; the restrictive database
-    # policy blocks_owner_read separates the owners. Writes stay template-only:
-    # a document editor writes through DocumentVariant.*Block.
+    # Document roles read document-owned blocks only; the owner axis below
+    # separates the owners at the database. Writes stay template-only: a
+    # document editor writes through DocumentVariant.*Block.
     read:
       [
         Templates.Read,
@@ -24,6 +24,16 @@ authorization:
     create: [Organization.All.ReadWrite]
     update: [Organization.All.ReadWrite]
     delete: [Organization.All.ReadWrite]
+  # One table, two owners: a template-owned block is readable with
+  # TemplateVariant's read roles, a document-owned block with DocumentVariant's,
+  # as those entities author them (compiled to the restrictive policy
+  # blocks_owner_read). The documents commands (link | follow) mark their
+  # transaction with app.document_command and read every owner's rows: a
+  # template publisher need not hold a document role to re-seed the documents
+  # tracking the template.
+  ownerAxis:
+    fields: [variant, documentVariant]
+    command: { setting: app.document_command, values: [link, follow] }
 displayTemplate: "{{definitionKey}}"
 fields:
   # Exactly one owner is set; the compiler emits num_nonnulls(document_variant_id, variant_id) = 1.

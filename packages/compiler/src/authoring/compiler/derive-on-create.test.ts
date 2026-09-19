@@ -52,9 +52,18 @@ describe("deriveOnCreate compiler contract", () => {
     }]);
   });
 
+  test("accepts the bare target index, which the compiler leads with tenant_id", () => {
+    expect(resolve({ indexes: [{ name: "templates_key_uidx", fields: ["key"], unique: true }] })[0]?.conflictColumns)
+      .toEqual(["tenant_id", "key"]);
+  });
+
   test("fails closed without the exact database uniqueness scope", () => {
-    expect(() => resolve({ indexes: [{ name: "wrong", fields: ["key"], unique: true }] }))
+    expect(() => resolve({ indexes: [{ name: "wrong", fields: ["name", "key"], unique: true }] }))
       .toThrow(/requires a unique index on \[tenantId, key\]/);
+    expect(() => resolve({ indexes: [{ name: "wrong", fields: ["key"], unique: true }], tenantScoped: false }))
+      .not.toThrow();
+    expect(() => resolve({ indexes: [{ name: "wrong", fields: ["tenantId", "key"], unique: true }], tenantScoped: false }))
+      .toThrow(/requires a unique index on \[key\]/);
   });
 
   test("rejects non-writable sources and undersized suffix targets", () => {

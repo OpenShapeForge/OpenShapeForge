@@ -543,6 +543,11 @@ function retentionReview(
  * Resolve authored entity-level indexes (field keys) into TableDefinition
  * indexes (column names). `tenantId` is accepted directly for tenant-scoped
  * tables since the compiler auto-attaches a `tenant_id` column.
+ *
+ * A unique index on a tenant-scoped table is unique per tenant: `tenant_id`
+ * leads it whether or not the author wrote `tenantId`, so `unique: [code]`
+ * never makes one tenant's code block another's, and the index doubles as
+ * the tenant-leading lookup the row-level policy wants.
  */
 function compileEntityIndexes(
   candidate: CompiledCandidate,
@@ -565,6 +570,9 @@ function compileEntityIndexes(
         );
       }
       resolvedColumns.push(column.name);
+    }
+    if (index.unique && tenantScoped && !resolvedColumns.includes("tenant_id")) {
+      resolvedColumns.unshift("tenant_id");
     }
     compiled.push({
       name: index.name,
@@ -1002,7 +1010,6 @@ function compileFieldRelationStorage(
   };
 
   for (const { candidate, table } of byEntity.values()) {
-    if (Number(candidate.contract.authoringVersion) !== 3) continue;
     for (const relationship of candidate.contract.model.relationships) {
       // Provider-backed: no storage on either side, nothing to reference.
       if (relationship.provider) continue;
@@ -1024,15 +1031,6 @@ function compileFieldRelationStorage(
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no persisted foreign-key column.`);
         attachReference(table, column, target.table, relationship.unique);
       } else if (relationship.kind === "hasMany") {
-        // A derived collection never lowers a foreign key the referencing
-        // field's own compilation did not: a pre-v3 referencing entity keeps
-        // its legacy policy (cross-module references stay unregistered and
-        // are owned by hand-written SQL).
-        if (Number(target.candidate.contract.authoringVersion) !== 3) {
-          const skipped = table.source?.relationshipStatus?.skippedReferences;
-          if (skipped) skipped.push(`${relationship.key}<-${relationship.target} (referencing entity keeps its own foreign-key policy)`);
-          continue;
-        }
         const column = target.table.columns.find((column) => column.name === relationship.foreignKey);
         if (!column) throw new Error(`Field relationship ${candidate.contract.entity.name}.${relationship.key} has no inverse foreign-key column on ${relationship.target}.`);
         if (relationship.through) {
@@ -1243,47 +1241,8 @@ export function compileAuthoringBackendManifest(
       });
     }
 
-    const columnsByName = new Map(columns.map((column) => [column.name, column]));
-    for (const relationship of candidate.contract.model.relationships) {
-      if (Number(candidate.contract.authoringVersion) === 3) continue;
-      if (relationship.kind !== "belongsTo" || !relationship.foreignKey) {
-        continue;
-      }
-      const column = columnsByName.get(relationship.foreignKey);
-      if (!column) {
-        continue;
-      }
-      const target = byEntityName.get(relationship.target);
-      if (!target) {
-        skippedReferences.push(`${relationship.foreignKey}->${relationship.target}.id (target not allowlisted)`);
-        continue;
-      }
-      const targetSchema =
-        schemaByModule[target.contract.entity.module] ?? snakeCase(target.contract.entity.module);
-      const reference: ReferenceDefinition = {
-        schema: targetSchema,
-        table: target.contract.storage.table,
-        column: "id",
-      };
-      const sameModule = target.contract.entity.module === candidate.contract.entity.module;
-      const registered = isRelationshipRegistered(
-        relationshipRegister,
-        { schema, table: name, column: relationship.foreignKey },
-        reference,
-      );
-      if (!sameModule && !registered) {
-        skippedReferences.push(
-          `${relationship.foreignKey}->${reference.schema}.${reference.table}.${reference.column} (cross-module unregistered)`,
-        );
-        continue;
-      }
-      column.type = "uuid";
-      column.references = reference;
-      emittedReferences.push(
-        `${relationship.foreignKey}->${reference.schema}.${reference.table}.${reference.column}`,
-      );
-    }
-
+    // Relationships are lowered once every table exists, in
+    // compileFieldRelationStorage, for every authoring version alike.
     const columnsByNameWithOperational = new Map(columns.map((column) => [column.name, column]));
     const retention = compileRetention(candidate, columnsByField, columnsByNameWithOperational);
 

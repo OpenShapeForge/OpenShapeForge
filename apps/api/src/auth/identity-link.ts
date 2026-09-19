@@ -34,8 +34,9 @@
  *      called from identity.ts on the bearer path). If NO Relation in the
  *      tenant carries the token's e-mail, there must be a pending invitation:
  *      a Relation of type person is then created through the generated CRUD
- *      path and linked, the invited role is granted on the audience client,
- *      and the invitation row moves to `accepted`. Without one, nothing is
+ *      path and linked, the invited roles are recorded on the membership
+ *      row for this tenant, and the invitation is claimed — all in one
+ *      transaction (identity-link-admission.ts). Without one, nothing is
  *      created and the request is refused. If a Relation DOES carry the
  *      e-mail, nothing is linked silently and no invitation is needed: the
  *      row is recorded as `pending_confirmation` with the Relation as
@@ -50,6 +51,18 @@
  * The result rides on the session as `session.relation`; `sessionRelation()`
  * is the accessor every other surface should read it through.
  *
+ * THE ROW ALSO CARRIES THE PERSON'S ROLES IN THIS TENANT
+ * ---------------------------------------------------------------------------
+ * `platform.identity_relations.roles` is the organization-scoped grant: what
+ * an invitation admitted the person as, or what `set_member_role` later
+ * assigned — for this (identity, tenant) and no other. identity.ts unions it
+ * onto the session for the tenant the token selected. One Keycloak account
+ * that is a member of several organizations therefore holds a separate role
+ * set in each; the identity provider carries membership, never the roles.
+ * Nothing here writes a Keycloak client role to the user any more: such a
+ * role is user-wide, and a grant made by organization A's administrator
+ * would have applied in organization B too.
+ *
  * Trusted-context and API key sessions carry no e-mail and are not people
  * signing in, so they never link; the accessor answers null for them.
  */
@@ -57,10 +70,6 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
-import {
-  createGeneratedEntityForTable,
-  getGeneratedCrudTables,
-} from "../graphql/generated-crud.js";
 import { HttpError } from "../rest/http-error.js";
 import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
 // This module and ./employee-invitations.ts import each other: an invitation
@@ -68,14 +77,16 @@ import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organiz
 // (there). The cycle is safe — every binding crossing it is read at call
 // time, never during module evaluation — and splitting the two halves apart
 // would put the admission rule and the table it reads in different files.
+import { findPendingInvitation } from "./employee-invitations.js";
+import { acceptPendingInvitation, admitInvitedPerson, notInvited } from "./identity-link-admission.js";
+import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 import {
-  acceptInvitation,
-  employeeInvitationRoleGrants,
-  findPendingInvitation,
-  invitedRoleWithinGrace,
-  INVITED_ROLE_GRACE_MS,
-  type GrantInvitedRole,
-} from "./employee-invitations.js";
+  insertLinkRow,
+  readLinkRow,
+  relationsWithEmail,
+  toState,
+  upsertIdentity,
+} from "./identity-link-store.js";
 
 // Both re-exported so every existing importer of this module keeps working;
 // they live in ./organization-roles.ts because a `const` may not cross the
@@ -138,19 +149,11 @@ export type IdentityLinkState = {
    */
   needsRoleAssignment: boolean;
   /**
-   * Client roles an invitation this identity accepted grants, while that
-   * acceptance is still inside `INVITED_ROLE_GRACE_MS` — see that constant in
-   * ./employee-invitations.ts for why the window exists and why it closes.
-   * identity.ts unions these onto the session's roles; empty at every other
-   * moment, which is almost always.
+   * The roles this identity holds in THIS tenant (see the module header).
+   * identity.ts unions them onto the session; empty until an invitation was
+   * accepted or an administrator ran `set_member_role`.
    */
-  invitedRoles: readonly string[];
-  /**
-   * `linked_at` as epoch milliseconds, or null while pending. Only used to
-   * decide, without a query, whether this link can still be inside
-   * `INVITED_ROLE_GRACE_MS`.
-   */
-  linkedAtMs: number | null;
+  roles: readonly string[];
 };
 
 /** What a linked session resolves to: the party the login acts as. */
@@ -249,32 +252,24 @@ export function __resetIdentityLinkForTests(): void {
 // ---------------------------------------------------------------------------
 // Resolution (just in time)
 
-type SessionInput = DbSessionInput & { tenantId: string; userId: string };
-
-/**
- * Test seams. Empty in production, where every default is the real thing.
- */
-export type IdentityLinkDeps = {
-  /** How an accepted invitation's role reaches Keycloak. */
-  grantInvitedRole?: GrantInvitedRole;
-};
+export type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 
 /**
  * The link state for this session's identity in this tenant, creating it
  * just in time on the first session — but only for somebody this tenant
  * invited or already knows.
  *
- * Throws {@link NotInvitedError} and nothing else. A FAILURE here (a database
- * hiccup, a missing entity) must not turn a valid token into an
- * unauthenticated request, so it is logged and the session simply carries no
- * link. A REFUSAL is not a failure: it is the resolved answer, and it has to
- * reach the caller.
+ * Throws {@link NotInvitedError} for a refusal and
+ * {@link SessionAuthenticationUnavailableError} for a FAILURE (a statement
+ * timeout, an exhausted pool). The failure is not swallowed: this row is what
+ * says whether the tenant admitted the person and which roles they hold
+ * here, so a session produced without it would authenticate an uninvited
+ * realm user on whatever the token happens to carry. Fail closed, 503.
  */
 export async function resolveIdentityLink(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   claims: IdentityClaims,
-  deps: IdentityLinkDeps = {},
 ): Promise<IdentityLinkState | null> {
   const key = cacheKey(claims.issuer, claims.subject, session.tenantId);
   const cached = linkCache.get(key);
@@ -285,21 +280,21 @@ export async function resolveIdentityLink(
 
   const work = (async () => {
     try {
-      const state = await ensureIdentityLink(db, session, claims, deps);
+      const state = await ensureIdentityLink(db, session, claims);
       if (state) {
         linkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
       }
       return state;
     } catch (error) {
-      // The one exception to "never throws": a refusal is the ANSWER, not a
-      // failure to compute one. Swallowing it would hand out exactly the
-      // session this module exists to withhold.
       if (error instanceof NotInvitedError) throw error;
+      if (error instanceof SessionAuthenticationUnavailableError) throw error;
       console.warn(
-        "[auth] Resolving the identity ↔ Relation link failed; the session carries no Relation:",
+        "[auth] Resolving the identity ↔ Relation link failed; refusing the session (503):",
         error instanceof Error ? error.message : String(error),
       );
-      return null;
+      throw new SessionAuthenticationUnavailableError(
+        "The identity link could not be resolved; try again.",
+      );
     } finally {
       inFlight.delete(key);
     }
@@ -312,7 +307,6 @@ async function ensureIdentityLink(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   claims: IdentityClaims,
-  deps: IdentityLinkDeps,
 ): Promise<IdentityLinkState | null> {
   const displayName = displayNameFromClaims(claims);
 
@@ -368,10 +362,22 @@ async function ensureIdentityLink(
     ) {
       throw notInvited(session, claims);
     }
-    return {
-      ...found.state,
-      invitedRoles: await gracePeriodRoles(db, session, claims, found.state),
-    };
+    // A linked member with no roles here and a still-pending invitation: the
+    // acceptance did not land when the link was made (a 503 on the way), or an
+    // administrator linked them by hand while an invitation was open. Accept
+    // now, so a person invited as an administrator does not stay on the
+    // just-in-time minimum until somebody notices.
+    if (found.state.status === "linked" && found.state.roles.length === 0 && claims.email) {
+      const invitation = await withDbSession(db, session, (trx) =>
+        findPendingInvitation(trx, session.tenantId, claims.email!),
+      );
+      if (invitation) {
+        const roles = await acceptPendingInvitation(db, session, invitation, found.identityId);
+        invalidateIdentityLink(claims.issuer, claims.subject, session.tenantId);
+        if (roles) return { ...found.state, needsRoleAssignment: false, roles };
+      }
+    }
+    return found.state;
   }
 
   // Phase 2: nobody in this tenant carries this e-mail. Being able to sign in
@@ -385,551 +391,23 @@ async function ensureIdentityLink(
     : null;
   if (!invitation) throw notInvited(session, claims);
 
-  // Invited: create the person as a Relation. Through the generated CRUD path
-  // (role-ungated variant: this is a runtime surface acting for a person who
-  // may hold no Relations role), so the rows get the same defaults, events and
-  // projections a REST create would.
-  const relationId = await createPersonRelation(db, session, claims, displayName);
-  if (!relationId) return null;
-
-  const linked = await withDbSession(db, session, async (trx) => {
-    const inserted = await insertLinkRow(trx, {
-      identityId: found.identityId,
-      tenantId: session.tenantId,
-      status: "linked",
-      relationId,
-      candidateRelationId: null,
-      linkedBy: "jit",
-      // Set now, cleared below the moment the invited role actually lands in
-      // Keycloak. It stays true only when that grant could not be made, which
-      // is exactly when an administrator still has to run `set_member_role`.
-      needsRoleAssignment: true,
-    });
-    if (inserted) {
-      console.info(
-        `[auth] Linked identity ${found.identityId} (${claims.subject}) to new Relation ` +
-          `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time, on ` +
-          `invitation ${invitation.id}).`,
-      );
-    }
-    // Lost a race with another replica: keep its link, ours stays an ordinary
-    // unlinked Relation an administrator can clean up.
-    const row = inserted ?? (await readLinkRow(trx, found.identityId, session.tenantId));
-    return row ? toState(row, claims) : null;
-  });
-  if (!linked) return null;
-
-  // The role they were invited as, granted now rather than waiting for an
-  // administrator to notice them in `list_pending_members`. `acceptInvitation`
-  // never throws: admission was already decided by the invitation, so a
-  // Keycloak that cannot be reached costs them the role, not the session.
-  const accepted = await acceptInvitation(
-    db,
-    session,
-    invitation,
-    claims.subject,
-    deps.grantInvitedRole,
-  );
-  if (!accepted.granted) return linked;
-
-  await clearNeedsRoleAssignment(db, session, found.identityId);
-  return {
-    ...linked,
-    needsRoleAssignment: false,
-    // Their token was minted before the grant above, so it cannot carry these
-    // roles. Carried on the session instead until the token catches up — see
-    // INVITED_ROLE_GRACE_MS.
-    invitedRoles: accepted.clientRoles,
-  };
+  // Invited: the Relation, the link with the invited roles and the claim of
+  // the invitation, in one transaction (identity-link-admission.ts).
+  return admitInvitedPerson(db, session, claims, found.identityId, invitation);
 }
 
-/** The refusal, worded so the person knows what has to happen next. */
-function notInvited(session: SessionInput, claims: IdentityClaims): NotInvitedError {
-  console.warn(
-    `[auth] Refused ${claims.email ?? claims.subject} (${claims.issuer}) in tenant ` +
-      `${session.tenantId}: nobody in this organization carries that e-mail and no ` +
-      "invitation is pending.",
-  );
-  return new NotInvitedError(
-    claims.email
-      ? `${claims.email} has not been invited to this organization. Being able to sign in is ` +
-        "not enough on its own: an organization administrator invites you by e-mail " +
-        "(invite_employee), and you follow the link in that mail. Ask an administrator of " +
-        "this organization to invite this address, then sign in again."
-      : "This sign-in carries no e-mail address, so it cannot be matched to an invitation or " +
-        "to anybody in this organization. An organization administrator has to link it " +
-        "explicitly (link_identity) before it can be used here.",
-  );
-}
-
-/**
- * The invited client roles to carry on a session whose token predates the
- * grant. Only asked while the link itself is younger than the grace window —
- * acceptance happens at link time, so an older link can never be inside it,
- * and the overwhelmingly common case costs no query at all.
- */
-async function gracePeriodRoles(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  claims: IdentityClaims,
-  state: IdentityLinkState,
-): Promise<readonly string[]> {
-  if (!claims.email || state.status !== "linked") return [];
-  if (!state.linkedAtMs || Date.now() - state.linkedAtMs > INVITED_ROLE_GRACE_MS) return [];
-  const role = await withDbSession(db, session, (trx) =>
-    invitedRoleWithinGrace(trx, session.tenantId, claims.email!),
-  );
-  return role ? employeeInvitationRoleGrants(role) : [];
-}
-
-async function createPersonRelation(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  claims: IdentityClaims,
-  displayName: string,
-): Promise<string | null> {
-  const tables = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
-  const relations = tables.get("erp.relations");
-  if (!relations) {
-    console.warn("[auth] This deployment has no Relation entity; identities stay unlinked.");
-    return null;
-  }
-  const relation = await createGeneratedEntityForTable(db, session, relations, {
-    displayName,
-    relationType: "person",
-    status: "active",
-  });
-  const relationId = String(relation.id);
-
-  const persons = tables.get("erp.natural_persons");
-  const personName = personNameFromClaims(claims);
-  if (persons && personName) {
-    await createGeneratedEntityForTable(db, session, persons, {
-      ...personName,
-      relationId,
-    });
-  }
-  const contactDetails = tables.get("erp.contact_details");
-  if (contactDetails && claims.email) {
-    await createGeneratedEntityForTable(db, session, contactDetails, {
-      relationId,
-      type: "email",
-      value: claims.email,
-      isPrimary: true,
-      status: "active",
-    });
-  }
-  return relationId;
-}
-
-// ---------------------------------------------------------------------------
-// Explicit linking
-
-/**
- * The person confirms the candidate the just-in-time path recorded for them.
- * Only ever links the SESSION's own identity, and only to its recorded
- * candidate — there is no argument to point it elsewhere.
- */
-export async function confirmPendingLink(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput & { relation?: IdentityLinkState | null | undefined },
-): Promise<IdentityLinkState> {
-  const current = session.relation;
-  if (!current) {
-    throw new HttpError(
-      409,
-      "NO_IDENTITY_LINK",
-      "This session carries no identity to confirm; sign in with a bearer token.",
-    );
-  }
-  if (current.status === "linked") {
-    throw new HttpError(409, "ALREADY_LINKED", "You are already linked to a Relation.");
-  }
-  if (!current.candidateRelationId) {
-    throw new HttpError(
-      409,
-      "NO_CANDIDATE",
-      "There is no candidate Relation to confirm; ask an organization administrator to link you.",
-    );
-  }
-  const state = await withDbSession(db, session, async (trx) => {
-    const row = await readLinkRow(trx, current.identityId, session.tenantId);
-    if (!row || row.status !== "pending_confirmation" || !row.candidate_relation_id) {
-      throw new HttpError(409, "NO_CANDIDATE", "There is no pending candidate to confirm any more.");
-    }
-    await sql`
-      update platform.identity_relations
-         set status = 'linked',
-             relation_id = ${row.candidate_relation_id},
-             candidate_relation_id = null,
-             linked_at = now(),
-             linked_by = ${current.identityId},
-             updated_at = now()
-       where identity_id = ${current.identityId}
-         and tenant_id = ${session.tenantId}
-    `.execute(trx);
-    const updated = await readLinkRow(trx, current.identityId, session.tenantId);
-    if (!updated) throw new HttpError(500, "INTERNAL", "The link vanished while confirming it.");
-    return toState(updated, current);
-  });
-  console.info(
-    `[auth] Identity ${state.identityId} confirmed its link to Relation ${state.relationId} ` +
-      `in tenant ${session.tenantId}.`,
-  );
-  invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
-  session.relation = state;
-  return state;
-}
-
-export type LinkIdentityInput = {
-  /** E-mail of the identity to link (as its identity provider reports it). */
-  identityEmail?: string | undefined;
-  /** Or the identity id, e.g. from a pending row. */
-  identityId?: string | undefined;
-  relationId: string;
-};
-
-/**
- * An organization administrator links an identity to a Relation of the
- * tenant. The identity must be known here — it has signed in to this tenant
- * before (linked or pending) — which is also what the RLS on
- * platform.identities lets the administrator see. Re-linking an already
- * linked identity is allowed: the previous Relation is left as it is.
- */
-export async function linkIdentityToRelation(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput & { relation?: IdentityLinkState | null | undefined },
-  input: LinkIdentityInput,
-): Promise<IdentityLinkState> {
-  if (!(session.roles ?? []).includes(IDENTITY_LINK_ADMIN_ROLE)) {
-    throw new HttpError(
-      403,
-      "FORBIDDEN",
-      `Linking identities requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
-    );
-  }
-  const actor = session.relation?.identityId ?? session.userId;
-  const email = input.identityEmail?.trim();
-  if (!email && !input.identityId) {
-    throw new HttpError(400, "VALIDATION", "Give identityEmail or identityId.");
-  }
-  if (!UUID_PATTERN.test(input.relationId)) {
-    throw new HttpError(400, "VALIDATION", "relationId must be a UUID.");
-  }
-  if (input.identityId && !UUID_PATTERN.test(input.identityId)) {
-    throw new HttpError(400, "VALIDATION", "identityId must be a UUID.");
-  }
-
-  const state = await withDbSession(db, session, async (trx) => {
-    const identities = await sql<{
-      id: string;
-      issuer: string;
-      subject: string;
-      email: string | null;
-      display_name: string | null;
-    }>`
-      select i.id, i.issuer, i.subject, i.email, i.display_name
-        from platform.identities i
-       where ${
-         input.identityId
-           ? sql`i.id = ${input.identityId}`
-           : sql`lower(i.email) = lower(${email ?? ""})`
-       }
-         and exists (
-           select 1 from platform.identity_relations ir
-            where ir.identity_id = i.id and ir.tenant_id = ${session.tenantId}
-         )
-       order by i.created_at
-    `.execute(trx);
-    if (identities.rows.length === 0) {
-      throw new HttpError(
-        404,
-        "IDENTITY_NOT_FOUND",
-        "No identity with that e-mail has signed in to this organization yet.",
-      );
-    }
-    if (identities.rows.length > 1) {
-      throw new HttpError(
-        409,
-        "IDENTITY_AMBIGUOUS",
-        "Several identities carry that e-mail; pass identityId instead.",
-      );
-    }
-    const identity = identities.rows[0]!;
-
-    const relation = await sql<{ id: string; display_name: string }>`
-      select id, display_name from erp.relations
-       where id = ${input.relationId} and tenant_id = ${session.tenantId}
-    `.execute(trx);
-    if (relation.rows.length === 0) {
-      throw new HttpError(404, "RELATION_NOT_FOUND", "No such Relation in this organization.");
-    }
-
-    await sql`
-      insert into platform.identity_relations
-        (identity_id, tenant_id, status, relation_id, candidate_relation_id, linked_at, linked_by)
-      values
-        (${identity.id}, ${session.tenantId}, 'linked', ${input.relationId}, null, now(), ${actor})
-      on conflict (identity_id, tenant_id) do update
-        set status = 'linked',
-            relation_id = excluded.relation_id,
-            candidate_relation_id = null,
-            linked_at = now(),
-            linked_by = excluded.linked_by,
-            updated_at = now()
-    `.execute(trx);
-    const row = await readLinkRow(trx, identity.id, session.tenantId);
-    if (!row) throw new HttpError(500, "INTERNAL", "The link vanished while writing it.");
-    return toState(row, { issuer: identity.issuer, subject: identity.subject });
-  });
-  console.info(
-    `[auth] ${actor} linked identity ${state.identityId} to Relation ${state.relationId} ` +
-      `in tenant ${session.tenantId}.`,
-  );
-  invalidateIdentityLink(state.issuer, state.subject, session.tenantId);
-  if (session.relation?.identityId === state.identityId) session.relation = state;
-  return state;
-}
-
-// ---------------------------------------------------------------------------
-// SQL
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-type LinkRow = {
-  identity_id: string;
-  issuer: string;
-  subject: string;
-  status: IdentityLinkStatus;
-  relation_id: string | null;
-  candidate_relation_id: string | null;
-  linked_by: string | null;
-  display_name: string | null;
-  relation_type: string | null;
-  needs_role_assignment: boolean;
-  linked_at: Date | string | null;
-};
-
-async function upsertIdentity(
-  trx: Transaction<DB>,
-  claims: IdentityClaims,
-  displayName: string,
-): Promise<string> {
-  const result = await sql<{ id: string }>`
-    insert into platform.identities (issuer, subject, email, display_name)
-    values (${claims.issuer}, ${claims.subject}, ${claims.email ?? null}, ${displayName})
-    on conflict (issuer, subject) do update
-      set email = coalesce(excluded.email, platform.identities.email),
-          display_name = coalesce(excluded.display_name, platform.identities.display_name),
-          updated_at = case
-            when excluded.email is distinct from platform.identities.email
-              or excluded.display_name is distinct from platform.identities.display_name
-            then now() else platform.identities.updated_at end
-    returning id
-  `.execute(trx);
-  return result.rows[0]!.id;
-}
-
-async function readLinkRow(
-  trx: Transaction<DB>,
-  identityId: string,
-  tenantId: string,
-): Promise<LinkRow | null> {
-  const result = await sql<LinkRow>`
-    select ir.identity_id, i.issuer, i.subject, ir.status, ir.relation_id,
-           ir.candidate_relation_id, ir.linked_by, ir.needs_role_assignment, ir.linked_at,
-           coalesce(linked.display_name, candidate.display_name) as display_name,
-           coalesce(linked.relation_type, candidate.relation_type) as relation_type
-      from platform.identity_relations ir
-      join platform.identities i on i.id = ir.identity_id
-      left join erp.relations linked
-        on linked.id = ir.relation_id and linked.tenant_id = ir.tenant_id
-      left join erp.relations candidate
-        on candidate.id = ir.candidate_relation_id and candidate.tenant_id = ir.tenant_id
-     where ir.identity_id = ${identityId} and ir.tenant_id = ${tenantId}
-  `.execute(trx);
-  return result.rows[0] ?? null;
-}
-
-async function insertLinkRow(
-  trx: Transaction<DB>,
-  row: {
-    identityId: string;
-    tenantId: string;
-    status: IdentityLinkStatus;
-    relationId: string | null;
-    candidateRelationId: string | null;
-    linkedBy: string | null;
-    needsRoleAssignment?: boolean;
-  },
-): Promise<LinkRow | null> {
-  const inserted = await sql<{ identity_id: string }>`
-    insert into platform.identity_relations
-      (identity_id, tenant_id, status, relation_id, candidate_relation_id, linked_at, linked_by,
-       needs_role_assignment)
-    values
-      (${row.identityId}, ${row.tenantId}, ${row.status}, ${row.relationId},
-       ${row.candidateRelationId},
-       ${row.status === "linked" ? sql`now()` : null}, ${row.linkedBy},
-       ${row.needsRoleAssignment ?? false})
-    on conflict (identity_id, tenant_id) do nothing
-    returning identity_id
-  `.execute(trx);
-  if (inserted.rows.length === 0) return null;
-  return readLinkRow(trx, row.identityId, row.tenantId);
-}
-
-async function relationsWithEmail(
-  trx: Transaction<DB>,
-  tenantId: string,
-  email: string,
-): Promise<Array<{ id: string; display_name: string }>> {
-  const result = await sql<{ id: string; display_name: string }>`
-    select distinct r.id, r.display_name
-      from erp.relations r
-      join erp.contact_details cd
-        on cd.relation_id = r.id and cd.tenant_id = r.tenant_id
-     where r.tenant_id = ${tenantId}
-       and lower(cd.type) = 'email'
-       and lower(cd.value) = lower(${email})
-  `.execute(trx);
-  return result.rows;
-}
-
-function toState(row: LinkRow, identity: { issuer: string; subject: string }): IdentityLinkState {
-  return {
-    identityId: row.identity_id,
-    issuer: row.issuer ?? identity.issuer,
-    subject: row.subject ?? identity.subject,
-    status: row.status,
-    relationId: row.relation_id,
-    displayName: row.display_name,
-    relationType: row.relation_type,
-    candidateRelationId: row.candidate_relation_id,
-    linkedBy: row.linked_by,
-    needsRoleAssignment: row.needs_role_assignment,
-    // Filled in by the callers that can afford the lookup; a state read
-    // straight from a row carries none, which is the honest default.
-    invitedRoles: [],
-    linkedAtMs: row.linked_at ? new Date(row.linked_at).getTime() : null,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Org-admin: pending role assignment
-
-export type PendingRoleAssignment = {
-  identityId: string;
-  relationId: string;
-  displayName: string | null;
-  email: string | null;
-  /** When this identity first signed in and got JIT-linked (linked_at). */
-  firstSignInAt: string;
-};
-
-/**
- * Identities in this tenant awaiting a real role — `list_pending_members`.
- * Gated the same way `linkIdentityToRelation` is: the caller must hold
- * Organization.All.ReadWrite. Ordered oldest first, so the longest-waiting
- * new hire surfaces first.
- */
-export async function listPendingRoleAssignments(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-): Promise<PendingRoleAssignment[]> {
-  if (!(session.roles ?? []).includes(IDENTITY_LINK_ADMIN_ROLE)) {
-    throw new HttpError(
-      403,
-      "FORBIDDEN",
-      `Listing pending members requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
-    );
-  }
-  return withDbSession(db, session, async (trx) => {
-    const result = await sql<{
-      identity_id: string;
-      relation_id: string;
-      display_name: string | null;
-      email: string | null;
-      linked_at: string;
-    }>`
-      select ir.identity_id, ir.relation_id, r.display_name, i.email, ir.linked_at
-        from platform.identity_relations ir
-        join platform.identities i on i.id = ir.identity_id
-        join erp.relations r on r.id = ir.relation_id and r.tenant_id = ir.tenant_id
-       where ir.tenant_id = ${session.tenantId}
-         and ir.needs_role_assignment
-         and ir.status = 'linked'
-       order by ir.linked_at asc
-    `.execute(trx);
-    return result.rows.map((row) => ({
-      identityId: row.identity_id,
-      relationId: row.relation_id,
-      displayName: row.display_name,
-      email: row.email,
-      firstSignInAt: row.linked_at,
-    }));
-  });
-}
-
-/**
- * Clear `needs_role_assignment` once an administrator has assigned a real
- * role (`set_member_role`). Idempotent, and scoped to this tenant by the same
- * RLS every other write here relies on.
- */
-export async function clearNeedsRoleAssignment(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  identityId: string,
-): Promise<void> {
-  await withDbSession(db, session, async (trx) => {
-    await sql`
-      update platform.identity_relations
-         set needs_role_assignment = false,
-             updated_at = now()
-       where identity_id = ${identityId}
-         and tenant_id = ${session.tenantId}
-    `.execute(trx);
-  });
-  const row = await withDbSession(db, session, (trx) => readLinkRow(trx, identityId, session.tenantId));
-  if (row) invalidateIdentityLink(row.issuer, row.subject, session.tenantId);
-}
-
-/** Resolve a relationId to its linked identityId in this tenant, for `set_member_role`. */
-export async function identityIdForRelation(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  relationId: string,
-): Promise<string | null> {
-  return withDbSession(db, session, async (trx) => {
-    const result = await sql<{ identity_id: string }>`
-      select identity_id from platform.identity_relations
-       where tenant_id = ${session.tenantId} and relation_id = ${relationId} and status = 'linked'
-    `.execute(trx);
-    return result.rows[0]?.identity_id ?? null;
-  });
-}
-
-/**
- * The Keycloak (issuer, subject) behind an identityId that has a row in this
- * tenant — `set_member_role` needs `subject` (Keycloak's own user id, the
- * `sub` claim) to call the role-mappings admin endpoint. Scoped to the
- * caller's tenant by the same join every other read here uses, so an
- * administrator cannot probe an identity from outside their organization.
- */
-export async function identityKeycloakSubject(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  identityId: string,
-): Promise<{ issuer: string; subject: string } | null> {
-  return withDbSession(db, session, async (trx) => {
-    const result = await sql<{ issuer: string; subject: string }>`
-      select i.issuer, i.subject
-        from platform.identities i
-        join platform.identity_relations ir
-          on ir.identity_id = i.id and ir.tenant_id = ${session.tenantId}
-       where i.id = ${identityId}
-    `.execute(trx);
-    return result.rows[0] ?? null;
-  });
-}
+// The SQL lives in ./identity-link-store.ts and the explicit-linking and
+// administration half in ./identity-link-admin.ts; both re-exported so every
+// importer keeps one address.
+export { readLinkRow, toState, UUID_PATTERN, writeMembershipRoles, type LinkRow } from "./identity-link-store.js";
+// The explicit-linking and administration half lives in
+// ./identity-link-admin.ts; re-exported so every importer keeps one address.
+export {
+  confirmPendingLink,
+  identityIdForRelation,
+  linkIdentityToRelation,
+  listPendingRoleAssignments,
+  setMembershipRoles,
+  type LinkIdentityInput,
+  type PendingRoleAssignment,
+} from "./identity-link-admin.js";

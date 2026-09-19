@@ -158,11 +158,14 @@ describe("per-organization MCP resource admission", () => {
     expect(challenge).not.toContain("insufficient_scope");
   });
 
-  test("a bound Zerocopter token is admitted on Zerocopter's resource (and only then reaches the database)", async () => {
+  test("a bound Zerocopter token is admitted on Zerocopter's resource (and only then needs the database)", async () => {
     const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
     const response = await call("/api/mcp/organizations/zerocopter-dev", token);
+    // Bound, and then refused as a person no membership record can be read
+    // for: this app has no database, and a person is never admitted from the
+    // token alone (503, not a session).
     expect(response.statusCode).toBe(503);
-    expect(JSON.parse(response.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
+    expect(JSON.parse(response.body).error.code).toBe("AUTHENTICATION_UNAVAILABLE");
   });
 
   test("the same Zerocopter token on Hubble's resource is refused like an unknown alias", async () => {
@@ -203,7 +206,7 @@ describe("per-organization MCP resource admission", () => {
     // ...and the legacy mount still takes it (tenant from the membership).
     const legacy = await call(MCP_MOUNT_PATH, token);
     expect(legacy.statusCode).toBe(503);
-    expect(JSON.parse(legacy.body).error.code).toBe("DATABASE_NOT_CONFIGURED");
+    expect(JSON.parse(legacy.body).error.code).toBe("AUTHENTICATION_UNAVAILABLE");
   });
 
   test("the audience Keycloak mints for a non-member is not admission", async () => {

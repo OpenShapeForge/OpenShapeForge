@@ -22,6 +22,7 @@
  * integration.
  */
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { sameTenantId } from "../organization-binding.js";
 import type { SecretKeyring } from "../../platform/secrets.js";
 import type { SessionScope, TrustedSessionContext } from "../trusted-context.js";
 import { exchangeForToken } from "./exchange.js";
@@ -111,7 +112,7 @@ export async function resolveApiKeySession(
   // was issued under. A mismatch means the realm client was re-pointed at
   // another organization after provisioning — the credential is stale in a way
   // that would otherwise cross a tenant boundary.
-  if (identity.tenantId !== key.tenantId) {
+  if (!sameTenantId(identity.tenantId, key.tenantId)) {
     console.warn(
       "[auth] API key tenant does not match its service account's tid; rejecting.",
     );
@@ -123,7 +124,7 @@ export async function resolveApiKeySession(
 
   // Telemetry, never a gate: a failed write here must not fail an authenticated
   // request, and nothing on the hot path reads these columns back.
-  void recordApiKeyUse(deps.db, key.keyId).catch((error: unknown) => {
+  void recordApiKeyUse(deps.db, { keyId: key.keyId, tenantId: key.tenantId }).catch((error: unknown) => {
     console.warn(
       "[auth] Recording API key use failed:",
       error instanceof Error ? error.message : String(error),

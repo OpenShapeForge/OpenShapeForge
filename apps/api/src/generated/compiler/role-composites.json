@@ -1,0 +1,227 @@
+{
+  "openshapeforge": {
+    "realm": {},
+    "clients": {
+      "erp-provider": {
+        "org_admin": [
+          {
+            "client": "erp-provider",
+            "role": "General.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "General.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Organization.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Organization.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.ApiKeys.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.Jobs.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.ReadWrite"
+          }
+        ],
+        "org_employee": [
+          {
+            "client": "erp-provider",
+            "role": "General.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.Read"
+          }
+        ],
+        "Test.Admin": [
+          {
+            "client": "erp-provider",
+            "role": "Agreements.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "CaseFile.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Cases.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Energy.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Finance.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "General.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "HousingAllocation.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Maintenance.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Organization.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.ApiKeys.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.Jobs.Manage"
+          },
+          {
+            "client": "erp-provider",
+            "role": "ProjectDevelopment.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Quality.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "RealEstate.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.Delete"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.ReadWrite"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.Bsn.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "workflow-admin"
+          },
+          {
+            "client": "openshapeforge-audit",
+            "role": "Audit.Logs.All"
+          },
+          {
+            "client": "openshapeforge-audit",
+            "role": "Audit.Settings.Manage"
+          },
+          {
+            "client": "openshapeforge-auth-api",
+            "role": "Organization.EmployeeRoles.ReadWrite"
+          },
+          {
+            "client": "openshapeforge-auth-api",
+            "role": "Organization.Employees.ReadWrite"
+          },
+          {
+            "client": "openshapeforge-auth-api",
+            "role": "Organization.Positions.ReadWrite"
+          },
+          {
+            "client": "openshapeforge-auth-api",
+            "role": "Relations.RelationGroups.ReadWrite"
+          },
+          {
+            "client": "openshapeforge-knowledge-base",
+            "role": "KnowledgeBase.All"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Admin"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Conversation.Assign"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Conversation.ReadAll"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Conversation.Reassign"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Conversation.ViewQueue"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.OptIn.Read"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.OptIn.Write"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Read"
+          },
+          {
+            "client": "openshapeforge-messaging",
+            "role": "Messaging.Send"
+          },
+          {
+            "client": "openshapeforge-support",
+            "role": "Support.Issues.All"
+          },
+          {
+            "client": "openshapeforge-timeline",
+            "role": "Timeline.All"
+          },
+          {
+            "client": "openshapeforge-timeline",
+            "role": "Timeline.Events.ReadAll"
+          }
+        ],
+        "Test.ReadOnly": [
+          {
+            "client": "erp-provider",
+            "role": "General.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.Read"
+          }
+        ],
+        "Test.User": [
+          {
+            "client": "erp-provider",
+            "role": "General.All.Read"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Relations.All.ReadWrite"
+          }
+        ]
+      }
+    }
+  },
+  "openshapeforge-control": {
+    "realm": {},
+    "clients": {}
+  }
+}

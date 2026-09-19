@@ -197,6 +197,32 @@ bootstrap admin, e.g. a container with port 8080 mapped to 18080:
 KC_URL=http://127.0.0.1:18080 KC_INTERNAL_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-acceptance.ts
 ```
 
+## What a login carries, and what the organization decides
+
+A verified token proves an identity (`iss` + `sub`) and, through Keycloak's
+Organization Membership mapper, which organizations that account belongs to.
+It does **not** carry what the person may do in any of them. OpenShapeForge
+records that per organization, on the membership row
+(`platform.identity_relations.roles`): an organization administrator's
+invitation admits the person as `org_admin` or `org_employee`, and
+`set_member_role` changes it later — for that organization only. What such a
+persona lets the person do is still the realm's decision: a realm that
+declares `org_admin` as a composite (a host's `clientRoleComposites`) has it
+expanded by the API from the generated realm export, member for member, the
+way Keycloak would have expanded it into the token. The same
+account invited as an administrator by organization A and as an employee by
+organization B is exactly that in each.
+
+The consequence for anyone administering a realm: a client role granted to a
+**user** in Keycloak is user-wide and is therefore never read for a person's
+session. It would otherwise apply in every organization the account is a
+member of, which is the cross-organization escalation this design closes.
+Realm roles remain issuer-wide grants for operator-level rights (`Platform.*`),
+and service accounts — configured service identities and the per-tenant
+API-key clients — keep their client roles, because their clients belong to one
+tenant. A federated login changes none of this: the broker admits the person
+to the realm, the organization's invitation admits them to the organization.
+
 ## How a human signs in: passkeys, and how a federated login fits
 
 Every realm this compiler generates is **passkey-only for humans**. It is worth

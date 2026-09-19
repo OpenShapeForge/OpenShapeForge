@@ -22,7 +22,11 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
-import { rewriteShortAddress } from "../mcp/organization-resource.js";
+import {
+  ORGANIZATION_ADDRESS_HEADER,
+  organizationAddressOf,
+  rewriteShortAddress,
+} from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
   createDatabaseRuntime,
@@ -219,6 +223,16 @@ export function createApiApp(options: {
     // A first segment that is one of the server's own names, or not a
     // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
     rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
+  });
+
+  // The alias a short address named, for the session resolver (see
+  // ORGANIZATION_ADDRESS_HEADER). Set from the ORIGINAL URL on every request
+  // and deleted otherwise, so the header is the server's and never the
+  // client's.
+  app.addHook("onRequest", async (request) => {
+    const alias = organizationAddressOf(request.originalUrl);
+    if (alias) request.headers[ORGANIZATION_ADDRESS_HEADER] = alias;
+    else delete request.headers[ORGANIZATION_ADDRESS_HEADER];
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { __setRoleCompositesForTests, expandRoleComposites, personSessionRoles } from "./person-roles.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -228,6 +229,79 @@ describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("returns realm roles unchanged when the token carries no client roles", () => {
     expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
+  });
+});
+
+describe("personSessionRoles (a person's effective roles in the selected organization)", () => {
+  const identity = {
+    roles: ["default-roles-openshapeforge", "Platform.ApiKeys.Manage"],
+    clientRoles: { "erp-provider": ["Organization.All.ReadWrite", "Relations.All.ReadWrite"] },
+  };
+  const realm = "openshapeforge";
+
+  test("unions realm roles with the membership row's roles and ignores client roles entirely", () => {
+    expect(
+      personSessionRoles(identity, { roles: ["General.All.Read"], needsRoleAssignment: false }, realm),
+    ).toEqual(["General.All.Read", "Platform.ApiKeys.Manage", "default-roles-openshapeforge"]);
+  });
+
+  test("a membership row with nothing recorded yet yields the just-in-time minimum beside the realm roles", () => {
+    expect(personSessionRoles(identity, { roles: [], needsRoleAssignment: true }, realm)).toEqual([
+      "General.All.Read",
+      "Platform.ApiKeys.Manage",
+      "default-roles-openshapeforge",
+    ]);
+  });
+
+  test("the shipped realm expands the personas the invitation path records", () => {
+    // From the generated artifact, i.e. the base authorization.yaml: what an
+    // invited administrator and employee actually hold.
+    expect(expandRoleComposites(realm, ["org_admin"])).toEqual([
+      "General.All.Read",
+      "General.All.ReadWrite",
+      "Organization.All.Read",
+      "Organization.All.ReadWrite",
+      "Platform.ApiKeys.Manage",
+      "Platform.Jobs.Manage",
+      "Relations.All.Read",
+      "Relations.All.ReadWrite",
+      "org_admin",
+    ]);
+    expect(expandRoleComposites(realm, ["org_employee"])).toEqual([
+      "General.All.Read",
+      "Relations.All.Read",
+      "org_employee",
+    ]);
+    // The dev layer's administrator composite, transitively.
+    expect(expandRoleComposites(realm, ["Test.Admin"])).toContain("Relations.All.ReadWrite");
+    // A realm the artifact does not know expands nothing.
+    expect(expandRoleComposites("other-realm", ["org_admin"])).toEqual(["org_admin"]);
+    expect(expandRoleComposites(undefined, ["org_admin"])).toEqual(["org_admin"]);
+  });
+
+  test("expansion follows each member into its own namespace, never a same-named role of another client", () => {
+    __setRoleCompositesForTests({
+      [realm]: {
+        realm: { reader: [{ client: "erp-provider", role: "Records.Read" }] },
+        clients: {
+          "erp-provider": {
+            org_admin: [{ realm: "reader" }, { client: "other", role: "org_admin" }],
+          },
+          other: {
+            // The persona of ANOTHER client named org_admin: reachable only
+            // as a member, and its own members are other's, not erp-provider's.
+            org_admin: [{ client: "other", role: "x" }],
+            "Records.Read": [{ client: "other", role: "leak" }],
+          },
+        },
+      },
+    });
+    try {
+      expect(expandRoleComposites(realm, ["org_admin"])).toEqual(["Records.Read", "org_admin", "reader", "x"]);
+      expect(expandRoleComposites(realm, ["org_admin"], "other")).toEqual(["org_admin", "x"]);
+    } finally {
+      __setRoleCompositesForTests(null);
+    }
   });
 });
 

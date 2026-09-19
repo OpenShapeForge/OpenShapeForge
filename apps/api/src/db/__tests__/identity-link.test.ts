@@ -14,14 +14,15 @@ import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
+import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
+import { personSessionRoles } from "../../auth/person-roles.js";
 import {
   __resetIdentityLinkForTests,
-  clearNeedsRoleAssignment,
   confirmPendingLink,
   identityIdForRelation,
-  identityKeycloakSubject,
   linkIdentityToRelation,
   listPendingRoleAssignments,
+  setMembershipRoles,
   resolveIdentityLink,
   sessionRelation,
   type IdentityClaims,
@@ -123,15 +124,10 @@ function sessionFor(who: Person, tenantId: string, relation?: IdentityLinkState 
 }
 
 /** Resolve like identity.ts does on a bearer session, bypassing the cache. */
-async function signIn(
-  db: Kysely<DB>,
-  who: Person,
-  tenantId: string,
-  deps: Parameters<typeof resolveIdentityLink>[3] = {},
-) {
+async function signIn(db: Kysely<DB>, who: Person, tenantId: string) {
   __resetIdentityLinkForTests();
   const session = sessionFor(who, tenantId);
-  const state = await resolveIdentityLink(db, session, who.claims, deps);
+  const state = await resolveIdentityLink(db, session, who.claims);
   session.relation = state;
   return { session, state };
 }
@@ -185,10 +181,9 @@ async function invitedSignIn(
   adminDb: Kysely<DB>,
   who: Person,
   tenantId: string,
-  deps: Parameters<typeof resolveIdentityLink>[3] = {},
 ) {
   await invite(adminDb, tenantId, who.claims.email!);
-  return signIn(appDb, who, tenantId, deps);
+  return signIn(appDb, who, tenantId);
 }
 
 async function invitationRows(adminDb: Kysely<DB>, tenantId: string) {
@@ -198,18 +193,6 @@ async function invitationRows(adminDb: Kysely<DB>, tenantId: string) {
        where tenant_id = ${tenantId} order by invited_at
     `.execute(adminDb)
   ).rows;
-}
-
-/** Records what the admission path asked Keycloak to grant, granting nothing. */
-function recordingGrant(effectiveRoles?: readonly string[]) {
-  const grants: Array<{ subject: string; clientId: string; roles: readonly string[] }> = [];
-  return {
-    grants,
-    grantInvitedRole: async (subject: string, clientId: string, roles: readonly string[]) => {
-      grants.push({ subject, clientId, roles });
-      return effectiveRoles;
-    },
-  };
 }
 
 async function linkRows(adminDb: Kysely<DB>, tenantId: string) {
@@ -361,41 +344,28 @@ describe("identity ↔ Relation link", () => {
   );
 
   test(
-    "an invited person is admitted with the invited role, without an administrator",
+    "an invited person is admitted with the invited role recorded for THIS tenant, without an administrator",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
         const dave = person("dave");
         await invite(adminDb, tenantA, "Dave@Example.com", "org_admin");
-        const keycloak = recordingGrant([
-          "Organization.All.ReadWrite",
-          "org_admin",
-          "Relations.All.ReadWrite",
-        ]);
 
-        const { state } = await signIn(appDb, dave, tenantA, {
-          grantInvitedRole: keycloak.grantInvitedRole,
-        });
+        const { state } = await signIn(appDb, dave, tenantA);
 
         expect(state).toMatchObject({ status: "linked", linkedBy: "jit" });
-        // The invited role was granted on the audience client, against the
-        // token's own subject — the address matched case-insensitively.
-        expect(keycloak.grants).toEqual([
-          {
-            subject: dave.claims.subject,
-            clientId: "erp-provider",
-            roles: ["Organization.All.ReadWrite"],
-          },
-        ]);
-        // No administrator has to finish this: the flag is already cleared,
-        // and the role rides on this very session because the token that
-        // admitted them predates the grant.
+        // The address matched case-insensitively, and the invited role is on
+        // the membership row — nothing was asked of Keycloak, and nothing on
+        // the session comes from the token's client roles.
         expect(state!.needsRoleAssignment).toBe(false);
-        expect(state!.invitedRoles).toEqual([
-          "Organization.All.ReadWrite",
-          "org_admin",
-          "Relations.All.ReadWrite",
-        ]);
+        expect(state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        const row = (
+          await sql<{ roles: string[]; needs_role_assignment: boolean }>`
+            select roles, needs_role_assignment from platform.identity_relations
+             where identity_id = ${state!.identityId} and tenant_id = ${tenantA}
+          `.execute(adminDb)
+        ).rows[0]!;
+        expect(row).toEqual({ roles: ["Organization.All.ReadWrite", "org_admin"], needs_role_assignment: false });
         expect(
           await listPendingRoleAssignments(
             appDb,
@@ -407,38 +377,179 @@ describe("identity ↔ Relation link", () => {
         expect(await invitationRows(adminDb, tenantA)).toMatchObject([
           { email: "Dave@Example.com", role: "org_admin", status: "accepted" },
         ]);
+
+        // A later session reads the same roles back from the row.
+        const again = await signIn(appDb, dave, tenantA);
+        expect(again.state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
       });
     },
     TEST_TIMEOUT,
   );
 
   test(
-    "when the role cannot be granted the person still gets in, for an administrator to finish",
+    "a linked member without roles and a still-pending invitation is accepted on the next sign-in",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const fay = person("fay");
+        await invite(adminDb, tenantA, "fay@example.com", "org_admin");
+        // The state a 503 between the link and the acceptance would have left
+        // behind (they are one transaction now, so it is written by hand):
+        // linked, no roles, invitation still pending.
+        const relationId = await existingRelation(adminDb, tenantA, "Fay Tester", "fay-other@example.com");
+        await sql`
+          insert into platform.identities (issuer, subject, email, display_name)
+          values (${ISSUER}, ${fay.claims.subject}, 'fay@example.com', 'Fay Tester')
+        `.execute(adminDb);
+        await sql`
+          insert into platform.identity_relations
+            (identity_id, tenant_id, status, relation_id, linked_at, linked_by)
+          select id, ${tenantA}, 'linked', ${relationId}, now(), 'jit'
+            from platform.identities where subject = ${fay.claims.subject}
+        `.execute(adminDb);
+
+        const { state } = await signIn(appDb, fay, tenantA);
+        expect(state).toMatchObject({
+          status: "linked",
+          relationId,
+          needsRoleAssignment: false,
+          roles: ["Organization.All.ReadWrite", "org_admin"],
+        });
+        expect(await invitationRows(adminDb, tenantA)).toMatchObject([{ status: "accepted" }]);
+        // And it sticks: the next session reads it from the row.
+        expect((await signIn(appDb, fay, tenantA)).state!.roles).toEqual([
+          "Organization.All.ReadWrite",
+          "org_admin",
+        ]);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "an invited org_admin holds what the realm's composite says, and can update a Relation with it",
+    async () => {
+      // The generated realm composites of the shipped base authorization —
+      // the same artifact production runs on, no injected table.
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const gina = person("gina");
+        const hal = person("hal");
+        await invite(adminDb, tenantA, "gina@example.com", "org_admin");
+        await invite(adminDb, tenantA, "hal@example.com", "org_employee");
+        const relationId = await existingRelation(adminDb, tenantA, "Some Client", "client@example.com");
+
+        const admin = await signIn(appDb, gina, tenantA);
+        const adminRoles = personSessionRoles({ roles: [] }, admin.state!, "openshapeforge");
+        expect(adminRoles).toContain("Relations.All.ReadWrite");
+        expect(adminRoles).toContain("Organization.All.ReadWrite");
+        expect(adminRoles).toContain("org_admin");
+        const updated = await updateGeneratedEntity(
+          appDb,
+          { tenantId: tenantA, userId: gina.claims.subject, roles: adminRoles, groups: [], scope: "tenant" },
+          { table: "erp.relations", id: relationId, values: { displayName: "Renamed Client" } },
+        );
+        expect(updated).toMatchObject({ display_name: "Renamed Client" });
+
+        const employee = await signIn(appDb, hal, tenantA);
+        const employeeRoles = personSessionRoles({ roles: [] }, employee.state!, "openshapeforge");
+        expect(employeeRoles).toEqual(["General.All.Read", "Relations.All.Read", "org_employee"]);
+        await expect(
+          updateGeneratedEntity(
+            appDb,
+            { tenantId: tenantA, userId: hal.claims.subject, roles: employeeRoles, groups: [], scope: "tenant" },
+            { table: "erp.relations", id: relationId, values: { displayName: "Nope" } },
+          ),
+        ).rejects.toThrow(/Not authorized to update Relation/);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "the invitation is claimed at admission: a revoke in between refuses, a role change in between wins",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        // Revoked after the lookup but before the claim: simulated by revoking
+        // right away — the claim (UPDATE ... RETURNING) is what decides, and
+        // it finds nothing pending. Nothing is created.
+        const ian = person("ian");
+        await invite(adminDb, tenantA, "ian@example.com", "org_admin");
+        await sql`
+          update platform.employee_invitations set status = 'revoked', revoked_at = now()
+           where tenant_id = ${tenantA} and lower(email) = 'ian@example.com'
+        `.execute(adminDb);
+        await expect(signIn(appDb, ian, tenantA)).rejects.toMatchObject({ code: "NOT_INVITED" });
+        expect(await linkRows(adminDb, tenantA)).toEqual([]);
+        expect(
+          (await sql<{ n: string }>`select count(*)::text as n from erp.relations where tenant_id = ${tenantA}`.execute(adminDb)).rows[0]!.n,
+        ).toBe("0");
+
+        // The role recorded is the role the row holds when it is claimed.
+        const jo = person("jo");
+        await invite(adminDb, tenantA, "jo@example.com", "org_admin");
+        await sql`
+          update platform.employee_invitations set role = 'org_employee'
+           where tenant_id = ${tenantA} and lower(email) = 'jo@example.com' and status = 'pending'
+        `.execute(adminDb);
+        const { state } = await signIn(appDb, jo, tenantA);
+        expect(state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect(await invitationRows(adminDb, tenantA)).toMatchObject([
+          { email: "ian@example.com", status: "revoked" },
+          { email: "jo@example.com", role: "org_employee", status: "accepted" },
+        ]);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "roles are per organization: an org_admin of A is what B invited them as, and nothing in a third",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
         const erin = person("erin");
         await invite(adminDb, tenantA, "erin@example.com", "org_admin");
+        await invite(adminDb, tenantB, "erin@example.com", "org_employee");
 
-        const { state } = await signIn(appDb, erin, tenantA, {
-          grantInvitedRole: async () => {
-            throw new Error("Keycloak is having a day");
-          },
-        });
+        const inA = await signIn(appDb, erin, tenantA);
+        const inB = await signIn(appDb, erin, tenantB);
+        expect(inA.state!.identityId).toBe(inB.state!.identityId);
+        expect(inA.state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+        expect(inB.state!.roles).toEqual(["General.All.Read", "org_employee"]);
 
-        // Admission was decided by the invitation, so a Keycloak that cannot
-        // be reached costs the role, not the session.
-        expect(state).toMatchObject({ status: "linked", needsRoleAssignment: true });
-        expect(state!.invitedRoles).toEqual([]);
-        // The invitation stays pending — it was not spent on a role that
-        // never landed — and the person shows up for `set_member_role`, which
-        // is exactly what an administrator would have had to do anyway.
-        expect(await invitationRows(adminDb, tenantA)).toMatchObject([{ status: "pending" }]);
-        const waiting = await listPendingRoleAssignments(
-          appDb,
-          sessionFor(person("admin-x", ADMIN_ROLES), tenantA),
-        );
-        expect(waiting.map((row) => row.email)).toEqual(["erin@example.com"]);
+        // The grant in A is not visible from B's row, through RLS as the app
+        // role and through the resolver alike.
+        const rolesSeenFrom = (tenantId: string) =>
+          withDbSession(appDb, sessionFor(erin, tenantId), async (trx) =>
+            (
+              await sql<{ tenant_id: string; roles: string[] }>`
+                select tenant_id, roles from platform.identity_relations
+                 where identity_id = ${inA.state!.identityId}
+              `.execute(trx)
+            ).rows,
+          );
+        expect(await rolesSeenFrom(tenantB)).toEqual([
+          { tenant_id: tenantB, roles: ["General.All.Read", "org_employee"] },
+        ]);
+        expect(await rolesSeenFrom(tenantA)).toEqual([
+          { tenant_id: tenantA, roles: ["Organization.All.ReadWrite", "org_admin"] },
+        ]);
+
+        // The person cannot raise their own roles: the row is theirs to
+        // confirm and to carry onboarding state on, never to grant with.
+        await expect(
+          withDbSession(appDb, sessionFor(erin, tenantB), (trx) =>
+            sql`
+              update platform.identity_relations
+                 set roles = array['Organization.All.ReadWrite']::text[]
+               where identity_id = ${inB.state!.identityId} and tenant_id = ${tenantB}
+            `.execute(trx),
+          ),
+        ).rejects.toMatchObject({ errno: "42501" });
+        __resetIdentityLinkForTests();
+        expect((await signIn(appDb, erin, tenantB)).state!.roles).toEqual(["General.All.Read", "org_employee"]);
       });
     },
     TEST_TIMEOUT,
@@ -674,69 +785,39 @@ describe("identity ↔ Relation link", () => {
   );
 
   test(
-    "needs_role_assignment is set only on the JIT-create path, listed for admins, and cleared by set_member_role",
+    "a member with no roles here is listed for admins and set_member_role records them, for this tenant only",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
         const admin = person("admin", ADMIN_ROLES);
+        const adminInA = await invitedSignIn(appDb, adminDb, admin, tenantA);
 
-        // 1. A brand-new identity: no existing Relation carries the e-mail, so
-        //    ensureIdentityLink creates one. needs_role_assignment must be true.
+        // 1. An invited person arrives with roles, so nothing is pending.
         const ivy = person("ivy");
         const first = await invitedSignIn(appDb, adminDb, ivy, tenantA);
-        expect(first.state!.needsRoleAssignment).toBe(true);
-        expect(
-          (await linkRows(adminDb, tenantA)).find((row) => row.identity_id === first.state!.identityId),
-        ).toMatchObject({ status: "linked" });
-        const flagRow = (
-          await sql<{ needs_role_assignment: boolean }>`
-            select needs_role_assignment from platform.identity_relations
-             where identity_id = ${first.state!.identityId} and tenant_id = ${tenantA}
-          `.execute(adminDb)
-        ).rows[0]!;
-        expect(flagRow.needs_role_assignment).toBe(true);
+        expect(first.state!.needsRoleAssignment).toBe(false);
+        expect(first.state!.roles).toEqual(["General.All.Read", "org_employee"]);
 
-        // 2. A later session for the SAME identity reads the flag back as
-        //    still true (the cache was reset by signIn, so this is a fresh read).
-        const second = await signIn(appDb, ivy, tenantA);
-        expect(second.state!.needsRoleAssignment).toBe(true);
-
-        // 3. The pending_confirmation path (an existing Relation, e-mail
-        //    match, nobody confirmed) must NEVER set the flag — it attaches to
-        //    a Relation someone already has, so there is nothing to grant.
-        const existingEmail = "jack@example.com";
-        await existingRelation(adminDb, tenantA, "Jack Existing", existingEmail);
+        // 2. A person whose Relation already existed is linked by confirming
+        //    the candidate. That link carries NO roles yet — nobody invited
+        //    them as anything — so they run on the just-in-time minimum and
+        //    show up for the administrator.
+        await existingRelation(adminDb, tenantA, "Jack Existing", "jack@example.com");
         const jack = person("jack");
-        const jackFirst = await invitedSignIn(appDb, adminDb, jack, tenantA);
+        const jackFirst = await signIn(appDb, jack, tenantA);
         expect(jackFirst.state!.status).toBe("pending_confirmation");
         expect(jackFirst.state!.needsRoleAssignment).toBe(false);
+        // Roles cannot be recorded on an unconfirmed link: nobody verified
+        // that Relation is theirs yet.
+        await expect(
+          setMembershipRoles(appDb, adminInA.session, jackFirst.state!.identityId, ["org_admin"]),
+        ).rejects.toMatchObject({ code: "IDENTITY_NOT_LINKED" });
+        const confirmed = await confirmPendingLink(appDb, jackFirst.session);
+        expect(confirmed).toMatchObject({ status: "linked", roles: [], needsRoleAssignment: true });
 
-        // 4. link_identity (an administrator linking explicitly) must not set
-        //    it either. Reuse jack's identity from step 3 (pending_confirmation,
-        //    needs_role_assignment already false) so this exercises the
-        //    administrator-link write itself, not a JIT create beforehand.
-        const adminInA = await invitedSignIn(appDb, adminDb, admin, tenantA);
-        const jackTarget = await existingRelation(adminDb, tenantA, "Jack Target", "jack-target@example.com");
-        const linked = await linkIdentityToRelation(appDb, adminInA.session, {
-          identityEmail: "jack@example.com",
-          relationId: jackTarget,
-        });
-        expect(linked.needsRoleAssignment).toBe(false);
-
-        // 5. list_pending_members (listPendingRoleAssignments): ivy shows up
-        //    (needs_role_assignment, linked) — note admin's OWN identity is
-        //    also JIT-created here and therefore also pending, since the flag
-        //    is about how the Relation came to exist, not about the JWT's
-        //    roles. Jack does not show up (still pending_confirmation, never
-        //    linked at all).
         const pending = await listPendingRoleAssignments(appDb, adminInA.session);
-        expect(pending.map((row) => row.identityId)).not.toContain(jackFirst.state!.identityId);
-        const ivyPending = pending.find((row) => row.identityId === first.state!.identityId);
-        expect(ivyPending).toMatchObject({
-          identityId: first.state!.identityId,
-          relationId: first.state!.relationId,
-          email: "ivy@example.com",
-        });
+        expect(pending.map((row) => row.identityId)).toEqual([jackFirst.state!.identityId]);
+        expect(pending[0]).toMatchObject({ email: "jack@example.com" });
 
         // Gated the same way link_identity is: a non-admin session is refused.
         const plainSession = sessionFor(person("plain"), tenantA);
@@ -744,265 +825,63 @@ describe("identity ↔ Relation link", () => {
           code: "FORBIDDEN",
         });
 
-        // 6. identityIdForRelation / identityKeycloakSubject: what
-        //    set_member_role resolves before calling the Keycloak admin API.
-        const resolvedIdentityId = await identityIdForRelation(
+        // 3. set_member_role, by relationId: writes the roles on THIS tenant's
+        //    row and clears the flag. No Keycloak call is made — there is no
+        //    control plane configured in this test, and none is needed.
+        expect(
+          await identityIdForRelation(appDb, adminInA.session, confirmed.relationId!),
+        ).toBe(jackFirst.state!.identityId);
+        const result = await callIdentityLinkTool(
+          "set_member_role",
+          { relationId: confirmed.relationId, role: "org_admin" },
           appDb,
           adminInA.session,
-          first.state!.relationId!,
         );
-        expect(resolvedIdentityId).toBe(first.state!.identityId);
-        const subject = await identityKeycloakSubject(appDb, adminInA.session, first.state!.identityId);
-        expect(subject).toEqual({ issuer: ISSUER, subject: ivy.claims.subject });
-
-        // 7. clearNeedsRoleAssignment: what set_member_role does after granting
-        //    the real Keycloak role. Idempotent, tenant-scoped, and it
-        //    invalidates the cache so the NEXT session re-reads the flag.
-        await clearNeedsRoleAssignment(appDb, adminInA.session, first.state!.identityId);
-        const clearedRow = (
-          await sql<{ needs_role_assignment: boolean }>`
-            select needs_role_assignment from platform.identity_relations
-             where identity_id = ${first.state!.identityId} and tenant_id = ${tenantA}
+        expect(result?.isError).not.toBe(true);
+        expect(result?.structuredContent).toMatchObject({
+          granted: true,
+          role: "org_admin",
+          roles: ["Organization.All.ReadWrite", "org_admin"],
+        });
+        const row = (
+          await sql<{ needs_role_assignment: boolean; roles: string[] }>`
+            select needs_role_assignment, roles from platform.identity_relations
+             where identity_id = ${jackFirst.state!.identityId} and tenant_id = ${tenantA}
           `.execute(adminDb)
         ).rows[0]!;
-        expect(clearedRow.needs_role_assignment).toBe(false);
+        expect(row).toEqual({ needs_role_assignment: false, roles: ["Organization.All.ReadWrite", "org_admin"] });
 
+        // The next session carries them, and the person is no longer pending.
         __resetIdentityLinkForTests();
-        const third = await signIn(appDb, ivy, tenantA);
-        expect(third.state!.needsRoleAssignment).toBe(false);
+        const third = await signIn(appDb, jack, tenantA);
+        expect(third.state).toMatchObject({ needsRoleAssignment: false, roles: ["Organization.All.ReadWrite", "org_admin"] });
         expect(
           (await listPendingRoleAssignments(appDb, adminInA.session)).map((row) => row.identityId),
-        ).not.toContain(first.state!.identityId);
+        ).toEqual([]);
 
-        // Clearing again is a no-op, not an error.
-        await expect(
-          clearNeedsRoleAssignment(appDb, adminInA.session, first.state!.identityId),
-        ).resolves.toBeUndefined();
+        // 4. Demotion is the same call, and it replaces rather than adds.
+        const demoted = await callIdentityLinkTool(
+          "set_member_role",
+          { identityId: jackFirst.state!.identityId, role: "org_employee" },
+          appDb,
+          adminInA.session,
+        );
+        expect(demoted?.structuredContent).toMatchObject({ roles: ["General.All.Read", "org_employee"] });
 
-        // Cross-tenant: an administrator of B never sees A's pending members
-        // (only their own tenant's — here, their own JIT-created identity).
+        // 5. Tenant B is untouched. Jack's row in B (once he is invited there)
+        //    carries B's grant, and B's administrator cannot reach his row in
+        //    A: it is invisible from B, so the update finds nothing.
         const adminInB = await invitedSignIn(appDb, adminDb, person("admin2", ADMIN_ROLES), tenantB);
-        const pendingInB = await listPendingRoleAssignments(appDb, adminInB.session);
-        expect(pendingInB.map((row) => row.identityId)).not.toContain(first.state!.identityId);
-        expect(pendingInB.every((row) => row.identityId !== jackFirst.state!.identityId)).toBe(true);
+        expect(await listPendingRoleAssignments(appDb, adminInB.session)).toEqual([]);
+        const jackInB = await invitedSignIn(appDb, adminDb, jack, tenantB);
+        expect(jackInB.state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        await expect(
+          setMembershipRoles(appDb, adminInB.session, jackFirst.state!.identityId, ["Organization.All.ReadWrite", "org_admin"]),
+        ).resolves.toMatchObject({ roles: ["Organization.All.ReadWrite", "org_admin"] });
+        __resetIdentityLinkForTests();
+        expect((await signIn(appDb, jack, tenantA)).state!.roles).toEqual(["General.All.Read", "org_employee"]);
+        expect((await signIn(appDb, jack, tenantB)).state!.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
       });
-    },
-    TEST_TIMEOUT,
-  );
-
-  test(
-    "set_member_role grants the Keycloak role, then forces the person to sign in again",
-    async () => {
-      const previousEnv = {
-        OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL,
-        KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API:
-          process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID,
-        OPENSHAPEFORGE_PUBLIC_ORIGIN: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
-      };
-      const originalFetch = globalThis.fetch;
-      process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL = "http://keycloak.test:8080";
-      process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API = "test-secret";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER = "http://keycloak.test:8080/realms/control";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI =
-        "http://keycloak.test:8080/realms/control/protocol/openid-connect/certs";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID = "operator-gateway";
-      process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://tenant.example.com";
-
-      // Records every admin-API call so the test can assert BOTH that the
-      // logout happens (not just that it doesn't blow up) AND that it happens
-      // strictly after the role-mapping POST, not before or instead of it.
-      const calls: Array<{ url: string; method: string }> = [];
-      globalThis.fetch = (async (input: unknown, init: RequestInit = {}) => {
-        const url = String(input);
-        const method = init.method ?? "GET";
-        if (url.includes("/protocol/openid-connect/token")) {
-          return Response.json({ access_token: "service-account-token", expires_in: 900 });
-        }
-        calls.push({ url, method });
-        if (url.endsWith("/clients?clientId=erp-provider")) {
-          return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
-        }
-        // Client roles are read page by page (#610); one page here.
-        if (/\/clients\/erp-provider-uuid\/roles(\?first=\d+&max=\d+)?$/.test(url)) {
-          return Response.json([{ id: "role-1", name: "General.All.Read" }]);
-        }
-        if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {
-          return new Response(null, { status: 204 });
-        }
-        if (url.endsWith("/logout") && method === "POST") {
-          return new Response(null, { status: 204 });
-        }
-        throw new Error(`Unexpected admin call in test: ${method} ${url}`);
-      }) as unknown as typeof globalThis.fetch;
-
-      try {
-        await withScratchDb(async (appDb, adminDb) => {
-          await seedTenants(adminDb);
-          const admin = person("mallory-admin", ADMIN_ROLES);
-          const nora = person("nora");
-
-          const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
-          // Nora's own admission could not reach Keycloak, so her invited role
-          // was never granted and she is still waiting for one. That is the
-          // only state `set_member_role` exists for now that admission grants
-          // the invited role by itself.
-          const noraSignIn = await invitedSignIn(appDb, adminDb, nora, tenantA, {
-            grantInvitedRole: async () => {
-              throw new Error("Keycloak was unreachable when she first signed in");
-            },
-          });
-          expect(noraSignIn.state!.needsRoleAssignment).toBe(true);
-
-          const result = await callIdentityLinkTool(
-            "set_member_role",
-            { identityId: noraSignIn.state!.identityId, role: "org_employee" },
-            appDb,
-            adminSignIn.session,
-          );
-
-          expect(result?.isError).not.toBe(true);
-          expect(result?.structuredContent).toMatchObject({
-            granted: true,
-            role: "org_employee",
-            forcedReauthentication: true,
-          });
-
-          // The role-mapping POST and the logout POST both happened, and the
-          // logout came strictly after the grant — set_member_role must not
-          // end the person's session before their new role is actually on it.
-          const roleMappingIndex = calls.findIndex(
-            (call) =>
-              call.url.includes("/role-mappings/clients/erp-provider-uuid") &&
-              call.method === "POST",
-          );
-          const logoutIndex = calls.findIndex(
-            (call) => call.url.endsWith("/logout") && call.method === "POST",
-          );
-          expect(roleMappingIndex).toBeGreaterThanOrEqual(0);
-          expect(logoutIndex).toBeGreaterThan(roleMappingIndex);
-          expect(calls[logoutIndex]!.url).toBe(
-            `http://keycloak.test:8080/admin/realms/openshapeforge/users/${nora.claims.subject}/logout`,
-          );
-
-          // And the durable side effect (the flag) is cleared regardless of
-          // the logout outcome, since it is not part of the same transaction.
-          const clearedRow = (
-            await sql<{ needs_role_assignment: boolean }>`
-              select needs_role_assignment from platform.identity_relations
-               where identity_id = ${noraSignIn.state!.identityId} and tenant_id = ${tenantA}
-            `.execute(adminDb)
-          ).rows[0]!;
-          expect(clearedRow.needs_role_assignment).toBe(false);
-        });
-      } finally {
-        globalThis.fetch = originalFetch;
-        for (const [key, value] of Object.entries(previousEnv)) {
-          if (value === undefined) delete (process.env as Record<string, string | undefined>)[key];
-          else process.env[key] = value;
-        }
-      }
-    },
-    TEST_TIMEOUT,
-  );
-
-  test(
-    "set_member_role still reports the grant as successful when forcing re-authentication fails",
-    async () => {
-      const previousEnv = {
-        OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL,
-        KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API:
-          process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI,
-        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID:
-          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID,
-        OPENSHAPEFORGE_PUBLIC_ORIGIN: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
-      };
-      const originalFetch = globalThis.fetch;
-      process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL = "http://keycloak.test:8080";
-      process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API = "test-secret";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER = "http://keycloak.test:8080/realms/control";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI =
-        "http://keycloak.test:8080/realms/control/protocol/openid-connect/certs";
-      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID = "operator-gateway";
-      process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://tenant.example.com";
-
-      globalThis.fetch = (async (input: unknown, init: RequestInit = {}) => {
-        const url = String(input);
-        const method = init.method ?? "GET";
-        if (url.includes("/protocol/openid-connect/token")) {
-          return Response.json({ access_token: "service-account-token", expires_in: 900 });
-        }
-        if (url.endsWith("/clients?clientId=erp-provider")) {
-          return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
-        }
-        // Client roles are read page by page (#610); one page here.
-        if (/\/clients\/erp-provider-uuid\/roles(\?first=\d+&max=\d+)?$/.test(url)) {
-          return Response.json([{ id: "role-1", name: "General.All.Read" }]);
-        }
-        if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {
-          return new Response(null, { status: 204 });
-        }
-        if (url.endsWith("/logout") && method === "POST") {
-          // Simulate a Keycloak hiccup on the logout call specifically.
-          return Response.json({ error: "server_error" }, { status: 500 });
-        }
-        throw new Error(`Unexpected admin call in test: ${method} ${url}`);
-      }) as unknown as typeof globalThis.fetch;
-
-      try {
-        await withScratchDb(async (appDb, adminDb) => {
-          await seedTenants(adminDb);
-          const admin = person("oswald-admin", ADMIN_ROLES);
-          const paula = person("paula");
-
-          const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
-          // As above: she is only waiting for a role because her own admission
-          // could not reach Keycloak.
-          const paulaSignIn = await invitedSignIn(appDb, adminDb, paula, tenantA, {
-            grantInvitedRole: async () => {
-              throw new Error("Keycloak was unreachable when she first signed in");
-            },
-          });
-
-          const result = await callIdentityLinkTool(
-            "set_member_role",
-            { identityId: paulaSignIn.state!.identityId, role: "org_employee" },
-            appDb,
-            adminSignIn.session,
-          );
-
-          // The role grant itself succeeded, so the tool call is NOT an
-          // error — a failed best-effort logout must never roll this back.
-          expect(result?.isError).not.toBe(true);
-          expect(result?.structuredContent).toMatchObject({
-            granted: true,
-            forcedReauthentication: false,
-          });
-
-          const clearedRow = (
-            await sql<{ needs_role_assignment: boolean }>`
-              select needs_role_assignment from platform.identity_relations
-               where identity_id = ${paulaSignIn.state!.identityId} and tenant_id = ${tenantA}
-            `.execute(adminDb)
-          ).rows[0]!;
-          expect(clearedRow.needs_role_assignment).toBe(false);
-        });
-      } finally {
-        globalThis.fetch = originalFetch;
-        for (const [key, value] of Object.entries(previousEnv)) {
-          if (value === undefined) delete (process.env as Record<string, string | undefined>)[key];
-          else process.env[key] = value;
-        }
-      }
     },
     TEST_TIMEOUT,
   );

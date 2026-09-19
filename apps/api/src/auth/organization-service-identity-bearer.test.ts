@@ -37,7 +37,11 @@ test("real JWT verification admits only a configured service client without pers
     expect(session.roles).toContain("Relations.All.ReadWrite");
     expect(session.relation).toBeNull();
     expect(personStoreAccess).toBe(0);
-    await resolveSessionContext(new Headers({ authorization: `Bearer ${await mint("web")}` }), { db });
+    // A person goes through the enrollment store — and when that store fails,
+    // the answer is 503, not a session built from the token alone.
+    await expect(
+      resolveSessionContext(new Headers({ authorization: `Bearer ${await mint("web")}` }), { db }),
+    ).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
     expect(personStoreAccess).toBeGreaterThan(0);
   } finally {
     server.stop(true);

@@ -34,8 +34,16 @@ import {
 
 export const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
-/** `https://host`, honouring a proxy's `x-forwarded-proto`. */
+/**
+ * The origin resources are named under. `OPENSHAPEFORGE_PUBLIC_ORIGIN` when the
+ * deployment states it — the audience a token must carry is then a value the
+ * operator chose, not one a caller can steer with a Host or
+ * `x-forwarded-proto` header. Only a deployment that states no public origin
+ * falls back to the request, honouring a proxy's `x-forwarded-proto`.
+ */
 export function requestOrigin(request: FastifyRequest): string {
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
   const forwardedProto = request.headers["x-forwarded-proto"];
   const proto =
     (typeof forwardedProto === "string" ? forwardedProto.split(",")[0]?.trim() : undefined) ??

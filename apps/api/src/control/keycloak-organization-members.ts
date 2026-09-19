@@ -157,8 +157,9 @@ export type KeycloakOrganizationMembersClient = {
 };
 
 export type KeycloakTenantMemberAdminClient = KeycloakOrganizationMembersClient & {
-  listMembers(organizationId: string, clientId: string): Promise<KeycloakOrganizationMember[]>;
-  getMember(organizationId: string, userId: string, clientId: string): Promise<KeycloakOrganizationMember | null>;
+  /** The organization's members as Keycloak knows them: identity facts only. A member's roles in the tenant are the tenant's own record (auth/identity-link.ts), never read from here. */
+  listMembers(organizationId: string): Promise<KeycloakOrganizationMember[]>;
+  getMember(organizationId: string, userId: string): Promise<KeycloakOrganizationMember | null>;
   listCredentials(userId: string): Promise<KeycloakMemberCredential[]>;
   deleteCredential(userId: string, credentialId: string): Promise<boolean>;
   removeMember(organizationId: string, userId: string): Promise<boolean>;
@@ -173,7 +174,6 @@ export type KeycloakOrganizationMember = {
   lastName: string | null;
   enabled: boolean;
   emailVerified: boolean;
-  roles: string[];
 };
 
 export type KeycloakMemberCredential = {
@@ -390,20 +390,7 @@ export function createKeycloakOrganizationMembersClient(
     );
   }
 
-  async function roleClientUuid(clientId: string): Promise<string> {
-    const { body } = await request(`${realmBase}/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" }, "resolving the role client", "resolve_role_client");
-    const matches = Array.isArray(body) ? body.filter((row) => row?.clientId === clientId && typeof row?.id === "string") : [];
-    if (matches.length !== 1) throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", "The organization role client is missing or ambiguous.");
-    return matches[0].id;
-  }
-
-  async function memberRoles(userId: string, clientUuid: string): Promise<string[]> {
-    const { body } = await request(`${realmBase}/users/${encodeURIComponent(userId)}/role-mappings/clients/${encodeURIComponent(clientUuid)}/composite`, { method: "GET" }, "listing member roles", "list_member_roles");
-    if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid member roles response.");
-    return body.flatMap((row) => typeof row?.name === "string" ? [row.name] : []).sort();
-  }
-
-  function toMember(row: unknown, roles: string[]): KeycloakOrganizationMember | null {
+  function toMember(row: unknown): KeycloakOrganizationMember | null {
     const value = (row ?? {}) as Record<string, unknown>;
     if (typeof value.id !== "string" || !value.id) return null;
     return {
@@ -414,7 +401,6 @@ export function createKeycloakOrganizationMembersClient(
       lastName: optionalString(value.lastName),
       enabled: value.enabled !== false,
       emailVerified: value.emailVerified === true,
-      roles,
     };
   }
 
@@ -445,15 +431,13 @@ export function createKeycloakOrganizationMembersClient(
         "Organization member listing exceeds the supported bound.",
       );
     },
-    async listMembers(organizationId, clientId) {
-      const clientUuid = await roleClientUuid(clientId);
+    async listMembers(organizationId) {
       const members: KeycloakOrganizationMember[] = [];
       for (let first = 0; first < 10000; first += 100) {
         const { body } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`, { method: "GET" }, "listing organization members", "list_organization_members");
         if (!Array.isArray(body)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization members response.");
         for (const row of body) {
-          const userId = typeof row?.id === "string" ? row.id : "";
-          const member = toMember(row, userId ? await memberRoles(userId, clientUuid) : []);
+          const member = toMember(row);
           if (!member) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member response.");
           members.push(member);
         }
@@ -462,8 +446,8 @@ export function createKeycloakOrganizationMembersClient(
       throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Organization member listing exceeds the supported bound.");
     },
 
-    async getMember(organizationId, userId, clientId) {
-      return (await this.listMembers(organizationId, clientId)).find((member) => member.memberId === userId) ?? null;
+    async getMember(organizationId, userId) {
+      return (await this.listMembers(organizationId)).find((member) => member.memberId === userId) ?? null;
     },
 
     async listCredentials(userId) {

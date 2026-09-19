@@ -41,6 +41,9 @@ import {
   recordOf,
 } from "./e2e/gql-shapes.js";
 import { isCanonical, isEntityBackedCreate } from "./e2e/operations.js";
+import { membershipRolesOf } from "./e2e/keycloak.js";
+import { realmFromIssuer } from "../../auth/identity.js";
+import { expandRoleComposites } from "../../auth/person-roles.js";
 
 registerSuiteLifecycle();
 const keycloakToken = await getKeycloakToken();
@@ -59,6 +62,7 @@ beforeAll(() =>
 );
 
 type TokenClaims = {
+  iss?: string;
   tid?: string;
   sub?: string;
   realm_access?: { roles?: string[] };
@@ -69,12 +73,17 @@ function claimsOf(token: string): TokenClaims {
   return JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as TokenClaims;
 }
 
-/** Every role a bearer token carries, realm and client alike. */
+/**
+ * The roles the API gives a session for this token: realm roles from the
+ * token, organization roles from the membership row the harness seeded for
+ * it (`seedKeycloakTokenPeople`), expanded through the realm's composites the
+ * way auth/person-roles.ts does. Never the token's `resource_access`.
+ */
 function tokenRoles(token: string): Set<string> {
   const payload = claimsOf(token);
   return new Set([
     ...(payload.realm_access?.roles ?? []),
-    ...Object.values(payload.resource_access ?? {}).flatMap((client) => client.roles ?? []),
+    ...expandRoleComposites(realmFromIssuer(payload.iss), membershipRolesOf(token)),
   ]);
 }
 

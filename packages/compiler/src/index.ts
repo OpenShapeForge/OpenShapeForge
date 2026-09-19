@@ -11,6 +11,11 @@ import {
 } from "./authoring/generate-ui-artifacts.js";
 import { generateAuthoringKeycloakArtifacts } from "./authoring/generate-keycloak-artifacts.js";
 import {
+  buildRoleComposites,
+  renderRoleComposites,
+  ROLE_COMPOSITES_PATH,
+} from "./authoring/role-composites.js";
+import {
   activeManifestSource,
   loadActivePlatformCompile,
   resolveActiveAuthoringDir,
@@ -151,6 +156,14 @@ export {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+export {
+  buildRoleComposites,
+  renderRoleComposites,
+  ROLE_COMPOSITES_PATH,
+  type RealmRoleComposites,
+  type RoleCompositeMember,
+  type RoleCompositesByRealm,
+} from "./authoring/role-composites.js";
 export type {
   AuthoringConfig,
   AuthoringSettingValue,
@@ -406,6 +419,7 @@ export async function collectAllArtifacts(
       : plugin.executionCompatibility;
     return authored ? [{ plugin: plugin.name, contribution: authored }] : [];
   });
+  const keycloakArtifacts = generateAuthoringKeycloakArtifacts(authoringDir);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
@@ -504,6 +518,12 @@ export async function collectAllArtifacts(
         path: SETTINGS_POLICY_PATH,
         contents: renderSettingsPolicy(settingsPolicy),
       },
+      // What each realm role expands to, so the API can expand a person's
+      // recorded organization roles the way Keycloak expands a token's.
+      {
+        path: ROLE_COMPOSITES_PATH,
+        contents: renderRoleComposites(buildRoleComposites(keycloakArtifacts)),
+      },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     // Headless hosts get the API's empty persisted-operation manifest from the
@@ -523,7 +543,7 @@ export async function collectAllArtifacts(
           }]
         : []),
     ],
-    keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
+    keycloak: keycloakArtifacts,
     plugins: [],
   };
 

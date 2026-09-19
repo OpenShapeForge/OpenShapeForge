@@ -208,9 +208,9 @@ function requiredString(input: Record<string, unknown>, field: string): string {
 }
 
 function memberDeps(context: ControlHandlerContext) {
-  if (!context.runtime.clients?.identityMembers || !context.runtime.clients.memberRoles) throw new ControlAuthorizationError("CONTROL_PLANE_NOT_CONFIGURED", "Tenant identity administration is not configured.");
+  if (!context.runtime.clients?.identityMembers) throw new ControlAuthorizationError("CONTROL_PLANE_NOT_CONFIGURED", "Tenant identity administration is not configured.");
   return { db: context.db, administrator: context.session.administrator,
-    members: context.runtime.clients.identityMembers, memberRoles: context.runtime.clients.memberRoles };
+    members: context.runtime.clients.identityMembers };
 }
 
 /** What whoami says a session can use when the transport did not say. */

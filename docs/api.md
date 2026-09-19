@@ -589,11 +589,19 @@ the variable is configured, a missing or unlisted `azp` is rejected while
 issuer and audience checks remain in force; when it is absent, existing bearer
 behavior is unchanged. A configured empty value admits no client.
 Claims used: `tid` (tenant UUID — the test fixture sets it as a user attribute
-mapped to the `tid` claim), `sub` (user id), `realm_access.roles` **unioned
-with every `resource_access.<client>.roles` list** (Keycloak expands realm and
-audience-client composites into per-client entity roles under
-`resource_access`, so realm roles alone would never match the entity role
-lists), and `groups` (requires the group-membership protocol mapper).
+mapped to the `tid` claim), `sub` (user id), `realm_access.roles`, and
+`groups` (requires the group-membership protocol mapper). **A person's
+organization roles do not come from the token.** They are the tenant's own
+record, `platform.identity_relations.roles` for that (identity, tenant) — the
+persona an invitation admitted them as (`org_admin`, `org_employee`) and the
+OSF baseline beside it — expanded by the API through the realm's composites
+(`generated/compiler/role-composites.json`, emitted beside the realm export)
+exactly as Keycloak would have expanded them, and unioned with the token's
+realm roles (`apps/api/src/auth/person-roles.ts`). `resource_access` is read
+for **service identities only** (configured service accounts and API-key
+exchanges, whose clients belong to one tenant): a client role on a Keycloak
+user would be user-wide and apply in every organization the account is a
+member of.
 
 **Tenant from Organization membership.** A token with no `tid` names its
 tenant through Keycloak's own `organization` claim instead — the Organization

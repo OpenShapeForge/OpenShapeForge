@@ -296,6 +296,15 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
           ${sql.lit(APP_ROLE)}
         );
       end if;
+      -- The bypass audit trail is append-only for the runtime: rows are
+      -- inserted, completed by the bypass session that opened them
+      -- (migrations/api-keys.ts), and never removed by the application.
+      if to_regclass('platform.system_bypass_audit') is not null then
+        execute format(
+          'revoke delete on platform.system_bypass_audit from %I',
+          ${sql.lit(APP_ROLE)}
+        );
+      end if;
     end
     $$;
   `.execute(db);

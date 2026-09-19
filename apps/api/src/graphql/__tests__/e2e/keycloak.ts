@@ -2,6 +2,7 @@
 
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../../generated/db/types.js";
+import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../../db/session.js";
 
 type KeycloakTokenStore = {
   defaultToken: Promise<string | null> | null;
@@ -9,11 +10,41 @@ type KeycloakTokenStore = {
   tokens: Map<string, Promise<string | null>>;
 };
 
+type TokenPersonClaims = {
+  iss?: string;
+  sub?: string;
+  tid?: string;
+  email?: string;
+  name?: string;
+  preferred_username?: string;
+  realm_access?: { roles?: string[] };
+  resource_access?: Record<string, { roles?: string[] }>;
+};
+
+function claimsOf(token: string): TokenPersonClaims {
+  return JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString()) as TokenPersonClaims;
+}
+
+/**
+ * The organization roles the tenant records for a realm test user: the
+ * audience client's roles as the dev realm assigns them to that user. A
+ * person's session never reads `resource_access` (auth/person-roles.ts); this
+ * is what `seedKeycloakTokenPeople` writes onto the membership row instead,
+ * so the dev realm's `users[].clientRoles` keep meaning "what this test
+ * identity may do in its tenant".
+ */
+export function membershipRolesOf(token: string): string[] {
+  const audience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE ?? "erp-provider";
+  return [...new Set(claimsOf(token).resource_access?.[audience]?.roles ?? [])].sort();
+}
+
 /**
  * Give the real-realm identities used by transport tests a tenant-owned
- * Relation. Production correctly refuses a valid realm token that the tenant
- * neither knows nor invited; these suites test bearer verification and role
- * enforcement, so membership is test setup rather than their subject.
+ * Relation, a LINKED membership row and the roles above. Production
+ * correctly refuses a valid realm token that the tenant neither knows nor
+ * invited, and grants nothing from the token's client roles; these suites
+ * test bearer verification and role enforcement, so membership and its
+ * roles are test setup rather than their subject.
  */
 export async function seedKeycloakTokenPeople(
   db: Kysely<DB>,
@@ -21,15 +52,8 @@ export async function seedKeycloakTokenPeople(
 ): Promise<void> {
   for (const token of tokens) {
     if (!token) continue;
-    const claims = JSON.parse(
-      Buffer.from(token.split(".")[1]!, "base64url").toString(),
-    ) as {
-      tid?: string;
-      email?: string;
-      name?: string;
-      preferred_username?: string;
-    };
-    if (!claims.tid || !claims.email) continue;
+    const claims = claimsOf(token);
+    if (!claims.tid || !claims.email || !claims.iss || !claims.sub) continue;
     const displayName = claims.name ?? claims.preferred_username ?? claims.email;
     await sql`
       insert into platform.tenants (id, slug, name, status)
@@ -57,6 +81,39 @@ export async function seedKeycloakTokenPeople(
       insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary)
       select tenant_id, id, 'email', ${claims.email}, true from created
     `.execute(db);
+    const roles = membershipRolesOf(token);
+    await sql`
+      insert into platform.identities (issuer, subject, email, display_name)
+      values (${claims.iss}, ${claims.sub}, ${claims.email}, ${displayName})
+      on conflict (issuer, subject) do nothing
+    `.execute(db);
+    // The roles column is guarded by a trigger that admits only an
+    // organization administrator or the audited bypass; the seed is the
+    // latter, the same way the runtime's own elevated write is.
+    await withSystemSession(
+      db,
+      { actorSubject: "e2e-seed", roles: [SYSTEM_BYPASS_ROLE], reason: "e2e: seed realm test people", tenantId: claims.tid },
+      (trx) => sql`
+      insert into platform.identity_relations
+        (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
+      select i.id, ${claims.tid}, 'linked', r.id, now(), 'e2e-seed',
+             (select coalesce(array_agg(value), '{}'::text[])
+                from jsonb_array_elements_text(${roles}::jsonb))
+        from platform.identities i
+        join erp.contact_details cd
+          on cd.tenant_id = ${claims.tid} and cd.type = 'email' and lower(cd.value) = lower(${claims.email})
+        join erp.relations r on r.id = cd.relation_id
+       where i.issuer = ${claims.iss} and i.subject = ${claims.sub}
+       limit 1
+      on conflict (identity_id, tenant_id) do update
+        set status = 'linked',
+            relation_id = excluded.relation_id,
+            linked_at = coalesce(platform.identity_relations.linked_at, now()),
+            linked_by = coalesce(platform.identity_relations.linked_by, 'e2e-seed'),
+            roles = excluded.roles,
+            updated_at = now()
+    `.execute(trx),
+    );
   }
 }
 

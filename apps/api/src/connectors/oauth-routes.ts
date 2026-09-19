@@ -25,6 +25,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
+import { HttpError } from "../rest/http-error.js";
 import { REST_MOUNT_PATH } from "../rest/rest-paths.js";
 import { ConnectorAuthorizationError, requireConnectorAdmin } from "./authorization.js";
 import { findConnectorContract } from "./catalog.js";
@@ -110,7 +111,9 @@ export function registerConnectorOAuthRoutes(
         instanceKey: string;
       };
       try {
-        const resolved = await resolveSessionContext(headersFromFastify(request.headers));
+        const resolved = await resolveSessionContext(headersFromFastify(request.headers), {
+          db: options.db,
+        });
         requireConnectorAdmin({
           tenantId: resolved.tenantId,
           userId: resolved.userId,
@@ -229,6 +232,13 @@ export function registerConnectorOAuthRoutes(
         if (error instanceof ConnectorOAuthError) {
           return reply
             .status(500)
+            .send({ error: { code: error.code, message: error.message } });
+        }
+        if (error instanceof HttpError) {
+          // A refusal or an unavailability the session resolver already
+          // classified (403 NOT_INVITED, 503 AUTHENTICATION_UNAVAILABLE).
+          return reply
+            .status(error.status)
             .send({ error: { code: error.code, message: error.message } });
         }
         request.log.error({ err: error }, "Connector OAuth authorize failed.");

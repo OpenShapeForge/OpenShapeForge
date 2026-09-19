@@ -343,6 +343,27 @@ export function shortAddressTarget(url: string | undefined): {
 }
 
 /**
+ * The organization a short address names, carried from the routing layer to
+ * session resolution as a server-owned request header.
+ *
+ * `rewriteShortAddress` strips `/<alias>` off before routing, and the routes
+ * behind it resolve their session from the headers alone — so without this
+ * the alias a REST or GraphQL request was addressed to would be gone by the
+ * time the credential is checked, and a token for organization A would be
+ * answered under `/<alias-of-B>/api/...` with A's data (the MCP resource
+ * carries its alias explicitly; this is the same rule for the other two
+ * surfaces). The server sets or DELETES the header on every request from the
+ * original URL, so a client cannot supply it; a client that could would only
+ * ever make the check stricter, because it refuses and never selects.
+ */
+export const ORGANIZATION_ADDRESS_HEADER = "x-openshapeforge-organization-address";
+
+/** The alias `ORGANIZATION_ADDRESS_HEADER` should carry for a request, or null. */
+export function organizationAddressOf(originalUrl: string | undefined): string | null {
+  return shortAddressTarget(originalUrl)?.alias ?? null;
+}
+
+/**
  * The whole short-address rewrite, as one function: what the server should
  * route a request to, given the URL a client actually asked for.
  *

@@ -466,22 +466,22 @@ describe("tenant member and credential administration", () => {
     expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
   });
 
-  it("lists only members of the named organization with their effective client roles", async () => {
+  it("lists only members of the named organization, and never reads their Keycloak user roles", async () => {
     const { fetch, calls } = stubFetch((url) => {
-      if (url.includes("/clients?clientId=")) return Response.json([{ id: "client-uuid", clientId: "hubble-api" }]);
       if (url.includes("/organizations/acme/members?")) return Response.json([{
         id: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
         enabled: true, emailVerified: true,
       }]);
-      if (url.includes("/role-mappings/clients/client-uuid/composite")) return Response.json([{ name: "org_admin" }]);
       return Response.json([]);
     });
-    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme", "hubble-api");
+    const members = await createKeycloakOrganizationMembersClient(config, { fetch }).listMembers("acme");
     expect(members).toEqual([{
       memberId: "member-1", username: "hans", email: "hans@example.com", firstName: "Hans", lastName: "Eilers",
-      enabled: true, emailVerified: true, roles: ["org_admin"],
+      enabled: true, emailVerified: true,
     }]);
     expect(calls.some(({ url }) => url.includes("/organizations/acme/members?first=0&max=100"))).toBe(true);
+    // A member's roles are the tenant's record, not a Keycloak user mapping.
+    expect(calls.some(({ url }) => url.includes("role-mappings"))).toBe(false);
   });
 
   it("returns safe credential metadata and never provider secrets", async () => {

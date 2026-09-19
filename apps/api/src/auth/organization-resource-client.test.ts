@@ -2,6 +2,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { __resetSessionResolverForTests, __setTenantForOrganizationForTests, resolveSessionContext } from "./identity.js";
+import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const issuer = "https://identity.example.test/realms/example";
 const resource = "https://api.example.test/alpha";
@@ -35,6 +36,7 @@ beforeEach(() => {
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "web-api";
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "web";
   __resetSessionResolverForTests();
+  stubLinkedMembershipForTests();
   __setTenantForOrganizationForTests(async (realm, organization) =>
     realm === "example" && organization === "organization-a" ? tenant : null);
 });

@@ -202,6 +202,7 @@ operations:
     confirmation:
       mode: none
 interfaces:
+  rest: {}
   graphql: {}
   web:
     views:

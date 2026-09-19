@@ -54,7 +54,7 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
-import { assertEntityValuesValid, type EntityValuesValidation } from "./input-validation.js";
+import { assertEntityValuesValid, assertOperationInputValid, type EntityValuesValidation } from "./input-validation.js";
 import { assertNoCallerElicitedOutput, assertNoOperationWrittenValues } from "./write-policy.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
@@ -765,6 +765,10 @@ export async function executeEntityOperation(
           "INTERNAL_SERVER_ERROR",
         );
       }
+      // The payload before prerequisites, the same order as the entity path:
+      // an invalid request answers VALIDATION, not a prerequisite it would
+      // only fail after.
+      assertOperationInputValid(operation, request.input ?? {});
       await requireOperationPrerequisites(db, session, operation);
       if (operation.intent === "delete") {
         const data = await executeEntityPlugin(

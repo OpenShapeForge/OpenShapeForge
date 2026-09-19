@@ -173,3 +173,32 @@ export function assertEntityValuesValid(
     retryable: false,
   });
 }
+
+const inputValidators = new WeakMap<EntityOperationContract, ValidateFunction>();
+
+/**
+ * A plugin-backed Operation owns its whole input contract (a document with
+ * its version and artifact), so the request is held to the compiled
+ * `inputSchema` as one object, before prerequisites or the handler run,
+ * and refused as the same VALIDATION failure an entity write gets.
+ */
+export function assertOperationInputValid(
+  operation: EntityOperationContract,
+  input: Readonly<Record<string, unknown>>,
+): void {
+  if (!operation.inputSchema) return;
+  let validate = inputValidators.get(operation);
+  if (!validate) {
+    validate = ajv.compile(operation.inputSchema as Record<string, unknown>);
+    inputValidators.set(operation, validate);
+  }
+  if (validate(input)) return;
+  const violations = violationsFromAjvErrors(validate.errors ?? []);
+  throw operationFailure({
+    code: "VALIDATION",
+    message: `The input does not satisfy the ${operation.entityName}.${operation.intent} contract.`,
+    detail: violations.map((violation) => violation.message).join(" "),
+    violations,
+    retryable: false,
+  });
+}

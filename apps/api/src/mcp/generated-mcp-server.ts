@@ -1769,15 +1769,19 @@ function envelopeSchema(
   operation: string,
 ): Record<string, unknown> {
   if (operation !== "create" && operation !== "update") return schema;
-  const properties = (schema.properties ?? {}) as Record<string, unknown>;
+  const { required: advertisedRequired, ...rest } = schema;
+  const properties = (rest.properties ?? {}) as Record<string, unknown>;
   if (operation === "update") {
     return { ...schema, properties: { ...properties, values: { type: "object" } } };
   }
-  const required = Array.isArray(schema.required)
-    ? (schema.required as unknown[]).filter((key) => typeof key === "string" && ENVELOPE_KEYS.has(key))
+  // `required` is always replaced: a create reduced to its controls must not
+  // keep the advertised field list, or ajv answers for the missing field
+  // before the runtime can name it as a REQUIRED violation.
+  const required = Array.isArray(advertisedRequired)
+    ? (advertisedRequired as unknown[]).filter((key) => typeof key === "string" && ENVELOPE_KEYS.has(key))
     : [];
   return {
-    ...schema,
+    ...rest,
     properties: Object.fromEntries(
       Object.entries(properties).filter(([key]) => ENVELOPE_KEYS.has(key)),
     ),
@@ -7006,15 +7010,23 @@ function buildServer(
             : toValidate,
           table,
         );
-        const expectedVersionField = match.operationId
+        const contract = match.operationId
           ? getEntityOperationContracts().find(
               (operation) => operation.id === match.operationId,
-            )?.concurrency?.version?.field
+            )
           : undefined;
+        const expectedVersionField = contract?.concurrency?.version?.field;
+        // An entity create's or update's authored values are the runtime's to
+        // judge, once, for every interface, so MCP gets the same VALIDATION +
+        // violations[] answer REST and GraphQL do instead of a private ajv
+        // verdict. A plugin Operation owns its input contract (a document
+        // with its version and artifact), so its tool is held to the
+        // advertised schema as a whole.
+        const entityBacked = contract !== undefined && contract.implementation?.type !== "plugin";
         // A field this session's tool does not advertise (immutable on update,
         // withheld, server-managed) is refused by name before anything else,
         // so the answer names the field whatever else the call is missing.
-        if (match.operation === "update") {
+        if (entityBacked && match.operation === "update") {
           if (toValidate.values && typeof toValidate.values === "object" && !Array.isArray(toValidate.values)) {
             assertDeclaredProperties(
               (match.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
@@ -7022,15 +7034,12 @@ function buildServer(
               "field",
             );
           }
-        } else {
+        } else if (entityBacked && match.operation === "create") {
           assertDeclaredProperties(match.inputSchema, toValidate, "field");
         }
-        // The edge checks the ENVELOPE (identity, controls, their types); the
-        // authored values are the runtime's to judge, once, for every
-        // interface, so MCP gets the same VALIDATION + violations[] answer
-        // REST and GraphQL do instead of a private ajv verdict.
+        // The edge checks the ENVELOPE (identity, controls, their types).
         assertSchemaValid(
-          envelopeSchema(match.inputSchema, match.operation),
+          entityBacked ? envelopeSchema(match.inputSchema, match.operation) : match.inputSchema,
           toValidate,
           "arguments",
           expectedVersionField,

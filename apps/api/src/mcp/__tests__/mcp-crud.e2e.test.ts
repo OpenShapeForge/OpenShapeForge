@@ -1005,6 +1005,28 @@ describe("generated MCP server", () => {
         });
       }
 
+      // A required scalar, not a foreign key: the factory creates parents for
+      // those, and their absence is a reference question, not this one.
+      const foreignKeyFields = new Set(
+        table.columns.filter((column) => foreignKeyTargets(table).has(column.name)).map(fieldName),
+      );
+      const requiredField = ((catalogTool(table, "create").inputSchema as { required?: string[] }).required ?? [])
+        .find((field) => !foreignKeyFields.has(field));
+      if (requiredField) {
+        test(`${prefix}: a create missing ${requiredField} is the canonical VALIDATION answer with a REQUIRED violation`, async () => {
+          // The edge holds the envelope only; the missing authored field is
+          // the runtime's finding, so it arrives as a field violation and not
+          // as ajv's verdict on the advertised argument object.
+          const { [requiredField]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", incomplete);
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            violations: expect.arrayContaining([{ field: requiredField, code: "REQUIRED", message: expect.any(String) }]),
+          });
+        });
+      }
+
       test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
         // The schema says additionalProperties:false; the server must agree.
         const valid = await createArgs(table, tenantA);
@@ -1022,6 +1044,18 @@ describe("generated MCP server", () => {
         });
         expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
         expect(toolError(body)).toMatch(/\bid\b/);
+      });
+    } else {
+      test(`${prefix}: a plugin-backed create is held to its advertised tool schema as a whole`, async () => {
+        // A plugin Operation owns its nested input contract; the edge keeps
+        // validating the full advertised schema, not a reduced envelope.
+        const schema = catalogTool(table, "create").inputSchema as { required?: string[] };
+        const missing = schema.required?.[0];
+        if (!missing) return;
+        const { [missing]: _omitted, ...incomplete } = await createArgs(table, tenantA);
+        const { body } = await call(tenantA, "create", incomplete);
+        expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+        expect(toolError(body)).toMatch(new RegExp(`required property '${missing}'`));
       });
     }
 

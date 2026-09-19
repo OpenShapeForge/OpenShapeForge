@@ -6,13 +6,13 @@
  *
  * "Actionable" is the load-bearing word, and the reason this test does more
  * than compare two checksums. The database backing this suite is shared
- * between git worktrees, so the common cause of a mismatch is not a stale
- * database but a database another branch has already migrated past this one.
- * `bun run db:migrate` cannot undo that — rolling forward has no way to drop a
- * table — so a preflight that always says "run db:migrate" spends the reader's
- * time on a command that cannot work and leaves the failure looking like a
- * regression in the branch under test. `describeGeneratedSchemaDrift` picks
- * the remediation that fits the direction of the drift; its selection logic is
+ * between git worktrees, so the common cause of a mismatch is not an empty
+ * database but one another branch has already built. `bun run db:migrate`
+ * refuses a built database whose checksum differs, so a preflight that
+ * always says "run db:migrate" spends the reader's time on a command that
+ * cannot work and leaves the failure looking like a regression in the branch
+ * under test. `describeGeneratedSchemaDrift` picks the remediation that fits
+ * — build, rebuild, or a scratch database; its selection logic is
  * unit-tested in `db/__tests__/schema-drift-remediation.test.ts`.
  */
 import { expect } from "bun:test";

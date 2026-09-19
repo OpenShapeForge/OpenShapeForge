@@ -81,11 +81,12 @@ issues, pull requests, and review comments. Act accordingly.
   twice and fails on drift.
 - **The schema is versioned by git, not by a migration history.** A database
   is built from the compiled manifest (`bun run db:migrate` on an empty one,
-  or the API's own first-start bootstrap); additive schema changes roll
-  forward automatically, and anything non-additive means rebuilding the
-  database with `bun run db:reset`. There are no hand-written migration files
-  to scaffold or keep immutable — what the manifest cannot express lives in
-  idempotent invariant DDL under `apps/api/src/db/migrations/`.
+  or the API's own first-start bootstrap). A built database whose recorded
+  manifest checksum differs from the build's is refused — there is no
+  roll-forward of any kind — and is rebuilt with `bun run db:reset`. There
+  are no hand-written migration files to scaffold or keep immutable — what
+  the manifest cannot express lives in idempotent invariant DDL under
+  `apps/api/src/db/migrations/`, re-applied on every run.
 - **New entities**: add YAML under
   `packages/compiler/config/authoring/entities/`, bump
   `expectedGeneratedCrudEntityCount` in

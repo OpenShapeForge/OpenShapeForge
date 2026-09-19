@@ -3,11 +3,13 @@
  * Message selection for the e2e drift preflight.
  *
  * The preflight's value is not that it fails — it is that the reader knows
- * what to do next. Two situations produce the same checksum mismatch and take
- * opposite remedies: a database BEHIND the manifest, which `bun run db:migrate`
- * rolls forward, and a database carrying schema this branch does not declare,
- * which migrate can only refuse because rolling forward cannot drop a table.
- * Telling the second reader to run migrate costs them a round trip that cannot
+ * what to do next. Three situations produce a checksum mismatch and take
+ * different next commands: an empty database, which `bun run db:migrate`
+ * builds; a database built from another manifest, which `bun run db:reset`
+ * rebuilds because nothing rolls a built database forward; and a database
+ * carrying schema this branch does not declare, which is another worktree's
+ * build and is best left alone for a scratch database. Telling the reader
+ * to run migrate on a built database costs them a round trip that cannot
  * succeed, so which message is chosen is worth a test of its own.
  *
  * These are pure: `describeGeneratedSchemaDrift` takes the drift status and the

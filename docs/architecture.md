@@ -44,7 +44,7 @@ Generated artifacts (all gitignored; reproducible)
 Runtimes and tools (all manifest-driven, no per-entity code)
   apps/api          generic GraphQL CRUD engine + entity-event journal
   apps/web          Next.js app; generic entity/rendering engine
-  db:migrate        roll-forward migrator keyed on the manifest checksum
+  db:migrate        builds a database from the manifest; refuses a checksum mismatch (db:reset)
   test:e2e          e2e suite derived from the manifest at load time
   test:perf         k6 scenarios/thresholds derived from the manifest
   docker compose    Keycloak imports the generated realm

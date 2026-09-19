@@ -20,7 +20,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |
 | [testing.md](testing.md) | Proof gates, the manifest-derived e2e suite, HTML reports, the k6 perf suite |
 | [capability-grants.md](capability-grants.md) | Token-authorized Operations for recipients without an account: `auth.mode: capability`, the grant table, resolution into a grant session, attempt limits, issuing and revoking, audit |
-| [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the additive roll-forward, drift signals, caveats |
+| [migrations.md](migrations.md) | The reset model: the build chain, db:reset and the empty-database bootstrap, the checksum refusal, drift signals, caveats |
 | [consuming.md](consuming.md) | Using the compiler from a host repo; the web app; current limitations |
 
 Also in this directory: **`entities.generated.md`** — the live reference of

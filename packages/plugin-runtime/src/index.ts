@@ -185,6 +185,23 @@ export type RuntimeEntityValueRegistry = {
   }> | undefined;
 };
 
+/**
+ * Compiler-bound storage of one published-snapshot pair: the editable head
+ * and the immutable version table, with the version table's foreign key back
+ * to the head. The versioning runtime executes against exactly these names.
+ */
+export type RuntimeVersioningBinding = {
+  readonly sourceEntity: string;
+  readonly versionEntity: string;
+  readonly head: { readonly schema: string; readonly table: string };
+  readonly version: { readonly schema: string; readonly table: string; readonly headColumn: string };
+};
+
+/** Metadata only. A binding grants no record or Operation access. */
+export type RuntimeVersioningRegistry = {
+  get(sourceEntity: string): RuntimeVersioningBinding | undefined;
+};
+
 export type RuntimeOperationDefinition = OperationReference & {
   key?: string;
   /** Native field binding is part of execution identity, without physical storage names. */
@@ -342,6 +359,8 @@ export type PluginPlatformServices = {
     json: RuntimeJsonSchemaValidator;
     /** Absent on hosts without entity-value support; callers must fail closed. */
     entityValues?: RuntimeEntityValueRegistry;
+    /** Absent on hosts without published-snapshot versioning; callers must fail closed. */
+    versioning?: RuntimeVersioningRegistry;
   };
   events: {
     append(

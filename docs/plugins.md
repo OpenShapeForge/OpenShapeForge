@@ -640,3 +640,22 @@ tables above. That is the whole reason the runtime contract exists here: before
 it, `apps/api` carried a hardcoded path to a plugin's generated output, and a
 repo that dropped the workflow plugin had to edit the migration chain to stop
 seeding. `db:migrate` reports the result under the seed's name.
+
+## Shipped example 3: `notebook`
+
+`examples/plugins/notebook/` — a plugin that is nothing but an authoring
+layer: no generators, no platform tables, no runtime half. Its two entities,
+`Notebook` and `NotebookVersion`, are declared in module `notebook`, so their
+tables are `notebook.notebooks` and `notebook.notebook_versions` rather than
+anything under `erp`, and `Notebook` declares the generic
+`versioning: publishedSnapshot`.
+
+That is the case the versioning runtime has to handle without knowing the
+entity. The compiler binds the exact storage of both sides into the head
+table's manifest source (`source.versioning.storage`: head schema and table,
+version schema and table, and the version table's foreign key back to the
+head); the API serves that through `platform.schemas.versioning`, and
+`Notebook.publish` executes against those names and nothing derived from
+`"Notebook"`. `apps/api/src/graphql/__tests__/plugin-versioning.e2e.test.ts`
+creates a notebook, publishes it twice and reads the versions back through the
+generated GraphQL surface.

@@ -47,6 +47,7 @@ import type {
   RuntimeFieldSchemaCompiler,
   RuntimeJsonSchemaValidator,
   RuntimeEntityValueRegistry,
+  RuntimeVersioningRegistry,
   RuntimeModuleContract,
   RuntimeArtifactServices,
   RuntimeArtifactStorageContribution,
@@ -324,6 +325,7 @@ export type ModulePlatformServices = {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
     entityValues?: RuntimeEntityValueRegistry;
+    versioning?: RuntimeVersioningRegistry;
   };
   events: {
     append(

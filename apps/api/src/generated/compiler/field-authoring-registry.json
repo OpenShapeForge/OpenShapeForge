@@ -24607,6 +24607,245 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "Notebook": {
+      "kind": "entity",
+      "entity": "Notebook",
+      "entityIdentity": true,
+      "valueType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Notebook",
+        "nl": "Notitieboek"
+      },
+      "shape": [
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "validation": {
+            "maxLength": 200
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "body",
+          "osfType": "string",
+          "label": {
+            "en": "Body",
+            "nl": "Inhoud"
+          },
+          "persisted": {
+            "column": "body",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "versions",
+          "label": {
+            "en": "Versions",
+            "nl": "Versies"
+          },
+          "osfType": "NotebookVersion",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "notebook",
+            "ownership": "owned"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      },
+      "versioned": true
+    },
+    "notebookId": {
+      "kind": "entityId",
+      "entity": "notebook",
+      "valueType": "string",
+      "label": {
+        "en": "Notebook",
+        "nl": "Notitieboek"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/notebooks",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "NotebookVersion": {
+      "kind": "entity",
+      "entity": "NotebookVersion",
+      "entityIdentity": true,
+      "valueType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Notebook version",
+        "nl": "Notitieboekversie"
+      },
+      "shape": [
+        {
+          "key": "notebook",
+          "osfType": "Notebook",
+          "required": true,
+          "immutable": true,
+          "relationship": {
+            "inverse": {
+              "key": "versions",
+              "label": {
+                "en": "Versions",
+                "nl": "Versies"
+              },
+              "ownership": "owned"
+            }
+          }
+        },
+        {
+          "key": "versionNumber",
+          "osfType": "integer",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "min": 1
+          },
+          "label": {
+            "en": "Version",
+            "nl": "Versie"
+          },
+          "persisted": {
+            "column": "version_number",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "status",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "defaultValue": "published",
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "published",
+                "label": {
+                  "en": "Published",
+                  "nl": "Gepubliceerd"
+                }
+              }
+            ]
+          },
+          "persisted": {
+            "column": "status",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "snapshot",
+          "osfType": "object",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Frozen content",
+            "nl": "Vastgelegde inhoud"
+          },
+          "persisted": {
+            "column": "snapshot",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "contentHash",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "label": {
+            "en": "Content checksum",
+            "nl": "Inhoudschecksum"
+          },
+          "persisted": {
+            "column": "content_hash",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedBy",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Published by",
+            "nl": "Gepubliceerd door"
+          },
+          "persisted": {
+            "column": "published_by",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedAt",
+          "osfType": "datetime",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Published at",
+            "nl": "Gepubliceerd op"
+          },
+          "persisted": {
+            "column": "published_at",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      },
+      "versionEntityOf": "Notebook"
+    },
+    "notebookVersionId": {
+      "kind": "entityId",
+      "entity": "notebook-version",
+      "valueType": "string",
+      "label": {
+        "en": "Notebook version",
+        "nl": "Notitieboekversie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/notebook-versions",
+      "displayTemplate": "{{versionNumber}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "OrgUnit": {
       "kind": "entity",
       "entity": "OrgUnit",

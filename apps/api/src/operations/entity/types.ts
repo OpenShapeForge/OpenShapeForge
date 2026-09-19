@@ -99,6 +99,10 @@ export type GeneratedCrudTable = {
       versionsField: string;
       snapshot: { ownedRelationships: "recursive" };
       publishOperation: string;
+      storage: {
+        head: { schema: string; table: string };
+        version: { schema: string; table: string; headColumn: string };
+      };
     };
     computedFields?: Array<{
       field: string;

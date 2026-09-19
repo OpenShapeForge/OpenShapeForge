@@ -6431,9 +6431,15 @@
                   "en": "Mark this milestone as reached so the next milestone billing run invoices it",
                   "nl": "Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert"
                 },
-                "writes": [
-                  "triggeredAt",
-                  "triggeredBy"
+                "stamps": [
+                  {
+                    "field": "triggeredAt",
+                    "value": "now"
+                  },
+                  {
+                    "field": "triggeredBy",
+                    "value": "actor"
+                  }
                 ]
               }
             ]

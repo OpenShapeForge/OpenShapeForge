@@ -112,9 +112,13 @@ fields:
           from: [draft]
           to: submitted
           label: { en: Submit, nl: Indienen }
-          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
+          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles;
+                                                        # recordPermission: edit on an ACL-protected entity
           preconditions: [ { field: reviewerId, present: true } ]
-          writes: [submittedAt, submittedBy]            # only this rule may set them
+          writes: [comment]                             # input fields only this rule may set
+          stamps:                                       # server-derived, never input
+            - { field: submittedAt, value: now }
+            - { field: submittedBy, value: actor }      # linked Relation, or the user id for a string
           confirmation: { mode: acknowledgement }       # or none (default)
 ```
 
@@ -128,10 +132,18 @@ What the compiler makes of it:
   projected as `POST /api/rest/v1/<basePath>/:id/<key>`, the MCP tool
   `<entity>_<key>`, the GraphQL mutation `<entity><Key>` and a web record
   action; the tool description names the `from` and `to` states.
-- The status field and every `writes` field become `writtenBy` the rule's
-  Operation: generic create admits no value (the column defaults to
+- The status field and every `writes` and `stamps` field become `writtenBy`
+  the rule's Operation: generic create admits no value (the column defaults to
   `initial`), generic update refuses them with a message naming the Operation
-  and its REST route, and the option set is a database `CHECK`.
+  and its REST route, and the option set is a database `CHECK`. A `stamps`
+  field is filled by the server at execution — `now` is the transaction time
+  on a datetime field, `actor` the session's linked Relation on a Relation
+  reference or the user id on a string field — and is refused as input.
+- On an entity with `authorization.rowAccess.recordPermissions` every rule
+  requires the record's `edit` permission (a rule may name `view` or `delete`
+  instead under `auth.recordPermission`), checked before the offer and again
+  inside the write; an entity without record-level permissions refuses the
+  key.
 - Availability follows [operation-availability.md](operation-availability.md):
   a rule is offered on a record only while its status is in `from` and its
   preconditions hold, and execution re-evaluates the same decision after
@@ -145,13 +157,15 @@ What the compiler makes of it:
 Validation at compile time: `options.type` must be `static` (the states are
 part of the contract, not a code table); `initial`, `from` and `to` must be
 option values and `defaultValue` must equal `initial`; rule keys are unique
-and do not collide with the entity's other operations; a `writes` field must
-be a persisted single field that nothing else writes; and the status field
+and do not collide with the entity's other operations; a `writes` or `stamps`
+field must be a persisted single field that nothing else writes and, when
+required, must carry a `defaultValue` (it leaves the create input, so without
+one no record could ever be created); and the status field
 may be neither `writtenBy`, `immutable` nor placed in a create or update
 form. `preconditions` is deliberately a small vocabulary — a field is
 present or absent — and richer checks belong in an authored plugin Operation.
 
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
-`pending` to `triggered` and is the only writer of `status`, `triggeredAt` and
-`triggeredBy`.
+`pending` to `triggered`, is the only writer of `status`, and stamps
+`triggeredAt` with the transaction time and `triggeredBy` with the actor.
 

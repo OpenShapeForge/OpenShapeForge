@@ -95,19 +95,45 @@ function assertRule(
     const target = fields.get(precondition.field);
     if (!target?.persisted) fail(entity, field, `${where} precondition names "${precondition.field}", which is not a persisted field.`);
   }
-  for (const key of rule.writes ?? []) {
+  const permission = rule.auth?.recordPermission;
+  if (permission && !entity.authorization?.rowAccess?.recordPermissions) {
+    fail(entity, field, `${where} names auth.recordPermission, but ${entity.entity} has no record-level permissions.`);
+  }
+  const written: Array<{ key: string; how: "writes" | "stamps"; value?: "now" | "actor" }> = [
+    ...(rule.writes ?? []).map((key) => ({ key, how: "writes" as const })),
+    ...(rule.stamps ?? []).map((stamp) => ({ key: stamp.field, how: "stamps" as const, value: stamp.value })),
+  ];
+  for (const { key, how, value } of written) {
     const target = fields.get(key);
     if (!target?.persisted || key === field.key || fieldCardinality(target) !== "single") {
-      fail(entity, field, `${where} writes "${key}", which is not a persisted single field other than the status.`);
+      fail(entity, field, `${where} ${how} "${key}", which is not a persisted single field other than the status.`);
     }
     if (target.writtenBy?.length || target.immutable || target.deriveOnCreate || target.computed || target.transitions) {
-      fail(entity, field, `${where} writes "${key}", but that field is already written elsewhere.`);
+      fail(entity, field, `${where} ${how} "${key}", but that field is already written elsewhere.`);
+    }
+    // writtenBy removes the field from generic create while storage stays
+    // NOT NULL: without a default no record could ever be created.
+    if (target.required && target.defaultValue === undefined) {
+      fail(entity, field, `${where} ${how} "${key}", which is required without a defaultValue, so no record could be created.`);
+    }
+    if (value === "now" && target.baseType !== "datetime") {
+      fail(entity, field, `${where} stamps "${key}" with now, but it is not a datetime field.`);
+    }
+    if (value === "actor" && !stampActor(target)) {
+      fail(entity, field, `${where} stamps "${key}" with actor, but it is neither a Relation reference nor a string field.`);
     }
     const writer = seen.get(`writes:${key}`);
-    if (writer) fail(entity, field, `${where} writes "${key}", which rule "${writer}" already writes.`);
+    if (writer) fail(entity, field, `${where} ${how} "${key}", which rule "${writer}" already writes.`);
     seen.set(`writes:${key}`, rule.key);
   }
   seen.set(rule.key, rule.key);
+}
+
+/** How `actor` lands in a field: the session's linked Relation for a Relation reference, else the user id. */
+function stampActor(field: Field): "relation" | "user" | undefined {
+  if (field.osfType === "Relation") return "relation";
+  if (field.baseType === "string" && !field.relationship && !field.options) return "user";
+  return undefined;
 }
 
 function idSchema(entity: CoreEntity): Record<string, unknown> {
@@ -131,6 +157,12 @@ function statusSchema(field: Field, values: string[]): Record<string, unknown> {
   };
 }
 
+/** `edit` on an entity with record-level permissions unless the rule says otherwise; nothing on one without. */
+function ruleRecordPermission(entity: CoreEntity, rule: FieldDefinitionTransitionRule): "view" | "edit" | "delete" | undefined {
+  if (!entity.authorization?.rowAccess?.recordPermissions) return undefined;
+  return rule.auth?.recordPermission ?? "edit";
+}
+
 function ruleOperation(
   entity: CoreEntity,
   field: Field,
@@ -138,6 +170,7 @@ function ruleOperation(
   values: string[],
   writes: Record<string, Record<string, unknown>>,
 ): EntityOperationDefinition {
+  const recordPermission = ruleRecordPermission(entity, rule);
   const required = ["id", ...Object.keys(writes).filter((key) => entity.fields.find((entry) => entry.key === key)?.required)];
   const label = text(rule.label, rule.key);
   const summary = text(rule.description, "");
@@ -170,7 +203,11 @@ function ruleOperation(
       { status: 409, code: "INVALID_STATE", description: `The ${entity.entity} is not ${rule.from.join(" or ")}, or a precondition of ${rule.key} does not hold.` },
       { status: 409, code: "VERSION_CONFLICT", description: "The record changed since it was loaded." },
     ],
-    auth: { mode: "session", roles: [...(rule.auth?.roles ?? entity.authorization?.roles?.update ?? [])] },
+    auth: {
+      mode: "session",
+      roles: [...(rule.auth?.roles ?? entity.authorization?.roles?.update ?? [])],
+      ...(recordPermission ? { recordPermission } : {}),
+    },
     tenancy: { mode: "required" },
     effects: { data: "write", external: "none" },
     reliability: { idempotency: { mode: "none" } },
@@ -221,6 +258,7 @@ export function withStatusTransitions(
           .map((compiledField) => [compiledField.key, compiledFieldSchemaWithoutDefinitions(compiledField)]),
       );
       for (const key of rule.writes ?? []) writtenBy.set(key, [id]);
+      for (const stamp of rule.stamps ?? []) writtenBy.set(stamp.field, [id]);
       operations[rule.key] = ruleOperation(entity, field, rule, values, writes);
       rest[rule.key] = { method: "POST", path: `/api/rest/v1/${basePath}/:id/${kebab(rule.key)}` };
     }
@@ -233,8 +271,16 @@ export function withStatusTransitions(
         from: [...rule.from],
         to: rule.to,
         label: text(rule.label, rule.key),
+        ...(() => { const permission = ruleRecordPermission(entity, rule); return permission ? { recordPermission: permission } : {}; })(),
         ...(rule.preconditions?.length ? { preconditions: rule.preconditions.map((entry) => ({ ...entry })) } : {}),
         ...(rule.writes?.length ? { writes: [...rule.writes] } : {}),
+        ...(rule.stamps?.length
+          ? { stamps: rule.stamps.map((stamp) => ({
+              field: stamp.field,
+              value: stamp.value,
+              ...(stamp.value === "actor" ? { actor: stampActor(entity.fields.find((entry) => entry.key === stamp.field)!)! } : {}),
+            })) }
+          : {}),
       })),
     });
   }

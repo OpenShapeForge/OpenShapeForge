@@ -10,11 +10,14 @@
 import { sql, type Transaction } from "kysely";
 import { operationFailure, type OperationError } from "@openshapeforge/operations";
 import type { DB } from "../../generated/db/types.js";
+import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationAvailabilityHandler, ModuleOperationHandler } from "../../modules/contract.js";
+import { sessionRelation } from "../../auth/identity-link.js";
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { updateGeneratedEntityForTable } from "./mutations.js";
+import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { serializeEntityRow } from "./serialize-result.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 
@@ -117,7 +120,66 @@ export function transitionAvailabilityHandler(
   };
 }
 
-/** Execute one rule: lock the row, recheck the decision, write `to` plus the rule's `writes`, journal the update. */
+/**
+ * Server-derived values the rule stamps: the transaction time, or the actor —
+ * the session's linked Relation where the field references one, the user id
+ * where it is a string. Neither is ever read from the input.
+ */
+function stampValues(binding: TransitionBinding, session: DbSessionInput): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const stamp of binding.rule.stamps ?? []) {
+    if (stamp.value === "now") {
+      values[stamp.field] = sql`now()`;
+      continue;
+    }
+    if (stamp.actor === "relation") {
+      const relation = sessionRelation(session as Parameters<typeof sessionRelation>[0]);
+      if (!relation) {
+        throw operationFailure({
+          code: "FORBIDDEN",
+          message: `${binding.rule.key} records the acting Relation, and this session is not linked to one.`,
+          retryable: false,
+        });
+      }
+      values[stamp.field] = relation.relationId;
+      continue;
+    }
+    values[stamp.field] = session.userId;
+  }
+  return values;
+}
+
+/**
+ * Execute one rule: lock the row, check the record permission the rule
+ * carries, recheck the decision, write `to`, the caller's `writes` and the
+ * server's `stamps`, journal the update.
+ */
+export async function executeTransition(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  binding: TransitionBinding,
+  input: Readonly<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const id = typeof input.id === "string" ? input.id : "";
+  return withDbSession(db, session, async (trx) => {
+    if (binding.rule.recordPermission) {
+      await assertRecordPermissionInTransaction(trx, session, binding.table, id, binding.rule.recordPermission);
+    }
+    const current = (await lockedRows(trx, session, binding.table, [id], true)).get(id);
+    if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+    const refusal = transitionRefusal(binding, current);
+    if (refusal) throw operationFailure(refusal);
+    const values: Record<string, unknown> = { [binding.status.field]: binding.rule.to };
+    for (const field of binding.rule.writes ?? []) {
+      if (input[field] !== undefined) values[field] = input[field];
+    }
+    Object.assign(values, stampValues(binding, session));
+    const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
+    if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+    return serializeEntityRow(binding.table, row);
+  });
+}
+
 export function transitionOperationHandler(
   operation: { key: string; target?: { entityName: string } },
 ): ModuleOperationHandler {
@@ -126,23 +188,7 @@ export function transitionOperationHandler(
     if (!context.db || !context.session) {
       throw generatedCrudError("Authenticated database session required.", "FORBIDDEN");
     }
-    const db = context.db;
-    const session = context.session;
-    const input = raw as Record<string, unknown>;
-    const id = typeof input.id === "string" ? input.id : "";
-    const value = await withDbSession(db, session, async (trx) => {
-      const current = (await lockedRows(trx, session, binding.table, [id], true)).get(id);
-      if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-      const refusal = transitionRefusal(binding, current);
-      if (refusal) throw operationFailure(refusal);
-      const values: Record<string, unknown> = { [binding.status.field]: binding.rule.to };
-      for (const field of binding.rule.writes ?? []) {
-        if (input[field] !== undefined) values[field] = input[field];
-      }
-      const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
-      if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-      return serializeEntityRow(binding.table, row);
-    });
+    const value = await executeTransition(context.db, context.session, binding, raw as Record<string, unknown>);
     return { value, status: 200 };
   };
 }

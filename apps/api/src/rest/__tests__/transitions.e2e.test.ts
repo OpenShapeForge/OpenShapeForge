@@ -65,12 +65,17 @@ describe("status transitions on REST", () => {
       available: true, concurrency: { version: { mode: "required", field: "updatedAt" } }, binding: { input: { id } },
     });
 
-    const unversioned = await call(writer, "POST", `${base}/${id}/trigger`, { triggeredBy: "e2e" });
+    const unversioned = await call(writer, "POST", `${base}/${id}/trigger`, {});
     expect(unversioned.status).toBe(400);
+    // Stamped fields are not input: the closed schema refuses them.
+    const forged = await call(writer, "POST", `${base}/${id}/trigger`, { triggeredAt: "2000-01-01T00:00:00Z", expectedVersion: pending.body.data.updatedAt });
+    expect(forged.status).toBe(400);
 
-    const triggered = await call(writer, "POST", `${base}/${id}/trigger`, { triggeredBy: "e2e", expectedVersion: pending.body.data.updatedAt });
+    const triggered = await call(writer, "POST", `${base}/${id}/trigger`, { expectedVersion: pending.body.data.updatedAt });
     expect(triggered.status).toBe(200);
-    expect(triggered.body).toMatchObject({ id, status: "triggered", triggeredBy: "e2e" });
+    expect(triggered.body).toMatchObject({ id, status: "triggered", triggeredBy: writer.userId });
+    expect(triggered.body.triggeredAt).toBe(triggered.body.updatedAt);
+    expect(Date.parse(triggered.body.triggeredAt)).toBeGreaterThan(Date.now() - 60_000);
 
     const after = await call(writer, "GET", `${base}/${id}`);
     expect(after.body.data.status).toBe("triggered");

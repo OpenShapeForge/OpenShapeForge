@@ -13,7 +13,11 @@ describe("status transition binding", () => {
     const binding = transitionBinding(trigger);
     expect(binding.table.source?.authoringEntityName).toBe("AgreementMilestone");
     expect(binding.statusColumn.name).toBe("status");
-    expect(binding.rule).toMatchObject({ key: "trigger", from: ["pending"], to: "triggered", writes: ["triggeredAt", "triggeredBy"] });
+    expect(binding.rule).toMatchObject({
+      key: "trigger", from: ["pending"], to: "triggered",
+      stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
+    });
+    expect(Object.keys((trigger.inputSchema as { properties: Record<string, unknown> }).properties)).toEqual(["id", "expectedVersion"]);
     expect(() => transitionBinding({ key: "AgreementMilestone.invoice", target: { entityName: "AgreementMilestone" } })).toThrow("not a status transition");
   });
 

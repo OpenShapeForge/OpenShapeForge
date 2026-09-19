@@ -67,16 +67,26 @@ export interface FieldDefinitionTransitionRule {
   to: string;
   label?: LocalizedText;
   description?: LocalizedText;
-  /** Roles that may invoke; defaults to the entity's update roles. */
-  auth?: { roles: string[] };
+  /**
+   * Who may invoke. `roles` defaults to the entity's update roles;
+   * `recordPermission` defaults to `edit` on an entity with record-level
+   * permissions and is refused on one without them.
+   */
+  auth?: { roles?: string[]; recordPermission?: "view" | "edit" | "delete" };
   /**
    * Record facts that must hold besides the current status. Deliberately a
    * small vocabulary: a field is present (not null) or absent. Anything
    * richer belongs in an authored plugin Operation.
    */
   preconditions?: Array<{ field: string; present: boolean }>;
-  /** Fields this transition, and only this transition, may set. */
+  /** Fields this transition, and only this transition, may set from its input. */
   writes?: string[];
+  /**
+   * Fields this transition, and only this transition, sets from the server:
+   * `now` (a datetime field) or `actor` (the session's linked Relation for a
+   * Relation reference, otherwise the user id). Never part of the input.
+   */
+  stamps?: Array<{ field: string; value: "now" | "actor" }>;
   confirmation?: { mode: "none" | "acknowledgement" };
 }
 

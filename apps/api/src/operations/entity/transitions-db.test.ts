@@ -12,6 +12,7 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { withDbSession } from "../../db/session.js";
+import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { createAgreementMilestone } from "../../billing/agreement-milestone-service.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { bindOperationHandlers, type OperationContract } from "../runtime.js";
@@ -19,7 +20,9 @@ import { registerEntityOperationAvailability } from "./availability.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { updateGeneratedEntity } from "./mutations.js";
 import { currentRecordOffers, offerTarget } from "./runtime.js";
-import { transitionAvailabilityHandler, transitionOperationHandler } from "./transitions.js";
+import { executeTransition, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
+import { recordPermissionsAllowRow } from "./record-permissions.js";
+import type { GeneratedCrudTable } from "./types.js";
 import { assertNoOperationWrittenValues } from "./write-policy.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -52,6 +55,22 @@ function columnDdl(): string {
     return `${column.name} ${column.type}${column.required ? " not null" : ""}`;
   }).join(", ");
 }
+/** The same table with record-level permissions, as an ACL-protected entity would compile it. */
+function protectedBinding(): TransitionBinding {
+  const base = transitionBinding(operation);
+  const table: GeneratedCrudTable = {
+    ...structuredClone(base.table),
+    columns: [...base.table.columns, { name: "authorization", type: "jsonb", required: true, primaryKey: false, generated: null, sourceField: "authorization" }],
+    source: {
+      ...structuredClone(base.table.source!),
+      authorization: {
+        ...base.table.source!.authorization!,
+        recordPermissions: { field: "authorization", column: "authorization", empty: "public", createRequires: ["view", "edit"] },
+      },
+    },
+  };
+  return { ...base, table, statusColumn: table.columns.find((column) => column.name === "status")!, rule: { ...base.rule, recordPermission: "edit" } };
+}
 async function milestone(status = "pending", tenantId = tenant) {
   const record = await createAgreementMilestone(privileged!.db, { ...session, tenantId }, { agreementId: randomUUID(), description: "Go-live", amount: 100 });
   if (status !== "pending") await sql`update erp.agreement_milestones set status = ${status} where id = ${record.id}::uuid`.execute(privileged!.db);
@@ -74,7 +93,7 @@ describe("status transitions against PostgreSQL", () => {
     privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 1 });
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
-      create table erp.agreement_milestones(${columnDdl()}, unique(tenant_id,id));
+      create table erp.agreement_milestones(${columnDdl()}, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,
@@ -106,16 +125,34 @@ describe("status transitions against PostgreSQL", () => {
     expect(() => assertNoOperationWrittenValues(table, { status: "pending" })).toThrow("cannot be set through create or update");
   });
 
-  test("the rule moves the status, writes its fields, bumps the version and journals the update", async () => {
+  test("the rule moves the status, stamps time and actor from the server, bumps the version and journals the update", async () => {
     const id = await milestone();
     const before = (await row(id))!;
-    const result = await transitionOperationHandler(operation)({ id, triggeredBy: "workflow:abc" }, context());
-    expect(result).toMatchObject({ status: 200, value: { id, status: "triggered", triggeredBy: "workflow:abc", description: "Go-live" } });
+    // Stamped fields are not input: a supplied value is neither accepted nor applied.
+    const result = await transitionOperationHandler(operation)({ id, triggeredBy: "forged", triggeredAt: "2000-01-01T00:00:00Z" }, context());
+    expect(result).toMatchObject({ status: 200, value: { id, status: "triggered", triggeredBy: actor, description: "Go-live" } });
     const after = (await row(id))!;
     expect(after.status).toBe("triggered");
-    expect(after.triggered_by).toBe("workflow:abc");
+    expect(after.triggered_by).toBe(actor);
+    expect(after.triggered_at).toBe(after.updated_at);
     expect(after.updated_at).not.toBe(before.updated_at);
+    expect(Date.parse(String(after.triggered_at))).toBeGreaterThan(Date.now() - 60_000);
     expect(await events(id)).toEqual(["created", "updated"]);
+  });
+
+  test("on an ACL-protected entity the rule is neither offered on nor applied to a record the session may not edit", async () => {
+    const binding = protectedBinding();
+    const denied = await milestone();
+    const allowed = await milestone();
+    await sql`update erp.agreement_milestones set "authorization" = ${jsonbLiteral({ view: { users: [actor] }, edit: { users: [randomUUID()] } })} where id = ${denied}::uuid`.execute(privileged!.db);
+    await sql`update erp.agreement_milestones set "authorization" = ${jsonbLiteral({ view: { users: [actor] }, edit: { users: [actor] } })} where id = ${allowed}::uuid`.execute(privileged!.db);
+    // The offer filter omits a custom Operation whose recordPermission the row refuses.
+    expect(recordPermissionsAllowRow(binding.table, (await row(denied))!, ["edit"], session)).toBe(false);
+    expect(recordPermissionsAllowRow(binding.table, (await row(allowed))!, ["edit"], session)).toBe(true);
+    await fails(executeTransition(restricted!.db, session, binding, { id: denied }), "FORBIDDEN");
+    expect((await row(denied))!.status).toBe("pending");
+    expect(await events(denied)).toEqual(["created"]);
+    expect(await executeTransition(restricted!.db, session, binding, { id: allowed })).toMatchObject({ id: allowed, status: "triggered" });
   });
 
   test("a status outside the rule's from is refused with INVALID_STATE naming from and to", async () => {
@@ -136,6 +173,7 @@ describe("status transitions against PostgreSQL", () => {
   test("the generic update refuses the status and the rule's writes fields by name", async () => {
     const id = await milestone();
     for (const values of [{ status: "triggered" }, { triggeredBy: "someone" }, { triggeredAt: new Date().toISOString() }]) {
+      // triggeredBy and triggeredAt are stamped by the rule, so writtenBy it too.
       await fails(updateGeneratedEntity(restricted!.db, session, { table: table.name, id, values }), "BAD_USER_INPUT");
     }
     expect((await row(id))!.status).toBe("pending");

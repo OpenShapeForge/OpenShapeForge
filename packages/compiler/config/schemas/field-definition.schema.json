@@ -320,8 +320,11 @@
                   "auth": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["roles"],
-                    "properties": { "roles": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }
+                    "minProperties": 1,
+                    "properties": {
+                      "roles": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                      "recordPermission": { "type": "string", "enum": ["view", "edit", "delete"], "description": "Defaults to `edit` on an entity with record-level permissions; refused on one without." }
+                    }
                   },
                   "preconditions": {
                     "type": "array",
@@ -332,7 +335,20 @@
                       "properties": { "field": { "type": "string", "minLength": 1 }, "present": { "type": "boolean" } }
                     }
                   },
-                  "writes": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "Persisted fields this transition, and only this transition, may set; they become `writtenBy` it and are accepted in its input." },
+                  "writes": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "Persisted fields this transition, and only this transition, may set from its input; they become `writtenBy` it. A required field needs a defaultValue, or the entity could never be created." },
+                  "stamps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["field", "value"],
+                      "properties": {
+                        "field": { "type": "string", "minLength": 1 },
+                        "value": { "type": "string", "enum": ["now", "actor"], "description": "`now` stamps a datetime field with the transaction time; `actor` stamps a Relation reference with the session's linked Relation, or a string field with the user id." }
+                      }
+                    },
+                    "description": "Server-derived writes: fields this transition, and only this transition, sets; `writtenBy` it and never part of its input."
+                  },
                   "confirmation": {
                     "type": "object",
                     "additionalProperties": false,

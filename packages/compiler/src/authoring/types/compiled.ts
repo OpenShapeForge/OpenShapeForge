@@ -695,7 +695,7 @@ export interface CompiledTransitionField {
     to: string;
     label: LocalizedText;
     /** Record permission the rule checks on an entity with record-level permissions. */
-    recordPermission?: "view" | "edit" | "delete";
+    recordPermission?: "edit";
     preconditions?: Array<{ field: string; present: boolean }>;
     writes?: string[];
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;

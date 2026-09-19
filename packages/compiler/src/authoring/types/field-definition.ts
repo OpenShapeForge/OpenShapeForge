@@ -68,11 +68,12 @@ export interface FieldDefinitionTransitionRule {
   label?: LocalizedText;
   description?: LocalizedText;
   /**
-   * Who may invoke. `roles` defaults to the entity's update roles;
-   * `recordPermission` defaults to `edit` on an entity with record-level
-   * permissions and is refused on one without them.
+   * Who may invoke. `roles` defaults to the entity's update roles. A
+   * transition writes the record, so on an entity with record-level
+   * permissions it always requires `edit`; `recordPermission` may only restate
+   * that, and is refused on an entity without record permissions.
    */
-  auth?: { roles?: string[]; recordPermission?: "view" | "edit" | "delete" };
+  auth?: { roles?: string[]; recordPermission?: "edit" };
   /**
    * Record facts that must hold besides the current status. Deliberately a
    * small vocabulary: a field is present (not null) or absent. Anything

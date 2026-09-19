@@ -66,8 +66,9 @@ describe("status transitions", () => {
     expect(output.properties.status!.enum).toEqual(["pending", "triggered", "invoiced", "cancelled"]);
   });
 
-  test("status and the writes fields are writtenBy the rule's Operation only", () => {
-    for (const key of ["status", "triggeredAt", "triggeredBy"]) {
+  test("status is writtenBy every rule's Operation, a stamped field by its rule only", () => {
+    expect(contract.model.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]);
+    for (const key of ["triggeredAt", "triggeredBy"]) {
       expect(contract.model.fields.find((field) => field.key === key)!.writtenBy).toEqual(["AgreementMilestone.trigger"]);
     }
     expect(contract.model.fields.find((field) => field.key === "description")!.writtenBy).toBeUndefined();
@@ -76,23 +77,26 @@ describe("status transitions", () => {
   test("the compiled rule table reaches the contract and the web manifest with the record action", () => {
     expect(contract.transitions).toEqual([{
       field: "status", initial: "pending",
-      rules: [{
-        key: "trigger", operation: "AgreementMilestone.trigger", from: ["pending"], to: "triggered", label: { en: "Trigger", nl: "Triggeren" },
-        stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
-      }],
+      rules: [
+        {
+          key: "trigger", operation: "AgreementMilestone.trigger", from: ["pending"], to: "triggered", label: { en: "Trigger", nl: "Triggeren" },
+          stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
+        },
+        { key: "cancel", operation: "AgreementMilestone.cancel", from: ["pending", "triggered"], to: "cancelled", label: { en: "Cancel", nl: "Annuleren" } },
+      ],
     }]);
     expect(contract.interfaces?.web?.operations).toBeDefined();
     const web = buildWebManifest([{ slug: "agreement-milestone", contract }]);
     const entity = web.entities.AgreementMilestone!;
     expect(entity.transitions).toEqual(contract.transitions as typeof entity.transitions);
-    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toContain("AgreementMilestone.trigger");
+    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toEqual(expect.arrayContaining(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]));
   });
 
   test("the lowered Operation passes the plugin Operation gates with a REST, MCP and GraphQL projection", () => {
-    const [compiled] = collectAuthoredEntityPluginOperations(
+    const compiled = collectAuthoredEntityPluginOperations(
       [{ contract }],
       { repoRoot: authoringDir, authoringDir, webPresent: false },
-    );
+    ).find((candidate) => candidate.key === "AgreementMilestone.trigger");
     expect(compiled!.transports.rest).toMatchObject({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/trigger" });
     expect(compiled!.transports.mcp).toEqual({ enabled: true, name: "agreement_milestone_trigger" });
     expect(compiled!.transports.graphql).toMatchObject({ enabled: true, kind: "mutation" });
@@ -136,7 +140,11 @@ describe("status transition validation", () => {
         },
       },
     } as CoreEntity;
-    expect(lower(edited)).toThrow("cannot be edited in the update form");
+    expect(lower(edited)).toThrow('"status" cannot be edited in the update form');
+    const editedWrite = { ...edited, fields: edited.fields.map((field) => field.key === "status"
+      ? { ...field, transitions: { initial: "pending", rules: [{ ...rule, writes: ["expectedAt"] }] } } : field) } as CoreEntity;
+    editedWrite.interfaces!.web!.views!.record!.modes = { update: { title: { en: "Edit" }, groups: [{ fields: ["expectedAt"] }] } };
+    expect(lower(editedWrite)).toThrow('"expectedAt" cannot be edited in the update form; rule "trigger" writes it');
   });
 
   test("rule keys are unique and do not collide with the entity's operations", () => {
@@ -177,12 +185,14 @@ describe("status transition validation", () => {
     expect(transitions[0]!.rules[0]!.stamps).toEqual([{ field: "actorRelationId", value: "actor", actor: "relation" }]);
   });
 
-  test("an ACL-protected entity gets recordPermission edit unless the rule overrides it; others may not name one", () => {
+  test("an ACL-protected entity gets recordPermission edit, which a rule may only restate; others may not name one", () => {
     const { entity, transitions } = withStatusTransitions(protectedEntity([rule]), catalogs);
     expect(entity.operations!.trigger!.auth).toEqual({ mode: "session", roles: ["Agreements.All.ReadWrite"], recordPermission: "edit" });
     expect(transitions[0]!.rules[0]!.recordPermission).toBe("edit");
-    const overridden = withStatusTransitions(protectedEntity([{ ...rule, auth: { recordPermission: "view" } }]), catalogs);
-    expect(overridden.entity.operations!.trigger!.auth).toEqual({ mode: "session", roles: ["Agreements.All.ReadWrite"], recordPermission: "view" });
+    const restated = withStatusTransitions(protectedEntity([{ ...rule, auth: { recordPermission: "edit" } }]), catalogs);
+    expect(restated.entity.operations!.trigger!.auth).toEqual({ mode: "session", roles: ["Agreements.All.ReadWrite"], recordPermission: "edit" });
+    expect(lower(protectedEntity([{ ...rule, auth: { recordPermission: "view" } }]))).toThrow("requires edit");
+    expect(lower(protectedEntity([{ ...rule, auth: { recordPermission: "delete" } }]))).toThrow("requires edit");
     expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, auth: { recordPermission: "edit" } }] } }, formless))).toThrow("no record-level permissions");
     expect(withStatusTransitions(withStatus({ transitions: { initial: "pending", rules: [rule] } }, formless), catalogs).entity.operations!.trigger!.auth).toEqual({ mode: "session", roles: ["Agreements.All.ReadWrite"] });
   });

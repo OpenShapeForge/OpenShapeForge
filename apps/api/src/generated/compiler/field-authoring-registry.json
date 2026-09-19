@@ -6441,6 +6441,22 @@
                     "value": "actor"
                   }
                 ]
+              },
+              {
+                "key": "cancel",
+                "from": [
+                  "pending",
+                  "triggered"
+                ],
+                "to": "cancelled",
+                "label": {
+                  "en": "Cancel",
+                  "nl": "Annuleren"
+                },
+                "description": {
+                  "en": "Withdraw this milestone so no billing run will invoice it",
+                  "nl": "Trek deze mijlpaal in zodat geen facturatierun hem factureert"
+                }
               }
             ]
           }

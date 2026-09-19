@@ -67,11 +67,16 @@ function assertStatusField(entity: CoreEntity, field: Field, values: string[]): 
   if (field.defaultValue !== undefined && field.defaultValue !== transitions.initial) {
     fail(entity, field, `defaultValue must equal initial "${transitions.initial}".`);
   }
+  assertNotInForms(entity, field, field.key, "only its transitions write it");
+}
+
+/** A field written only by a transition has no place in a create or update form. */
+function assertNotInForms(entity: CoreEntity, field: Field, key: string, why: string): void {
   const modes = entity.interfaces?.web?.views?.record?.modes ?? {};
   for (const [mode, definition] of Object.entries(modes)) {
     const listed = (definition?.groups ?? []).some((group) =>
-      (group.fields ?? []).some((entry) => (typeof entry === "string" ? entry : entry.key) === field.key));
-    if (listed) fail(entity, field, `the field cannot be edited in the ${mode} form; only its transitions write it.`);
+      (group.fields ?? []).some((entry) => (typeof entry === "string" ? entry : entry.key) === key));
+    if (listed) fail(entity, field, `"${key}" cannot be edited in the ${mode} form; ${why}.`);
   }
 }
 
@@ -99,6 +104,11 @@ function assertRule(
   if (permission && !entity.authorization?.rowAccess?.recordPermissions) {
     fail(entity, field, `${where} names auth.recordPermission, but ${entity.entity} has no record-level permissions.`);
   }
+  // A transition is a write, and the write path asserts edit; a weaker or
+  // different permission on the offer would promise what the write refuses.
+  if (permission && permission !== "edit") {
+    fail(entity, field, `${where} names auth.recordPermission ${permission}; a transition writes the record and requires edit.`);
+  }
   const written: Array<{ key: string; how: "writes" | "stamps"; value?: "now" | "actor" }> = [
     ...(rule.writes ?? []).map((key) => ({ key, how: "writes" as const })),
     ...(rule.stamps ?? []).map((stamp) => ({ key: stamp.field, how: "stamps" as const, value: stamp.value })),
@@ -122,6 +132,7 @@ function assertRule(
     if (value === "actor" && !stampActor(target)) {
       fail(entity, field, `${where} stamps "${key}" with actor, but it is neither a Relation reference nor a string field.`);
     }
+    assertNotInForms(entity, field, key, `${where} ${how} it`);
     const writer = seen.get(`writes:${key}`);
     if (writer) fail(entity, field, `${where} ${how} "${key}", which rule "${writer}" already writes.`);
     seen.set(`writes:${key}`, rule.key);
@@ -157,10 +168,9 @@ function statusSchema(field: Field, values: string[]): Record<string, unknown> {
   };
 }
 
-/** `edit` on an entity with record-level permissions unless the rule says otherwise; nothing on one without. */
-function ruleRecordPermission(entity: CoreEntity, rule: FieldDefinitionTransitionRule): "view" | "edit" | "delete" | undefined {
-  if (!entity.authorization?.rowAccess?.recordPermissions) return undefined;
-  return rule.auth?.recordPermission ?? "edit";
+/** `edit` on an entity with record-level permissions; nothing on one without. */
+function ruleRecordPermission(entity: CoreEntity, _rule: FieldDefinitionTransitionRule): "edit" | undefined {
+  return entity.authorization?.rowAccess?.recordPermissions ? "edit" : undefined;
 }
 
 function ruleOperation(

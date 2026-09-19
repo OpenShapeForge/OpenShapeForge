@@ -299,7 +299,7 @@ export type WebStatusTransitions = {
     from: string[];
     to: string;
     label: LocalizedText;
-    recordPermission?: "view" | "edit" | "delete";
+    recordPermission?: "edit";
     preconditions?: Array<{ field: string; present: boolean }>;
     writes?: string[];
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;

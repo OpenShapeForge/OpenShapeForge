@@ -78,10 +78,12 @@ describe("AgreementMilestone immutability in the shipped manifest", () => {
     expect(isWritableColumn(column!, "update")).toBe(true);
   });
 
-  test("status and the trigger stamps are written only by AgreementMilestone.trigger", () => {
+  test("status is written only by its transitions, the trigger stamps only by AgreementMilestone.trigger", () => {
     for (const columnName of ["status", "triggered_at", "triggered_by"]) {
       const column = table?.columns.find((entry) => entry.name === columnName);
-      expect(column?.writtenBy?.map((writer) => writer.operation)).toEqual(["AgreementMilestone.trigger"]);
+      expect(column?.writtenBy?.map((writer) => writer.operation)).toEqual(
+        columnName === "status" ? ["AgreementMilestone.trigger", "AgreementMilestone.cancel"] : ["AgreementMilestone.trigger"],
+      );
       expect(isCallerWritableColumn(table!, column!, "create")).toBe(false);
       expect(isCallerWritableColumn(table!, column!, "update")).toBe(false);
     }

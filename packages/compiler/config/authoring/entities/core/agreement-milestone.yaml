@@ -119,12 +119,12 @@ fields:
         - { value: triggered, label: { en: Triggered, nl: Getriggerd } }
         - { value: invoiced, label: { en: Invoiced, nl: Gefactureerd } }
         - { value: cancelled, label: { en: Cancelled, nl: Geannuleerd } }
-    # The lifecycle as a state machine: `trigger` is the only writer of
-    # `status`, and stamps triggeredAt/triggeredBy from the server, so a
-    # milestone cannot be marked triggered through a generic update nor
-    # backdated. `invoiced` is still written by the milestone billing run
-    # (apps/api/src/billing/milestone-billing-run.ts) until that run becomes a
-    # described Operation.
+    # The lifecycle as a state machine: `trigger` and `cancel` are the only
+    # writers of `status`; `trigger` stamps triggeredAt/triggeredBy from the
+    # server, so a milestone cannot be marked triggered through a generic
+    # update nor backdated. `invoiced` deliberately has no rule here: the
+    # milestone billing run (apps/api/src/billing/milestone-billing-run.ts)
+    # writes it in raw SQL until that run becomes a described Operation (A8).
     transitions:
       initial: pending
       rules:
@@ -138,6 +138,13 @@ fields:
           stamps:
             - { field: triggeredAt, value: now }
             - { field: triggeredBy, value: actor }
+        - key: cancel
+          from: [pending, triggered]
+          to: cancelled
+          label: { en: Cancel, nl: Annuleren }
+          description:
+            en: Withdraw this milestone so no billing run will invoice it
+            nl: Trek deze mijlpaal in zodat geen facturatierun hem factureert
   - key: expectedAt
     osfType: date
     required: false

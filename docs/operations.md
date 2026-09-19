@@ -112,8 +112,7 @@ fields:
           from: [draft]
           to: submitted
           label: { en: Submit, nl: Indienen }
-          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles;
-                                                        # recordPermission: edit on an ACL-protected entity
+          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
           preconditions: [ { field: reviewerId, present: true } ]
           writes: [comment]                             # input fields only this rule may set
           stamps:                                       # server-derived, never input
@@ -140,10 +139,10 @@ What the compiler makes of it:
   on a datetime field, `actor` the session's linked Relation on a Relation
   reference or the user id on a string field — and is refused as input.
 - On an entity with `authorization.rowAccess.recordPermissions` every rule
-  requires the record's `edit` permission (a rule may name `view` or `delete`
-  instead under `auth.recordPermission`), checked before the offer and again
-  inside the write; an entity without record-level permissions refuses the
-  key.
+  requires the record's `edit` permission — a transition is a write, so
+  `auth.recordPermission` may only restate `edit` — checked before the offer
+  and again inside the write; an entity without record-level permissions
+  refuses the key.
 - Availability follows [operation-availability.md](operation-availability.md):
   a rule is offered on a record only while its status is in `from` and its
   preconditions hold, and execution re-evaluates the same decision after
@@ -160,12 +159,14 @@ option values and `defaultValue` must equal `initial`; rule keys are unique
 and do not collide with the entity's other operations; a `writes` or `stamps`
 field must be a persisted single field that nothing else writes and, when
 required, must carry a `defaultValue` (it leaves the create input, so without
-one no record could ever be created); and the status field
-may be neither `writtenBy`, `immutable` nor placed in a create or update
-form. `preconditions` is deliberately a small vocabulary — a field is
+one no record could ever be created); and neither the status field nor a
+`writes`/`stamps` target may be placed in a create or update form, nor may the
+status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
 present or absent — and richer checks belong in an authored plugin Operation.
 
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
-`pending` to `triggered`, is the only writer of `status`, and stamps
-`triggeredAt` with the transaction time and `triggeredBy` with the actor.
+`pending` to `triggered` and stamps `triggeredAt` with the transaction time
+and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
+`cancelled`. `invoiced` is still written by the milestone billing run until
+that run is a described Operation.
 

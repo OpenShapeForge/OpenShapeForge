@@ -36,8 +36,10 @@ const session = {
   roles: ["Agreements.All.Read", "Agreements.All.ReadWrite"],
 };
 const table = getGeneratedCrudTables().find((candidate) => candidate.source?.authoringEntityName === "AgreementMilestone")!;
-const operation = (rawCatalog as { operations: OperationContract[] }).operations
-  .find((candidate) => candidate.key === "AgreementMilestone.trigger")!;
+const catalogOperation = (key: string) => (rawCatalog as { operations: OperationContract[] }).operations
+  .find((candidate) => candidate.key === key)!;
+const operation = catalogOperation("AgreementMilestone.trigger");
+const cancel = catalogOperation("AgreementMilestone.cancel");
 const context = () => ({ db: restricted!.db, session, transport: "operation" as const }) as unknown as Parameters<ReturnType<typeof transitionOperationHandler>>[1];
 
 function databaseUrl(app = false) {
@@ -162,6 +164,17 @@ describe("status transitions against PostgreSQL", () => {
     });
     expect((await row(id))!.status).toBe("triggered");
     expect(await events(id)).toEqual(["created"]);
+  });
+
+  test("cancel runs from pending or triggered and is refused afterwards; the status names every rule as its writer", async () => {
+    const pending = await milestone();
+    const triggered = await milestone("triggered");
+    expect(await transitionOperationHandler(cancel)({ id: pending }, context())).toMatchObject({ value: { status: "cancelled", triggeredAt: null } });
+    expect(await transitionOperationHandler(cancel)({ id: triggered }, context())).toMatchObject({ value: { status: "cancelled" } });
+    await fails(transitionOperationHandler(cancel)({ id: pending }, context()), "INVALID_STATE");
+    await fails(transitionOperationHandler(operation)({ id: pending }, context()), "INVALID_STATE");
+    expect(table.columns.find((column) => column.name === "status")!.writtenBy!.map((writer) => writer.operation))
+      .toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]);
   });
 
   test("a record of another tenant or none at all is NOT_FOUND", async () => {

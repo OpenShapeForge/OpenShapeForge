@@ -539,8 +539,10 @@ describe("coreEntity properties the compiler implements", () => {
     const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
       if (path.includes("variableSources")) return false;
       if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
-      const name = path.split(/[.\]|>]/).at(-1) ?? "";
-      return schema.type === "string" && /^(actions\[|resultRenderer|component|render|<key>)$/.test(name) && !path.includes("i18n");
+      // The last path element: an item of `actions` is `actions[]`, a map key is `<key>`.
+      const name = path.match(/(?:^|[.>|])([^.>|]+)$/)?.[1] ?? "";
+      const stringLike = schema.type === "string" || typeof schema.pattern === "string";
+      return stringLike && /^(actions\[\]|resultRenderer|component|render|<key>)$/.test(name) && !path.includes("i18n");
     };
     const walk = (node: unknown, path: string) => {
       if (!node || typeof node !== "object" || Array.isArray(node)) return;
@@ -574,6 +576,7 @@ describe("coreEntity properties the compiler implements", () => {
       "web.views->webViewsV2.collection.columns[].key",
       "web.views->webViewsV2.collection.defaultSort.key",
       "web.views->webViewsV2.collection.actions[]",
+      "web.views->webViewsV2.record.actions[]",
       "web.views->webViewsV2.record.badges[]",
       "web.views->webViewsV2.record.layout.context.fields[]",
       "web.views->webViewsV2.record.layout.context.relationships[]",

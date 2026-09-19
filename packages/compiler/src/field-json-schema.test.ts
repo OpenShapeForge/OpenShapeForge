@@ -63,6 +63,14 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("carries enumeration values in the field's type and refuses one that does not convert exactly", () => {
+    const options = (value: string) => ({ type: "static" as const, items: [{ value, label: { en: value, nl: value } }] });
+    expect(compiledFieldSchema(field({ key: "priority", osfType: "integer", baseType: "integer", options: options("2") })).enum).toEqual([2]);
+    expect(compiledFieldSchema(field({ key: "flag", osfType: "boolean", baseType: "boolean", options: options("true") })).enum).toEqual([true]);
+    expect(compiledFieldSchema(field({ key: "code", osfType: "string", baseType: "string", options: options("2") })).enum).toEqual(["2"]);
+    expect(() => compiledFieldSchema(field({ key: "flag", osfType: "boolean", baseType: "boolean", options: options("yes") }))).toThrow("is not a boolean");
+    expect(() => compiledFieldSchema(field({ key: "priority", osfType: "integer", baseType: "integer", options: options("1.5") }))).toThrow("is not a safe integer");
+  });
   it("projects managed entity choices as a live reference, never a static enum", () => {
     const schema = compiledFieldSchema(field({
       key: "category", options: { type: "entity", source: "Category", valueField: "code" },

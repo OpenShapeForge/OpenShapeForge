@@ -43,13 +43,26 @@ function localizedText(value: OperationLocalizedText | undefined): string | unde
 /**
  * Authored option values are strings (the authoring schema admits nothing
  * else); an enumeration on a typed field carries the values in that type, so
- * `{ type: integer, enum: [1] }` validates what a client sends.
+ * `{ type: integer, enum: [1] }` validates what a client sends. A value that
+ * does not convert exactly (`yes` on a boolean, `1.5` or an unsafe integer on
+ * an integer) is an authoring error, never a string smuggled into a typed
+ * enumeration.
  */
 export function typedEnumValues(values: readonly string[], valueType: string | undefined): (string | number | boolean)[] {
   return values.map((value) => {
-    if (valueType === "integer" && /^-?\d+$/.test(value.trim())) return Number(value);
-    if (valueType === "number" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
-    if (valueType === "boolean" && (value === "true" || value === "false")) return value === "true";
+    const text = value.trim();
+    if (valueType === "integer") {
+      if (!/^-?\d+$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a safe integer.`);
+      return Number(text);
+    }
+    if (valueType === "number") {
+      if (text === "" || !Number.isFinite(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a finite number.`);
+      return Number(text);
+    }
+    if (valueType === "boolean") {
+      if (text !== "true" && text !== "false") throw new Error(`Enumeration value ${JSON.stringify(value)} is not a boolean.`);
+      return text === "true";
+    }
     return value;
   });
 }

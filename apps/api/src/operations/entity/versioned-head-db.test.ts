@@ -33,7 +33,7 @@ function table(name: string, columns: ReturnType<typeof column>[], versioning?: 
         storage: { head: { schema: "erp", table: name }, version: { schema: "erp", table: "head_versions", headColumn: "head_id" }, owned: versioning.owned as never },
       } } : {}),
     },
-  } as GeneratedCrudTable;
+  } as unknown as GeneratedCrudTable;
 }
 const tables: GeneratedCrudTable[] = [
   table("heads", [column("lifecycle_status", "text", { sourceField: "lifecycleStatus" })], { owned: [owned("lefts", "head_id", [owned("leaves", "left_id")]), owned("rights", "head_id", [owned("leaves", "right_id")])] }),

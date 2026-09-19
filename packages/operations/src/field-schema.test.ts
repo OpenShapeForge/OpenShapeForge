@@ -136,6 +136,15 @@ test("an enumeration on a typed field carries its values in that type", () => {
   expect(properties.code).toMatchObject({ type: "string", enum: ["1"] });
 });
 
+test("an enumeration value that does not convert exactly to the field's type is refused", () => {
+  const withOptions = (osfType: string, value: string) => () => operationFieldObjectSchema([{ key: "v", osfType, options: { type: "static", items: [{ value, label: "x" }] } }], {});
+  expect(withOptions("boolean", "yes")).toThrow("is not a boolean");
+  expect(withOptions("integer", "1.5")).toThrow("is not a safe integer");
+  expect(withOptions("integer", "9007199254740993")).toThrow("is not a safe integer");
+  expect(withOptions("number", "abc")).toThrow("is not a finite number");
+  expect(withOptions("integer", " 7 ")).not.toThrow();
+});
+
 test("an empty English label does not hide the Dutch one", () => {
   const schema = operationFieldObjectSchema([{ key: "kind", osfType: "string", label: { en: "", nl: "Soort" } }], {});
   expect((schema.properties as Record<string, Record<string, unknown>>).kind!.title).toBe("Soort");

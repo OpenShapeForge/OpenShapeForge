@@ -143,6 +143,8 @@ type FieldSchema = {
   type?: string;
   format?: string;
   enum?: unknown[];
+  maxLength?: number;
+  pattern?: string;
   required?: string[];
   properties?: Record<string, FieldSchema>;
   "x-osf-reference"?: { entity: string; valueField?: string };
@@ -157,6 +159,36 @@ function createFieldSchema(table: GeneratedTable, field: string): FieldSchema | 
   const contract = operationContractFor(table, "create");
   const values = (contract?.inputSchema as FieldSchema | undefined)?.properties?.values;
   return values?.properties?.[field];
+}
+
+/**
+ * A sample the compiled write contract accepts: an allowed enum value, else the
+ * column sample made to fit the advertised pattern and length (a three-letter
+ * currency code cannot carry a marker). The runtime enforces what the contract
+ * advertises, on every interface, so a marker in an options field is refused.
+ */
+export function schemaSample(
+  column: Column,
+  schema: Pick<FieldSchema, "enum" | "maxLength" | "pattern"> | undefined,
+  marker: string,
+): unknown {
+  if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
+  const rawSample = sampleValue(column, marker);
+  if (typeof rawSample !== "string") return rawSample;
+  let sample: string = rawSample;
+  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
+    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
+    if (!new RegExp(schema.pattern).test(identifier)) {
+      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
+    }
+    sample = identifier;
+  }
+  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
+}
+
+/** `schemaSample` against the field's projected create schema on `table`. */
+export function contractSample(table: GeneratedTable, column: Column, marker: string): unknown {
+  return schemaSample(column, createFieldSchema(table, fieldName(column)), marker);
 }
 
 /**
@@ -283,7 +315,7 @@ export async function columnInput(
     const reference = createFieldSchema(table, field)?.["x-osf-reference"];
     input[field] = reference
       ? await referencedValue(reference, identity, depth)
-      : sampleValue(column, marker);
+      : contractSample(table, column, marker);
   }
   return input;
 }
@@ -391,13 +423,16 @@ export function textColumnFor(
 ): Column | undefined {
   // "update": callers plant a value at create and then change it, so the
   // column has to be writable in both directions — and settable by the
-  // create the factory drives.
-  const mutableText = table.columns.filter(
-    (column) =>
-      isMutableColumn(column, "update") &&
+  // create the factory drives. Free text only: callers plant markers, and a
+  // column whose contract is an options list, a pattern or a short code
+  // refuses one.
+  const mutableText = table.columns.filter((column) => {
+    const schema = createFieldSchema(table, fieldName(column));
+    return isMutableColumn(column, "update") &&
       column.type === "text" &&
-      isCreatableField(table, fieldName(column)),
-  );
+      isCreatableField(table, fieldName(column)) &&
+      !schema?.enum && !schema?.pattern && (schema?.maxLength ?? Infinity) >= 80;
+  });
   return mutableText.find((column) => fieldName(column) === preferredField) ?? mutableText[0];
 }
 

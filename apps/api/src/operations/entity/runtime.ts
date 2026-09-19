@@ -54,6 +54,8 @@ import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
 import { entityBusinessUnavailability } from "./availability.js";
+import { assertEntityValuesValid, type EntityValuesValidation } from "./input-validation.js";
+import { assertNoCallerElicitedOutput, assertNoOperationWrittenValues } from "./write-policy.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -165,6 +167,22 @@ function requireValues(input: EntityOperationInput | undefined): Record<string, 
     throw generatedCrudError("Entity operation requires values.", "BAD_USER_INPUT");
   }
   return input.values;
+}
+
+/**
+ * The compiled write contract, enforced once for every interface. The
+ * operation-written and elicited refusals run first so a field that exists but
+ * is not the caller's to set is named as such, not as an unknown field.
+ */
+function requireContractValues(
+  operation: EntityOperationContract,
+  table: GeneratedCrudTable,
+  values: Record<string, unknown>,
+  options: EntityValuesValidation,
+): void {
+  assertNoCallerElicitedOutput(table, values);
+  assertNoOperationWrittenValues(table, values);
+  assertEntityValuesValid(operation, table, values, options);
 }
 
 function requireControl(
@@ -852,11 +870,12 @@ export async function executeEntityOperation(
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const data = typeof request.input?.blueprintId === "string"
-          ? await createFromBlueprint(db, session, table, request.input.blueprintId, request.input.values ?? {})
-          : await createGeneratedEntity(db, session, {
-              table: table.name, values: requireValues(request.input),
-            });
+        const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
+        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
+        const data = blueprintId !== undefined
+          ? await createFromBlueprint(db, session, table, blueprintId, values)
+          : await createGeneratedEntity(db, session, { table: table.name, values });
         return {
           intent: "create",
           data,
@@ -896,10 +915,12 @@ export async function executeEntityOperation(
                 : {}),
             }
           : undefined;
+        const values = requireValues(request.input);
+        requireContractValues(operation, table, values, { partial: true });
         const data = await updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
-          values: requireValues(request.input),
+          values,
           ...(guard ? { guard } : {}),
         });
         return {

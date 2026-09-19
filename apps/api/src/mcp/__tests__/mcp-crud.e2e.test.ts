@@ -27,7 +27,8 @@ import {
   isMutableColumn,
   nextMarker,
   pluginCreateInput,
-  sampleValue,
+  contractSample,
+  schemaSample,
   tables,
   tablesByName,
   untrackRow,
@@ -380,30 +381,6 @@ function createSchemaProperties(
     (tool.inputSchema as { properties?: Record<string, { enum?: unknown[]; maxLength?: number; pattern?: string }> })
       .properties ?? {}
   );
-}
-
-/**
- * A sample the advertised schema accepts: an allowed enum value, else the
- * column sample cut to the advertised length (a three-letter currency code
- * cannot carry a marker). The server enforces what it advertises.
- */
-function schemaSample(
-  column: (typeof tables)[number]["columns"][number],
-  schema: { enum?: unknown[]; maxLength?: number; pattern?: string } | undefined,
-  marker: string,
-): unknown {
-  if (Array.isArray(schema?.enum) && schema.enum.length > 0) return schema.enum[0];
-  const rawSample = sampleValue(column, marker);
-  if (typeof rawSample !== "string") return rawSample;
-  let sample: string = rawSample;
-  if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
-    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
-    if (!new RegExp(schema.pattern).test(identifier)) {
-      throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
-    }
-    sample = identifier;
-  }
-  return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
 }
 
 /** Sample create arguments: required scalars plus real rows for required FKs.
@@ -1197,7 +1174,7 @@ describe("generated MCP server", () => {
 
       test(`${prefix}: ${offeredOnCreate ? `accepts ${field} on create and ` : ""}refuses ${field} on update`, async () => {
         const valueFor = async () =>
-          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : sampleValue(immutable, nextMarker());
+          fkTarget ? createForeignKeyTarget(fkTarget, tenantA) : contractSample(table, immutable, nextMarker());
         const created = await call(
           tenantA,
           "create",

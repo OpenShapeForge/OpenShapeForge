@@ -113,7 +113,7 @@ describe("bootstrapIfEmpty", () => {
   );
 
   test(
-    "leaves a stale database for db:migrate and a foreign one for db:reset",
+    "leaves a database built from another manifest, and a foreign one, for db:reset",
     async () => {
       await withScratchDb(async (url) => {
         await withDb(url, (db) => db.connection().execute((conn) => runMigrationChain(conn)));
@@ -123,8 +123,8 @@ describe("bootstrapIfEmpty", () => {
             where version = ${generatedSchemaMigrationVersion}
           `.execute(db);
         });
-        // Behind is drift, not emptiness: bootstrap neither builds nor rolls
-        // forward, and the stale record survives to be reported.
+        // Behind is drift, not emptiness: bootstrap does not build over it,
+        // and the stale record survives to be reported.
         const stale = await withDb(url, (db) => bootstrapIfEmpty(db));
         expect(stale).toMatchObject({ bootstrapped: false, reason: "behind" });
         await withDb(url, async (db) => {

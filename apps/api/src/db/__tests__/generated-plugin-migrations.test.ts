@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import {
-  verifyPluginMigrationLedger,
-  type GeneratedPluginMigration,
-} from "../migrations/generated-plugin-migrations.js";
+import type { GeneratedPluginMigration } from "../migrations/generated-plugin-migrations.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -43,25 +40,18 @@ function migration(
   sqlText: string,
   version = "0001_tenant-trigger",
 ): GeneratedPluginMigration {
-  return {
-    plugin: "cpq",
-    version,
-    checksum: createHash("sha256").update(sqlText).digest("hex"),
-    sql: sqlText,
-  };
+  return { plugin: "cpq", version, sql: sqlText };
 }
 
 describe("generated plugin schema migrations", () => {
-  test("repeatable constraints reconcile a rollback to an earlier ledgered definition", async () => {
+  test("every registry entry is applied on every run, so the registry is the whole truth", async () => {
     await withScratchDb(async (url) => {
       const runtime = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
-      const check = (expression: string, digest: string) => ({
-        ...migration(
+      const check = (expression: string, digest: string) =>
+        migration(
           `ALTER TABLE platform.tenants DROP CONSTRAINT IF EXISTS repeatable_slug_check;\nALTER TABLE platform.tenants ADD CONSTRAINT repeatable_slug_check CHECK (${expression});\n`,
           `0001_repeatable-slug-${digest}`,
-        ),
-        repeatable: true as const,
-      });
+        );
       const broad = check("slug IN ('alpha', 'beta')", "broad");
       const narrow = check("slug IN ('alpha')", "narrow");
       const definition = async () => (await sql<{ definition: string }>`
@@ -70,13 +60,20 @@ describe("generated plugin schema migrations", () => {
         where conname = 'repeatable_slug_check'
       `.execute(runtime.db)).rows[0]!.definition;
       try {
-        await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
+        const first = await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
+        expect(first.pluginMigrationsApplied).toEqual(["plugin:cpq:0001_repeatable-slug-broad"]);
         expect(await definition()).toContain("'beta'");
         await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad, narrow] }));
         expect(await definition()).not.toContain("'beta'");
-        const rolledBack = await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
-        expect(rolledBack.pluginMigrationsApplied).toEqual(["plugin:cpq:0001_repeatable-slug-broad"]);
+        // No ledger: the entry runs again and is reported again, and nothing
+        // remembers the entry that is no longer registered.
+        const again = await runtime.db.connection().execute((db) => runMigrationChain(db, { pluginMigrations: [broad] }));
+        expect(again.pluginMigrationsApplied).toEqual(["plugin:cpq:0001_repeatable-slug-broad"]);
         expect(await definition()).toContain("'beta'");
+        const ledger = await sql<{ version: string }>`
+          select version from platform.schema_migrations where version like 'plugin:%'
+        `.execute(runtime.db);
+        expect(ledger.rows).toEqual([]);
       } finally {
         await runtime.close();
       }
@@ -86,17 +83,17 @@ describe("generated plugin schema migrations", () => {
   }, 60_000);
 
   test(
-    "applies after generated tables, refuses edits, and tolerates rollback extras",
+    "applies after generated tables and names a failing entry",
     async () => {
       const ddl = `
-CREATE FUNCTION platform.cpq_mark_tenant() RETURNS trigger
+CREATE OR REPLACE FUNCTION platform.cpq_mark_tenant() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
   NEW.keycloak_realm := 'plugin-trigger';
   RETURN NEW;
 END;
 $$;
-CREATE TRIGGER cpq_mark_tenant
+CREATE OR REPLACE TRIGGER cpq_mark_tenant
 BEFORE INSERT ON platform.tenants
 FOR EACH ROW EXECUTE FUNCTION platform.cpq_mark_tenant();
 `;
@@ -121,47 +118,31 @@ FOR EACH ROW EXECUTE FUNCTION platform.cpq_mark_tenant();
           `.execute(runtime.db);
           expect(tenant.rows[0]?.keycloak_realm).toBe("plugin-trigger");
 
+          // Idempotent DDL is what the contract asks for; a rerun is the proof.
           const second = await runtime.db.connection().execute((db) =>
             runMigrationChain(db, { pluginMigrations: registry }),
           );
-          expect(second.pluginMigrationsApplied).toEqual([]);
+          expect(second.pluginMigrationsApplied).toEqual([
+            "plugin:cpq:0001_tenant-trigger",
+          ]);
 
-          const additive = [
+          // An entry that is not idempotent fails on its second run, is
+          // rolled back, and is named — there is no ledger to hide behind.
+          const bare = [
             ...registry,
             migration(
               "ALTER TABLE platform.tenants ADD CONSTRAINT cpq_tenant_slug_check CHECK (slug <> '');\n",
               "0002_tenant-check",
             ),
           ];
-          const rolledForward = await runtime.db.connection().execute((db) =>
-            runMigrationChain(db, { pluginMigrations: additive }),
+          await runtime.db.connection().execute((db) =>
+            runMigrationChain(db, { pluginMigrations: bare }),
           );
-          expect(rolledForward.pluginMigrationsApplied).toEqual([
-            "plugin:cpq:0002_tenant-check",
-          ]);
-
-          const edited = [{ ...additive[0]!, checksum: "0".repeat(64) }, additive[1]!];
-          const mismatched = await verifyPluginMigrationLedger(runtime.db, edited);
-          expect(mismatched.ready).toBe(false);
-          expect(mismatched.mismatched).toEqual([
-            "plugin:cpq:0001_tenant-trigger",
-          ]);
           await expect(
             runtime.db.connection().execute((db) =>
-              runMigrationChain(db, { pluginMigrations: edited }),
+              runMigrationChain(db, { pluginMigrations: bare }),
             ),
-          ).rejects.toThrow(/checksum mismatch/);
-
-          const removed = await verifyPluginMigrationLedger(runtime.db, []);
-          expect(removed.ready).toBe(true);
-          expect(removed.unexpected).toEqual([
-            "plugin:cpq:0001_tenant-trigger",
-            "plugin:cpq:0002_tenant-check",
-          ]);
-          const rolledBack = await runtime.db.connection().execute((db) =>
-            runMigrationChain(db, { pluginMigrations: [] }),
-          );
-          expect(rolledBack.pluginMigrationsApplied).toEqual([]);
+          ).rejects.toThrow(/plugin:cpq:0002_tenant-check failed and was rolled back/);
         } finally {
           await runtime.close();
         }

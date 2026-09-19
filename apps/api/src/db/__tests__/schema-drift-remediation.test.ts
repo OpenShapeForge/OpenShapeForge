@@ -36,15 +36,16 @@ function drift(
 
 const nothingUndeclared: UndeclaredDatabaseSchema = { tables: [], columns: [] };
 
-describe("describeGeneratedSchemaDrift — database behind the manifest", () => {
-  test('"behind" with nothing undeclared points at db:migrate', () => {
+describe("describeGeneratedSchemaDrift — database built from another manifest", () => {
+  test('"behind" with nothing undeclared points at db:reset, never db:migrate', () => {
     const remediation = describeGeneratedSchemaDrift(drift("behind"), nothingUndeclared, {
       databaseName: "openshapeforge_dev",
     });
 
-    expect(remediation.kind).toBe("migrate");
-    expect(remediation.message).toContain('database "openshapeforge_dev" is behind the bundled manifest');
-    expect(remediation.message).toContain("bun run db:migrate");
+    expect(remediation.kind).toBe("reset");
+    expect(remediation.message).toContain('database "openshapeforge_dev" was built from another manifest');
+    expect(remediation.message).toContain("bun run db:reset");
+    expect(remediation.message).not.toContain("  bun run db:migrate");
     // The reader must not be told the branch's schema is foreign to the DB.
     expect(remediation.message).not.toContain("does not declare");
   });
@@ -62,13 +63,23 @@ describe("describeGeneratedSchemaDrift — database behind the manifest", () => 
     expect(remediation.message).toContain("bun run db:migrate");
   });
 
-  test("the migrate case still offers the scratch-database escape", () => {
+  test("both the migrate and the reset case offer the scratch-database escape", () => {
+    for (const status of ["behind", "unmigrated"] as const) {
+      const message = describeGeneratedSchemaDrift(drift(status), nothingUndeclared).message;
+      expect(message).toContain("OPENSHAPEFORGE_MIGRATE_DATABASE_URL");
+      expect(message).toContain(
+        'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',
+      );
+    }
+  });
+
+  test("the reset case names no database and echoes no password", () => {
     const message = describeGeneratedSchemaDrift(drift("behind"), nothingUndeclared).message;
 
-    expect(message).toContain("OPENSHAPEFORGE_MIGRATE_DATABASE_URL");
     expect(message).toContain(
-      'DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e',
+      'OPENSHAPEFORGE_RESET_DATABASE_CONFIRMATION="${DATABASE_URL##*/}" bun run db:reset',
     );
+    expect(message).not.toContain("postgres://");
   });
 });
 

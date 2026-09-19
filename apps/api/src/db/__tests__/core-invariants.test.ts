@@ -3,9 +3,9 @@
  * The core invariants a built database carries beyond the manifest
  * (migrations/core-invariants.ts), proven against a throwaway scratch
  * database after the real chain: the tenant-qualified document keys, the
- * managed DocumentType authority, and idempotency across a rerun and an
- * additive roll-forward — the one path that re-applies the generated
- * schema.sql over the widened keys. The closure trigger has its own suite
+ * managed DocumentType authority, and idempotency across a rerun of the
+ * whole chain, which re-applies the invariants over the widened keys. The
+ * closure trigger has its own suite
  * (org-unit-closure.test.ts), as do the document commands and the artifact
  * binding.
  *
@@ -20,7 +20,6 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { applyCoreInvariants } from "../migrations/core-invariants.js";
-import { generatedSchemaMigrationVersion } from "../migrations/generated-schema.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -99,14 +98,10 @@ describe("core invariants", () => {
         await applyCoreInvariants(db);
         expect(await documentForeignKeys(db)).toEqual(compoundKeys);
 
-        // An additive roll-forward re-applies schema.sql, whose foreign-key
-        // blocks guard by NAME: the compound keys must survive it.
-        await sql`
-          update platform.schema_migrations set checksum = ${"simulated-old"}
-          where version = ${generatedSchemaMigrationVersion}
-        `.execute(db);
-        const rolled = await db.connection().execute((conn) => runMigrationChain(conn));
-        expect(rolled.applied).toBe(true);
+        // A rerun of the whole chain on the built database is the checksum
+        // no-op followed by every invariant: the compound keys must survive it.
+        const rerun = await db.connection().execute((conn) => runMigrationChain(conn));
+        expect(rerun.applied).toBe(false);
         expect(await documentForeignKeys(db)).toEqual(compoundKeys);
       });
     },

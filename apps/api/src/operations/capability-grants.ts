@@ -15,6 +15,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB, Json } from "../generated/db/types.js";
 import type { DbSessionInput } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
+import { jsonbLiteral } from "../db/sql-helpers.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import type {
   RuntimeCapabilityGrantIssueInput,
@@ -188,7 +189,7 @@ export async function issueCapabilityGrantInTransaction(
          set revoked_at = ${now}, revoked_reason = 'superseded', superseded_by = ${id}
        where subject_entity = ${input.subject.entity}
          and subject_id = ${input.subject.id}
-         and recipient = ${JSON.stringify(recipient)}::jsonb
+         and recipient = ${jsonbLiteral(recipient)}
          and revoked_at is null
          and consumed_at is null
          and expires_at > ${now}
@@ -209,7 +210,7 @@ export async function issueCapabilityGrantInTransaction(
        issued_by, issued_at, expires_at, max_uses)
     values
       (${id}, ${session.tenantId}, ${hashGrantSecret(secret)}, array[${sql.join(operations.map((key) => sql.val(key)))}]::text[],
-       ${input.subject.entity}, ${input.subject.id}, ${JSON.stringify(recipient)}::jsonb,
+       ${input.subject.entity}, ${input.subject.id}, ${jsonbLiteral(recipient)},
        ${session.userId}, ${now}, ${expiresAt}, ${maxUses})
   `.execute(trx);
   await appendScopedEntityEventInTransaction(trx, {

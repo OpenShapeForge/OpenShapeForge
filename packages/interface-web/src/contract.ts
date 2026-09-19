@@ -284,8 +284,30 @@ export type WebRecordView = {
 
 export type WebEntityView = WebCollectionView | WebRecordView;
 
+/**
+ * A status field declared as a state machine. Each rule is also one of the
+ * entity's `operations` (by `operation` id) and appears in a record's offer
+ * list only while the record's status is in `from`; the renderer shows the
+ * offered rules as the record's transition buttons.
+ */
+export type WebStatusTransitions = {
+  field: string;
+  initial: string;
+  rules: Array<{
+    key: string;
+    operation: string;
+    from: string[];
+    to: string;
+    label: LocalizedText;
+    preconditions?: Array<{ field: string; present: boolean }>;
+    writes?: string[];
+  }>;
+};
+
 export type WebEntityInterface = {
   blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
+  /** Status state machines declared on this entity's fields. */
+  transitions?: WebStatusTransitions[];
   /** Canonical record label used outside a particular view, including selectors. */
   displayTemplate?: string;
   entityId: string;

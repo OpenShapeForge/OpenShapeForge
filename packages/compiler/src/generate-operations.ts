@@ -41,10 +41,11 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
  * blueprint Operations, `osf-control` the platform's own administration,
- * `osf-grants` the operator side of capability grants and `osf-jobs` the
- * durable job queue.
+ * `osf-grants` the operator side of capability grants, `osf-jobs` the
+ * durable job queue and `osf-transitions` the status transitions declared on
+ * entity fields.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-grants", "osf-jobs"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -181,6 +182,9 @@ const RESERVED_API_NAMESPACES = new Set([
 const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
   ["control", "osf-control"],
   ["jobs", "osf-jobs"],
+  // Status transitions live under the entity's own generated REST resource
+  // (POST /api/rest/v1/<base>/:id/<key>): they are that resource's verbs.
+  ["rest", "osf-transitions"],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {

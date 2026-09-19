@@ -35,6 +35,7 @@ import { buildAuthorization } from "./authorization.js";
 import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
 import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
+import { withStatusTransitions } from "./transitions.js";
 import {
   isCoreEntityV2,
   v2PluginOperations,
@@ -145,9 +146,14 @@ export function validateTimelineIncludes(
 }
 
 export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
+  const lowered = withStatusTransitions(
+    normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.osfTypes),
+    { componentCatalog: artifacts.componentCatalog, osfTypes: artifacts.osfTypes },
+  );
+  const transitions = lowered.transitions;
   artifacts = {
     ...artifacts,
-    coreEntity: normalizeEntityFields(withPublishedSnapshotVersioning(artifacts.coreEntity), artifacts.osfTypes),
+    coreEntity: lowered.entity,
     profiles: artifacts.profiles.map((profile) => (profile.fields ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.osfTypes) } : profile)),
   };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
@@ -224,6 +230,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     },
     storage: { table: tableName, columns },
     ...(blueprint ? { blueprint } : {}),
+    ...(transitions.length ? { transitions } : {}),
     ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
     model: { fields: modelFields, relationships },
     ...(coreEntity.versioning ? {

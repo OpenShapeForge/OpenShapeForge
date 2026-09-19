@@ -875,7 +875,7 @@ export function renderOpenApiSpec(
   paths["/api/artifacts"] = {
     post: {
       operationId: "stageArtifact",
-      summary: "Upload a temporary document file",
+      summary: "Upload a temporary file for a record",
       description: "Streams bytes into the configured storage provider. Use the returned opaque handle in the Operation that binds it to its owning record — Document.create or DocumentVersion.create for a document file — before it expires.",
       tags: ["Files"],
       parameters: [{

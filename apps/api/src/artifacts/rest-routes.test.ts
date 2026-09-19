@@ -48,7 +48,7 @@ describe("artifact REST adapter", () => {
     const response = await app.inject({ method: "POST", url: "/api/artifacts", headers: authorizationHeaders(), payload: "%PDF-test" });
     expect(response.statusCode).toBe(201);
     expect(response.json().data).toMatchObject({ artifactId: ARTIFACT_ID, version: 1, fileName: "bewijs.pdf" });
-    expect(staged).toEqual({ name: "bewijs.pdf", bytes: "%PDF-test", purpose: "document-upload" });
+    expect(staged).toEqual({ name: "bewijs.pdf", bytes: "%PDF-test", purpose: "record-upload" });
     await app.close();
   });
 

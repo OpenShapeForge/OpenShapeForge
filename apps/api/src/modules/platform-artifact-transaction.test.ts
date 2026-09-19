@@ -148,4 +148,52 @@ describe("artifact record authorization transaction scope", () => {
       await db.destroy();
     }
   });
+
+  test("a download without an Operation transaction reads the oracle and the provider on one connection", async () => {
+    const observations: QueryObservation[] = [];
+    const db = database(observations);
+    const platform = new ModulePlatformRuntime(db);
+    const session: TrustedSessionContext = {
+      tenantId,
+      userId,
+      roles: ["CaseFile.All.Read"],
+      groups: [],
+      relationGroupIds: [],
+      scope: "tenant",
+      credential: "bearer",
+    };
+    const module: RuntimeModule = {
+      name: "test-artifact-storage",
+      artifactStorage: {
+        providerId,
+        stage: async () => descriptor,
+        bind: async () => descriptor,
+        // The provider takes the documented handle and nothing else: no oracle call of its own.
+        read: async (context) => context.withTransaction(async (transaction) => {
+          await sql`select 1 as provider_read_marker`.execute(transaction);
+          return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Document", id: documentId } };
+        }),
+      },
+    };
+    platform.registerArtifactStorage([module]);
+
+    try {
+      await withModuleOperationSession(
+        platform.services,
+        session,
+        async (active) => platform.services.artifacts.read(active!, {
+          artifactId,
+          owner: { entity: "Document", id: documentId },
+        }),
+      );
+      const oracle = observations.find((entry) => entry.sql.includes('from "erp"."documents" as row_source'));
+      const provider = observations.find((entry) => entry.sql.includes("provider_read_marker"));
+      expect(oracle).toBeDefined();
+      expect(provider).toBeDefined();
+      expect(provider?.connectionId).toBe(oracle?.connectionId);
+      expect(new Set(observations.map((entry) => entry.connectionId)).size).toBe(1);
+    } finally {
+      await db.destroy();
+    }
+  });
 });

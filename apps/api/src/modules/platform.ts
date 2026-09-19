@@ -331,8 +331,14 @@ export class ModulePlatformRuntime {
         const active = this.#operationTransactionStorage.getStore();
         return active?.session === session ? active.trx : undefined;
       },
+      // Joins the Operation transaction when there is one, else the read
+      // transaction an enclosing artifact call opened: a download's oracle
+      // check and the provider's read are then one transaction, so the record
+      // the session was found to reach is the record the bytes are read
+      // against. `currentTransaction` (bind) stays on the Operation one alone.
       withTransaction: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore();
+        const active = this.#operationTransactionStorage.getStore() ??
+          this.#recordAccessTransactionStorage.getStore();
         if (active) {
           if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
           return work(active.trx);

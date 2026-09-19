@@ -83,7 +83,7 @@ export function registerArtifactRestRoutes(
         throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
       }
       const descriptor = await options.artifacts.stage(verified, {
-        purpose: "document-upload",
+        purpose: "record-upload",
         fileName: fileName(request),
         source,
       });

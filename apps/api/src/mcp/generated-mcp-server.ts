@@ -7867,7 +7867,7 @@ export function registerGeneratedMcpServer(
             uploadSession,
             (activeSession) => options.modulePlatform!.services.artifacts.stage(
               activeSession,
-              { purpose: "document-upload", fileName, source },
+              { purpose: "record-upload", fileName, source },
             ),
           );
           return reply.status(201).send({ data: descriptor, operations: [] });

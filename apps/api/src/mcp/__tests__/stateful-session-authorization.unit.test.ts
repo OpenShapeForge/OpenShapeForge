@@ -9,9 +9,9 @@ import {
   withFreshRelationGroupMemberships,
 } from "../stateful-session-authorization.js";
 
-function authorization(
-  overrides: Partial<StatefulMcpAuthorization> = {},
-): StatefulMcpAuthorization {
+type TestAuthorization = StatefulMcpAuthorization & Pick<TrustedSessionContext, "roles" | "scope">;
+
+function authorization(overrides: Partial<TestAuthorization> = {}): TestAuthorization {
   return {
     tenantId: "33333333-3333-4333-8333-333333333333",
     userId: "22222222-2222-4222-8222-222222222222",
@@ -27,10 +27,10 @@ function authorization(
 
 describe("sameStatefulMcpAuthorization", () => {
   it("refreshes RelationGroup memberships without treating them as token claims", async () => {
-    const established = authorization() as StatefulMcpAuthorization & {
+    const established = authorization() as TestAuthorization & {
       relationGroupIds?: readonly string[];
     };
-    const current = authorization() as StatefulMcpAuthorization & {
+    const current = authorization() as TestAuthorization & {
       relationGroupIds?: readonly string[];
     };
     established.relationGroupIds = ["11111111-1111-4111-8111-111111111111"];
@@ -186,15 +186,31 @@ describe("sameStatefulMcpAuthorization", () => {
     ).toBe(true);
   });
 
-  it("still refuses identity, claim, scope, and credential changes", () => {
+  it("carries roles and scope per request, so a role change applies in place instead of ending the session", async () => {
+    const established = authorization({ roles: ["General.All.Read", "org_employee"], scope: "self" }) as TrustedSessionContext;
+    const stateful = createStatefulMcpSessionContext(established);
+    // Outside a request: what the session was established with, so the
+    // server built at initialize sees a complete session.
+    expect(stateful.roles).toEqual(["General.All.Read", "org_employee"]);
+    expect(stateful.scope).toBe("self");
+    // A role change between requests is not a reason to reinitialize...
+    const promoted = authorization({ roles: ["Organization.All.ReadWrite", "org_admin"], scope: "tenant" }) as TrustedSessionContext;
+    expect(sameStatefulMcpAuthorization(established, promoted)).toBe(true);
+    // ...and the request that carries it sees the new roles.
+    await withFreshRelationGroupMemberships(promoted, async () => {
+      expect(stateful.roles).toEqual(["Organization.All.ReadWrite", "org_admin"]);
+      expect(stateful.scope).toBe("tenant");
+    });
+    expect(stateful.roles).toEqual(["General.All.Read", "org_employee"]);
+  });
+
+  it("still refuses identity, claim, and credential changes", () => {
     const original = authorization();
     expect(
       sameStatefulMcpAuthorization(original, authorization({ userId: "different-user" })),
     ).toBe(false);
-    expect(sameStatefulMcpAuthorization(original, authorization({ roles: [] }))).toBe(false);
     expect(sameStatefulMcpAuthorization(original, authorization({ oauthScopes: [] }))).toBe(false);
     expect(sameStatefulMcpAuthorization(original, authorization({ groups: [] }))).toBe(false);
-    expect(sameStatefulMcpAuthorization(original, authorization({ scope: "self" }))).toBe(false);
     expect(
       sameStatefulMcpAuthorization(original, authorization({ credential: "api-key" })),
     ).toBe(false);

@@ -6,10 +6,8 @@ export type StatefulMcpAuthorization = Pick<
   TrustedSessionContext,
   | "tenantId"
   | "userId"
-  | "roles"
   | "oauthScopes"
   | "groups"
-  | "scope"
   | "credential"
   | "loginSessionBinding"
 >;
@@ -23,8 +21,12 @@ function sameClaims(left: readonly string[] = [], right: readonly string[] = [])
 
 /**
  * A stateful MCP session may survive access-token renewal, but not a change of
- * login session or effective authorization. Both absent login bindings retain
- * compatibility for API-key and trusted-context sessions.
+ * login session, identity or token claims. Roles and the scope derived from
+ * them are NOT in this tuple: a person's roles are the membership row's
+ * (auth/person-roles.ts), refreshed on every request below, so
+ * `set_member_role` applies in place rather than ending the session. Both
+ * absent login bindings retain compatibility for API-key and trusted-context
+ * sessions.
  */
 export function sameStatefulMcpAuthorization(
   established: StatefulMcpAuthorization,
@@ -33,10 +35,8 @@ export function sameStatefulMcpAuthorization(
   return (
     established.tenantId === current.tenantId &&
     established.userId === current.userId &&
-    sameClaims(established.roles, current.roles) &&
     sameClaims(established.oauthScopes, current.oauthScopes) &&
     sameClaims(established.groups, current.groups) &&
-    established.scope === current.scope &&
     established.credential === current.credential &&
     established.loginSessionBinding === current.loginSessionBinding
   );
@@ -55,6 +55,8 @@ type RequestScope = {
   active: boolean;
   ids: readonly string[];
   relation: TrustedSessionContext["relation"];
+  roles: readonly string[];
+  scope: TrustedSessionContext["scope"];
 };
 
 const freshRequestScope = new AsyncLocalStorage<RequestScope>();
@@ -79,6 +81,29 @@ export function createStatefulMcpSessionContext(
     get: () => {
       const request = freshRequestScope.getStore();
       return request?.active ? request.ids : NO_RELATION_GROUPS;
+    },
+  });
+  // Roles and scope are the current request's — what the membership row says
+  // now. Outside a request they are the roles the session was established
+  // with, so the server built at initialize (tool catalog, opening sentence)
+  // sees a complete session; every request replaces them before any handler
+  // runs.
+  const establishedRoles = Object.freeze([...(established.roles ?? [])]) as readonly string[];
+  const establishedScope = established.scope;
+  Object.defineProperty(stateful, "roles", {
+    enumerable: true,
+    configurable: false,
+    get: () => {
+      const request = freshRequestScope.getStore();
+      return request?.active ? request.roles : establishedRoles;
+    },
+  });
+  Object.defineProperty(stateful, "scope", {
+    enumerable: true,
+    configurable: false,
+    get: () => {
+      const request = freshRequestScope.getStore();
+      return request?.active ? request.scope : establishedScope;
     },
   });
   Object.defineProperty(stateful, "relation", {
@@ -108,6 +133,8 @@ export async function withFreshRelationGroupMemberships<T>(
     active: true,
     ids: Object.freeze([...(current.relationGroupIds ?? [])]),
     relation: current.relation ?? null,
+    roles: Object.freeze([...(current.roles ?? [])]) as readonly string[],
+    scope: current.scope,
   };
   return freshRequestScope.run(request, async () => {
     try {

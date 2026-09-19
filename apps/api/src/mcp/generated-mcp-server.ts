@@ -138,6 +138,7 @@ import {
   storeSubmission,
   type PendingConfiguration,
   findExistingConfiguration,
+  handoffFailureCode,
   mergeConfigurationValues,
 } from "./configuration-handoff.js";
 import {
@@ -8089,7 +8090,7 @@ export function registerGeneratedMcpServer(
           );
       } catch (error) {
         request.log.error(
-          { err: error },
+          { err: error, failure: handoffFailureCode(error) },
           "Personal connection callback failed.",
         );
         return reply
@@ -8371,7 +8372,7 @@ export function registerGeneratedMcpServer(
             .send(renderConfigurationSavedPage(pending.displayName));
         } catch (error) {
           request.log.error(
-            { err: error },
+            { err: error, failure: handoffFailureCode(error) },
             "Configuration handoff submission failed.",
           );
           return reply

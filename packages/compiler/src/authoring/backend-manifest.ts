@@ -35,6 +35,7 @@ import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
 import { resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
+import { fieldValueCheckConstraints } from "./field-value-checks.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -1344,6 +1345,10 @@ export function compileAuthoringBackendManifest(
       candidate.contract.entity.name,
       columnsByNameWithOperational,
     );
+    const valueChecks = fieldValueCheckConstraints(schema, name, candidate.contract.storage.columns.map((storageColumn) => ({
+      field: candidate.fieldsByKey.get(storageColumn.field),
+      column: columnsByField.get(storageColumn.field)!,
+    })));
 
     return {
       schema,
@@ -1356,6 +1361,7 @@ export function compileAuthoringBackendManifest(
       columns,
       ...(rowScope ? { rowScope } : {}),
       ...(compiledIndexes.length > 0 ? { indexes: compiledIndexes } : {}),
+      ...(valueChecks.length > 0 ? { constraints: valueChecks } : {}),
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,

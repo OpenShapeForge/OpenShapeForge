@@ -58,7 +58,17 @@ the DDL itself:
    - compiler-plugin invariants (`generated-plugin-migrations.ts`): a
      plugin's `constraints` and `schemaMigrations` on its contributed tables,
      still ledgered per plugin and version in `platform.schema_migrations`
-     because their SQL is opaque to the compiler.
+     because their SQL is opaque to the compiler;
+   - compiler-owned value checks, on the same ledger under `osf-compiler`
+     (`authoring/field-value-checks.ts`): `CHECK (col IN (...))` for a field
+     whose `options` are static items, and `CHECK (col ~ '<pattern>')` for a
+     `validation.pattern` PostgreSQL reads the way ECMA-262 does (no
+     lookarounds, backreferences, `\b`, unicode escapes or lazy quantifiers —
+     those stay runtime-only). Scalar text columns only; a referentiedata
+     options source is data, not schema. Each is named `<table>_<column>_
+     options_check` or `_pattern_check` and is repeatable and
+     content-addressed, so a changed options list drops and re-adds the
+     constraint on the next migrate instead of leaving a stale one behind.
 4. **Grants** — the app role's whole-schema DML sweep, the blueprint
    re-narrowing, then the worker role's enumerated grants, re-evaluated from
    the manifest on every run.

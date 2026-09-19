@@ -140,10 +140,12 @@ describe("generated schema migration", () => {
           // The ledger holds the generated-schema record plus the immutable
           // migrations contributed by the generated compiler-plugin registry.
           // No unrelated hand-written history is replayed on a fresh install.
+          // Both sides sorted in JS: the database's collation orders a hyphen
+          // differently from a code-point sort, and the set is what matters.
           const ledger = await sql<{ version: string }>`
-            select version from platform.schema_migrations order by version
+            select version from platform.schema_migrations
           `.execute(db);
-          expect(ledger.rows.map((row) => row.version)).toEqual(
+          expect(ledger.rows.map((row) => row.version).sort()).toEqual(
             [generatedSchemaMigrationVersion, ...first.pluginMigrationsApplied].sort(),
           );
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(

@@ -65,6 +65,10 @@ type IntegrationRow = {
   client_secret_algorithm: string | null;
 };
 
+/** A tenant no row belongs to, so a miss still opens the fenced session. */
+const DECOY_TENANT_ID = "00000000-0000-4000-8000-000000000000";
+const DECOY_SECRET_HASH = "0".repeat(64);
+
 function asDate(value: Date | string | null): Date | null {
   if (value === null) return null;
   return value instanceof Date ? value : new Date(value);
@@ -108,24 +112,23 @@ export async function resolveApiKey(
   const tenantResult = await sql<{ tenant_id: string | null }>`
     select app.api_key_tenant(${lookupId}) as tenant_id
   `.execute(db);
-  const tenantId = tenantResult.rows[0]?.tenant_id ?? null;
-  const row = tenantId
-    ? await withCredentialResolutionSession(db, tenantId, async (trx) => {
-        const keyResult = await sql<KeyRow>`
-          select id, tenant_id, integration_id, secret_hash, role_subset, expires_at, revoked_at
-            from platform.api_keys
-           where lookup_id = ${lookupId}
-           limit 1
-        `.execute(trx);
-        return keyResult.rows[0];
-      })
-    : undefined;
-  // Compare against a decoy hash when the lookup missed, so an unknown key and
-  // a wrong secret cost the same. Without this, response time distinguishes
-  // "this lookup id exists" from "it does not" — an enumeration oracle over a
-  // column an attacker can otherwise only guess.
+  // An unknown lookup id and a known one cost the same: the fenced read runs
+  // either way (against a tenant that has no such row when the id is unknown)
+  // and the hash comparison runs against a decoy. Without that, response time
+  // distinguishes "this lookup id exists" from "it does not" — an enumeration
+  // oracle over a column an attacker can otherwise only guess.
+  const tenantId = tenantResult.rows[0]?.tenant_id ?? DECOY_TENANT_ID;
+  const row = await withCredentialResolutionSession(db, tenantId, async (trx) => {
+    const keyResult = await sql<KeyRow>`
+      select id, tenant_id, integration_id, secret_hash, role_subset, expires_at, revoked_at
+        from platform.api_keys
+       where lookup_id = ${lookupId}
+       limit 1
+    `.execute(trx);
+    return keyResult.rows[0];
+  });
   if (!row) {
-    secretMatches(secret, "0".repeat(64));
+    secretMatches(secret, DECOY_SECRET_HASH);
     return { ok: false, reason: "unknown" };
   }
 

@@ -22,6 +22,7 @@
  * integration.
  */
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { sameTenantId } from "../organization-binding.js";
 import type { SecretKeyring } from "../../platform/secrets.js";
 import type { SessionScope, TrustedSessionContext } from "../trusted-context.js";
 import { exchangeForToken } from "./exchange.js";
@@ -111,7 +112,7 @@ export async function resolveApiKeySession(
   // was issued under. A mismatch means the realm client was re-pointed at
   // another organization after provisioning — the credential is stale in a way
   // that would otherwise cross a tenant boundary.
-  if (identity.tenantId !== key.tenantId) {
+  if (!sameTenantId(identity.tenantId, key.tenantId)) {
     console.warn(
       "[auth] API key tenant does not match its service account's tid; rejecting.",
     );

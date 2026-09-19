@@ -193,11 +193,18 @@ export function createDocumentArtifactAuthorization(
         if (typeof documentId !== "string" || !UUID.test(documentId)) {
           return undefined;
         }
-        await context.records.assertAccess(context.session, {
-          entityName: "DocumentVersion",
-          id: input.owner.recordId,
-          intent: "get",
-        });
+        // A version's bytes are the document's content, so reading them is
+        // the Document's `get` plus the version's own. A capability grant
+        // names the records it reaches when it is issued, and a version
+        // created afterwards — a signed copy, a certificate — is on no such
+        // list; the Document is. Under a grant the parent decides alone.
+        if (context.session.credential !== "grant") {
+          await context.records.assertAccess(context.session, {
+            entityName: "DocumentVersion",
+            id: input.owner.recordId,
+            intent: "get",
+          });
+        }
         await context.records.assertAccess(context.session, {
           entityName: "Document",
           id: documentId,

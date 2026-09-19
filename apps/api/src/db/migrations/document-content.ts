@@ -21,23 +21,8 @@
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
-import { ensureCheckConstraint } from "./sql-invariants.js";
-
-/**
- * Name and expression of the compiler-owned owner check on erp.blocks, as
- * emitted in apps/api/src/generated/db/manifest.json ("compilerOwned" check).
- * The plugin-migration step adds it under the same name when absent;
- * restating it here keeps the invariant visible next to the guards that rely
- * on it and is a no-op once the definitions agree.
- */
-const BLOCK_OWNER_CHECK = {
-  table: "erp.blocks",
-  name: "erp_blocks_values_owner_check_7e02a4f3b503",
-  expression: 'num_nonnulls("document_variant_id", "variant_id") = 1',
-};
 
 export async function applyDocumentContentGuards(db: OpenShapeForgeDatabase): Promise<void> {
-  await ensureCheckConstraint(db, BLOCK_OWNER_CHECK);
   await sql`
     create or replace function app.document_command() returns text
     language sql stable

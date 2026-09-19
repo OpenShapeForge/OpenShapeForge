@@ -369,9 +369,12 @@ export function contentLanguage(locale: string): string {
 
 /**
  * The variant a channel serves for a locale: the exact locale, else a variant
- * of the same language (`nl` for `nl-NL`, the bare language preferred), else
- * the channel's authored default. A channel without any of those is an error,
- * never a silent switch to another language; another channel never is.
+ * of the same language (`nl` for `nl-NL`: the bare language first, then the
+ * authored default if it is one of them, then the lowest locale), else the
+ * channel's authored default. The choice depends on the variants alone, never
+ * on the order they arrived in, so a frozen template and a live document
+ * agree. A channel without any of those is an error, never a silent switch
+ * to another language; another channel never is.
  */
 export function selectContentTemplateVariant(
   version: ContentTemplateVersion,
@@ -381,10 +384,13 @@ export function selectContentTemplateVariant(
   const channels = version.variants.filter((variant) => variant.channel === channel);
   if (!channels.length) contentError("UNSUPPORTED_CHANNEL", `Template has no ${channel} variant.`);
   const language = contentLanguage(locale);
-  const sameLanguage = channels.filter((variant) => contentLanguage(variant.locale) === language);
+  const sameLanguage = channels
+    .filter((variant) => contentLanguage(variant.locale) === language)
+    .sort((left, right) => left.locale.localeCompare(right.locale, "en"));
   const variant =
     channels.find((variant) => variant.locale === locale) ??
     sameLanguage.find((variant) => variant.locale === language) ??
+    sameLanguage.find((variant) => variant.default) ??
     sameLanguage[0] ??
     channels.find((variant) => variant.default);
   if (!variant) contentError("UNSUPPORTED_LOCALE", `Template has no ${channel}/${locale} variant and no default ${channel} variant.`);

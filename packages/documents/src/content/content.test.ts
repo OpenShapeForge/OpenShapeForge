@@ -284,6 +284,16 @@ describe("template variants and local/global variables", () => {
     expect(snapshot.templates[0]!.variantId).toBe("root-nl-NL");
     snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
     expect(snapshot.templates[0]!.variantId).toBe("root-nl");
+    // Among regions of the same language, the authored default wins, else the lowest locale, whatever the order given.
+    withVariants([{ ...document!, id: "root-nl-NL", locale: "nl-NL" }, { ...document!, id: "root-nl-BE", locale: "nl-BE", default: true }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
+    withVariants([{ ...document!, id: "root-nl-NL", locale: "nl-NL" }, { ...document!, id: "root-nl-BE", locale: "nl-BE" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
+    withVariants([{ ...document!, id: "root-nl-BE", locale: "nl-BE" }, { ...document!, id: "root-nl-NL", locale: "nl-NL" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-BE");
     // A language the template lacks is served by the channel's default variant.
     withVariants([{ ...document!, id: "root-en", locale: "en", default: true }, { ...document!, id: "root-fr", locale: "fr" }]);
     snapshot = await materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers);

@@ -147,7 +147,7 @@ state and requires the head's `updatedAt` as `expectedVersion`. `Document.status
 | `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles. Resolves the editable head for one channel and locale through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
 | `Document.publish` `{ id, expectedVersion }` | Generic snapshot publish (`packages/versioning`): freezes the document row with its variants and blocks into a new `DocumentVersion`, moves `latestVersion(Id)`/`publishedVersion(Id)`, sets `lifecycleStatus = published`. |
 | `Template.publish` (existing) | Unchanged input; also runs the follow rule. |
-| `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; the CPQ plugin depends on it. |
+| `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; plugins that render a frozen template to a file build on it. |
 
 The web manifest projects `insert`, `move`, `update` and `remove` on the
 `DocumentVariant.blocks` relationship; the `Document` record view authors

@@ -652,6 +652,10 @@ tables:
       - { name: subject_entity, type: text, required: true }
       - { name: subject_id, type: uuid, required: true }
       - { name: recipient, type: jsonb, required: true }
+      # Records beside the subject the issuer delegated to the recipient:
+      # [{ entity, id, intents: [get | update] }], verified against the
+      # issuer's own access when the grant was issued.
+      - { name: records, type: jsonb, required: true, default: "'[]'::jsonb" }
       - { name: issued_by, type: uuid, required: true }
       - { name: issued_at, type: timestamptz, required: true, default: now() }
       - { name: expires_at, type: timestamptz, required: true }

@@ -74,6 +74,18 @@ operations:
               operations:
                 type: array
                 items: { type: string }
+              records:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [entity, id, intents]
+                  properties:
+                    entity: { type: string }
+                    id: { type: string, format: uuid }
+                    intents:
+                      type: array
+                      items: { type: string, enum: [get, update] }
               issuedBy: { type: string, format: uuid }
               issuedAt: { type: string, format: date-time }
               expiresAt: { type: string, format: date-time }

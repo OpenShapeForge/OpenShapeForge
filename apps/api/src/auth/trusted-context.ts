@@ -47,6 +47,8 @@ export type CapabilityGrantSession = {
   /** Opaque beyond its `kind`; whatever the issuer recorded about the recipient. */
   recipient: { kind: string; [key: string]: unknown };
   operations: readonly string[];
+  /** Records beside the subject the issuer delegated, each with its intents. */
+  records: readonly { entity: string; id: string; intents: readonly ("get" | "update")[] }[];
   expiresAt: string;
   /** Single-use grants are consumed in the handler's transaction. */
   maxUses: number | null;

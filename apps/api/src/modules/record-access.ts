@@ -68,6 +68,26 @@ function requireCanonicalRoles(
   }
 }
 
+/**
+ * A grant session holds no roles; what it reaches is written on the grant.
+ * The subject record is reachable for `get` and `update` (the capability
+ * Operation exists to act on it), and every other record only with an intent
+ * its issuer delegated — verified against the issuer's own access when the
+ * grant was issued, so this never widens past what that session could do.
+ */
+function requireGrantedRecord(
+  session: TrustedSessionContext,
+  input: RuntimeRecordAccessRequest,
+): void {
+  const grant = session.grant;
+  if (!grant) refusal("Not authorized to access this record.");
+  if (grant.subject.entity === input.entityName && grant.subject.id === input.id && input.intent !== "delete") return;
+  const delegated = grant.records.find((record) => record.entity === input.entityName && record.id === input.id);
+  if (!delegated || !(delegated.intents as readonly string[]).includes(input.intent)) {
+    refusal("The capability grant does not reach this record.");
+  }
+}
+
 async function assertVisibleRecord(
   trx: Transaction<DB>,
   session: TrustedSessionContext,
@@ -111,14 +131,21 @@ export class RecordAccessRuntime {
         const operation = operationFor(input);
         const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
 
-        // Match the public Entity dispatcher: the table gate proves CRUD is
-        // enabled and checks its generated roles. The Operation check keeps a
-        // stale/mismatched catalog fail-closed instead of choosing one source.
-        requireEntityOperation(table, input.intent, session);
-        requireCanonicalRoles(operation, session);
+        if (session.credential === "grant") {
+          requireGrantedRecord(session, input);
+        } else {
+          // Match the public Entity dispatcher: the table gate proves CRUD is
+          // enabled and checks its generated roles. The Operation check keeps a
+          // stale/mismatched catalog fail-closed instead of choosing one source.
+          requireEntityOperation(table, input.intent, session);
+          requireCanonicalRoles(operation, session);
+        }
 
         const authorize = async (trx: Transaction<DB>): Promise<void> => {
-          const permissions = operation.authorization.recordPermissions ?? [];
+          // A grant's record permissions were the issuer's, proven at issue
+          // time; the grant id itself owns no record. Only the tenant fence
+          // is re-checked here, so a record deleted since is still refused.
+          const permissions = session.credential === "grant" ? [] : (operation.authorization.recordPermissions ?? []);
           if (permissions.length === 0) {
             await assertVisibleRecord(trx, session, table, input.id);
             return;

@@ -16,6 +16,7 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import Fastify, { type FastifyInstance } from "fastify";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import { operationErrorOf } from "@openshapeforge/operations";
 import { createDatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { withDbSession } from "../../db/session.js";
@@ -54,7 +55,14 @@ function capabilityOperation(key: string, handler: string, path: string): Operat
     title: key,
     description: key,
     handler,
-    inputSchema: { type: "object", additionalProperties: false, properties: { note: { type: "string" } } },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        note: { type: "string" },
+        probe: { type: "array", items: { type: "object", additionalProperties: true } },
+      },
+    },
     outputSchema: {
       type: "object",
       required: ["subject", "recipient", "credential", "roles"],
@@ -64,6 +72,7 @@ function capabilityOperation(key: string, handler: string, path: string): Operat
         credential: { type: "string" },
         roles: { type: "array", items: { type: "string" } },
         uses: { type: "integer" },
+        reach: { type: "object", additionalProperties: true },
       },
       additionalProperties: false,
     },
@@ -102,6 +111,7 @@ const issueOperation: OperationContract = {
       expiresInSeconds: { type: "integer" },
       supersede: { type: "boolean" },
       fail: { type: "boolean" },
+      records: { type: "array", items: { type: "object", additionalProperties: true } },
     },
     additionalProperties: false,
   },
@@ -138,14 +148,27 @@ const envelopesModule: RuntimeModule = {
           expiresAt: new Date(Date.now() + ((input.expiresInSeconds as number | undefined) ?? 3600) * 1000),
           maxUses: (input.maxUses as number | null | undefined) ?? null,
           ...(input.supersede ? { supersede: "same-subject-and-recipient" as const } : {}),
+          ...(input.records ? { records: input.records as never } : {}),
         });
         if (input.fail) throw new HttpError(409, "CONFLICT", "Rolled back after issuing.");
         return { status: 201, value: { id: issued.id, token: issued.token } };
       });
     },
-    async readEnvelope(_input, context) {
+    async readEnvelope(input, context) {
       const session = context.session!;
-      return { value: { subject: session.grant!.subject, recipient: session.grant!.recipient, credential: session.credential, roles: session.roles } };
+      // What the grant reaches through the core oracle: the subject, the
+      // delegated records, and nothing else.
+      const reach: Record<string, string> = {};
+      for (const probe of (input.probe as { entityName: string; id: string; intent: "get" | "update" | "delete" }[] | undefined) ?? []) {
+        const key = `${probe.entityName}:${probe.intent}`;
+        try {
+          await context.platform!.records.assertAccess(session, probe);
+          reach[key] = "ok";
+        } catch (error) {
+          reach[key] = operationErrorOf(error)?.code ?? "error";
+        }
+      }
+      return { value: { subject: session.grant!.subject, recipient: session.grant!.recipient, credential: session.credential, roles: session.roles, ...(input.probe ? { reach } : {}) } };
     },
     async signEnvelope(input, context) {
       const session = context.session!;
@@ -294,6 +317,69 @@ describe("capability grants over REST", () => {
     // Missing and malformed tokens.
     expect(await present(readOperation.transports.rest.path, undefined)).toMatchObject({ status: 401, body: { error: { code: "GRANT_INVALID" } } });
     expect(await present(readOperation.transports.rest.path, "nonsense")).toMatchObject({ status: 401, body: { error: { code: "GRANT_INVALID" } } });
+  }, TEST_TIMEOUT);
+
+  test("a grant reaches its subject and the records its issuer delegated, and nothing else", async () => {
+    const envelopeId = randomUUID();
+    const issuerRoles = ["Organization.All.ReadWrite", "Relations.All.ReadWrite"];
+    const [ours, theirs] = await Promise.all([tenantId, tenantB].map((tenant) =>
+      withDbSession(runtime.db, { tenantId: tenant, userId: randomUUID(), roles: issuerRoles, groups: [], scope: "tenant" }, async (trx) => {
+        const inserted = await sql<{ id: string }>`
+          insert into erp.relations (tenant_id, display_name, relation_type) values (${tenant}, 'Delegated', 'organization') returning id::text
+        `.execute(trx);
+        return inserted.rows[0]!.id;
+      })));
+
+    // The issuer must hold what it delegates: a Relation of another tenant is
+    // not visible to it, and a role it lacks (delete never delegates at all).
+    const foreign = await app.inject({
+      method: "POST", url: "/api/envelopes/links", headers: operatorHeaders(tenantId, issuerRoles),
+      payload: { envelopeId, address: "customer@example.test", records: [{ entity: "Relation", id: theirs, intents: ["get"] }] },
+    });
+    expect(foreign.statusCode).toBe(403);
+    const unheld = await app.inject({
+      method: "POST", url: "/api/envelopes/links", headers: operatorHeaders(tenantId),
+      payload: { envelopeId, address: "customer@example.test", records: [{ entity: "Relation", id: ours, intents: ["update"] }] },
+    });
+    expect(unheld.statusCode).toBe(403);
+
+    const link = await app.inject({
+      method: "POST", url: "/api/envelopes/links", headers: operatorHeaders(tenantId, issuerRoles),
+      payload: { envelopeId, address: "customer@example.test", records: [{ entity: "Relation", id: ours!, intents: ["get", "update"] }] },
+    });
+    expect(link.statusCode).toBe(201);
+    const token = (link.json() as { token: string }).token;
+    const other = randomUUID();
+    const read = await present(readOperation.transports.rest.path, token, {
+      probe: [
+        { entityName: "Envelope", id: envelopeId, intent: "get" },
+        { entityName: "Relation", id: ours, intent: "get" },
+        { entityName: "Relation", id: ours, intent: "update" },
+        { entityName: "Relation", id: ours, intent: "delete" },
+      ],
+    });
+    expect(read.status).toBe(200);
+    expect(read.body.reach).toEqual({
+      // The subject entity has no generated table here, so the oracle has no
+      // Operation to name; a plugin's own entity would answer "ok".
+      "Envelope:get": "FORBIDDEN",
+      "Relation:get": "ok",
+      "Relation:update": "ok",
+      "Relation:delete": "FORBIDDEN",
+    });
+    const unlisted = await present(readOperation.transports.rest.path, token, {
+      probe: [{ entityName: "Relation", id: other, intent: "get" }],
+    });
+    expect(unlisted.body.reach).toEqual({ "Relation:get": "FORBIDDEN" });
+    const crossTenant = await present(readOperation.transports.rest.path, token, {
+      probe: [{ entityName: "Relation", id: theirs, intent: "get" }],
+    });
+    expect(crossTenant.body.reach).toEqual({ "Relation:get": "FORBIDDEN" });
+
+    const listed = await app.inject({ method: "GET", url: `/api/grants?subjectEntity=Envelope&subjectId=${envelopeId}`, headers: operatorHeaders(tenantId) });
+    expect(listed.statusCode).toBe(200);
+    expect((listed.json() as { grants: { records: unknown }[] }).grants[0]?.records)
+      .toEqual([{ entity: "Relation", id: ours, intents: ["get", "update"] }]);
   }, TEST_TIMEOUT);
 
   test("a wrong secret counts, the limit locks, and the operator sees and revokes the grant", async () => {

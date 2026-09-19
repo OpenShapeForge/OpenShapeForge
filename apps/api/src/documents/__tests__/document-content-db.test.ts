@@ -82,11 +82,11 @@ describe("document content against PostgreSQL", () => {
     await collections(restricted(), session, binding("move"), { id: nl.id, expectedVersion: await version(), childId: blocks[1]!.id, beforeId: blocks[0]!.id });
     expect((await variantBlocks(nl.id)).map((block) => block.text)).toEqual(["Local note", "Hello again {{local.name}}", "Second, edited here", "Third"]);
 
-    // A republish without content changes leaves the untouched block's version alone.
+    // A republish without content changes is the same version again and leaves the untouched block's version alone.
     const before = (await variantBlocks(nl.id)).find((block) => block.template_block_id === ids.first)!.updated_at;
-    const thirdVersion = await publishTemplate(context, ids.template);
+    expect(await publishTemplate(context, ids.template)).toBe(secondVersion);
     expect((await variantBlocks(nl.id)).find((block) => block.template_block_id === ids.first)!.updated_at).toBe(before);
-    expect((await document(documentId)).template_version_id).toBe(thirdVersion);
+    expect((await document(documentId)).template_version_id).toBe(secondVersion);
 
     // Publish through the generic snapshot versioning: the head is frozen into a DocumentVersion beside the uploaded
     // ones; an upload labelled v1 cannot collide because snapshot labels use their own reserved prefix.
@@ -133,9 +133,8 @@ describe("document content against PostgreSQL", () => {
     const fresh = await variant(documentId, "document", "nl");
     expect(fresh.id).not.toBe(nl.id);
     expect(shape(await variantBlocks(fresh.id))).toEqual([["template", other.first, false, "Hello {{local.name}}"], ["template", other.second, false, "Second"]]);
-    // Only a published version links; an unknown one is reported missing.
-    await sql`update erp.template_versions set status = 'draft' where id = ${firstVersion}::uuid`.execute(privileged());
-    await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: firstVersion, replace: true }, context), "INVALID_STATE");
+    // An unknown version is reported missing. (A TemplateVersion is published by construction: its status
+    // admits no other value, so the unpublished refusal cannot be provoked on a real row.)
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: randomUUID() }, context), "NOT_FOUND");
   }, 60_000);
 

@@ -118,6 +118,20 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       const snapshot = { schemaVersion: 1, entity: sourceEntity, head: { ...tree, row: content(tree.row, PUBLICATION) } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");
+      // Content is what a version is: a head whose content still hashes like
+      // its latest version has nothing new to publish. It becomes published
+      // again (a change edited back is no change), no row is added and no
+      // follower runs, so nothing downstream is re-drafted.
+      const latest = typeof source.latest_version_id === "string" ? (await rows<{ row: Row }>(transaction,
+        `select to_jsonb(version_row.*) as row from ${versionTable} version_row where tenant_id = app.current_tenant() and id = $1::uuid`, [source.latest_version_id]))[0]?.row : undefined;
+      if (latest && latest.content_hash === contentHash) {
+        await rows(transaction, `update ${headTable} set
+          published_version = $2, published_version_id = $3::uuid, lifecycle_status = 'published', updated_at = now()
+          where tenant_id = app.current_tenant() and id = $1::uuid and (published_version_id is distinct from $3::uuid or lifecycle_status <> 'published') returning id`,
+          [id, latest.version_number, latest.id]);
+        await rows(transaction, "select set_config('app.publishing_entity', '', true)", []);
+        return { value: latest };
+      }
       const inserted = (await rows<{ row: Row }>(transaction, `
         insert into ${versionTable}
           (id, tenant_id, ${headColumn}, version_number, status, snapshot, content_hash, published_by, published_at)

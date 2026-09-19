@@ -80,7 +80,10 @@ const snapshotColumns = (node: SnapshotNode) => Object.keys(node.row);
 const variantBlocks = (node: SnapshotNode) => orderedChildren(node, "blocks", "variant_id_position");
 const TOUCH = "updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')";
 
-async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, previousVariant: SnapshotNode | undefined, nextVariant: SnapshotNode): Promise<string[]> {
+type VariantFollow = Readonly<{ problems: readonly string[]; changed: boolean }>;
+
+/** Re-seeds one variant; `changed` says whether any block row was written, which is what drafts the document. */
+async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, previousVariant: SnapshotNode | undefined, nextVariant: SnapshotNode): Promise<VariantFollow> {
   const { trx, columns } = apply;
   const previousNodes = new Map((previousVariant ? variantBlocks(previousVariant) : []).map((node) => [rowId(node), node]));
   const allNext = variantBlocks(nextVariant);
@@ -97,11 +100,15 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
     nextNodes.map((node) => ({ templateBlockId: rowId(node), key: contentKey(blockContent(node.row, columns)), locked: node.row.locked === true })),
   );
   const unchanged = new Map(current.map((row) => [row.id, contentKey(blockContent(row, columns))]));
+  let changed = false;
   for (const entry of plan.reseed) {
     const content = blockContent(nextById.get(entry.templateBlockId)!.row, columns);
-    if (unchanged.get(entry.id) !== contentKey(content)) await replaceDocumentBlockContent(trx, entry.id, content, columns);
+    if (unchanged.get(entry.id) === contentKey(content)) continue;
+    await replaceDocumentBlockContent(trx, entry.id, content, columns);
+    changed = true;
   }
-  await markBlocksDiverged(trx, plan.diverge);
+  const newlyDiverged = plan.diverge.filter((id) => !current.find((row) => row.id === id)?.diverged);
+  await markBlocksDiverged(trx, newlyDiverged);
   await deleteDocumentBlocks(trx, variant.id, plan.remove);
   const order: string[] = [];
   for (const [position, slot] of plan.order.entries()) {
@@ -109,9 +116,11 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
       variantId: variant.id, position, templateBlockId: slot.templateBlockId, content: blockContent(nextById.get(slot.templateBlockId)!.row, columns), columns,
     }));
   }
+  const moved = current.some((row, index) => order[index] !== row.id);
+  changed ||= newlyDiverged.length > 0 || plan.remove.length > 0 || plan.insert.length > 0 || moved;
   await updateBlockPositions(trx, variant.id, order);
-  await rows(trx, `update erp.document_variants set ${TOUCH} where tenant_id = app.current_tenant() and id = $1::uuid`, [variant.id]);
-  return skipped.length ? [`Skipped template block definition(s) not allowed on a document: ${skipped.join(", ")}.`] : [];
+  if (changed) await rows(trx, `update erp.document_variants set ${TOUCH} where tenant_id = app.current_tenant() and id = $1::uuid`, [variant.id]);
+  return { changed, problems: skipped.length ? [`Skipped template block definition(s) not allowed on a document: ${skipped.join(", ")}.`] : [] };
 }
 
 /**
@@ -134,16 +143,23 @@ export async function applyTemplateVersion(apply: ApplyContext, document: Tracke
   const existing = new Map((await listDocumentVariants(trx, document.id)).map((variant) => [`${variant.channel}/${variant.locale}`, variant]));
   const problems: string[] = [];
   const covered = new Set<string>();
+  // The pin always moves; the head is drafted only when a block actually
+  // changed (the draft rule, docs/document-content.md).
+  let changed = false;
   for (const { channel, locale, node } of templateVariants(next.snapshot)) {
     const key = `${channel}/${locale}`;
     covered.add(key);
-    const variant = existing.get(key) ?? await insertDocumentVariant(trx, document.id, channel, locale);
-    problems.push(...await followVariant(apply, variant, previousVariants.find((entry) => entry.channel === channel && entry.locale === locale)?.node, node));
+    let variant = existing.get(key);
+    if (!variant) { variant = await insertDocumentVariant(trx, document.id, channel, locale); changed = true; }
+    const followed = await followVariant(apply, variant, previousVariants.find((entry) => entry.channel === channel && entry.locale === locale)?.node, node);
+    problems.push(...followed.problems);
+    changed ||= followed.changed;
   }
   const orphaned = [...existing.keys()].filter((key) => !covered.has(key) && previousVariants.some((entry) => `${entry.channel}/${entry.locale}` === key));
   if (orphaned.length) problems.push(`The template no longer has variant(s) ${orphaned.join(", ")}; they were left as they are.`);
-  await rows(trx, `update erp.documents set template_version_id = $2::uuid, follow_error = $3::text, lifecycle_status = 'draft', ${TOUCH}
-    where tenant_id = app.current_tenant() and id = $1::uuid`, [document.id, next.id, problems.length ? problems.join(" ").slice(0, 2000) : null]);
+  await rows(trx, `update erp.documents set template_version_id = $2::uuid, follow_error = $3::text,
+      lifecycle_status = case when $4::boolean then 'draft' else lifecycle_status end, ${TOUCH}
+    where tenant_id = app.current_tenant() and id = $1::uuid`, [document.id, next.id, problems.length ? problems.join(" ").slice(0, 2000) : null, changed]);
   return problems.length ? problems.join(" ") : null;
 }
 

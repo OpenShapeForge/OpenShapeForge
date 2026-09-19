@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import type { ColumnDefinition, TableConstraintDefinition } from "../schema.js";
 import { stringRule } from "../field-json-schema.js";
+import { fieldCardinality } from "./compiler/helpers.js";
 import type { Field } from "./types/authoring.js";
 
 /**
@@ -16,10 +17,10 @@ import type { Field } from "./types/authoring.js";
  * inside a structure the column cannot constrain this way, and a referentiedata
  * or remote options source is data, not schema.
  *
- * Both are compiler-owned, content-addressed and `replaceExisting`, the same
- * shape entity-value storage uses: the constraint NAME is fixed per column so a
- * changed options list replaces the previous CHECK on the next migrate instead
- * of leaving a stale one behind.
+ * Both are compiler-owned table constraints, the shape entity-value storage
+ * uses: rendered as name-guarded DDL and applied on every migrate. A changed
+ * options list changes the manifest checksum, so a built database is rebuilt
+ * rather than left with a stale CHECK (docs/migrations.md).
  */
 
 const ident = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -70,7 +71,6 @@ function checkConstraint(
   const name = constraintName(table, column, kind);
   return {
     compilerOwned: true,
-    replaceExisting: true,
     version: `0001_field-${kind}-${`${schema}-${name}`.replaceAll("_", "-")}-${digestOf(expression)}`,
     name,
     kind: "check",
@@ -86,7 +86,7 @@ export function fieldValueCheckConstraints(
 ): TableConstraintDefinition[] {
   const constraints: TableConstraintDefinition[] = [];
   for (const { field, column } of columns) {
-    if (!field || column.type !== "text" || (field.cardinality ?? "single") !== "single") continue;
+    if (!field || column.type !== "text" || fieldCardinality(field) !== "single") continue;
     const options = field.options;
     if (options?.type === "static" && options.items && options.items.length > 0) {
       const values = [...new Set(options.items.map((item) => item.value))];

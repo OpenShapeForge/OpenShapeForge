@@ -63,14 +63,14 @@ the DDL itself:
      records that it ran;
    - compiler-owned value checks, through the same registry under
      `osf-compiler` (`authoring/field-value-checks.ts`): `CHECK (col IN (...))`
-     for a scalar field whose `options` are static items, and
+     for a single-valued field whose `options` are static items, and
      `CHECK (col ~ '<pattern>')` for a `validation.pattern` PostgreSQL reads
      the way ECMA-262 does (no lookarounds, backreferences, `\b`, unicode
      escapes or lazy quantifiers — those stay runtime-only). Text columns
      only; a referentiedata options source is data, not schema. Each is named
-     `<table>_<column>_options_check` or `_pattern_check` and replaces the
-     previous same-name constraint on every migrate, so a changed options list
-     never leaves a stale one behind.
+     `<table>_<column>_options_check` or `_pattern_check`; a changed options
+     list changes the manifest checksum, so a built database is rebuilt
+     rather than left with a stale CHECK.
 4. **Grants** — the app role's whole-schema DML sweep, the blueprint
    re-narrowing, then the worker role's enumerated grants, re-evaluated from
    the manifest on every run.

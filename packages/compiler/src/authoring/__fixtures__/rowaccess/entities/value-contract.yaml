@@ -88,6 +88,31 @@ fields:
     persisted:
       column: quantity
       storageClass: core
+  - key: segment
+    osfType: string
+    required: false
+    cardinality:
+      min: 0
+      max: 1
+    label:
+      en: Segment
+      nl: Segment
+    validation:
+      pattern: "^[a-z]+--[a-z]+$"
+    options:
+      type: static
+      items:
+        - value: non--food
+          label:
+            en: Non-food
+            nl: Non-food
+        - value: fresh--food
+          label:
+            en: Fresh food
+            nl: Verse waren
+    persisted:
+      column: segment
+      storageClass: core
   - key: tags
     osfType: string
     cardinality: collection

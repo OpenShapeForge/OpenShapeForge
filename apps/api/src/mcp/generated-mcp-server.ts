@@ -1682,8 +1682,11 @@ async function runtimeRowByFilter(
 }
 
 // The advertised JSON Schema IS the contract: what tools/list promises,
-// tools/call enforces. Without this, enum/pattern/length constraints are
-// decoration and `status: "banana"` persists with a 200.
+// tools/call enforces. The edge holds the argument envelope and the derived
+// and composed tools to it; an entity tool's authored values are judged by
+// executeEntityOperation, the one validator every interface shares
+// (operations/entity/input-validation.ts), so `status: "banana"` comes back
+// as VALIDATION with a per-field violation here as it does over REST.
 const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false });
 // ajv-formats is CJS; under NodeNext the default import is typed as the
 // module namespace rather than the callable it is at runtime.
@@ -1742,6 +1745,44 @@ function assertSchemaValid(
   } finally {
     ajv.removeSchema(schema);
   }
+}
+
+const ENVELOPE_KEYS = new Set([
+  "id",
+  "blueprintId",
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
+/**
+ * The tool schema with the authored values taken out: an update's `values`
+ * becomes a bare object, a create keeps only its transport controls and
+ * admits the fields as additional properties. Reads and deletes carry no
+ * values and validate as advertised.
+ */
+function envelopeSchema(
+  schema: Record<string, unknown>,
+  operation: string,
+): Record<string, unknown> {
+  if (operation !== "create" && operation !== "update") return schema;
+  const properties = (schema.properties ?? {}) as Record<string, unknown>;
+  if (operation === "update") {
+    return { ...schema, properties: { ...properties, values: { type: "object" } } };
+  }
+  const required = Array.isArray(schema.required)
+    ? (schema.required as unknown[]).filter((key) => typeof key === "string" && ENVELOPE_KEYS.has(key))
+    : [];
+  return {
+    ...schema,
+    properties: Object.fromEntries(
+      Object.entries(properties).filter(([key]) => ENVELOPE_KEYS.has(key)),
+    ),
+    ...(required.length ? { required } : {}),
+    additionalProperties: true,
+  };
 }
 
 /**
@@ -6947,8 +6988,26 @@ function buildServer(
               (operation) => operation.id === match.operationId,
             )?.concurrency?.version?.field
           : undefined;
+        // A field this session's tool does not advertise (immutable on update,
+        // withheld, server-managed) is refused by name before anything else,
+        // so the answer names the field whatever else the call is missing.
+        if (match.operation === "update") {
+          if (toValidate.values && typeof toValidate.values === "object" && !Array.isArray(toValidate.values)) {
+            assertDeclaredProperties(
+              (match.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
+              toValidate.values as Record<string, unknown>,
+              "field",
+            );
+          }
+        } else {
+          assertDeclaredProperties(match.inputSchema, toValidate, "field");
+        }
+        // The edge checks the ENVELOPE (identity, controls, their types); the
+        // authored values are the runtime's to judge, once, for every
+        // interface, so MCP gets the same VALIDATION + violations[] answer
+        // REST and GraphQL do instead of a private ajv verdict.
         assertSchemaValid(
-          match.inputSchema,
+          envelopeSchema(match.inputSchema, match.operation),
           toValidate,
           "arguments",
           expectedVersionField,

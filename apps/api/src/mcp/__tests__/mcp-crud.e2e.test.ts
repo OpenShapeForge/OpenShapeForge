@@ -988,6 +988,23 @@ describe("generated MCP server", () => {
     });
 
     if (isEntityBackedCreate(table)) {
+      const optionField = Object.entries(createSchemaProperties(table))
+        .find(([, schema]) => Array.isArray(schema.enum) && schema.enum.length > 0)?.[0];
+      if (optionField) {
+        test(`${prefix}: an out-of-options ${optionField} is the canonical VALIDATION answer with a field violation`, async () => {
+          // The same envelope REST and GraphQL return: the runtime judges the
+          // authored values once, for every interface, and MCP relays it.
+          const valid = await createArgs(table, tenantA);
+          const { body } = await call(tenantA, "create", { ...valid, [optionField]: "not-an-option" });
+          expect(toolError(body)).toMatch(/VALIDATION/);
+          expect(body.result.structuredContent.error).toMatchObject({
+            code: "VALIDATION",
+            retryable: false,
+            violations: [{ field: optionField, code: "NOT_IN_OPTIONS" }],
+          });
+        });
+      }
+
       test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
         // The schema says additionalProperties:false; the server must agree.
         const valid = await createArgs(table, tenantA);

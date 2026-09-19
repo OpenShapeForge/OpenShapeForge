@@ -33,7 +33,7 @@ import {
   deleteGeneratedEntity,
   updateGeneratedEntity,
 } from "./mutations.js";
-import { getGeneratedEntity, listGeneratedEntities } from "./queries.js";
+import { fetchGeneratedEntityRow, getGeneratedEntity, listGeneratedEntities } from "./queries.js";
 import type {
   EntityOperationInput,
   EntityOperationContract,
@@ -308,6 +308,13 @@ async function prepareMutationConfirmation(
   const confirmation = operation.interaction.confirmation;
   if (confirmation.mode === "none") return { ready: true };
   if (confirmation.mode === "acknowledgement") {
+    // A missing row answers NOT_FOUND before the acknowledgement is demanded,
+    // the same order the challenge path keeps: there is nothing to confirm
+    // when the target is gone, and REST clients read 428 on a deleted row as
+    // "still there".
+    if (input?.confirmed !== true) {
+      await requireMutationTarget(db, session, table, requireId(input));
+    }
     requireOperationAcknowledgement(operation, input);
     return { ready: true };
   }
@@ -344,6 +351,17 @@ async function prepareMutationConfirmation(
     confirmationToken: requireControl(input, "confirmationToken"),
     confirmationAnswer: requireControl(input, "confirmationAnswer"),
   };
+}
+
+/** The tenant-scoped row an update or delete targets, or NOT_FOUND. */
+async function requireMutationTarget(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<void> {
+  if (await fetchGeneratedEntityRow(db, session, table, id)) return;
+  throw operationFailure({ code: "NOT_FOUND", message: "Resource not found." });
 }
 
 /**

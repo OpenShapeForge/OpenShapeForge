@@ -49,10 +49,6 @@ fields:
       category: workflow
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Contact details
-          nl: Contactgegevens
   - key: type
     osfType: string
     required: true
@@ -227,10 +223,6 @@ fields:
     osfType: RelationRole
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Contact details
-          nl: Contactgegevens
 operations:
   list:
     name: { en: List contact details, nl: Contactgegevens tonen }

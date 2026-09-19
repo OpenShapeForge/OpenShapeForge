@@ -18,7 +18,7 @@ import {
   type Corpus, type CorpusFile, type EntityRef,
   deletePair, entitiesOf, findFieldByColumn, findPair, getMap, getSeq, getString, insertPair, pairKey, plainEqual, toPlain, yaml,
 } from "./corpus.ts";
-import { entityLabels } from "./inverse-fold.ts";
+import { derivedCollectionLabel, entityLabels } from "./inverse-fold.ts";
 
 export interface LegacyFoldOptions {
   strict?: boolean;
@@ -223,7 +223,7 @@ export function foldLegacyHasMany(corpus: Corpus, file: CorpusFile, report: Lega
       const declaration: Record<string, unknown> = {};
       if (key !== defaultInverseKey(child.name)) declaration.key = key;
       const label = entry.get("label", true);
-      if (label && !plainEqual(toPlain(label), entityLabels(ownerRef))) declaration.label = toPlain(label);
+      if (label && !plainEqual(toPlain(label), derivedCollectionLabel(ownerRef))) declaration.label = toPlain(label);
       if (Object.keys(declaration).length) {
         const relationship = getMap(reference, "relationship") ?? (() => {
           const map = new yaml.YAMLMap();

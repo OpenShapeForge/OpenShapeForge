@@ -153,10 +153,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Accounts
-          nl: Accounts
   - key: naturalPersonId
     label:
       en: Natural person
@@ -167,10 +163,6 @@ fields:
     osfType: NaturalPerson
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Accounts
-          nl: Accounts
 operations:
   list:
     name: List Account

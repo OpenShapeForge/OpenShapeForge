@@ -192,10 +192,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Case files
-          nl: Dossiers
   - key: parentCaseFileId
     label:
       en: Parent case file

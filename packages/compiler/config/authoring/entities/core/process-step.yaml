@@ -329,9 +329,6 @@ fields:
       ownership: reference
       inverse:
         key: steps
-        label:
-          en: Process steps
-          nl: Processtappen
   - key: ownerId
     label:
       en: Owner

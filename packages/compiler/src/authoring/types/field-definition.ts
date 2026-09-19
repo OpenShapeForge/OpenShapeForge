@@ -61,7 +61,8 @@ export type FieldDefinitionValidation = FieldValidation;
  * How a single entity reference shapes the collection the compiler derives
  * for it on the target entity. Everything is optional: the key defaults to
  * the lower-camel plural of the referencing entity and the label to that
- * entity's labels. Collection policy (ownership, ordering, owner-scoped
+ * entity's plural labels (authored `pluralLabels`, else the English label
+ * pluralised). Collection policy (ownership, ordering, owner-scoped
  * authorization, allowed value definitions) belongs to the collection and is
  * declared here because the collection itself is never authored.
  */

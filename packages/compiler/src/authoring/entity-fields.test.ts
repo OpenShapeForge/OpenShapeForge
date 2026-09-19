@@ -211,7 +211,7 @@ describe("derived inverse collection labels", () => {
   test("pluralises each authored label, and prefers authored pluralLabels per locale", async () => {
     const { defaultInverseLabel } = await import("./inverse-collections.js");
     expect(defaultInverseLabel({ entity: "Appointment", labels: { en: "Appointment", nl: "Afspraak" } }))
-      .toEqual({ en: "Appointments", nl: "Afspraaks" });
+      .toEqual({ en: "Appointments", nl: "Afspraak" });
     expect(defaultInverseLabel({ entity: "Appointment", labels: { en: "Appointment", nl: "Afspraak" }, pluralLabels: { nl: "Afspraken" } }))
       .toEqual({ en: "Appointments", nl: "Afspraken" });
     expect(defaultInverseLabel({ entity: "AgreementParty", title: "Agreement party" })).toEqual({ en: "Agreement parties" });

@@ -127,10 +127,6 @@ fields:
     osfType: OrgUnit
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Relation groups
-          nl: Relatiegroepen
 operations:
   list:
     name: { en: List relation groups, nl: Relatiegroepen tonen }

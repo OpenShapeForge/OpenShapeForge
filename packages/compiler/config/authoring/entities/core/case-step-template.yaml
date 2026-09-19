@@ -398,9 +398,6 @@ fields:
       ownership: reference
       inverse:
         key: steps
-        label:
-          en: Case step templates
-          nl: Zaakstapsjablonen
   - key: parentStepTemplateId
     label:
       en: Parent case step template

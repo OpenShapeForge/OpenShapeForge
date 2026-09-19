@@ -112,10 +112,6 @@ fields:
     osfType: SupportIssue
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Attachments
-          nl: Bijlagen
 operations:
   list:
     name: List Attachment

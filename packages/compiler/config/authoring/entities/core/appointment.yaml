@@ -133,10 +133,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Appointments
-          nl: Afspraken
 operations:
   list:
     name: List Appointment

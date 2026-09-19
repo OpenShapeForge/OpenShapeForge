@@ -177,10 +177,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Communication preferences
-          nl: Communicatievoorkeuren
   - key: contactDetailId
     label:
       en: Contact detail

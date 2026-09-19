@@ -457,10 +457,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Cases
-          nl: Zaken
   - key: caseFileId
     label:
       en: Case file
@@ -471,10 +467,6 @@ fields:
     osfType: CaseFile
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Cases
-          nl: Zaken
   - key: currentQueueId
     label:
       en: Current queue
@@ -485,10 +477,6 @@ fields:
     osfType: WorkQueue
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Cases
-          nl: Zaken
   - key: slaPolicyId
     label:
       en: SLA policy
@@ -499,10 +487,6 @@ fields:
     osfType: SlaPolicy
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Cases
-          nl: Zaken
   - key: parentCaseId
     label:
       en: Parent case

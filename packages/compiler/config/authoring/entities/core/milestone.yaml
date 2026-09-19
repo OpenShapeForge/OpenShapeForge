@@ -144,10 +144,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Milestones
-          nl: Mijlpalen
   - key: slaPolicyId
     label:
       en: SLA policy
@@ -158,10 +154,6 @@ fields:
     osfType: SlaPolicy
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Milestones
-          nl: Mijlpalen
   - key: ownerId
     label:
       en: Owner

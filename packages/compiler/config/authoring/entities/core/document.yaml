@@ -321,10 +321,6 @@ fields:
     osfType: CaseFile
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Documents
-          nl: Documenten
   - key: caseId
     label:
       en: Case
@@ -335,10 +331,6 @@ fields:
     osfType: Case
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Documents
-          nl: Documenten
   - key: relationId
     label:
       en: Relation
@@ -349,10 +341,6 @@ fields:
     osfType: Relation
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Documents
-          nl: Documenten
 operations:
   list:
     name: { en: List documents, nl: Documenten tonen }

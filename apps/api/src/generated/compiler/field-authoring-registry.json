@@ -3970,13 +3970,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Accounts",
-                "nl": "Accounts"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -3991,13 +3985,7 @@
           },
           "osfType": "NaturalPerson",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Accounts",
-                "nl": "Accounts"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -4280,13 +4268,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Addresses",
-                "nl": "Adressen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -4301,13 +4283,7 @@
           },
           "osfType": "NaturalPerson",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Addresses",
-                "nl": "Adressen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -4322,13 +4298,7 @@
           },
           "osfType": "LegalEntity",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Addresses",
-                "nl": "Adressen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -4497,13 +4467,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Address assignments",
-                "nl": "Adrestoewijzingen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -4533,13 +4497,7 @@
           },
           "osfType": "RelationRole",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Address assignments",
-                "nl": "Adrestoewijzingen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -5109,13 +5067,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Agreements",
-                "nl": "Overeenkomsten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -5130,13 +5082,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Agreements",
-                "nl": "Overeenkomsten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -7331,13 +7277,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Appointments",
-                "nl": "Afspraken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -8767,13 +8707,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Assignments",
-                "nl": "Toewijzingen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -8788,13 +8722,7 @@
           },
           "osfType": "WorkQueue",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Assignments",
-                "nl": "Toewijzingen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -8965,13 +8893,7 @@
           },
           "osfType": "SupportIssue",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Attachments",
-                "nl": "Bijlagen"
-              }
-            }
+            "ownership": "reference"
           }
         }
       ],
@@ -11788,13 +11710,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Cases",
-                "nl": "Zaken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -11809,13 +11725,7 @@
           },
           "osfType": "CaseFile",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Cases",
-                "nl": "Zaken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -11830,13 +11740,7 @@
           },
           "osfType": "WorkQueue",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Cases",
-                "nl": "Zaken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -11851,13 +11755,7 @@
           },
           "osfType": "SlaPolicy",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Cases",
-                "nl": "Zaken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -12289,13 +12187,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Case files",
-                "nl": "Dossiers"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -13826,11 +13718,7 @@
           "relationship": {
             "ownership": "reference",
             "inverse": {
-              "key": "steps",
-              "label": {
-                "en": "Case step templates",
-                "nl": "Zaakstapsjablonen"
-              }
+              "key": "steps"
             }
           }
         },
@@ -14581,13 +14469,7 @@
           },
           "osfType": "SupportIssue",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Comments",
-                "nl": "Opmerkingen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -14832,13 +14714,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Communication preferences",
-                "nl": "Communicatievoorkeuren"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -15066,13 +14942,7 @@
             "category": "workflow"
           },
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Contact details",
-                "nl": "Contactgegevens"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -15319,13 +15189,7 @@
           },
           "osfType": "RelationRole",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Contact details",
-                "nl": "Contactgegevens"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -15522,13 +15386,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Contact moments",
-                "nl": "Contactmomenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -15543,13 +15401,7 @@
           },
           "osfType": "RelationRole",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Contact moments",
-                "nl": "Contactmomenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -15564,13 +15416,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Contact moments",
-                "nl": "Contactmomenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -17296,13 +17142,7 @@
           },
           "osfType": "CaseFile",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Documents",
-                "nl": "Documenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -17317,13 +17157,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Documents",
-                "nl": "Documenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -17338,13 +17172,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Documents",
-                "nl": "Documenten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -18687,13 +18515,7 @@
           },
           "osfType": "OrgUnit",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Employee roles",
-                "nl": "Medewerkerrollen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -18708,13 +18530,7 @@
           },
           "osfType": "Position",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Employee roles",
-                "nl": "Medewerkerrollen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -24017,13 +23833,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Milestones",
-                "nl": "Mijlpalen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -24038,13 +23848,7 @@
           },
           "osfType": "SlaPolicy",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Milestones",
-                "nl": "Mijlpalen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -24985,7 +24789,7 @@
       },
       "pluralLabel": {
         "en": "Notebooks",
-        "nl": "Notitieboeks"
+        "nl": "Notitieboek"
       },
       "shape": [
         {
@@ -25070,7 +24874,7 @@
       },
       "pluralLabel": {
         "en": "Notebook versions",
-        "nl": "Notitieboekversies"
+        "nl": "Notitieboekversie"
       },
       "shape": [
         {
@@ -25579,13 +25383,7 @@
           },
           "osfType": "Tenant",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Organization permissions",
-                "nl": "Organisatierechten"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -25600,13 +25398,7 @@
           },
           "osfType": "OrgUnit",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Organization permissions",
-                "nl": "Organisatierechten"
-              }
-            }
+            "ownership": "reference"
           }
         }
       ],
@@ -25848,13 +25640,7 @@
             "category": "workflow"
           },
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Payment details",
-                "nl": "Betaalgegevens"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -28546,11 +28332,7 @@
           "relationship": {
             "ownership": "reference",
             "inverse": {
-              "key": "steps",
-              "label": {
-                "en": "Process steps",
-                "nl": "Processtappen"
-              }
+              "key": "steps"
             }
           }
         },
@@ -33354,13 +33136,7 @@
           },
           "osfType": "OrgUnit",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Relation groups",
-                "nl": "Relatiegroepen"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -37053,13 +36829,7 @@
             "category": "workflow"
           },
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tasks",
-                "nl": "Taken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -37095,13 +36865,7 @@
           },
           "osfType": "Relation",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tasks",
-                "nl": "Taken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -37148,13 +36912,7 @@
           },
           "osfType": "Appointment",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tasks",
-                "nl": "Taken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -37169,13 +36927,7 @@
           },
           "osfType": "ContactMoment",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tasks",
-                "nl": "Taken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -37190,13 +36942,7 @@
           },
           "osfType": "Case",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "Tasks",
-                "nl": "Taken"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -38456,13 +38202,7 @@
           },
           "osfType": "Tenant",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "User organization permissions",
-                "nl": "Gebruikersrechten per organisatie"
-              }
-            }
+            "ownership": "reference"
           }
         },
         {
@@ -38477,13 +38217,7 @@
           },
           "osfType": "OrgUnit",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "label": {
-                "en": "User organization permissions",
-                "nl": "Gebruikersrechten per organisatie"
-              }
-            }
+            "ownership": "reference"
           }
         }
       ],

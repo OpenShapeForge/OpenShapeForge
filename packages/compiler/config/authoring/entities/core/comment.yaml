@@ -75,10 +75,6 @@ fields:
     osfType: SupportIssue
     relationship:
       ownership: reference
-      inverse:
-        label:
-          en: Comments
-          nl: Opmerkingen
   # System-written attribution: the commenting user, not an input.
   - key: authorId
     readOnly: true

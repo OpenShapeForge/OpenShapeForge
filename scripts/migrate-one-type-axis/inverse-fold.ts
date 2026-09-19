@@ -56,7 +56,7 @@ export function entityLabels(entity: EntityRef): unknown {
 }
 
 /** The label a derived inverse collection would carry: the child's plural labels. */
-function derivedCollectionLabel(entity: EntityRef): unknown {
+export function derivedCollectionLabel(entity: EntityRef): unknown {
   const labels = entity.root.get("labels", true);
   const pluralLabels = entity.root.get("pluralLabels", true);
   return defaultInverseLabel({

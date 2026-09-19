@@ -642,10 +642,11 @@ describe("worker-role RLS axis", () => {
               expect(row.qual).not.toContain("current_worker_role");
             }
 
-            // The other 17 policies are untouched. Spot-checked on the business
-            // tables the old blanket bypass exposed.
+            // The other policies are untouched. Spot-checked on the business
+            // tables the old blanket bypass exposed. An INSERT-only policy
+            // (the tenant registry's) has no USING, only WITH CHECK.
             const untouched = await sql<{ qual: string }>`
-              select coalesce(qual, '') as qual
+              select coalesce(qual, with_check, '') as qual
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);

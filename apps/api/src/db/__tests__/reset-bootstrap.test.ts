@@ -113,7 +113,7 @@ describe("bootstrapIfEmpty", () => {
   );
 
   test(
-    "leaves a stale database for db:migrate and a foreign one for db:reset",
+    "leaves a database built from another manifest, and a foreign one, for db:reset",
     async () => {
       await withScratchDb(async (url) => {
         await withDb(url, (db) => db.connection().execute((conn) => runMigrationChain(conn)));
@@ -123,8 +123,8 @@ describe("bootstrapIfEmpty", () => {
             where version = ${generatedSchemaMigrationVersion}
           `.execute(db);
         });
-        // Behind is drift, not emptiness: bootstrap neither builds nor rolls
-        // forward, and the stale record survives to be reported.
+        // Behind is drift, not emptiness: bootstrap does not build over it,
+        // and the stale record survives to be reported.
         const stale = await withDb(url, (db) => bootstrapIfEmpty(db));
         expect(stale).toMatchObject({ bootstrapped: false, reason: "behind" });
         await withDb(url, async (db) => {
@@ -150,6 +150,24 @@ describe("bootstrapIfEmpty", () => {
         await withDb(url, async (db) => {
           expect(await recordedChecksum(db)).toBeNull();
           expect(await tableExists(db, "erp.relations")).toBe(false);
+        });
+      });
+
+      await withScratchDb(async (url) => {
+        // A DECLARED table with no generated-schema record is a build nobody
+        // verified; it is refused the same way rather than adopted.
+        await withDb(url, async (db) => {
+          await sql`create schema erp`.execute(db);
+          await sql`create table erp.relations (id uuid primary key)`.execute(db);
+        });
+        const partial = await withDb(url, (db) => bootstrapIfEmpty(db));
+        expect(partial).toMatchObject({
+          bootstrapped: false,
+          reason: "foreign-schema",
+          undeclared: { tables: ["erp.relations"], columns: [] },
+        });
+        await withDb(url, async (db) => {
+          expect(await recordedChecksum(db)).toBeNull();
         });
       });
     },

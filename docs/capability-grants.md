@@ -142,9 +142,10 @@ are asked to sign and lets the completing handler append the signed copy to
 the record's Document (`appendDocumentVersion` from
 `@openshapeforge/documents/runtime`, the same command `DocumentVersion.create`
 runs, under a grant that delegates `update` on that Document). Reading a
-version's bytes through `platform.artifacts.read` under a grant asks the
-parent **Document**'s `get` alone: the versions a completion creates did not
-exist when the grant was issued, and a version is the document's content.
+version's bytes through `platform.artifacts.read` names the **Document** as
+the file's owner and asks its `get`: the versions a completion creates did
+not exist when the grant was issued, and a version is the document's content
+([artifact-storage-port.md](artifact-storage-port.md)).
 The generated Operations still refuse the grant session: delegation admits
 authored handler code, never a client.
 

@@ -99,7 +99,7 @@ describe("entityValue compiled storage and registry", () => {
   it("content-addresses replaceable entity-value CHECK migrations", () => {
     const first = compileFixture();
     const firstChecks = table(first).constraints!.filter((constraint) => constraint.kind === "check");
-    expect(firstChecks.every((constraint) => constraint.compilerOwned && constraint.replaceExisting)).toBe(true);
+    expect(firstChecks.every((constraint) => constraint.compilerOwned)).toBe(true);
     expect(firstChecks.every((constraint) => /^0001_entity-value-.+-[a-f0-9]{12}$/.test(constraint.version))).toBe(true);
 
     const second = compileFixture((entities) => {

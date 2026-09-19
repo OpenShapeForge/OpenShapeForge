@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { operationErrorOf } from "@openshapeforge/operations";
 import type { ModuleOperationContext } from "@openshapeforge/plugin-runtime";
 import { list, get, set, reset, profile } from "./runtime.js";
-import { catalogMigration } from "./index.js";
+import { catalogPolicies } from "./index.js";
 
 const field = { key: "locale", osfType: "string", defaultValue: "nl", label: { en: "Language" } };
 function harness() {
@@ -74,7 +74,10 @@ test("profile uses confirmed host session only and refuses pending candidate", a
   expect(await profile({}, h.context)).toEqual({ value: { relationId: "own", displayName: "Own profile" } });
   expect(await errorCode(() => profile({ relationId: "other" }, h.context))).toBe("VALIDATION");
 });
-test("definition catalog mutation requires managed bypass", () => {
-  expect(catalogMigration).toContain("force row level security");
-  expect(catalogMigration).toContain("with check (app.bypass_rls())");
+test("definition catalog mutation requires managed bypass, and the DDL repeats safely", () => {
+  expect(catalogPolicies).toContain("force row level security");
+  expect(catalogPolicies).toContain("with check (app.bypass_rls())");
+  const creates = catalogPolicies.match(/create policy/g)?.length ?? 0;
+  expect(catalogPolicies.match(/drop policy if exists/g)?.length).toBe(creates);
+  expect(catalogPolicies).not.toContain("create table");
 });

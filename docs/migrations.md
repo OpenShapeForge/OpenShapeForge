@@ -9,7 +9,7 @@ all three run the same chain under the same advisory lock
 
 | | what it does |
 | --- | --- |
-| `bun run db:migrate` | Builds an empty database; on a built one, re-applies the invariants, rolls an additive manifest change forward, and re-runs the seeds. |
+| `bun run db:migrate` | Builds an empty database; on a built one with the same manifest checksum, re-applies the invariants and re-runs the seeds; on any other built one, refuses. |
 | `bun run db:reset` | Drops the migrate URL's database `with (force)`, recreates it, and builds it. Destroys every row — see below for what it refuses. |
 | API first start | Outside production, an API that finds an **empty** database builds it through `OPENSHAPEFORGE_MIGRATE_DATABASE_URL` before serving (`roles/api-readiness.ts`). |
 
@@ -48,8 +48,7 @@ the DDL itself:
    and foreign key, from the one declaration. A key into a tenant-scoped
    table is always `(tenant, column) -> (tenant_id, id)`; the compiler
    refuses any other shape (`packages/compiler/src/tenant-bound-references.ts`).
-   On a built
-   database this is the checksum no-op or an additive roll-forward (below).
+   On a built database this is the checksum no-op, or the refusal (below).
 3. **Invariants** — plain idempotent DDL, no ledger, no version:
    - `core-invariants.ts`: the org-unit closure trigger, the document
      authority guards and tenant-qualified compound keys, the logical
@@ -59,9 +58,11 @@ the DDL itself:
      `operation-execution-receipts.ts`, `blueprints.ts`: the checks,
      expression indexes, functions and policies of the runtime tables;
    - compiler-plugin invariants (`generated-plugin-migrations.ts`): a
-     plugin's `constraints` and `schemaMigrations` on its contributed tables,
-     still ledgered per plugin and version in `platform.schema_migrations`
-     because their SQL is opaque to the compiler.
+     plugin's `constraints` (rendered by the compiler as name-guarded DO
+     blocks) and its free-form `schemaMigrations`, which the plugin must
+     write idempotently — every registry entry runs on every migrate, in
+     plugin-then-version order, each in its own transaction, and nothing
+     records that it ran.
 4. **Grants** — the app role's whole-schema DML sweep, the blueprint
    re-narrowing, then the worker role's enumerated grants, re-evaluated from
    the manifest on every run.
@@ -133,10 +134,10 @@ the paired systems with it, or expect identities to re-link on next sign-in.
 ## The empty-database bootstrap
 
 `bootstrapIfEmpty` (`apps/api/src/db/bootstrap.ts`) runs the chain if, and
-only if, the database has no generated-schema record **and** nothing in a
-manifest-covered schema that the manifest does not declare. A database that
-is *behind* is left for `db:migrate`; one carrying *foreign* schema —
-another branch's, a legacy layout — is left for `db:reset`. Both probes run
+only if, the database has no generated-schema record **and** no table at all
+in a manifest-covered schema. A database that was built from another
+manifest, and one carrying tables without a record — another branch's, a
+legacy layout — are both left for `db:reset`. Both probes run
 again under the lock, so a second replica finds the database built rather
 than building it twice.
 
@@ -146,38 +147,47 @@ database as `DATABASE_URL` — a migrate URL left over from another setup can
 never build into somewhere else. In production an unmigrated database refuses
 to serve; the schema is the deploy's responsibility there.
 
-## The additive roll-forward
+## The checksum: build, no-op, or refuse
 
 `apps/api/src/db/migrations/generated-schema.ts` records the applied
 manifest checksum in `platform.schema_migrations` under
 `0001_generated_platform_schema`. On every run:
 
-- **No record** → build: apply `schema.sql`, record the checksum.
-- **Checksum equal** → no-op.
-- **Checksum differs** → diff the bundled manifest against the live
-  `information_schema` and classify every difference.
+- **No record, and no table in any manifest-covered schema** → build: apply
+  `schema.sql`, record the checksum.
+- **No record, but tables in a covered schema** → refuse, listing them.
+  `schema.sql` is `CREATE … IF NOT EXISTS` throughout, so applying it over
+  leftovers — a legacy layout, another branch's build, a declared table
+  someone created by hand — would stamp the checksum onto a database nobody
+  verified, and the mismatch refusal would never fire again.
+- **Checksum equal, nothing undeclared** → no-op for the generated step; the
+  invariants, grants and seeds that follow still run, because they are the
+  idempotent parts.
+- **Checksum equal, but a table or column the manifest does not declare** →
+  refuse, listing it. One declared source of truth per table, whatever the
+  checksum says.
+- **Checksum differs** → refuse, before touching anything, with both
+  checksums and the remediation: `bun run db:reset`.
 
-**Additive** (applied automatically, atomically): a manifest table missing in
-the database; a manifest column missing on an existing table when Postgres
-can add it without a backfill (nullable, or has a default, or is identity,
-or the table has no rows). The roll-forward adds the columns, re-applies the
-idempotent `schema.sql` (`CREATE … IF NOT EXISTS` throughout; policies
-`DROP IF EXISTS` + `CREATE`; foreign keys guarded by name) and rolls the
-recorded checksum forward, all in one transaction. A developer who adds an
-entity or a column keeps the shared development database.
+That is the whole rule. The chain never asks *what* differs between a built
+database and the manifest, whether the difference would have been safe to
+add, or whether a table has rows — a database is built from the manifest on
+an empty database, and one built from another manifest is rebuilt. Nothing in the chain can `ALTER` a built database toward the
+manifest, and nothing needs to: the cost of a rebuild is a disposable
+database's rows, and the alternative was a migrator that could add columns
+but not change an index, a foreign key's column set or a `CHECK`
+expression, and then recorded the new checksum over a database that still
+differed.
 
-**Non-additive** (hard error with an exact listing): a required, no-default
-column missing on a populated table; a database column absent from the
-manifest; a type, nullability, identity or default mismatch; a table in a
-manifest-covered schema that the manifest does not declare. In the reset
-model that is not something to transform in place: the remediation is
-`bun run db:reset`.
-
-Column defaults are compared against the manifest's verbatim authoring
-default, with one normalisation — a redundant cast on a quoted literal to the
-column's own type (`'process'` and `'process'::text` on a `text` column) is
-the same default. Anything else is compared as written, so author defaults in
-the folded form Postgres reports back (`false`, `0`, `now()`).
+What the manifest checksum covers is what `schema.sql` and the plugin
+constraint registry are rendered from: tables, columns, indexes, generated
+policies and every plugin `constraints` entry. The hand-written invariants
+under `apps/api/src/db/migrations/` are outside it, which is why they
+reconcile themselves: `ensureCheckConstraint` compares the definition
+Postgres holds with the intended one (through a rolled-back `NOT VALID`
+probe, since Postgres re-spells a `CHECK` in its own canonical form) and
+drops and re-adds the constraint only when they differ; `ensureForeignKey`
+does the same for a key whose column set has changed.
 
 ## Drift signals
 
@@ -189,39 +199,45 @@ another branch's?
 
 - **API startup** (`roles/api-readiness.ts`, on `onReady`, 5s timeout):
 
-  | | empty | behind / foreign | check unverifiable |
+  | | empty | built from another manifest / foreign | check unverifiable |
   | --- | --- | --- | --- |
   | **production** | fatal | fatal | fatal |
-  | **development** | bootstrapped (same-database migrate URL) | warning banner, keeps serving | error log, keeps serving |
+  | **development** | bootstrapped (same-database migrate URL) | warning banner naming `db:reset`, keeps serving | error log, keeps serving |
 
 - **Readiness** (`/api/ready`): the schema check raises
-  `GENERATED_SCHEMA_BEHIND` or `GENERATED_SCHEMA_UNMIGRATED`; nothing else
-  about the schema gates readiness.
+  `GENERATED_SCHEMA_BEHIND`, `GENERATED_SCHEMA_UNMIGRATED` or — on a
+  matching checksum with a table or column beside the manifest —
+  `GENERATED_SCHEMA_FOREIGN`; nothing else about the schema gates readiness.
 
 - **e2e preflight** — `schema-drift.e2e.test.ts` fails the suite fast with
-  the recorded vs bundled checksums and the remediation that fits: `db:migrate`
-  for a database that is behind, `db:reset` (or a scratch database) for one
-  that carries schema the branch does not declare.
+  the recorded vs bundled checksums and the remediation that fits:
+  `db:migrate` for an empty database, `db:reset` for one built from another
+  manifest, and a scratch database for one that carries schema the branch
+  does not declare — that one is someone else's build.
 
 ## Caveats
 
-- **Type equivalents are non-additive.** The diff compares
-  `information_schema.data_type` through a fixed exact map (`text`→`text`,
-  `timestamptz`→`timestamp with time zone`, `text[]`→`ARRAY`, …). A live
-  column that is semantically compatible but spelled differently counts as a
-  mismatch, and any manifest type outside the map is refused rather than
-  guessed at.
-- **A partial schema is foreign schema.** Every table in a manifest-covered
-  schema must be in the manifest; there is no exemption list. The only
-  column-level exemption is a plugin schema migration's own columns on a
-  generated table (`nonManifestManagedColumns`), until plugins declare those
-  in the registry.
-- Row-count probes honor RLS; the migrate role is expected to be the
-  superuser/owner used by `db:migrate`. Misclassification is fail-safe: a
-  wrongly-additive `ADD COLUMN … NOT NULL` would be rejected by Postgres
-  itself.
+- **A partial schema is foreign schema.** Every table and every column in a
+  manifest-covered schema must be in the manifest; there is no exemption
+  list, at either level. A plugin that needs a column on a generated table
+  declares it in the manifest (an `entityPatch` layer or
+  `contributePlatformTables`), not in free-form DDL.
+- **Plugin `schemaMigrations` are invariants, not history.** They run on
+  every migrate. A bare `CREATE FUNCTION` or `ADD CONSTRAINT` fails on the
+  second run, is rolled back, and is named in the error; write
+  `CREATE OR REPLACE`, `IF NOT EXISTS`, or a guarded DO block.
+- **A matching checksum is not the whole story.** A column added with
+  `psql` keeps the recorded checksum; the chain, the e2e preflight, the
+  API's startup check and `/api/ready` all run the undeclared-schema probe
+  (`findUndeclaredDatabaseSchema`) on a matching checksum as well, so it is
+  refused or reported rather than carried along. (`bootstrapIfEmpty` never
+  sees a matching checksum: it stops at "migrated" and leaves the probe to
+  the startup check that called it.) What none of them see is a *declared* object
+  altered in place — a retyped column, a rewritten generated index — because
+  nothing compares a built database's shape to the manifest; that is what
+  the checksum stands for, and a `db:reset` is the only way to be sure.
 
-`bun run --cwd apps/api test:migrations` exercises the chain — build, no-op,
-additive roll-forward, non-additive refusal, the one-source-of-truth
-invariant, `db:reset` and the bootstrap — against throwaway scratch databases
-([testing.md](testing.md#migration-tests)).
+`(cd apps/api && bun test src/db)` exercises the chain — build, no-op, the
+checksum refusal, the one-source-of-truth invariant, the hand-written
+`CHECK` replacement, `db:reset` and the bootstrap — against throwaway
+scratch databases ([testing.md](testing.md#migration-tests)).

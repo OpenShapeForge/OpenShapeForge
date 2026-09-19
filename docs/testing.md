@@ -167,17 +167,17 @@ entity more than yours leaves `openshapeforge_dev` holding a table your branch
 does not declare, and `schema-drift.e2e.test.ts` then fails the whole suite on
 your branch — which has changed nothing.
 
-The preflight tells the two directions apart and prints only the remedy that
-fits:
+The preflight tells the cases apart and prints only the remedy that fits:
 
-- **The database is behind your manifest.** Nothing in it is outside what your
-  branch declares, so `bun run db:migrate` rolls it forward: new tables and new
-  columns are additive and apply without touching data.
+- **The database is empty.** `bun run db:migrate` builds it.
+- **The database was built from another manifest.** Nothing in it is outside
+  what your branch declares, but a built database is never altered in place,
+  so `bun run db:reset` rebuilds it — destroying its rows, and only until the
+  next worktree rebuilds it again.
 - **The database carries schema your branch does not declare.** The message
-  names the offending tables and columns. `db:migrate` cannot fix this and will
-  refuse — rolling forward has no way to drop a table — so rerunning it is
-  wasted time. Point the suite at a scratch database instead, which leaves
-  everyone else's `openshapeforge_dev` where it is:
+  names the offending tables and columns. That is another branch's build;
+  point the suite at a scratch database instead, which leaves everyone else's
+  `openshapeforge_dev` where it is:
 
   ```sh
   ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"
@@ -191,7 +191,7 @@ fits:
   names, so the RLS point above survives the move to a scratch database.
 
   Recreating `openshapeforge_dev` works too, at the cost of its data — and only
-  until the next worktree migrates it.
+  until the next worktree rebuilds it.
 
 Either way the failure is **not** a regression in the branch under test. Drop
 the scratch database when you are done (`drop database … with (force)`) —

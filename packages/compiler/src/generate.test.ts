@@ -198,17 +198,12 @@ describe("platform schema generator", () => {
       'CREATE INDEX IF NOT EXISTS "cases_tenant_owner_id_idx" ON "erp"."cases" ("tenant_id", "owner_id") WHERE "owner_id" IS NOT NULL;',
     );
     // The plain tenant-isolation policy should NOT be emitted alongside the
-    // row-scope policy; rowScope subsumes it.
-    expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
-    expect(sql).toContain(
-      'DROP POLICY IF EXISTS "cases_tenant_isolation" ON "erp"."cases";',
-    );
-    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_tenant_isolation"')).toBeLessThan(
-      sql.indexOf('CREATE POLICY "cases_row_scope"'),
-    );
+    // row-scope policy; rowScope subsumes it. Nothing drops it either: a
+    // database built under the other policy is rebuilt, not rolled forward.
+    expect(sql).not.toContain('"cases_tenant_isolation"');
   });
 
-  it("drops the generated row-scope policy when a table returns to tenant isolation", () => {
+  it("emits only the tenant-isolation policy when a table has no row scope", () => {
     const tenantOnlyManifest: PlatformSchemaManifest = {
       version: 1,
       tables: [
@@ -228,13 +223,8 @@ describe("platform schema generator", () => {
       artifact.path.endsWith("schema.sql"),
     )?.contents ?? "";
 
-    expect(sql).toContain(
-      'DROP POLICY IF EXISTS "cases_row_scope" ON "erp"."cases";',
-    );
-    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_row_scope"')).toBeLessThan(
-      sql.indexOf('CREATE POLICY "cases_tenant_isolation"'),
-    );
-    expect(sql).not.toContain('CREATE POLICY "cases_row_scope"');
+    expect(sql).toContain('CREATE POLICY "cases_tenant_isolation"');
+    expect(sql).not.toContain('"cases_row_scope"');
   });
 
   it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {
@@ -804,9 +794,7 @@ describe("platform schema generator", () => {
         `DROP POLICY IF EXISTS "${table}_tenant_isolation" ON "erp"."${table}";`,
       );
       // The row-scope policy variant must NOT be present for these tables.
-      expect(schemaSql).not.toContain(
-        `CREATE POLICY "${table}_row_scope" ON "erp"."${table}"`,
-      );
+      expect(schemaSql).not.toContain(`"${table}_row_scope"`);
       expect(schemaSql).toContain(
         `CREATE POLICY "${table}_tenant_isolation" ON "erp"."${table}"\n  USING (app.bypass_rls() OR (tenant_id = app.current_tenant()))\n  WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
       );
@@ -1924,7 +1912,8 @@ describe("generated REST OpenAPI artifact", () => {
 
   it("emits versioned paths only for rest-enabled tables and enabled operations", () => {
     const spec = openApiFor(restManifest);
-    expect(Object.keys(spec.paths)).toEqual([
+    // The artifact transport is documented for every host; entity paths follow the opt-in.
+    expect(Object.keys(spec.paths).filter((path) => !path.startsWith("/api/artifacts"))).toEqual([
       "/api/rest/v1/widgets",
       "/api/rest/v1/widgets/{id}",
     ]);
@@ -1956,9 +1945,9 @@ describe("generated REST OpenAPI artifact", () => {
     expect(update.required).toBeUndefined();
   });
 
-  it("always emits the artifact — with empty paths when no table opts in", () => {
+  it("always emits the artifact — with only the artifact transport when no table opts in", () => {
     const spec = openApiFor(manifest);
-    expect(spec.paths).toEqual({});
+    expect(Object.keys(spec.paths).sort()).toEqual(["/api/artifacts", "/api/artifacts/{artifactId}/contents"]);
   });
 
   it("is deterministic: two renders are byte-identical", () => {

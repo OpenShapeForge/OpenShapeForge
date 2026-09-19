@@ -139,6 +139,7 @@ import {
   type PendingConfiguration,
   findExistingConfiguration,
   handoffFailureCode,
+  handoffModelValues,
   mergeConfigurationValues,
 } from "./configuration-handoff.js";
 import {
@@ -6817,13 +6818,23 @@ function buildServer(
           const definitions = Array.isArray(sourceRow[elicit.definitionsField])
             ? (sourceRow[elicit.definitionsField] as Record<string, unknown>[])
             : [];
+          const required = Array.isArray(
+            (match.inputSchema as { required?: unknown } | undefined)?.required,
+          )
+            ? ((match.inputSchema as { required: unknown[] }).required as string[])
+            : [];
           const minted = await mintConfiguration({
             db,
             tenantId: session.tenantId as string,
             userId: session.userId as string,
             table: table.name,
             elicit,
-            modelValues: modelArguments,
+            modelValues: handoffModelValues({
+              required,
+              elicit,
+              modelValues: modelArguments,
+              sourceRow,
+            }),
             definitions,
             displayName: String(
               sourceRow.name ?? entity?.entity ?? "this record",
@@ -7867,7 +7878,7 @@ export function registerGeneratedMcpServer(
             uploadSession,
             (activeSession) => options.modulePlatform!.services.artifacts.stage(
               activeSession,
-              { purpose: "document-upload", fileName, source },
+              { purpose: "record-upload", fileName, source },
             ),
           );
           return reply.status(201).send({ data: descriptor, operations: [] });

@@ -7,15 +7,24 @@
  * session — `app.worker_role = 'job-worker'`, which the table's policy admits
  * across tenants because it declares `workerAccess: job-worker`; nothing is
  * bypassed. Each claimed job then runs its handler under an ordinary tenant
- * session for the job's tenant and the person who enqueued it, so every row
- * the handler touches is fenced the way that person's own request would be.
+ * session that replays the session of the person who enqueued it — tenant,
+ * user, roles, groups, RelationGroup memberships and scope, as the row
+ * persisted them — so every row the handler touches is fenced the way that
+ * person's own request would be. That session never names `job-worker`, in
+ * `app.roles` or in `app.worker_role`: the worker GUC is the cross-tenant
+ * widen of the queue's own policy, and a handler that held it could read
+ * every tenant's jobs. The lock and the settle below reach the job's row
+ * through the tenant predicate alone, and the `workerDml` tables through
+ * the GRANTs the connection already holds.
  *
- * The outcome is settled in a third, separate transaction. The handler's
- * tenant transaction commits before the settle, so a crash between the two
- * leaves a `running` row whose lease expires and is reclaimed — the handler
- * may run twice, which is why handlers that cause external effects must end
- * `outcome_unknown` when they cannot tell whether the effect happened,
- * rather than throw.
+ * One job per claim, claimed immediately before it runs, so the lease is
+ * measured from the start of the run and a slow neighbour cannot eat it. The
+ * handler's transaction first locks its own job row against the claim token:
+ * a claim that was reclaimed meanwhile stops before any effect, and a held
+ * lock keeps `claimJobs` (`skip locked`) from handing the job out while it
+ * runs. The outcome is settled inside that same transaction, so the handler's
+ * writes and the outcome commit together; only a handler that throws is
+ * settled apart, as a `retry`, after its transaction rolled back.
  */
 import { sql, type Transaction } from "kysely";
 import type { RuntimeJobError, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
@@ -25,7 +34,8 @@ import type { DB } from "../generated/db/types.js";
 import type { ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import type { JobHandlerRegistry } from "./handlers.js";
 import { sweepDoneJobs } from "./queries.js";
-import { claimJobs, settleJob, type ClaimedJob, type SettleJobInput } from "./store.js";
+import { lockClaimedJob, settleJob, type SettleJobInput, type SettleJobResult } from "./settle.js";
+import { claimJobs, type ClaimedJob } from "./store.js";
 
 /**
  * The worker role platform.jobs names in its policy (`workerAccess`). The
@@ -89,37 +99,87 @@ function errorOf(error: unknown): RuntimeJobError {
   return { message: String(error) };
 }
 
-function isOutcome(value: unknown): value is RuntimeJobOutcome {
-  return !!value && typeof value === "object" &&
-    ["done", "retry", "failed", "outcome_unknown"].includes(String((value as { outcome?: unknown }).outcome));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJobError(value: unknown): value is RuntimeJobError {
+  return isRecord(value) && typeof value.message === "string" &&
+    (value.code === undefined || typeof value.code === "string") &&
+    (value.detail === undefined || isRecord(value.detail));
 }
 
 /**
- * Run one claimed job to an outcome. Never throws: a handler that throws is a
- * `retry`, and a kind nobody handles is `dead` at once — retrying it would only
- * spend the attempt budget on a configuration problem.
+ * The outcome a handler returned, or the `failed` that stands in for one it
+ * did not: nothing is `done`, and anything else — an unknown outcome, a retry
+ * without an error to record — is a handler bug, which no retry will fix.
+ */
+export function settlementOf(job: ClaimedJob, outcome: RuntimeJobOutcome | void): SettleJobInput {
+  const base = { id: job.id, claimToken: job.claimToken };
+  if (outcome === undefined) return { ...base, outcome: "done" };
+  const invalid = (reason: string): SettleJobInput => ({
+    ...base,
+    outcome: "failed",
+    error: { code: "INVALID_OUTCOME", message: `Handler for "${job.kind}" ${reason}.` },
+  });
+  if (!isRecord(outcome)) return invalid("returned something other than an outcome");
+  const value = outcome as Record<string, unknown>;
+  switch (value.outcome) {
+    case "done":
+      if (value.result !== undefined && !isRecord(value.result)) return invalid("returned a result that is not an object");
+      return { ...base, outcome: "done", ...(value.result !== undefined ? { result: value.result } : {}) };
+    case "retry":
+      if (!isJobError(value.error)) return invalid("asked for a retry without an error");
+      if (value.retryAt !== undefined && !(value.retryAt instanceof Date && Number.isFinite(value.retryAt.getTime()))) {
+        return invalid("asked for a retry at an invalid time");
+      }
+      return { ...base, outcome: "retry", error: value.error, ...(value.retryAt !== undefined ? { retryAt: value.retryAt } : {}) };
+    case "failed":
+    case "outcome_unknown":
+      if (!isJobError(value.error)) return invalid(`ended ${value.outcome} without an error`);
+      return { ...base, outcome: value.outcome, error: value.error };
+    default:
+      return invalid(`returned an unrecognised outcome "${String(value.outcome)}"`);
+  }
+}
+
+export type JobRunResult =
+  | { ran: true; settlement: SettleJobInput; result: SettleJobResult }
+  /** The claim no longer held when the run began: another worker owns the job now. */
+  | { ran: false };
+
+/**
+ * Run one claimed job to its settled outcome. Never throws: a handler that
+ * throws is a `retry`, and a kind nobody handles is `dead` at once — retrying
+ * it would only spend the attempt budget on a configuration problem.
  */
 export async function runClaimedJob(
   db: OpenShapeForgeDatabase,
   job: ClaimedJob,
   handlers: JobHandlerRegistry,
   log: ModuleWorkerLogger,
-): Promise<SettleJobInput> {
-  const base = { id: job.id, claimToken: job.claimToken };
+): Promise<JobRunResult> {
+  const settleApart = async (settlement: SettleJobInput): Promise<JobRunResult> => ({
+    ran: true,
+    settlement,
+    result: await withJobWorkerSession(db, (trx) => settleJob(trx, settlement)),
+  });
   const registered = handlers.get(job.kind);
   if (!registered) {
-    return {
-      ...base,
+    return settleApart({
+      id: job.id,
+      claimToken: job.claimToken,
       outcome: "dead",
       error: { code: "NO_HANDLER", message: `No active runtime module handles job kind "${job.kind}".` },
-    };
+    });
   }
   try {
-    const outcome = await withDbSession(
+    return await withDbSession(
       db,
-      { tenantId: job.tenantId, userId: job.actorId, roles: [JOB_WORKER_ROLE] },
-      (trx) =>
-        registered.handler(job.payload, {
+      { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
+      async (trx): Promise<JobRunResult> => {
+        if (!(await lockClaimedJob(trx, job))) return { ran: false };
+        const outcome = await registered.handler(job.payload, {
           job: {
             id: job.id,
             tenantId: job.tenantId,
@@ -131,48 +191,54 @@ export async function runClaimedJob(
           },
           db: trx,
           log,
-        }),
+        });
+        const settlement = settlementOf(job, outcome);
+        return { ran: true, settlement, result: await settleJob(trx, settlement) };
+      },
     );
-    if (outcome === undefined) return { ...base, outcome: "done" };
-    if (!isOutcome(outcome)) {
-      return { ...base, outcome: "failed", error: { code: "INVALID_OUTCOME", message: `Handler for "${job.kind}" returned an unrecognised outcome.` } };
-    }
-    return { ...base, ...outcome };
   } catch (error) {
-    return { ...base, outcome: "retry", error: errorOf(error) };
+    return settleApart({ id: job.id, claimToken: job.claimToken, outcome: "retry", error: errorOf(error) });
   }
 }
 
 export type ProcessJobBatchResult = { processed: number };
 
+/**
+ * Claim and run up to `batchSize` jobs, one claim per job, stopping early
+ * when `shouldStop` says so — a job never claimed needs no releasing.
+ */
 export async function processJobBatch(
   db: OpenShapeForgeDatabase,
   handlers: JobHandlerRegistry,
   log: ModuleWorkerLogger,
   options: JobWorkerOptions = {},
+  shouldStop: () => boolean = () => false,
 ): Promise<ProcessJobBatchResult> {
-  const claimed = await withJobWorkerSession(db, (trx) =>
-    claimJobs(trx, {
-      limit: options.batchSize ?? DEFAULT_BATCH_SIZE,
-      leaseSeconds: options.leaseSeconds ?? DEFAULT_LEASE_SECONDS,
-      ...(options.kinds ? { kinds: options.kinds } : {}),
-    }),
-  );
-  for (const job of claimed) {
-    const settlement = await runClaimedJob(db, job, handlers, log);
-    const result = await withJobWorkerSession(db, (trx) => settleJob(trx, settlement));
-    if (!result.settled) {
-      log.warn({ job: job.id, kind: job.kind }, "Job lease was reclaimed before its outcome was recorded; discarding it.");
+  const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+  let processed = 0;
+  while (processed < batchSize && !shouldStop()) {
+    const [job] = await withJobWorkerSession(db, (trx) =>
+      claimJobs(trx, {
+        limit: 1,
+        leaseSeconds: options.leaseSeconds ?? DEFAULT_LEASE_SECONDS,
+        ...(options.kinds ? { kinds: options.kinds } : {}),
+      }),
+    );
+    if (!job) break;
+    processed += 1;
+    const run = await runClaimedJob(db, job, handlers, log);
+    if (!run.ran || !run.result.settled) {
+      log.warn({ job: job.id, kind: job.kind }, "Job lease was reclaimed by another worker; leaving the outcome to it.");
       continue;
     }
-    if (settlement.outcome !== "done") {
+    if (run.settlement.outcome !== "done") {
       log.warn(
-        { job: job.id, kind: job.kind, attempt: job.attempts, status: result.status, error: settlement.error },
-        `Job ended ${result.status}.`,
+        { job: job.id, kind: job.kind, attempt: job.attempts, status: run.result.status, error: run.settlement.error },
+        `Job ended ${run.result.status}.`,
       );
     }
   }
-  return { processed: claimed.length };
+  return { processed };
 }
 
 /** Sweep `done` jobs past retention; a no-op when retention is 0. */
@@ -213,7 +279,7 @@ export function startJobWorker(
         const swept = await sweepJobs(db, doneRetentionDays);
         if (swept > 0) log.info({ swept, doneRetentionDays }, "Swept done jobs past retention.");
       }
-      const result = await processJobBatch(db, handlers, log, options);
+      const result = await processJobBatch(db, handlers, log, options, () => stopped);
       nextDelayMs = result.processed > 0 ? 0 : pollIntervalMs;
     } finally {
       active = false;
@@ -224,8 +290,9 @@ export function startJobWorker(
   schedule(0);
 
   return {
-    // Settles only after the in-flight tick: a job whose handler committed but
-    // whose outcome was not yet recorded would otherwise wait for its lease.
+    // Settles only after the in-flight job: the tick checks `stopped` before
+    // every claim, so the jobs it has not started stay queued for the next
+    // worker and the one it is running finishes and records its outcome.
     stop: async () => {
       stopped = true;
       if (timer) {

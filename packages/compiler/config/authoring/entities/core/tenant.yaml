@@ -247,6 +247,16 @@ interfaces:
             title:
               en: Edit tenant
               nl: Tenant bewerken
+            groups:
+              - title:
+                  en: Tenant details
+                  nl: Tenantgegevens
+                fields:
+                  - slug
+                  - name
+                  - status
+                  - description
+                  - avatarStorageLocation
     fields:
       status:
         render:

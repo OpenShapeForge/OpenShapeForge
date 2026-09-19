@@ -200,19 +200,27 @@ function defaultSql(field: Field | undefined, column: ColumnDefinition): string 
     return field.defaultValue ? "true" : "false";
   }
   if (
-    (column.type === "integer" || column.type === "bigint") &&
+    (column.type === "integer" || column.type === "bigint" || column.type === "numeric") &&
     typeof field.defaultValue === "number" &&
-    Number.isFinite(field.defaultValue)
+    Number.isFinite(field.defaultValue) &&
+    (column.type === "numeric" || Number.isInteger(field.defaultValue))
   ) {
     return String(field.defaultValue);
   }
   if (column.type === "jsonb") {
     return `${quoteSqlString(JSON.stringify(field.defaultValue))}::jsonb`;
   }
-  if (typeof field.defaultValue === "string") {
+  if (typeof field.defaultValue === "string" && column.type !== "boolean" &&
+    column.type !== "integer" && column.type !== "bigint" && column.type !== "numeric") {
     return quoteSqlString(field.defaultValue);
   }
-  return undefined;
+  // An authored default the column cannot carry is a contract the database
+  // would silently drop: a required numeric with `defaultValue: 1` compiled to
+  // NOT NULL with no default, and every insert that relied on it failed.
+  throw new Error(
+    `Field ${field.key} declares defaultValue ${JSON.stringify(field.defaultValue)}, ` +
+      `which cannot be rendered as a SQL default for ${column.type} column ${column.name}.`,
+  );
 }
 
 function isRelationshipRegistered(

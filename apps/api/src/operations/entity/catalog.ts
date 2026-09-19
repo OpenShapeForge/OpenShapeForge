@@ -32,6 +32,21 @@ export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean
     : table.generatedCrudEligible === true;
 }
 
+/**
+ * Whether every row of `table` is its own tenant: the compiler stamps
+ * CHECK (id = tenant_id) on a tenant registry (packages/compiler/src/
+ * tenant-bound-references.ts, `hasTenantIdentityCheck`), and this reads the
+ * same mark back from the manifest, with the same whitespace normalisation.
+ * Such a row has one write path, provisioning; nothing creates a second.
+ */
+export function isTenantRegistryTable(table: GeneratedCrudTable): boolean {
+  return (table.constraints ?? []).some(
+    (constraint) =>
+      constraint.kind === "check" &&
+      constraint.expression?.replace(/\s+/g, " ").trim() === "id = tenant_id",
+  );
+}
+
 export function isGeneratedCrudOperationEnabled(
   table: GeneratedCrudTable,
   operation: GeneratedCrudExposureOperation,

@@ -12,6 +12,7 @@ import {
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
   isOperationWrittenColumn,
+  isTenantRegistryTable,
   isWritableColumn,
 } from "../../generated-crud.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
@@ -74,13 +75,6 @@ export function fieldName(column: Column): string {
  * column written by a named Operation (a versioned head's lifecycle status)
  * is never a caller's to set, whatever the intent.
  */
-/** Whether every row of `table` is its own tenant, so the row for an identity is the provisioned one. */
-export function isTenantRegistry(table: GeneratedTable): boolean {
-  return (table.constraints ?? []).some(
-    (constraint) => constraint.kind === "check" && constraint.expression === "id = tenant_id",
-  );
-}
-
 export function isMutableColumn(
   column: Column,
   operation: "create" | "update" = "create",
@@ -237,7 +231,7 @@ export async function createRow(
   // provisioning, and the harness provisions each run's tenant row once
   // (ensureTenantRows). The fixture for it IS that row: a second insert
   // would collide on the tenant's own id.
-  if (isTenantRegistry(table)) {
+  if (isTenantRegistryTable(table)) {
     return identity.tenantId;
   }
 

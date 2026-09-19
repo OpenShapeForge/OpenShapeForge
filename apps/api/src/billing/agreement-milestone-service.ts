@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession, type DbSessionInput } from "../db/session.js";
+import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityForTable,
   getGeneratedCrudTables,
@@ -139,7 +138,6 @@ export async function createAgreementMilestone(
     basisAmount,
     percentOfBasis,
     amount,
-    status: "pending",
     expectedAt,
   });
 
@@ -155,70 +153,5 @@ export async function createAgreementMilestone(
     triggeredAt: (row.triggeredAt as string | null) ?? null,
     triggeredBy: (row.triggeredBy as string | null) ?? null,
     producedInvoiceId: (row.producedInvoiceId as string | null) ?? null,
-  };
-}
-
-/**
- * Flips an AgreementMilestone from `pending` to `triggered` — the explicit
- * act (by a person or a caller such as a workflow instance) that makes it
- * eligible for the next mode = milestone BillingRun. There is deliberately no
- * automatic listener watching for this; a caller invokes this directly.
- *
- * The status guard is a single conditional UPDATE (WHERE status = 'pending'),
- * not a read-then-write, so two concurrent triggers of the same milestone
- * cannot both succeed.
- */
-export async function triggerAgreementMilestone(
-  db: OpenShapeForgeDatabase,
-  session: DbSessionInput,
-  agreementMilestoneId: string,
-  triggeredBy?: string,
-): Promise<AgreementMilestoneRecord> {
-  requireRole(session, MILESTONE_WRITE_ROLE, "trigger an AgreementMilestone");
-  const id = requireUuid(agreementMilestoneId, "agreementMilestoneId");
-
-  return withDbSession(db, session, async (trx) => {
-    const updated = await sql<{ row: Record<string, unknown> }>`
-      update erp.agreement_milestones
-      set status = 'triggered',
-          triggered_at = now(),
-          triggered_by = ${triggeredBy ?? null},
-          updated_at = now()
-      where id = ${id}::uuid
-        and status = 'pending'
-      returning to_jsonb(agreement_milestones.*) as row
-    `.execute(trx);
-
-    const row = updated.rows[0]?.row;
-    if (row) return projectMilestoneRow(row);
-
-    const existing = await sql<{ status: string }>`
-      select status from erp.agreement_milestones where id = ${id}::uuid
-    `.execute(trx);
-    const current = existing.rows[0]?.status;
-    if (current === undefined) {
-      throw new HttpError(404, "NOT_FOUND", `AgreementMilestone ${id} was not found.`);
-    }
-    throw new HttpError(
-      409,
-      "CONFLICT",
-      `AgreementMilestone ${id} cannot be triggered from status "${current}"; only a "pending" milestone can be triggered.`,
-    );
-  });
-}
-
-function projectMilestoneRow(row: Record<string, unknown>): AgreementMilestoneRecord {
-  return {
-    id: row.id as string,
-    agreementId: row.agreement_id as string,
-    description: row.description as string,
-    basisAmount: (row.basis_amount as number | null) ?? null,
-    percentOfBasis: (row.percent_of_basis as number | null) ?? null,
-    amount: row.amount as number,
-    status: row.status as string,
-    expectedAt: (row.expected_at as string | null) ?? null,
-    triggeredAt: (row.triggered_at as string | null) ?? null,
-    triggeredBy: (row.triggered_by as string | null) ?? null,
-    producedInvoiceId: (row.produced_invoice_id as string | null) ?? null,
   };
 }

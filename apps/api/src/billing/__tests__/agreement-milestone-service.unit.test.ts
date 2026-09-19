@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { getGeneratedCrudTables, isWritableColumn } from "../../graphql/generated-crud.js";
+import { getGeneratedCrudTables, isCallerWritableColumn, isWritableColumn } from "../../graphql/generated-crud.js";
 import { generatedEntityTypeDefs } from "../../graphql/generated-entity-schema.js";
 import { resolveExpectedAt, resolveMilestoneAmounts } from "../agreement-milestone-service.js";
 
@@ -72,11 +72,18 @@ describe("AgreementMilestone immutability in the shipped manifest", () => {
     }
   });
 
-  test("description and status stay writable on update", () => {
-    for (const columnName of ["description", "status"]) {
+  test("description stays writable on update", () => {
+    const column = table?.columns.find((entry) => entry.name === "description");
+    expect(column?.immutable).toBeUndefined();
+    expect(isWritableColumn(column!, "update")).toBe(true);
+  });
+
+  test("status and the trigger stamps are written only by AgreementMilestone.trigger", () => {
+    for (const columnName of ["status", "triggered_at", "triggered_by"]) {
       const column = table?.columns.find((entry) => entry.name === columnName);
-      expect(column?.immutable).toBeUndefined();
-      expect(isWritableColumn(column!, "update")).toBe(true);
+      expect(column?.writtenBy?.map((writer) => writer.operation)).toEqual(["AgreementMilestone.trigger"]);
+      expect(isCallerWritableColumn(table!, column!, "create")).toBe(false);
+      expect(isCallerWritableColumn(table!, column!, "update")).toBe(false);
     }
   });
 

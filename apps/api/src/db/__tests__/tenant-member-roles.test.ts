@@ -119,6 +119,37 @@ describe("tenant member roles from the control plane", () => {
           await resolveIdentityLink(appDb, { tenantId: tenant, userId: subject, roles: [], groups: [], scope: "self" }, claims);
         }
 
+        // A member whose sign-in is still pending confirmation (their Relation
+        // existed; nobody verified it is theirs) has a row but no link: no
+        // roles can be assigned onto it.
+        const pendingSubject = randomUUID();
+        await sql`
+          insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+          values (gen_random_uuid(), ${TENANT}, 'Pat Existing', 'person', 'active')
+        `.execute(adminDb);
+        await sql`
+          insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary)
+          select tenant_id, id, 'email', 'pat@example.com', true from erp.relations
+           where tenant_id = ${TENANT} and display_name = 'Pat Existing'
+        `.execute(adminDb);
+        __resetIdentityLinkForTests();
+        const pat = await resolveIdentityLink(
+          appDb,
+          { tenantId: TENANT, userId: pendingSubject, roles: [], groups: [], scope: "self" },
+          { issuer: ISSUER, subject: pendingSubject, email: "pat@example.com" },
+        );
+        expect(pat!.status).toBe("pending_confirmation");
+        const patDeps = { db: appDb, administrator, members: membersClient(pendingSubject, "pat@example.com") };
+        await expect(
+          changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"),
+        ).rejects.toMatchObject({ message: expect.stringContaining("pending confirmation") });
+        expect(
+          (await sql<{ roles: string[] }>`
+            select ir.roles from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
+             where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}
+          `.execute(adminDb)).rows[0]!.roles,
+        ).toEqual([]);
+
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({
           action: "assigned",

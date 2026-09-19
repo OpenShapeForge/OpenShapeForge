@@ -14,10 +14,10 @@ import { sql, type Transaction } from "kysely";
 import {
   employeeInvitationRoleGrants,
   isEmployeeInvitationRole,
-  memberRoleClientId,
   type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
 import { invalidateIdentityLink } from "../auth/identity-link.js";
+import { writeMembershipRoles } from "../auth/identity-link-store.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withSystemSession } from "../db/session.js";
@@ -67,7 +67,7 @@ async function membershipsBySubject(trx: Transaction<DB>, tenantId: string): Pro
 }
 
 async function memberWithSummary(deps: Dependencies, trx: Transaction<DB>, tenant: TenantIdentity, memberId: string) {
-  const member = await deps.members.getMember(tenant.keycloak_organization_id!, memberId, memberRoleClientId());
+  const member = await deps.members.getMember(tenant.keycloak_organization_id!, memberId);
   if (!member) throw new ControlInputError("The member does not exist in this tenant.");
   const credentials = await deps.members.listCredentials(member.memberId);
   const membership = (await membershipsBySubject(trx, tenant.id)).get(memberId);
@@ -84,7 +84,7 @@ export async function listTenantMembers(deps: Dependencies, slug: string) {
     const memberships = await membershipsBySubject(trx, tenant.id);
     return {
       tenantSlug: slug,
-      members: await Promise.all((await deps.members.listMembers(tenant.keycloak_organization_id!, memberRoleClientId()))
+      members: await Promise.all((await deps.members.listMembers(tenant.keycloak_organization_id!))
         .map(async (member) => {
           const credentials = await deps.members.listCredentials(member.memberId);
           return { tenantSlug: slug, ...member, roles: [...(memberships.get(member.memberId)?.roles ?? [])].sort(),
@@ -153,16 +153,14 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
     const next = mode === "assign"
       ? [...new Set([...current, ...grants])]
       : [...current].filter((role) => !grants.has(role));
-    await sql`
-      update platform.identity_relations
-         set roles = (
-               select coalesce(array_agg(value), '{}'::text[])
-                 from jsonb_array_elements_text(${[...next].sort()}::jsonb)
-             ),
-             needs_role_assignment = false,
-             updated_at = now()
-       where identity_id = ${membership.identity_id}::uuid and tenant_id = ${tenant.id}::uuid
-    `.execute(trx);
+    // Linked rows only, like set_member_role: roles on an unconfirmed link
+    // would be honoured the moment the person confirms a Relation nobody
+    // verified is theirs.
+    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next))) {
+      throw new ControlInputError(
+        "The member is not linked to a Relation in this tenant yet (their sign-in is pending confirmation); roles can be assigned once they are.",
+      );
+    }
     invalidateIdentityLink(membership.issuer, membership.subject, tenant.id);
     return { tenantSlug: slug, memberId, roles: [...next].sort(), action: mode === "assign" ? "assigned" : "removed" };
   });

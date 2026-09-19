@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { blueprintOperationHandler } from "./entity/blueprints.js";
+import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
 import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
 import { JOBS_PLUGIN, jobsOperationHandler } from "../jobs/operations.js";
 import {
@@ -583,6 +584,18 @@ export function bindOperationHandlers(
     if (operation.plugin === "osf-blueprints") {
       if (modulesByName.has("osf-blueprints")) throw new Error("The core blueprint runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
+      continue;
+    }
+    // Status transitions declared on entity fields are core too: one generic
+    // handler plus the offer policy that hides a rule whose `from` does not
+    // hold, so what a caller is offered is what the write will accept.
+    if (operation.plugin === TRANSITIONS_PLUGIN) {
+      if (modulesByName.has(TRANSITIONS_PLUGIN)) throw new Error("The core transition runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, {
+        operation,
+        handler: transitionOperationHandler(operation),
+        availability: transitionAvailabilityHandler(operation),
+      });
       continue;
     }
     // The platform's own administration is core too: its handlers ship with
@@ -1872,9 +1885,10 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  // The core jobs Operations project in every process, as their REST and MCP
-  // surfaces do: the handlers ship with the runtime, not with a module.
-  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN]);
+  // The core jobs and transition Operations project in every process, as
+  // their REST and MCP surfaces do: the handlers ship with the runtime, not
+  // with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

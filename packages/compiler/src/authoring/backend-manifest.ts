@@ -998,6 +998,11 @@ function compileFieldRelationStorage(
         kind: "check",
         expression: TENANT_IDENTITY_CHECK_EXPRESSION,
       });
+      // A registry row's id IS its tenant, so it comes from the verified
+      // session rather than a random default: a generic create that supplies
+      // only tenant_id then satisfies the check without knowing about it.
+      const identity = target.columns.find((candidate) => candidate.name === "id")!;
+      identity.default = "app.current_tenant()";
     }
     const composite = source.tenantScoped && target.tenantScoped && !tenancyIdentity;
     const deleteAction = onDelete ?? previous?.onDelete;
@@ -1237,7 +1242,12 @@ export function compileAuthoringBackendManifest(
     const idIndex = columns.findIndex((column) => column.name === "id");
     const existingTenantColumn = columns.find((column) => column.name === "tenant_id");
     if (tenantScoped && existingTenantColumn) {
+      // The tenant column is the row's identity under row-level security and
+      // the leading half of every key into this table; an authored
+      // `required: false` on it would leave those keys unchecked (a NULL
+      // half passes MATCH SIMPLE). Required, whatever the field says.
       existingTenantColumn.type = "uuid";
+      existingTenantColumn.required = true;
     }
     if (tenantScoped && !columns.some((column) => column.name === "tenant_id")) {
       const tenantColumn: ColumnDefinition = { name: "tenant_id", type: "uuid", required: true };

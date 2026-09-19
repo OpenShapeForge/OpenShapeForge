@@ -42,7 +42,7 @@ function sql(manifest: PlatformSchemaManifest) {
   return generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
 }
 describe("schema-3 field relationship storage", () => {
-  it("retains a nullable authoritative tenant column as a single FK and refuses uniqueness", () => {
+  it("keeps an authored tenant column required, as a single FK proven by the registry check, and refuses uniqueness", () => {
     const bindTenant = (contract: CompiledEntityContract) => {
       // The derived inverse collection on the target follows the renamed key.
       if (contract.entity.name === targetName) contract.model.relationships.find((relationship) => relationship.key === "rowAccessOwners")!.foreignKey = "tenant_id";
@@ -53,8 +53,11 @@ describe("schema-3 field relationship storage", () => {
     };
     const manifest = compileRelations(bindTenant);
     const column = source(manifest).columns.find(column => column.name === "tenant_id")!;
-    expect(column.required).not.toBe(true);
+    // Authored nullable, compiled required: a NULL tenant would pass the key unchecked.
+    expect(column.required).toBe(true);
     expect(column.references).toEqual({ schema: "erp", table: target(manifest).name, column: "id" });
+    expect(target(manifest).constraints).toContainEqual(expect.objectContaining({ kind: "check", expression: "id = tenant_id" }));
+    expect(target(manifest).columns.find(column => column.name === "id")!.default).toBe("app.current_tenant()");
     expect(sql(manifest)).toContain('FOREIGN KEY ("tenant_id")');
     expect(sql(manifest)).not.toContain('FOREIGN KEY ("tenant_id", "tenant_id")');
     expect(() => compileRelations(contract => {
@@ -242,7 +245,7 @@ describe("schema-3 field relationship storage", () => {
   it("refuses malformed composite reference metadata and missing unique targets", () => {
     const missingColumns = compileRelations();
     source(missingColumns).columns.find((column) => column.name === "owner_id")!.references!.localColumns = ["missing", "owner_id"];
-    expect(() => sql(missingColumns)).toThrow("must reuse its own tenant_id");
+    expect(() => sql(missingColumns)).toThrow("names unknown local column missing");
     const missingUnique = compileRelations();
     target(missingUnique).indexes = [];
     expect(() => sql(missingUnique)).toThrow("requires a matching unique index");

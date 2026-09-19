@@ -2,7 +2,7 @@
   "name": "@openshapeforge/workflow-layout",
   "version": "0.1.0",
   "publishConfig": { "registry": "https://npm.pkg.github.com" },
-  "repository": { "type": "git", "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git" },
+  "repository": { "type": "git", "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git", "directory": "packages/workflow-layout" },
   "files": ["src", "LICENSE", "!src/**/*.test.ts"],
   "license": "BUSL-1.1",
   "type": "module",

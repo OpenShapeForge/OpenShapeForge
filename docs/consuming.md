@@ -6,11 +6,19 @@ check-script ownership model travels with it.
 
 ## Getting the package
 
-`@openshapeforge/compiler` is published to the **GitHub Packages npm
-registry** (not npmjs.com) by the **Package compiler** workflow
-(`.github/workflows/package-compiler.yml`) on pushes to `main`, whenever the
-version in `packages/compiler/package.json` is not there yet — releasing is
-"bump the version and merge".
+`@openshapeforge/compiler` — and every other non-private package under
+`packages/` — is published to the **GitHub Packages npm registry** (not
+npmjs.com) by the **Package compiler** workflow
+(`.github/workflows/package-compiler.yml`, driven by
+`scripts/publish-packages.mjs`) on two channels:
+
+- **`latest`**, from pushes to `main`, whenever the version in the package's
+  `package.json` is not there yet — releasing is "bump the version and merge".
+- **`dev`**, from every push to the `hans/dev` integration branch, as
+  `<version>-dev.<8-char sha>`. Every package in one run pins its sibling
+  packages to that same version, so `bun add @openshapeforge/compiler@dev`
+  (or an exact `0.2.0-dev.<sha>`) installs one commit of the workspace, not a
+  mix.
 
 GitHub's npm registry requires authentication even for public packages, so
 consumers need a token with `read:packages` (a classic PAT, or

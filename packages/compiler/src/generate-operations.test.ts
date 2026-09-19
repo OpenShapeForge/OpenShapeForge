@@ -13,6 +13,8 @@ import {
   CORE_OPERATION_MODULES,
   operationOpenApiPaths,
   renderOperationCatalog,
+  CAPABILITY_GRANT_ERRORS,
+  CAPABILITY_GRANT_SECURITY_SCHEME,
 } from "./generate-operations.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
 import type { CompiledEntityOperation, OperationCatalogDefinition } from "./authoring/types.js";
@@ -912,6 +914,71 @@ describe("first-class plugin operations", () => {
     expect(spec.components.securitySchemes.oauth2Auth.description).toBe(
       "Sign in through the host identity provider.",
     );
+  });
+
+  describe("capability auth", () => {
+    const capability = (overrides: Partial<PluginOperationContract> = {}): PluginOperationContract => ({
+      ...operation,
+      auth: { mode: "capability" },
+      transports: {
+        ...operation.transports,
+        mcp: { enabled: false, reason: "A grant token is presented on REST only." },
+        graphql: { enabled: false, reason: "A grant token is presented on REST only." },
+      },
+      ...overrides,
+    });
+
+    test("projects to REST only and requires a tenant", () => {
+      expect(() => collectPluginOperations([{ name: "demo", operations: [{
+        ...operation,
+        auth: { mode: "capability" },
+      }] }], context)).toThrow(/capability auth can only project to REST/);
+      expect(() => collectPluginOperations([{ name: "demo", operations: [
+        capability({ tenancy: { mode: "none" } }),
+      ] }], context)).toThrow(/capability auth requires tenancy mode required/);
+    });
+
+    test("appends the platform grant errors without overriding a declared pair", () => {
+      const [compiled] = collectPluginOperations([{ name: "demo", operations: [capability({
+        errors: [{ status: 401, code: "GRANT_INVALID", description: "Own wording." }],
+      })] }], context);
+      const pairs = compiled!.errors.map((error) => `${error.status} ${error.code}`);
+      expect(pairs).toEqual([
+        "401 GRANT_INVALID",
+        ...CAPABILITY_GRANT_ERRORS
+          .filter((error) => error.code !== "GRANT_INVALID")
+          .map((error) => `${error.status} ${error.code}`),
+      ]);
+      expect(compiled!.errors[0]!.description).toBe("Own wording.");
+      expect(pairs).toContain("423 GRANT_LOCKED");
+      expect(pairs).toContain("403 GRANT_SCOPE");
+    });
+
+    test("describes every capability Operation by the one platform security scheme", () => {
+      const compiled = collectPluginOperations([{ name: "demo", operations: [capability()] }], context);
+      const spec = JSON.parse(renderOpenApiSpec({ version: 1, tables: [] }, "fixture", {
+        operations: compiled,
+      })) as any;
+      expect(spec.paths["/api/demo/quotes/{quoteId}/publish"].post.security).toEqual([
+        { [CAPABILITY_GRANT_SECURITY_SCHEME]: [] },
+      ]);
+      expect(spec.components.securitySchemes[CAPABILITY_GRANT_SECURITY_SCHEME]).toMatchObject({
+        type: "http",
+        scheme: "grant",
+      });
+      expect(Object.keys(spec.paths["/api/demo/quotes/{quoteId}/publish"].post.responses)).toContain("423");
+    });
+
+    test("keeps the platform scheme name away from custom schemes", () => {
+      expect(() => collectPluginOperations([{ name: "demo", operations: [capability({
+        auth: {
+          mode: "custom",
+          scheme: CAPABILITY_GRANT_SECURITY_SCHEME,
+          description: "Not a grant",
+          securityScheme: { type: "apiKey", in: "header", name: "X-Token" },
+        },
+      })] }], context)).toThrow(/reserved for capability grants/);
+    });
   });
 
   test("fails compilation when an operation plugin has no runtime module", () => {

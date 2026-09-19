@@ -204,6 +204,17 @@ export type PluginOperationAuth =
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
     }
   | {
+      /**
+       * A capability grant: a hashed, expiring, recipient-bound token that
+       * core resolves into a grant session before the handler runs. The
+       * grant names the exact Operation keys and the one record it covers;
+       * the handler reads them from `session.grant`. REST only, described by
+       * the platform-owned `capabilityGrant` security scheme; the grant
+       * errors are appended to the Operation's declared errors.
+       */
+      mode: "capability";
+    }
+  | {
       mode: "custom";
       /** OpenAPI components.securitySchemes key. */
       scheme: string;

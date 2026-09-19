@@ -194,6 +194,7 @@ describe("generated schema migration", () => {
             "identities",
             "identity_relations",
             "employee_invitations",
+            "capability_grants",
             "update_notices",
             "user_update_notices",
             "operation_execution_receipts",
@@ -234,6 +235,7 @@ describe("generated schema migration", () => {
           const invariants = await sql<{ name: string }>`
             select conname as name from pg_constraint
             where conname in (
+              'capability_grants_max_uses_check',
               'identity_relations_status_shape',
               'employee_invitations_status_shape',
               'operation_execution_receipts_state_shape',
@@ -245,6 +247,7 @@ describe("generated schema migration", () => {
           `.execute(db);
           expect(invariants.rows.map((row) => row.name)).toEqual([
             "blueprint_copies_source_version_fkey",
+            "capability_grants_max_uses_check",
             "employee_invitations_status_shape",
             "identity_relations_relation_id_fkey",
             "identity_relations_status_shape",

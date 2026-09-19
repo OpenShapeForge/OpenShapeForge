@@ -1,0 +1,204 @@
+# Capability grants as seen by an operator: the person who issued a link, or
+# a colleague of theirs, listing what is outstanding for a record and pulling
+# a link back. Issuing stays with the plugin that owns the record
+# (`platform.grants.issue`), because only it knows which Operations a
+# recipient should get; listing and revoking are generic and live here, bound
+# to the core `osf-grants` runtime module. Both are ordinary session
+# Operations gated by the organization-administration role, projected to
+# REST, MCP and GraphQL. The token itself is never readable: a grant row is
+# reported by its id, recipient, subject, Operations and lifecycle only.
+schemaVersion: 1
+kind: operationCatalog
+plugin: osf-grants
+operations:
+  list:
+    id: grants.list
+    name:
+      en: List capability grants
+      nl: Toegangslinks tonen
+    description:
+      en: 'Lists the capability grants issued for one record: recipient, covered Operations, expiry, use
+        count and whether each is still active, consumed, expired or revoked. Never returns a token.'
+      nl: 'Toont de toegangslinks die voor één record zijn uitgegeven: ontvanger, toegestane Operations,
+        vervaldatum, gebruik en of elke link nog actief, verbruikt, verlopen of ingetrokken is. Geeft nooit
+        een token terug.'
+    implementation:
+      type: plugin
+      plugin: osf-grants
+      handler: listGrants
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [subjectEntity, subjectId]
+        properties:
+          subjectEntity:
+            type: string
+            minLength: 1
+            x-osf-i18n:
+              title:
+                en: Record type
+                nl: Recordtype
+          subjectId:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Record
+                nl: Record
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [grants]
+        properties:
+          grants:
+            type: array
+            items:
+              $ref: '#/$defs/grant'
+        $defs:
+          grant:
+            type: object
+            additionalProperties: false
+            required: [id, subjectEntity, subjectId, recipient, operations, issuedBy, issuedAt, expiresAt, uses, status]
+            properties:
+              id: { type: string, format: uuid }
+              subjectEntity: { type: string }
+              subjectId: { type: string, format: uuid }
+              recipient:
+                type: object
+                additionalProperties: true
+                required: [kind]
+                properties:
+                  kind: { type: string }
+              operations:
+                type: array
+                items: { type: string }
+              issuedBy: { type: string, format: uuid }
+              issuedAt: { type: string, format: date-time }
+              expiresAt: { type: string, format: date-time }
+              maxUses: { type: [integer, "null"] }
+              uses: { type: integer }
+              consumedAt: { type: [string, "null"], format: date-time }
+              revokedAt: { type: [string, "null"], format: date-time }
+              revokedReason: { type: [string, "null"] }
+              supersededBy: { type: [string, "null"], format: uuid }
+              lockedUntil: { type: [string, "null"], format: date-time }
+              status:
+                type: string
+                enum: [active, consumed, expired, revoked]
+    auth:
+      mode: session
+      roles: [Organization.All.ReadWrite]
+    tenancy:
+      mode: required
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: &grantErrors
+      - status: 400
+        code: VALIDATION
+        description: The input does not describe a valid request.
+      - status: 401
+        code: UNAUTHENTICATED
+        description: An authenticated tenant session is required.
+      - status: 403
+        code: FORBIDDEN
+        description: The session lacks the organization-administration role.
+      - status: 404
+        code: NOT_FOUND
+        description: The grant does not exist in this tenant.
+  revoke:
+    id: grants.revoke
+    name:
+      en: Revoke a capability grant
+      nl: Toegangslink intrekken
+    description:
+      en: 'Revokes one capability grant so its link stops working immediately. Revoking an already revoked,
+        consumed or expired grant changes nothing and reports the grant as it is.'
+      nl: 'Trekt één toegangslink in zodat die meteen niet meer werkt. Een al ingetrokken, verbruikte of
+        verlopen link intrekken verandert niets en meldt de link zoals hij is.'
+    implementation:
+      type: plugin
+      plugin: osf-grants
+      handler: revokeGrant
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id]
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-i18n:
+              title:
+                en: Grant
+                nl: Toegangslink
+          reason:
+            type: string
+            minLength: 1
+            maxLength: 500
+            x-osf-i18n:
+              title:
+                en: Reason
+                nl: Reden
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, status, revokedAt]
+        properties:
+          id: { type: string, format: uuid }
+          status:
+            type: string
+            enum: [active, consumed, expired, revoked]
+          revokedAt: { type: [string, "null"], format: date-time }
+    auth:
+      mode: session
+      roles: [Organization.All.ReadWrite]
+    tenancy:
+      mode: required
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+    errors: *grantErrors
+interfaces:
+  rest:
+    operations:
+      list:
+        method: GET
+        path: /api/grants
+        response:
+          status: 200
+          kind: json
+      revoke:
+        method: POST
+        path: /api/grants/:id/revoke
+        response:
+          status: 200
+          kind: json
+  mcp:
+    operations:
+      list:
+        name: grants_list
+      revoke:
+        name: grants_revoke
+  graphql:
+    operations:
+      list:
+        kind: query
+        field: capabilityGrants
+      revoke:
+        kind: mutation
+        field: revokeCapabilityGrant

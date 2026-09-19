@@ -49,6 +49,13 @@ import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
+import {
+  generatedCapabilityOperations,
+  issueCapabilityGrantInTransaction,
+  listCapabilityGrantsInTransaction,
+  revokeCapabilityGrantInTransaction,
+} from "../operations/capability-grants.js";
+import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -288,8 +295,17 @@ export class ModulePlatformRuntime {
   #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
-  constructor(db: OpenShapeForgeDatabase) {
+  readonly #capabilityOperations: ReadonlySet<string> | undefined;
+
+  constructor(
+    db: OpenShapeForgeDatabase,
+    options: {
+      /** Keys of the `auth.mode: capability` Operations a grant may name; defaults to the generated catalog. */
+      capabilityOperations?: ReadonlySet<string>;
+    } = {},
+  ) {
     this.#db = db;
+    this.#capabilityOperations = options.capabilityOperations;
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
@@ -391,6 +407,37 @@ export class ModulePlatformRuntime {
             ...event,
             payload: event.payload as Json,
           });
+        },
+      },
+      grants: {
+        issue: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Issuing a capability grant requires a live verified session.");
+          }
+          if (session.credential === "grant") {
+            throw new Error("A grant session cannot issue capability grants.");
+          }
+          return this.services.db.withSession(session, (trx) =>
+            issueCapabilityGrantInTransaction(trx, session, input, {
+              capabilityOperations: this.#capabilityOperations ?? generatedCapabilityOperations(),
+            })
+          );
+        },
+        revoke: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Revoking a capability grant requires a live verified session.");
+          }
+          return this.services.db.withSession(session, async (trx) => {
+            const summary = await revokeCapabilityGrantInTransaction(trx, input);
+            if (!summary) throw new CapabilityGrantNotFoundError(input.id);
+            return summary;
+          });
+        },
+        list: (session, subject) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Listing capability grants requires a live verified session.");
+          }
+          return this.services.db.withSession(session, (trx) => listCapabilityGrantsInTransaction(trx, subject));
         },
       },
       errors: {

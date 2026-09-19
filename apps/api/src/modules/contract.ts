@@ -50,6 +50,7 @@ import type {
   RuntimeModuleContract,
   RuntimeArtifactServices,
   RuntimeArtifactStorageContribution,
+  RuntimeCapabilityGrantServices,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -335,6 +336,7 @@ export type ModulePlatformServices = {
       },
     ): Promise<void>;
   };
+  grants: RuntimeCapabilityGrantServices<TrustedSessionContext>;
   errors: {
     classifyDatabase(cause: unknown): OperationError | undefined;
   };

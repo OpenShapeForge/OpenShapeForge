@@ -77,6 +77,15 @@ Any executor built against this metadata MUST:
 
 Building that job is tracked as a follow-up issue.
 
+What does exist are per-table purge functions a deployment can call from
+its own scheduler: `purgeExpiredAuthorizationStates` for
+`platform.connector_oauth_states`, and `purgeCapabilityGrants` for
+`platform.capability_grants`, which removes grants whose expiry or
+revocation is older than a retention window (default thirty days) while the
+`capability_grant_*` audit rows stay in `platform.entity_events`
+([capability-grants.md](capability-grants.md#housekeeping)). Neither is
+scheduled by the API itself.
+
 ## Data-subject erasure: metadata only (follow-up)
 
 There is likewise **no cross-entity erasure primitive**. The generated CRUD

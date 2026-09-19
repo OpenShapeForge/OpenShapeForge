@@ -81,6 +81,7 @@ import { applyCoreInvariants } from "./migrations/core-invariants.js";
 import { applyDocumentContentGuards } from "./migrations/document-content.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
@@ -147,6 +148,7 @@ export async function runMigrationChain(
     options.appliedBy,
   );
   await applyEmployeeInvitationsMigration(db);
+  await applyCapabilityGrantsMigration(db);
   await applyOrganizationRelationLinkMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);

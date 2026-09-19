@@ -3221,6 +3221,10 @@ function operationMayInvoke(
   // control-realm session; a tenant session never sees it, whatever its
   // roles are called, so the tenant surface cannot even name it.
   if (tool.auth.mode === "control" || session.credential === "control-bearer") return false;
+  // A capability Operation is authenticated by its grant token on REST only
+  // (the compiler refuses its MCP projection), so a grant session has
+  // nothing to invoke here.
+  if (session.credential === "grant") return false;
   if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
     return false;
   const scopes = new Set(session.oauthScopes ?? []);

@@ -31,7 +31,24 @@ export type PluginSessionCredential =
    * the host's own control Operations accept it; a plugin Operation never
    * sees one, and a plugin must never treat it as a tenant session.
    */
-  | "control-bearer";
+  | "control-bearer"
+  /**
+   * A capability grant the host resolved for an `auth.mode: capability`
+   * Operation: a tenant, no user, no roles. `grant` names the Operations and
+   * the one record it covers; the handler works on nothing else.
+   */
+  | "grant";
+
+/** What a capability grant covers, verified by the host from the grant row. */
+export type PluginCapabilityGrant = {
+  id: string;
+  subject: { entity: string; id: string };
+  /** Opaque beyond its `kind`; whatever the issuer recorded about the recipient. */
+  recipient: { kind: string; [key: string]: unknown };
+  operations: readonly string[];
+  expiresAt: string;
+  maxUses: number | null;
+};
 
 /** Verified by the host. A plugin must never populate this from tool input. */
 export type PluginSessionContext = {
@@ -49,10 +66,62 @@ export type PluginSessionContext = {
   relationGroupIds?: readonly string[];
   scope: PluginSessionScope;
   credential: PluginSessionCredential;
+  /** Present exactly when `credential` is "grant". */
+  grant?: PluginCapabilityGrant;
   relation?: unknown;
 };
 
 export type PluginDatabaseSchema = Record<string, unknown>;
+
+export type RuntimeCapabilityGrantRecipient = { kind: string; [key: string]: unknown };
+
+export type RuntimeCapabilityGrantIssueInput = {
+  /** Canonical keys of `auth.mode: capability` Operations the grant may invoke. */
+  operations: readonly string[];
+  subject: { entity: string; id: string };
+  recipient: RuntimeCapabilityGrantRecipient;
+  expiresAt: Date | string;
+  /** Omitted or null: reusable until expiry. 1: single use. */
+  maxUses?: number | null;
+  /** Revoke every active grant for the same subject and recipient in the same transaction. */
+  supersede?: "same-subject-and-recipient";
+};
+
+export type RuntimeCapabilityGrantIssued = {
+  id: string;
+  /** `<grantId>.<secret>`; returned once, never stored or readable again. */
+  token: string;
+  expiresAt: string;
+};
+
+export type RuntimeCapabilityGrantStatus = "active" | "consumed" | "expired" | "revoked";
+
+/** A grant as operators and issuers see it: never the token or its hash. */
+export type RuntimeCapabilityGrantSummary = {
+  id: string;
+  subjectEntity: string;
+  subjectId: string;
+  recipient: RuntimeCapabilityGrantRecipient;
+  operations: readonly string[];
+  issuedBy: string;
+  issuedAt: string;
+  expiresAt: string;
+  maxUses: number | null;
+  uses: number;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  revokedReason: string | null;
+  supersededBy: string | null;
+  lockedUntil: string | null;
+  status: RuntimeCapabilityGrantStatus;
+};
+
+export type RuntimeCapabilityGrantServices<Session> = {
+  issue(session: Session, input: RuntimeCapabilityGrantIssueInput): Promise<RuntimeCapabilityGrantIssued>;
+  /** Idempotent: an inactive grant is reported as it is. Unknown ids fail. */
+  revoke(session: Session, input: { id: string; reason?: string }): Promise<RuntimeCapabilityGrantSummary>;
+  list(session: Session, subject: { entity: string; id: string }): Promise<readonly RuntimeCapabilityGrantSummary[]>;
+};
 
 export type RuntimeSchemaValidationResult =
   | { valid: true }
@@ -292,6 +361,13 @@ export type PluginPlatformServices = {
      */
     classifyDatabase(cause: unknown): OperationError | undefined;
   };
+  /**
+   * Capability grants: hashed, expiring, recipient-bound tokens that let
+   * someone without an account invoke the listed `auth.mode: capability`
+   * Operations on one record. Issuing joins the active Operation transaction
+   * when there is one, so a grant and the record it covers commit together.
+   */
+  grants: RuntimeCapabilityGrantServices<PluginSessionContext>;
   operations: {
     /** Definitions currently available to this live verified session. */
     list(

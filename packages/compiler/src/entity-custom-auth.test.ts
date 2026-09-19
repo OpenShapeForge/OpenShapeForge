@@ -47,3 +47,10 @@ test("custom auth stays REST-only and its security requirement reaches OpenAPI",
   expect(() => compile({ mcp: {} })).toThrow("custom auth can only project to REST");
   expect(() => compile({ graphql: {} })).toThrow("custom auth can only project to REST");
 });
+
+test("strict YAML accepts capability authentication as a bare mode", () => {
+  const valid = new Ajv2020({ strict: false }).compile(schema.$defs.operationAuthV2);
+  expect(valid({ mode: "capability" })).toBe(true);
+  expect(valid({ mode: "capability", roles: ["administrator"] })).toBe(false);
+  expect(valid({ mode: "capability", scheme: "Grant" })).toBe(false);
+});

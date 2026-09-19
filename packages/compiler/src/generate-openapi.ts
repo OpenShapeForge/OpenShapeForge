@@ -38,6 +38,7 @@ import type {
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 import {
+  CAPABILITY_GRANT_SECURITY_SCHEME,
   operationOpenApiPaths,
   type CompiledPluginOperation,
 } from "./generate-operations.js";
@@ -1572,6 +1573,19 @@ export function renderOpenApiSpec(
     paths[path] = { ...existing, ...methods };
   }
 
+  // One platform-owned scheme for every capability Operation: the token is
+  // resolved by core, so the description is the same everywhere it appears.
+  const capabilitySecuritySchemes = (options.operations ?? []).some((operation) => operation.auth.mode === "capability")
+    ? {
+        [CAPABILITY_GRANT_SECURITY_SCHEME]: {
+          type: "http",
+          scheme: "grant",
+          description:
+            "Capability grant token (`Authorization: Grant <grantId>.<secret>`): a hashed, expiring, " +
+            "recipient-bound token that authorizes listed Operations on one record for someone without an account.",
+        },
+      }
+    : {};
   const customSecuritySchemes = Object.fromEntries(
     (options.operations ?? [])
       .filter((operation) => operation.auth.mode === "custom")
@@ -1644,6 +1658,7 @@ export function renderOpenApiSpec(
               },
             }
           : {}),
+        ...capabilitySecuritySchemes,
         ...customSecuritySchemes,
       },
       schemas,

@@ -67,8 +67,9 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design.
   "core-entity.schema.json": 154,
   // The platform's own administration (operations/control.yaml): the 23
-  // control-realm Operations behind /api/control/v1 and the control MCP.
-  "operation-catalog.schema.json": 1,
+  // control-realm Operations behind /api/control/v1 and the control MCP —
+  // and the operator side of capability grants (operations/grants.yaml).
+  "operation-catalog.schema.json": 2,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,

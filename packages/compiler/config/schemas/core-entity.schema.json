@@ -973,6 +973,13 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["mode"],
+          "description": "A capability grant: core resolves a hashed, expiring, recipient-bound token into a grant session that names the covered Operations and the one record. REST only; tenancy must be required.",
+          "properties": { "mode": { "const": "capability" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["mode", "roles"],
           "description": "A control-realm operator: the bearer is verified against the platform's control realm (not a tenant realm) and must hold one of the listed realm roles. No tenant context exists; tenancy must be none.",
           "properties": {

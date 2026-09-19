@@ -88,7 +88,7 @@ describe("compiled field JSON Schema projection", () => {
     // validator registers it; a shape emitted here that it refuses makes Ajv
     // throw for the whole operation schema (collection mutations, document
     // create schemas). #592 added constraints to the emitter alone.
-    const ajv = new Ajv2020({ strict: false });
+    const ajv = new Ajv2020.default({ strict: false });
     ajv.addKeyword(operationReferenceKeyword);
     const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { customer: schema } });
     expect(compile(compiledFieldSchema(field({

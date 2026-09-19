@@ -89,6 +89,22 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   expect(artifacts.groups.ui.some(artifact => /\/tenant\.tsx?$|\/tenant\//.test(artifact.path))).toBe(false);
   const pageConfigs = JSON.parse(artifacts.groups.ui.find(artifact => artifact.path.endsWith("entity-page-configs.seed.json"))!.contents);
   expect(pageConfigs.rows.filter((row: { entitySlug: string }) => row.entitySlug === "tenant")).toEqual([]);
+  const web = JSON.parse(artifacts.groups.ui.find(artifact => artifact.path.endsWith("apps/web/src/generated/web-manifest.json"))!.contents);
+  const webTenant = web.entities.Tenant;
+  expect(Object.keys(webTenant.operations).sort()).toEqual(["get", "list", "update"]);
+  expect(webTenant.views.collection.modes).toEqual(["read"]);
+  expect(webTenant.views.record.modes).toEqual(["read", "update"]);
+  expect(webTenant.views.record.routes).toEqual({ read: "/tenants/:id" });
+  expect(webTenant.views.record.operations.actions).toEqual([]);
+  expect(Object.keys(webTenant.views.record.operations).sort()).toEqual(["actions", "read", "update"]);
+  expect(webTenant.views.record.formGroups.create).toEqual([]);
+  expect(webTenant.views.record.formGroups.update).toEqual([
+    expect.objectContaining({ id: "tenant-details", fields: ["slug", "name", "status", "description", "avatarStorageLocation"] }),
+  ]);
+  const writable = Object.values(webTenant.fields as Record<string, { key: string; supports: { create: boolean; update: boolean } }>)
+    .filter(field => field.supports.update).map(field => field.key);
+  expect(writable).toEqual(["slug", "name", "status", "description", "avatarStorageLocation"]);
+  expect(Object.values(webTenant.fields as Record<string, { supports: { create: boolean } }>).some(field => field.supports.create)).toBe(false);
   const webManifest = artifacts.groups.ui.find(artifact => artifact.path.endsWith("compiler/entity-manifest.ts"))!.contents;
   const webEntry = webManifest.match(/"tenant": \{[\s\S]*?\n  \}/)![0];
   expect(webEntry).toContain('"create": []');

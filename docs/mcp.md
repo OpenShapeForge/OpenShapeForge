@@ -326,7 +326,8 @@ never the token: no claims, no ids, no slugs, no tenant keys.
 - `organization` is the display name from the tenant registry
   (`platform.tenants.name`), read as the session's own row under the same
   row-level-security policy `Query.currentTenant` relies on.
-- `role` is derived from the realm's composite roles — `org_admin` reads as
+- `role` is the persona recorded on the person's membership row for this
+  organization (`platform.identity_relations.roles`) — `org_admin` reads as
   "Organization administrator", `org_employee` as "Employee" — and otherwise
   falls back to the raw role list. `permissions` lists the remaining role names
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).

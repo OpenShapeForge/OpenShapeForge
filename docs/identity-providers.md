@@ -205,7 +205,11 @@ It does **not** carry what the person may do in any of them. OpenShapeForge
 records that per organization, on the membership row
 (`platform.identity_relations.roles`): an organization administrator's
 invitation admits the person as `org_admin` or `org_employee`, and
-`set_member_role` changes it later — for that organization only. The same
+`set_member_role` changes it later — for that organization only. What such a
+persona lets the person do is still the realm's decision: a realm that
+declares `org_admin` as a composite (a host's `clientRoleComposites`) has it
+expanded by the API from the generated realm export, member for member, the
+way Keycloak would have expanded it into the token. The same
 account invited as an administrator by organization A and as an employee by
 organization B is exactly that in each.
 

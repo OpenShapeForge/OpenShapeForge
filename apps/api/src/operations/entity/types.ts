@@ -92,6 +92,22 @@ export type GeneratedCrudTable = {
   realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
     blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
+    /** Status state machines declared on fields; each rule is the Operation `operation`. */
+    transitions?: Array<{
+      field: string;
+      initial: string;
+      rules: Array<{
+        key: string;
+        operation: string;
+        from: string[];
+        to: string;
+        label: { en?: string; nl?: string };
+        recordPermission?: "edit";
+        preconditions?: Array<{ field: string; present: boolean }>;
+        writes?: string[];
+        stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
+      }>;
+    }>;
     authoringEntityName?: string;
     /** Present only for strict v2 entity authoring; absence means legacy v1. */
     authoringVersion?: 2 | 3;

@@ -26,7 +26,9 @@ domains:
 # withheld the same way DocumentVersion's is; POST /api/agreement-milestones
 # (apps/api/src/billing/rest-routes.ts) is the only creation path. Generic
 # `update`/`delete` stay enabled so the `immutable: true` fields below are
-# still refused on update by the ordinary generated transports.
+# still refused on update by the ordinary generated transports. The status
+# lifecycle is a declared state machine on `status` (see `transitions`), so
+# triggering is the Operation AgreementMilestone.trigger on every interface.
 fields:
   - key: description
     required: true
@@ -106,12 +108,43 @@ fields:
       en: Lifecycle status of the milestone.
       nl: Levenscyclusstatus van de mijlpaal.
     defaultValue: pending
+    readOnly: true
     persisted:
       column: status
       storageClass: core
     options:
-      type: referentiedata
-      referentieGroep: AGREEMENTMILESTONESTATUS
+      type: static
+      items:
+        - { value: pending, label: { en: Pending, nl: In afwachting } }
+        - { value: triggered, label: { en: Triggered, nl: Getriggerd } }
+        - { value: invoiced, label: { en: Invoiced, nl: Gefactureerd } }
+        - { value: cancelled, label: { en: Cancelled, nl: Geannuleerd } }
+    # The lifecycle as a state machine: `trigger` and `cancel` are the only
+    # writers of `status`; `trigger` stamps triggeredAt/triggeredBy from the
+    # server, so a milestone cannot be marked triggered through a generic
+    # update nor backdated. `invoiced` deliberately has no rule here: the
+    # milestone billing run (apps/api/src/billing/milestone-billing-run.ts)
+    # writes it in raw SQL until that run becomes a described Operation (A8).
+    transitions:
+      initial: pending
+      rules:
+        - key: trigger
+          from: [pending]
+          to: triggered
+          label: { en: Trigger, nl: Triggeren }
+          description:
+            en: Mark this milestone as reached so the next milestone billing run invoices it
+            nl: Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert
+          stamps:
+            - { field: triggeredAt, value: now }
+            - { field: triggeredBy, value: actor }
+        - key: cancel
+          from: [pending, triggered]
+          to: cancelled
+          label: { en: Cancel, nl: Annuleren }
+          description:
+            en: Withdraw this milestone so no billing run will invoice it
+            nl: Trek deze mijlpaal in zodat geen facturatierun hem factureert
   - key: expectedAt
     osfType: date
     required: false
@@ -131,6 +164,7 @@ fields:
   - key: triggeredAt
     osfType: datetime
     required: false
+    readOnly: true
     label:
       en: Triggered at
       nl: Getriggerd op
@@ -143,12 +177,15 @@ fields:
   - key: triggeredBy
     osfType: string
     required: false
+    readOnly: true
     label:
       en: Triggered by
       nl: Getriggerd door
     description:
-      en: User account, workflow instance id, or system process that triggered the milestone.
-      nl: Gebruikersaccount, workflow-instantie-id of systeemproces dat de mijlpaal heeft getriggerd.
+      en: The identity of the session that triggered the milestone, stamped by the server when the trigger
+        transition runs; never supplied by the caller.
+      nl: De identiteit van de sessie die de mijlpaal heeft getriggerd, door de server vastgelegd wanneer de
+        trigger-transitie loopt; nooit door de aanroeper opgegeven.
     validation:
       maxLength: 200
     persisted:
@@ -286,8 +323,6 @@ interfaces:
             title: { en: Update agreement milestone, nl: Overeenkomstmijlpaal wijzigen }
             groups:
               - title: { en: Milestone details, nl: Mijlpaalgegevens }
-                fields: [ description, status ]
+                fields: [ description ]
               - title: { en: Planning, nl: Planning }
                 fields: [ expectedAt ]
-              - title: { en: Trigger, nl: Trigger }
-                fields: [ triggeredAt, triggeredBy ]

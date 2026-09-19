@@ -2,6 +2,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  operationChoiceKeyword,
   operationI18nKeyword,
   operationInputFieldsKeyword,
   operationReferenceKeyword,
@@ -26,7 +27,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
   instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
   // The authoring editor's choice marker (which catalog a string is chosen from); presentation metadata as well.
-  instance.addKeyword({ keyword: "x-osf-choice", schemaType: "string", valid: true });
+  instance.addKeyword(operationChoiceKeyword);
   instance.addKeyword(operationReferenceKeyword);
   instance.addKeyword(operationI18nKeyword);
   instance.addKeyword(operationInputFieldsKeyword);

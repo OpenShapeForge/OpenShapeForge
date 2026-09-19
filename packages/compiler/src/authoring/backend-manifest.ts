@@ -1462,6 +1462,7 @@ export function compileAuthoringBackendManifest(
       source: {
         path: candidate.path,
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
+        ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
         ...([2, 3].includes(candidate.contract.authoringVersion)

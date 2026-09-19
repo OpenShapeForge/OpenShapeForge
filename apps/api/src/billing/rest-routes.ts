@@ -7,16 +7,12 @@ import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
   createAgreementMilestone,
-  triggerAgreementMilestone,
   type AgreementMilestoneInput,
 } from "./agreement-milestone-service.js";
 import { runMilestoneBillingRun, type MilestoneBillingRunInput } from "./milestone-billing-run.js";
 
 export const AGREEMENT_MILESTONE_PATH = "/api/agreement-milestones";
 export const MILESTONE_BILLING_RUN_PATH = "/api/billing-runs/milestone";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -42,18 +38,6 @@ export function parseAgreementMilestoneBody(body: unknown): AgreementMilestoneIn
   const unknown = Object.keys(parsed).find((key) => !allowed.has(key));
   if (unknown) throw new HttpError(400, "BAD_USER_INPUT", `Unknown request field "${unknown}".`);
   return parsed as unknown as AgreementMilestoneInput;
-}
-
-export function parseTriggerBody(body: unknown): { triggeredBy?: string } {
-  if (body === undefined || body === null) return {};
-  const parsed = parseBody(body);
-  const allowed = new Set(["triggeredBy"]);
-  const unknown = Object.keys(parsed).find((key) => !allowed.has(key));
-  if (unknown) throw new HttpError(400, "BAD_USER_INPUT", `Unknown request field "${unknown}".`);
-  if (parsed.triggeredBy !== undefined && typeof parsed.triggeredBy !== "string") {
-    throw new HttpError(400, "BAD_USER_INPUT", "triggeredBy must be a string.");
-  }
-  return parsed as { triggeredBy?: string };
 }
 
 export function parseMilestoneBillingRunBody(body: unknown): MilestoneBillingRunInput {
@@ -110,22 +94,6 @@ export function registerAgreementMilestoneRestRoutes(
       const input = parseAgreementMilestoneBody(request.body);
       const created = await createAgreementMilestone(context.db, context.session, input);
       return reply.status(201).send(created);
-    });
-
-    instance.post(`${AGREEMENT_MILESTONE_PATH}/:agreementMilestoneId/trigger`, async (request, reply) => {
-      const context = await requireContext(request, options.db);
-      const { agreementMilestoneId } = request.params as { agreementMilestoneId: string };
-      if (!UUID_PATTERN.test(agreementMilestoneId)) {
-        throw new HttpError(400, "BAD_USER_INPUT", "agreementMilestoneId must be a UUID.");
-      }
-      const { triggeredBy } = parseTriggerBody(request.body);
-      const updated = await triggerAgreementMilestone(
-        context.db,
-        context.session,
-        agreementMilestoneId,
-        triggeredBy,
-      );
-      return reply.status(200).send(updated);
     });
 
     instance.post(MILESTONE_BILLING_RUN_PATH, async (request, reply) => {

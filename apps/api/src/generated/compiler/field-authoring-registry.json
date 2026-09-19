@@ -6376,13 +6376,89 @@
             "nl": "Levenscyclusstatus van de mijlpaal."
           },
           "defaultValue": "pending",
+          "readOnly": true,
           "persisted": {
             "column": "status",
             "storageClass": "core"
           },
           "options": {
-            "type": "referentiedata",
-            "referentieGroep": "AGREEMENTMILESTONESTATUS"
+            "type": "static",
+            "items": [
+              {
+                "value": "pending",
+                "label": {
+                  "en": "Pending",
+                  "nl": "In afwachting"
+                }
+              },
+              {
+                "value": "triggered",
+                "label": {
+                  "en": "Triggered",
+                  "nl": "Getriggerd"
+                }
+              },
+              {
+                "value": "invoiced",
+                "label": {
+                  "en": "Invoiced",
+                  "nl": "Gefactureerd"
+                }
+              },
+              {
+                "value": "cancelled",
+                "label": {
+                  "en": "Cancelled",
+                  "nl": "Geannuleerd"
+                }
+              }
+            ]
+          },
+          "transitions": {
+            "initial": "pending",
+            "rules": [
+              {
+                "key": "trigger",
+                "from": [
+                  "pending"
+                ],
+                "to": "triggered",
+                "label": {
+                  "en": "Trigger",
+                  "nl": "Triggeren"
+                },
+                "description": {
+                  "en": "Mark this milestone as reached so the next milestone billing run invoices it",
+                  "nl": "Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert"
+                },
+                "stamps": [
+                  {
+                    "field": "triggeredAt",
+                    "value": "now"
+                  },
+                  {
+                    "field": "triggeredBy",
+                    "value": "actor"
+                  }
+                ]
+              },
+              {
+                "key": "cancel",
+                "from": [
+                  "pending",
+                  "triggered"
+                ],
+                "to": "cancelled",
+                "label": {
+                  "en": "Cancel",
+                  "nl": "Annuleren"
+                },
+                "description": {
+                  "en": "Withdraw this milestone so no billing run will invoice it",
+                  "nl": "Trek deze mijlpaal in zodat geen facturatierun hem factureert"
+                }
+              }
+            ]
           }
         },
         {
@@ -6406,6 +6482,7 @@
           "key": "triggeredAt",
           "osfType": "datetime",
           "required": false,
+          "readOnly": true,
           "label": {
             "en": "Triggered at",
             "nl": "Getriggerd op"
@@ -6423,13 +6500,14 @@
           "key": "triggeredBy",
           "osfType": "string",
           "required": false,
+          "readOnly": true,
           "label": {
             "en": "Triggered by",
             "nl": "Getriggerd door"
           },
           "description": {
-            "en": "User account, workflow instance id, or system process that triggered the milestone.",
-            "nl": "Gebruikersaccount, workflow-instantie-id of systeemproces dat de mijlpaal heeft getriggerd."
+            "en": "The identity of the session that triggered the milestone, stamped by the server when the trigger transition runs; never supplied by the caller.",
+            "nl": "De identiteit van de sessie die de mijlpaal heeft getriggerd, door de server vastgelegd wanneer de trigger-transitie loopt; nooit door de aanroeper opgegeven."
           },
           "validation": {
             "maxLength": 200
@@ -42870,39 +42948,6 @@
           "label": {
             "nl": "Mijlpaal",
             "en": "Milestone"
-          }
-        }
-      ]
-    },
-    "AGREEMENTMILESTONESTATUS": {
-      "description": "Lifecycle status of an agreement milestone.",
-      "items": [
-        {
-          "value": "pending",
-          "label": {
-            "nl": "In afwachting",
-            "en": "Pending"
-          }
-        },
-        {
-          "value": "triggered",
-          "label": {
-            "nl": "Getriggerd",
-            "en": "Triggered"
-          }
-        },
-        {
-          "value": "invoiced",
-          "label": {
-            "nl": "Gefactureerd",
-            "en": "Invoiced"
-          }
-        },
-        {
-          "value": "cancelled",
-          "label": {
-            "nl": "Geannuleerd",
-            "en": "Cancelled"
           }
         }
       ]

@@ -87,3 +87,86 @@ safe without credentials and explains where a local bearer header belongs;
 it contains no token, tenant, or trusted-context value. Root fields appear in
 stable product groups, alphabetized within each group, while descriptions
 remain visible through introspection.
+
+## Transitions
+
+A status field can be authored as a state machine instead of a free column.
+Each rule compiles to an ordinary record Operation, so the lifecycle of a
+record is described once, in YAML, and every interface shows the same verbs:
+
+```yaml
+fields:
+  - key: status
+    osfType: string
+    required: true
+    defaultValue: draft
+    options:
+      type: static
+      items:
+        - { value: draft, label: { en: Draft, nl: Concept } }
+        - { value: submitted, label: { en: Submitted, nl: Ingediend } }
+    transitions:
+      initial: draft
+      rules:
+        - key: submit                       # Operation <Entity>.submit
+          from: [draft]
+          to: submitted
+          label: { en: Submit, nl: Indienen }
+          auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
+          preconditions: [ { field: reviewerId, present: true } ]
+          writes: [comment]                             # input fields only this rule may set
+          stamps:                                       # server-derived, never input
+            - { field: submittedAt, value: now }
+            - { field: submittedBy, value: actor }      # linked Relation, or the user id for a string
+          confirmation: { mode: acknowledgement }       # or none (default)
+```
+
+What the compiler makes of it:
+
+- One canonical Operation `<Entity>.<key>` per rule, implemented by the core
+  `osf-transitions` runtime — no per-entity code. Its input is `{ id,
+  expectedVersion, ...writes }` (plus `leaseToken`/`confirmed` when the rule
+  asks for them), its output the record, its declared errors `VALIDATION`,
+  `FORBIDDEN`, `NOT_FOUND`, `INVALID_STATE` and `VERSION_CONFLICT`. It is
+  projected as `POST /api/rest/v1/<basePath>/:id/<key>`, the MCP tool
+  `<entity>_<key>`, the GraphQL mutation `<entity><Key>` and a web record
+  action; the tool description names the `from` and `to` states.
+- The status field and every `writes` and `stamps` field become `writtenBy`
+  the rule's Operation: generic create admits no value (the column defaults to
+  `initial`), generic update refuses them with a message naming the Operation
+  and its REST route, and the option set is a database `CHECK`. A `stamps`
+  field is filled by the server at execution — `now` is the transaction time
+  on a datetime field, `actor` the session's linked Relation on a Relation
+  reference or the user id on a string field — and is refused as input.
+- On an entity with `authorization.rowAccess.recordPermissions` every rule
+  requires the record's `edit` permission — a transition is a write, so
+  `auth.recordPermission` may only restate `edit` — checked before the offer
+  and again inside the write; an entity without record-level permissions
+  refuses the key.
+- Availability follows [operation-availability.md](operation-availability.md):
+  a rule is offered on a record only while its status is in `from` and its
+  preconditions hold, and execution re-evaluates the same decision after
+  locking the row. A refused rule answers `INVALID_STATE` naming the current
+  state and the rule's `from` and `to`.
+- The web manifest carries the rule table (`transitions` on the entity, with
+  `from`/`to`/`label` per rule) so a renderer can show the offered rules as
+  the record's transition buttons; the backend manifest carries the same
+  table for the runtime.
+
+Validation at compile time: `options.type` must be `static` (the states are
+part of the contract, not a code table); `initial`, `from` and `to` must be
+option values and `defaultValue` must equal `initial`; rule keys are unique
+and do not collide with the entity's other operations; a `writes` or `stamps`
+field must be a persisted single field that nothing else writes and, when
+required, must carry a `defaultValue` (it leaves the create input, so without
+one no record could ever be created); and neither the status field nor a
+`writes`/`stamps` target may be placed in a create or update form, nor may the
+status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
+present (not null) or absent (null); an empty string is a present value — and
+richer checks belong in an authored plugin Operation.
+
+`AgreementMilestone.status` is the first core state machine: `trigger` moves
+`pending` to `triggered` and stamps `triggeredAt` with the transaction time
+and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
+`cancelled`. `invoiced` is still written by the milestone billing run until
+that run is a described Operation.

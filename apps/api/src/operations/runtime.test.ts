@@ -311,6 +311,7 @@ describe("canonical operation runtime", () => {
     expect(bound.has("entityTypes.list")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
     expect(bound.has("grants.revoke")).toBe(true);
+    expect(bound.has("AgreementMilestone.trigger")).toBe(true);
     expect(
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
@@ -319,7 +320,8 @@ describe("canonical operation runtime", () => {
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control" ||
         operation.plugin === "osf-grants" ||
-        operation.plugin === "osf-jobs"
+        operation.plugin === "osf-jobs" ||
+        operation.plugin === "osf-transitions"
       ),
     ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.

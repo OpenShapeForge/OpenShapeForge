@@ -351,6 +351,8 @@ export type VersioningStorageBinding = {
 
 export type TableSourceDefinition = {
   blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
+  /** Status state machines the core transition runtime executes for this table. */
+  transitions?: import("./authoring/types/compiled.js").CompiledTransitionField[];
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;

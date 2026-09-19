@@ -13,7 +13,7 @@ labels:
   nl: Component cumulatief
 pluralLabels:
   en: Component cumulatives
-  nl: Componentcumulatieven
+  nl: Cumulatieven per component
 domains:
   - finance
   - contracts

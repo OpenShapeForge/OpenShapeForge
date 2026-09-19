@@ -12,7 +12,7 @@ labels:
   nl: Onderhoudstaak voorcalculatie
 pluralLabels:
   en: Maintenance task calculations
-  nl: Onderhoudstaak voorcalculaties
+  nl: Voorcalculaties onderhoudstaak
 domains:
   - maintenance
 fields:

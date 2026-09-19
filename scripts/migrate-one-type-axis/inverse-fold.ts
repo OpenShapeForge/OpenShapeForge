@@ -73,7 +73,7 @@ export function inverseDeclaration(collection: YAMLMap, child: EntityRef): Recor
   const key = getString(collection, "key")!;
   if (key !== defaultInverseKey(child.name)) declaration.key = key;
   const label = collection.get("label", true);
-  if (label && !plainEqual(toPlain(label), entityLabels(child))) declaration.label = toPlain(label);
+  if (label && !plainEqual(toPlain(label), defaultInverseLabel({ entity: child.entity, labels: child.labels, pluralLabels: child.pluralLabels, title: child.title }))) declaration.label = toPlain(label);
   const relationship = getMap(collection, "relationship");
   if (relationship && getString(relationship, "ownership") === "owned") declaration.ownership = "owned";
   const sortable = collection.get("sortable", true);

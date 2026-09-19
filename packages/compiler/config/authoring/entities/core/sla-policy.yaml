@@ -12,7 +12,7 @@ labels:
   nl: SLA-beleid
 pluralLabels:
   en: SLA policies
-  nl: SLA-beleidsregels
+  nl: SLA-beleid
 domains:
   - cases
   - service

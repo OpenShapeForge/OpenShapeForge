@@ -2,7 +2,7 @@
 import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
 import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
-import { type InverseCollectionSource, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
+import { type InverseCollectionSource, defaultInverseLabel, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
 
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 const slug = (value: string) => snake(value).replaceAll("_", "-");
@@ -86,6 +86,7 @@ export function deriveEntityOsfTypes(
       valueType: "string",
       validation: { format: "uuid" },
       label: entity.labels ?? { en: entity.title ?? entity.entity },
+      pluralLabel: defaultInverseLabel(entity),
       shape: withInverseCollections(entity.entity, entity.fields, deriveInverseCollections(entity.entity, sources, isEntityType)),
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
       ...(entity.versioning ? { versioned: true } : {}),
@@ -124,6 +125,7 @@ export function inverseCollectionsFor(entity: string, catalog: Record<string, Os
     .map(([name, definition]) => ({
       entity: name,
       labels: definition.label,
+      pluralLabels: definition.pluralLabel,
       fields: definition.shape!,
       valueDefinition: definition.entityIdentity === false,
     }));

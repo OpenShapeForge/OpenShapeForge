@@ -33,16 +33,17 @@ export function defaultInverseKey(childEntity: string): string {
 }
 
 /**
- * The child entity's authored `pluralLabels`, or each of its `labels`
- * pluralised the way `defaultInverseKey` pluralises the key: a collection
- * of Appointment records is "Appointments", never "Appointment".
+ * The child entity's plural labels: authored `pluralLabels` per locale, and
+ * for every other locale of `labels` the label pluralised the way
+ * `defaultInverseKey` pluralises the key. A collection of Appointment records
+ * is "Appointments", never "Appointment".
  */
 export function defaultInverseLabel(
   child: Pick<InverseCollectionSource, "entity" | "labels" | "pluralLabels" | "title">,
 ): LocalizedText {
-  if (child.pluralLabels) return child.pluralLabels;
   const singular = child.labels ?? { en: child.title ?? child.entity };
-  return Object.fromEntries(Object.entries(singular).map(([lang, text]) => [lang, pluralize(text)]));
+  const derived = Object.fromEntries(Object.entries(singular).map(([lang, text]) => [lang, pluralize(text)]));
+  return { ...derived, ...(child.pluralLabels ?? {}) };
 }
 
 /**

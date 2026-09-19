@@ -3795,6 +3795,10 @@
         "en": "Account",
         "nl": "Account"
       },
+      "pluralLabel": {
+        "en": "Accounts",
+        "nl": "Accounts"
+      },
       "shape": [
         {
           "key": "username",
@@ -4078,6 +4082,10 @@
       "label": {
         "en": "Address",
         "nl": "Adres"
+      },
+      "pluralLabel": {
+        "en": "Addresses",
+        "nl": "Adressen"
       },
       "shape": [
         {
@@ -4380,6 +4388,10 @@
         "en": "Address Assignment",
         "nl": "Adrestoewijzing"
       },
+      "pluralLabel": {
+        "en": "Address assignments",
+        "nl": "Adrestoewijzingen"
+      },
       "shape": [
         {
           "key": "type",
@@ -4561,6 +4573,10 @@
         "en": "Administrative region",
         "nl": "Bestuurlijk gebied"
       },
+      "pluralLabel": {
+        "en": "Administrative regions",
+        "nl": "Bestuurlijke gebieden"
+      },
       "shape": [
         {
           "key": "code",
@@ -4731,6 +4747,10 @@
       "label": {
         "en": "Agreement",
         "nl": "Overeenkomst"
+      },
+      "pluralLabel": {
+        "en": "Agreements",
+        "nl": "Overeenkomsten"
       },
       "shape": [
         {
@@ -5164,7 +5184,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -5346,6 +5366,10 @@
       "label": {
         "en": "Agreement component",
         "nl": "Overeenkomstcomponent"
+      },
+      "pluralLabel": {
+        "en": "Agreement components",
+        "nl": "Overeenkomstcomponenten"
       },
       "shape": [
         {
@@ -5611,7 +5635,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -5676,6 +5700,10 @@
       "label": {
         "en": "Component cumulative",
         "nl": "Component cumulatief"
+      },
+      "pluralLabel": {
+        "en": "Component cumulatives",
+        "nl": "Cumulatieven per component"
       },
       "shape": [
         {
@@ -5973,6 +6001,10 @@
         "en": "Agreement component type",
         "nl": "Overeenkomstcomponenttype"
       },
+      "pluralLabel": {
+        "en": "Agreement component types",
+        "nl": "Overeenkomstcomponenttypen"
+      },
       "shape": [
         {
           "key": "code",
@@ -6188,6 +6220,10 @@
         "en": "Agreement link",
         "nl": "Overeenkomstkoppeling"
       },
+      "pluralLabel": {
+        "en": "Agreement links",
+        "nl": "Overeenkomstkoppelingen"
+      },
       "shape": [
         {
           "key": "linkType",
@@ -6293,6 +6329,10 @@
       "label": {
         "en": "Agreement milestone",
         "nl": "Overeenkomstmijlpaal"
+      },
+      "pluralLabel": {
+        "en": "Agreement milestones",
+        "nl": "Overeenkomstmijlpalen"
       },
       "shape": [
         {
@@ -6513,6 +6553,10 @@
       "label": {
         "en": "Agreement party",
         "nl": "Overeenkomstpartij"
+      },
+      "pluralLabel": {
+        "en": "Agreement parties",
+        "nl": "Overeenkomstpartijen"
       },
       "shape": [
         {
@@ -6865,6 +6909,10 @@
         "en": "Alert",
         "nl": "Melding"
       },
+      "pluralLabel": {
+        "en": "Alerts",
+        "nl": "Meldingen"
+      },
       "shape": [
         {
           "key": "code",
@@ -7131,6 +7179,10 @@
         "en": "Appointment",
         "nl": "Afspraak"
       },
+      "pluralLabel": {
+        "en": "Appointments",
+        "nl": "Afspraken"
+      },
       "shape": [
         {
           "key": "subject",
@@ -7332,6 +7384,10 @@
         "en": "Appointment option",
         "nl": "Afspraakoptie"
       },
+      "pluralLabel": {
+        "en": "Appointment options",
+        "nl": "Afspraakopties"
+      },
       "shape": [
         {
           "key": "optionNumber",
@@ -7484,6 +7540,10 @@
       "label": {
         "en": "Appointment request",
         "nl": "Afspraakverzoek"
+      },
+      "pluralLabel": {
+        "en": "Appointment requests",
+        "nl": "Afspraakverzoeken"
       },
       "shape": [
         {
@@ -7725,6 +7785,10 @@
         "en": "Area",
         "nl": "Oppervlakte"
       },
+      "pluralLabel": {
+        "en": "Areas",
+        "nl": "Oppervlakten"
+      },
       "shape": [
         {
           "key": "value",
@@ -7884,6 +7948,10 @@
       "label": {
         "en": "Asset",
         "nl": "Object"
+      },
+      "pluralLabel": {
+        "en": "Assets",
+        "nl": "Objecten"
       },
       "shape": [
         {
@@ -8277,6 +8345,10 @@
         "en": "Asset condition",
         "nl": "Conditie"
       },
+      "pluralLabel": {
+        "en": "Asset conditions",
+        "nl": "Condities"
+      },
       "shape": [
         {
           "key": "assessedAt",
@@ -8420,6 +8492,10 @@
       "label": {
         "en": "Asset group",
         "nl": "Objectgroep"
+      },
+      "pluralLabel": {
+        "en": "Asset groups",
+        "nl": "Objectgroepen"
       },
       "shape": [
         {
@@ -8569,6 +8645,10 @@
       "label": {
         "en": "Assignment",
         "nl": "Toewijzing"
+      },
+      "pluralLabel": {
+        "en": "Assignments",
+        "nl": "Toewijzingen"
       },
       "shape": [
         {
@@ -8767,6 +8847,10 @@
         "en": "Attachment",
         "nl": "Bijlage"
       },
+      "pluralLabel": {
+        "en": "Attachments",
+        "nl": "Bijlagen"
+      },
       "shape": [
         {
           "key": "fileName",
@@ -8908,6 +8992,10 @@
         "en": "Bank reconciliation",
         "nl": "Aflettering"
       },
+      "pluralLabel": {
+        "en": "Bank reconciliations",
+        "nl": "Afletteringen"
+      },
       "shape": [
         {
           "key": "matchedAt",
@@ -9008,6 +9096,10 @@
       "label": {
         "en": "Bank statement",
         "nl": "Bankafschrift"
+      },
+      "pluralLabel": {
+        "en": "Bank statements",
+        "nl": "Bankafschriften"
       },
       "shape": [
         {
@@ -9170,6 +9262,10 @@
       "label": {
         "en": "Bank statement line",
         "nl": "Bankafschriftregel"
+      },
+      "pluralLabel": {
+        "en": "Bank statement lines",
+        "nl": "Bankafschriftregels"
       },
       "shape": [
         {
@@ -9386,6 +9482,10 @@
       "label": {
         "en": "Billing run",
         "nl": "Facturatie-run"
+      },
+      "pluralLabel": {
+        "en": "Billing runs",
+        "nl": "Facturatie-runs"
       },
       "shape": [
         {
@@ -9693,6 +9793,10 @@
         "en": "Billing run item",
         "nl": "Facturatie-run-item"
       },
+      "pluralLabel": {
+        "en": "Billing run items",
+        "nl": "Facturatie-run-items"
+      },
       "shape": [
         {
           "key": "idempotencyKey",
@@ -9995,6 +10099,10 @@
         "en": "Billing schedule",
         "nl": "Facturatieschema"
       },
+      "pluralLabel": {
+        "en": "Billing schedules",
+        "nl": "Facturatieschema's"
+      },
       "shape": [
         {
           "key": "period",
@@ -10198,6 +10306,10 @@
       "label": {
         "en": "Block",
         "nl": "Block"
+      },
+      "pluralLabel": {
+        "en": "Blocks",
+        "nl": "Blocks"
       },
       "shape": [
         {
@@ -10443,6 +10555,10 @@
         "en": "Budget",
         "nl": "Begroting"
       },
+      "pluralLabel": {
+        "en": "Budgets",
+        "nl": "Begrotingen"
+      },
       "shape": [
         {
           "key": "code",
@@ -10593,6 +10709,10 @@
         "en": "Budget line",
         "nl": "Begrotingsregel"
       },
+      "pluralLabel": {
+        "en": "Budget lines",
+        "nl": "Begrotingsregels"
+      },
       "shape": [
         {
           "key": "lineNumber",
@@ -10728,6 +10848,10 @@
       "label": {
         "en": "Building",
         "nl": "Pand"
+      },
+      "pluralLabel": {
+        "en": "Buildings",
+        "nl": "Panden"
       },
       "shape": [
         {
@@ -10931,6 +11055,10 @@
         "en": "Building part",
         "nl": "Bouwdeel"
       },
+      "pluralLabel": {
+        "en": "Building parts",
+        "nl": "Bouwdelen"
+      },
       "shape": [
         {
           "key": "code",
@@ -11077,6 +11205,10 @@
       "label": {
         "en": "Case",
         "nl": "Zaak"
+      },
+      "pluralLabel": {
+        "en": "Cases",
+        "nl": "Zaken"
       },
       "shape": [
         {
@@ -11937,6 +12069,10 @@
         "en": "Case file",
         "nl": "Dossier"
       },
+      "pluralLabel": {
+        "en": "Case files",
+        "nl": "Dossiers"
+      },
       "shape": [
         {
           "key": "code",
@@ -12254,6 +12390,10 @@
         "en": "Case file type",
         "nl": "Dossiertype"
       },
+      "pluralLabel": {
+        "en": "Case file types",
+        "nl": "Dossiertypen"
+      },
       "shape": [
         {
           "key": "code",
@@ -12368,6 +12508,10 @@
       "label": {
         "en": "Case Object Link",
         "nl": "Zaakobjectkoppeling"
+      },
+      "pluralLabel": {
+        "en": "Case object links",
+        "nl": "Zaakobjectkoppelingen"
       },
       "shape": [
         {
@@ -12488,6 +12632,10 @@
       "label": {
         "en": "Case Party",
         "nl": "Zaakbetrokkene"
+      },
+      "pluralLabel": {
+        "en": "Case parties",
+        "nl": "Zaakbetrokkenen"
       },
       "shape": [
         {
@@ -12648,6 +12796,10 @@
       "label": {
         "en": "Case Status Event",
         "nl": "Zaakstatusgebeurtenis"
+      },
+      "pluralLabel": {
+        "en": "Case status events",
+        "nl": "Zaakstatusgebeurtenissen"
       },
       "shape": [
         {
@@ -12829,6 +12981,10 @@
       "label": {
         "en": "Case Step Action",
         "nl": "Zaakstapactie"
+      },
+      "pluralLabel": {
+        "en": "Case step actions",
+        "nl": "Zaakstapacties"
       },
       "shape": [
         {
@@ -13154,6 +13310,10 @@
       "label": {
         "en": "Case Step Template",
         "nl": "Zaakstapsjabloon"
+      },
+      "pluralLabel": {
+        "en": "Case step templates",
+        "nl": "Zaakstapsjablonen"
       },
       "shape": [
         {
@@ -13740,6 +13900,10 @@
         "en": "Case Template",
         "nl": "Zaaksjabloon"
       },
+      "pluralLabel": {
+        "en": "Case templates",
+        "nl": "Zaaksjablonen"
+      },
       "shape": [
         {
           "key": "code",
@@ -14022,6 +14186,10 @@
         "en": "Case Type",
         "nl": "Zaaktype"
       },
+      "pluralLabel": {
+        "en": "Case types",
+        "nl": "Zaaktypen"
+      },
       "shape": [
         {
           "key": "code",
@@ -14184,6 +14352,10 @@
         "en": "Chip",
         "nl": "Chip"
       },
+      "pluralLabel": {
+        "en": "Chips",
+        "nl": "Chips"
+      },
       "shape": [
         {
           "key": "key",
@@ -14345,6 +14517,10 @@
         "en": "Comment",
         "nl": "Opmerking"
       },
+      "pluralLabel": {
+        "en": "Comments",
+        "nl": "Opmerkingen"
+      },
       "shape": [
         {
           "key": "body",
@@ -14447,6 +14623,10 @@
       "label": {
         "en": "Communication Preference",
         "nl": "Communicatievoorkeur"
+      },
+      "pluralLabel": {
+        "en": "Communication preferences",
+        "nl": "Communicatievoorkeuren"
       },
       "shape": [
         {
@@ -14694,6 +14874,10 @@
         "en": "Condition assessment",
         "nl": "Conditiemeting"
       },
+      "pluralLabel": {
+        "en": "Condition assessments",
+        "nl": "Conditiemetingen"
+      },
       "shape": [
         {
           "key": "assessedAt",
@@ -14852,6 +15036,10 @@
       "label": {
         "en": "Contact Detail",
         "nl": "Contactgegeven"
+      },
+      "pluralLabel": {
+        "en": "Contact details",
+        "nl": "Contactgegevens"
       },
       "shape": [
         {
@@ -15171,6 +15359,10 @@
         "en": "Contact Moment",
         "nl": "Contactmoment"
       },
+      "pluralLabel": {
+        "en": "Contact moments",
+        "nl": "Contactmomenten"
+      },
       "shape": [
         {
           "key": "channel",
@@ -15425,6 +15617,10 @@
         "en": "Cost dimension",
         "nl": "Kostendimensie"
       },
+      "pluralLabel": {
+        "en": "Cost dimensions",
+        "nl": "Kostendimensies"
+      },
       "shape": [
         {
           "key": "code",
@@ -15631,6 +15827,10 @@
       "label": {
         "en": "Creditor",
         "nl": "Crediteur"
+      },
+      "pluralLabel": {
+        "en": "Creditors",
+        "nl": "Crediteuren"
       },
       "shape": [
         {
@@ -15947,6 +16147,10 @@
         "en": "Debtor",
         "nl": "Debiteur"
       },
+      "pluralLabel": {
+        "en": "Debtors",
+        "nl": "Debiteuren"
+      },
       "shape": [
         {
           "key": "debtorNumber",
@@ -16258,6 +16462,10 @@
         "en": "Direct debit mandate",
         "nl": "Incassomachtiging"
       },
+      "pluralLabel": {
+        "en": "Direct debit mandates",
+        "nl": "Incassomachtigingen"
+      },
       "shape": [
         {
           "key": "mandateReference",
@@ -16497,6 +16705,10 @@
         "en": "Direct debit order",
         "nl": "Incasso-opdracht"
       },
+      "pluralLabel": {
+        "en": "Direct debit orders",
+        "nl": "Incasso-opdrachten"
+      },
       "shape": [
         {
           "key": "iban",
@@ -16681,6 +16893,10 @@
       "label": {
         "en": "Document",
         "nl": "Document"
+      },
+      "pluralLabel": {
+        "en": "Documents",
+        "nl": "Documenten"
       },
       "shape": [
         {
@@ -17202,6 +17418,10 @@
         "en": "Document Type",
         "nl": "Documenttype"
       },
+      "pluralLabel": {
+        "en": "Document types",
+        "nl": "Documenttypen"
+      },
       "shape": [
         {
           "key": "code",
@@ -17315,6 +17535,10 @@
       "label": {
         "en": "Document variant",
         "nl": "Documentvariant"
+      },
+      "pluralLabel": {
+        "en": "Document variants",
+        "nl": "Documentvarianten"
       },
       "shape": [
         {
@@ -17453,6 +17677,10 @@
       "label": {
         "en": "Document Version",
         "nl": "Documentversie"
+      },
+      "pluralLabel": {
+        "en": "Document versions",
+        "nl": "Documentversies"
       },
       "shape": [
         {
@@ -17846,6 +18074,10 @@
         "en": "Employee",
         "nl": "Medewerker"
       },
+      "pluralLabel": {
+        "en": "Employees",
+        "nl": "Medewerkers"
+      },
       "shape": [
         {
           "key": "employeeNumber",
@@ -18068,6 +18300,10 @@
         "en": "Employee budget",
         "nl": "Medewerkerbudget"
       },
+      "pluralLabel": {
+        "en": "Employee budgets",
+        "nl": "Medewerkerbudgetten"
+      },
       "shape": [
         {
           "key": "code",
@@ -18254,6 +18490,10 @@
       "label": {
         "en": "Employee role",
         "nl": "Medewerkerrol"
+      },
+      "pluralLabel": {
+        "en": "Employee roles",
+        "nl": "Medewerkerrollen"
       },
       "shape": [
         {
@@ -18523,6 +18763,10 @@
         "en": "Encumbrance",
         "nl": "Zekerheid"
       },
+      "pluralLabel": {
+        "en": "Encumbrances",
+        "nl": "Zekerheden"
+      },
       "shape": [
         {
           "key": "encumbranceKind",
@@ -18727,6 +18971,10 @@
         "en": "Energy performance",
         "nl": "Energieprestatie"
       },
+      "pluralLabel": {
+        "en": "Energy performances",
+        "nl": "Energieprestaties"
+      },
       "shape": [
         {
           "key": "code",
@@ -18886,6 +19134,10 @@
         "en": "Energy performance measurement",
         "nl": "Energieprestatiemeting"
       },
+      "pluralLabel": {
+        "en": "Energy performance measurements",
+        "nl": "Energieprestatiemetingen"
+      },
       "shape": [
         {
           "key": "measuredAt",
@@ -18993,6 +19245,10 @@
       "label": {
         "en": "Fiscal period",
         "nl": "Boekjaarperiode"
+      },
+      "pluralLabel": {
+        "en": "Fiscal periods",
+        "nl": "Boekjaarperioden"
       },
       "shape": [
         {
@@ -19131,7 +19387,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -19235,6 +19491,10 @@
       "label": {
         "en": "Fiscal year",
         "nl": "Boekjaar"
+      },
+      "pluralLabel": {
+        "en": "Fiscal years",
+        "nl": "Boekjaren"
       },
       "shape": [
         {
@@ -19377,6 +19637,10 @@
         "en": "Inspection report",
         "nl": "Inspectierapport"
       },
+      "pluralLabel": {
+        "en": "Inspection reports",
+        "nl": "Inspectierapporten"
+      },
       "shape": [
         {
           "key": "code",
@@ -19516,6 +19780,10 @@
       "label": {
         "en": "Invoice",
         "nl": "Factuur"
+      },
+      "pluralLabel": {
+        "en": "Invoices",
+        "nl": "Facturen"
       },
       "shape": [
         {
@@ -19939,7 +20207,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -20056,6 +20324,10 @@
       "label": {
         "en": "Invoice collection item",
         "nl": "Factuurincasso-regel"
+      },
+      "pluralLabel": {
+        "en": "Invoice collection items",
+        "nl": "Factuurincasso-regels"
       },
       "shape": [
         {
@@ -20193,6 +20465,10 @@
       "label": {
         "en": "Invoice line",
         "nl": "Factuurregel"
+      },
+      "pluralLabel": {
+        "en": "Invoice lines",
+        "nl": "Factuurregels"
       },
       "shape": [
         {
@@ -20483,6 +20759,10 @@
         "en": "Invoice payment",
         "nl": "Factuurbetaling"
       },
+      "pluralLabel": {
+        "en": "Invoice payments",
+        "nl": "Factuurbetalingen"
+      },
       "shape": [
         {
           "key": "paidAt",
@@ -20607,6 +20887,10 @@
       "label": {
         "en": "Invoice sequence",
         "nl": "Factuurreeks"
+      },
+      "pluralLabel": {
+        "en": "Invoice sequences",
+        "nl": "Factuurreeksen"
       },
       "shape": [
         {
@@ -20768,6 +21052,10 @@
         "en": "Invoice VAT bucket",
         "nl": "BTW-totaal"
       },
+      "pluralLabel": {
+        "en": "Invoice VAT buckets",
+        "nl": "BTW-totalen"
+      },
       "shape": [
         {
           "key": "amountBase",
@@ -20850,6 +21138,10 @@
       "label": {
         "en": "Label Rule",
         "nl": "Labelregel"
+      },
+      "pluralLabel": {
+        "en": "Label rules",
+        "nl": "Labelregels"
       },
       "shape": [
         {
@@ -21167,6 +21459,10 @@
         "en": "Ledger account",
         "nl": "Grootboekrekening"
       },
+      "pluralLabel": {
+        "en": "Ledger accounts",
+        "nl": "Grootboekrekeningen"
+      },
       "shape": [
         {
           "key": "code",
@@ -21336,7 +21632,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -21545,6 +21841,10 @@
         "en": "Ledger posting",
         "nl": "Boeking"
       },
+      "pluralLabel": {
+        "en": "Ledger postings",
+        "nl": "Boekingen"
+      },
       "shape": [
         {
           "key": "postingDate",
@@ -21738,6 +22038,10 @@
       "label": {
         "en": "Ledger posting line",
         "nl": "Boekingsregel"
+      },
+      "pluralLabel": {
+        "en": "Ledger posting lines",
+        "nl": "Boekingsregels"
       },
       "shape": [
         {
@@ -21957,6 +22261,10 @@
         "en": "Legal Entity",
         "nl": "Rechtspersoon"
       },
+      "pluralLabel": {
+        "en": "Legal entities",
+        "nl": "Rechtspersonen"
+      },
       "shape": [
         {
           "key": "name",
@@ -22122,6 +22430,10 @@
       "label": {
         "en": "Maintenance order",
         "nl": "Onderhoudsorder"
+      },
+      "pluralLabel": {
+        "en": "Maintenance orders",
+        "nl": "Onderhoudsorders"
       },
       "shape": [
         {
@@ -22470,6 +22782,10 @@
         "en": "Maintenance order party",
         "nl": "Partij op onderhoudsorder"
       },
+      "pluralLabel": {
+        "en": "Maintenance order parties",
+        "nl": "Partijen op onderhoudsorder"
+      },
       "shape": [
         {
           "key": "roleType",
@@ -22723,6 +23039,10 @@
         "en": "Maintenance request",
         "nl": "Onderhoudsverzoek"
       },
+      "pluralLabel": {
+        "en": "Maintenance requests",
+        "nl": "Onderhoudsverzoeken"
+      },
       "shape": [
         {
           "key": "code",
@@ -22940,6 +23260,10 @@
         "en": "Maintenance request settlement",
         "nl": "Onderhoudsverzoek-verrekening"
       },
+      "pluralLabel": {
+        "en": "Maintenance request settlements",
+        "nl": "Onderhoudsverzoek-verrekeningen"
+      },
       "shape": [
         {
           "key": "description",
@@ -23057,6 +23381,10 @@
       "label": {
         "en": "Maintenance spending",
         "nl": "Onderhoudsbesteding"
+      },
+      "pluralLabel": {
+        "en": "Maintenance spendings",
+        "nl": "Onderhoudsbestedingen"
       },
       "shape": [
         {
@@ -23195,6 +23523,10 @@
       "label": {
         "en": "Maintenance task",
         "nl": "Onderhoudstaak"
+      },
+      "pluralLabel": {
+        "en": "Maintenance tasks",
+        "nl": "Onderhoudstaken"
       },
       "shape": [
         {
@@ -23349,7 +23681,7 @@
           "key": "maintenanceTaskCalculations",
           "label": {
             "en": "Maintenance task calculations",
-            "nl": "Onderhoudstaak voorcalculaties"
+            "nl": "Voorcalculaties onderhoudstaak"
           },
           "osfType": "MaintenanceTaskCalculation",
           "cardinality": "collection",
@@ -23375,6 +23707,10 @@
       "label": {
         "en": "Maintenance task calculation",
         "nl": "Onderhoudstaak voorcalculatie"
+      },
+      "pluralLabel": {
+        "en": "Maintenance task calculations",
+        "nl": "Voorcalculaties onderhoudstaak"
       },
       "shape": [
         {
@@ -23515,6 +23851,10 @@
       "label": {
         "en": "Milestone",
         "nl": "Mijlpaal"
+      },
+      "pluralLabel": {
+        "en": "Milestones",
+        "nl": "Mijlpalen"
       },
       "shape": [
         {
@@ -23740,6 +24080,10 @@
         "en": "Monitor interval",
         "nl": "Monitorinterval"
       },
+      "pluralLabel": {
+        "en": "Monitor intervals",
+        "nl": "Monitorintervallen"
+      },
       "shape": [
         {
           "key": "code",
@@ -23832,6 +24176,10 @@
       "label": {
         "en": "Monitor log",
         "nl": "Monitorlog"
+      },
+      "pluralLabel": {
+        "en": "Monitor logs",
+        "nl": "Monitorlogs"
       },
       "shape": [
         {
@@ -23989,6 +24337,10 @@
         "en": "Monitor log entry",
         "nl": "Monitorlogregel"
       },
+      "pluralLabel": {
+        "en": "Monitor log entries",
+        "nl": "Monitorlogregels"
+      },
       "shape": [
         {
           "key": "loggedAt",
@@ -24080,6 +24432,10 @@
       "label": {
         "en": "Monitor measurement",
         "nl": "Monitormeting"
+      },
+      "pluralLabel": {
+        "en": "Monitor measurements",
+        "nl": "Monitormetingen"
       },
       "shape": [
         {
@@ -24197,6 +24553,10 @@
         "en": "Monitor reading",
         "nl": "Monitorwaarde"
       },
+      "pluralLabel": {
+        "en": "Monitor readings",
+        "nl": "Monitorwaarden"
+      },
       "shape": [
         {
           "key": "readAt",
@@ -24284,6 +24644,10 @@
       "label": {
         "en": "Natural Person",
         "nl": "Natuurlijk Persoon"
+      },
+      "pluralLabel": {
+        "en": "Natural persons",
+        "nl": "Natuurlijke personen"
       },
       "shape": [
         {
@@ -24619,6 +24983,10 @@
         "en": "Notebook",
         "nl": "Notitieboek"
       },
+      "pluralLabel": {
+        "en": "Notebooks",
+        "nl": "Notitieboeks"
+      },
       "shape": [
         {
           "key": "name",
@@ -24699,6 +25067,10 @@
       "label": {
         "en": "Notebook version",
         "nl": "Notitieboekversie"
+      },
+      "pluralLabel": {
+        "en": "Notebook versions",
+        "nl": "Notitieboekversies"
       },
       "shape": [
         {
@@ -24857,6 +25229,10 @@
       "label": {
         "en": "Org unit",
         "nl": "Organisatorische eenheid"
+      },
+      "pluralLabel": {
+        "en": "Org units",
+        "nl": "Organisatorische eenheden"
       },
       "shape": [
         {
@@ -25082,6 +25458,10 @@
         "en": "Organization permission",
         "nl": "Organisatierecht"
       },
+      "pluralLabel": {
+        "en": "Organization permissions",
+        "nl": "Organisatierechten"
+      },
       "shape": [
         {
           "key": "targetScopeKind",
@@ -25265,6 +25645,10 @@
       },
       "label": {
         "en": "Payment Detail",
+        "nl": "Betaalgegevens"
+      },
+      "pluralLabel": {
+        "en": "Payment details",
         "nl": "Betaalgegevens"
       },
       "shape": [
@@ -25504,6 +25888,10 @@
         "en": "Payment method",
         "nl": "Betaalwijze"
       },
+      "pluralLabel": {
+        "en": "Payment methods",
+        "nl": "Betaalwijzen"
+      },
       "shape": [
         {
           "key": "code",
@@ -25727,6 +26115,10 @@
         "en": "Payment order",
         "nl": "Betaalopdracht"
       },
+      "pluralLabel": {
+        "en": "Payment orders",
+        "nl": "Betaalopdrachten"
+      },
       "shape": [
         {
           "key": "referenceNumber",
@@ -25885,6 +26277,10 @@
       "label": {
         "en": "Payment plan",
         "nl": "Betalingsregeling"
+      },
+      "pluralLabel": {
+        "en": "Payment plans",
+        "nl": "Betalingsregelingen"
       },
       "shape": [
         {
@@ -26066,6 +26462,10 @@
         "en": "Payment plan instalment",
         "nl": "Termijn"
       },
+      "pluralLabel": {
+        "en": "Payment plan instalments",
+        "nl": "Termijnen"
+      },
       "shape": [
         {
           "key": "instalmentNumber",
@@ -26187,6 +26587,10 @@
         "en": "Period balance",
         "nl": "Periodesaldo"
       },
+      "pluralLabel": {
+        "en": "Period balances",
+        "nl": "Periodesaldi"
+      },
       "shape": [
         {
           "key": "dimensionsHash",
@@ -26307,6 +26711,10 @@
         "en": "Personal preference",
         "nl": "Persoonlijke voorkeur"
       },
+      "pluralLabel": {
+        "en": "Personal preferences",
+        "nl": "Persoonlijke voorkeuren"
+      },
       "shape": [
         {
           "key": "ownerUserId",
@@ -26415,6 +26823,10 @@
       "label": {
         "en": "Point",
         "nl": "Punt"
+      },
+      "pluralLabel": {
+        "en": "Points",
+        "nl": "Punten"
       },
       "shape": [
         {
@@ -26543,6 +26955,10 @@
       "label": {
         "en": "Position",
         "nl": "Functie"
+      },
+      "pluralLabel": {
+        "en": "Positions",
+        "nl": "Functies"
       },
       "shape": [
         {
@@ -26740,6 +27156,10 @@
         "en": "Preference",
         "nl": "Voorkeur"
       },
+      "pluralLabel": {
+        "en": "Preferences",
+        "nl": "Voorkeuren"
+      },
       "shape": [
         {
           "key": "ownerScope",
@@ -26889,6 +27309,10 @@
       "label": {
         "en": "Price adjustment",
         "nl": "Prijsaanpassing"
+      },
+      "pluralLabel": {
+        "en": "Price adjustments",
+        "nl": "Prijsaanpassingen"
       },
       "shape": [
         {
@@ -27045,6 +27469,10 @@
       "label": {
         "en": "Case Step Container",
         "nl": "Zaakstapcontainer"
+      },
+      "pluralLabel": {
+        "en": "Case step containers",
+        "nl": "Zaakstapcontainers"
       },
       "shape": [
         {
@@ -27504,6 +27932,10 @@
         "en": "Process role",
         "nl": "Procesrol"
       },
+      "pluralLabel": {
+        "en": "Process roles",
+        "nl": "Procesrollen"
+      },
       "shape": [
         {
           "key": "roleType",
@@ -27688,6 +28120,10 @@
       "label": {
         "en": "Process Step",
         "nl": "Processtap"
+      },
+      "pluralLabel": {
+        "en": "Process steps",
+        "nl": "Processtappen"
       },
       "shape": [
         {
@@ -28228,6 +28664,10 @@
         "en": "Project",
         "nl": "Project"
       },
+      "pluralLabel": {
+        "en": "Projects",
+        "nl": "Projecten"
+      },
       "shape": [
         {
           "key": "code",
@@ -28557,6 +28997,10 @@
         "en": "Project budget line",
         "nl": "Projectbudgetregel"
       },
+      "pluralLabel": {
+        "en": "Project budget lines",
+        "nl": "Projectbudgetregels"
+      },
       "shape": [
         {
           "key": "lineNumber",
@@ -28692,6 +29136,10 @@
       "label": {
         "en": "Project objective",
         "nl": "Projectdoelstelling"
+      },
+      "pluralLabel": {
+        "en": "Project objectives",
+        "nl": "Projectdoelstellingen"
       },
       "shape": [
         {
@@ -28842,6 +29290,10 @@
       "label": {
         "en": "Project order",
         "nl": "Projectopdracht"
+      },
+      "pluralLabel": {
+        "en": "Project orders",
+        "nl": "Projectopdrachten"
       },
       "shape": [
         {
@@ -29022,6 +29474,10 @@
       "label": {
         "en": "Project phase",
         "nl": "Projectfase"
+      },
+      "pluralLabel": {
+        "en": "Project phases",
+        "nl": "Projectfasen"
       },
       "shape": [
         {
@@ -29220,6 +29676,10 @@
         "en": "Project phase decision",
         "nl": "Projectfasebesluit"
       },
+      "pluralLabel": {
+        "en": "Project phase decisions",
+        "nl": "Projectfasebesluiten"
+      },
       "shape": [
         {
           "key": "decidedAt",
@@ -29347,6 +29807,10 @@
       "label": {
         "en": "Project role",
         "nl": "Projectrol"
+      },
+      "pluralLabel": {
+        "en": "Project roles",
+        "nl": "Projectrollen"
       },
       "shape": [
         {
@@ -29571,6 +30035,10 @@
         "en": "Project spending",
         "nl": "Projectbesteding"
       },
+      "pluralLabel": {
+        "en": "Project spendings",
+        "nl": "Projectbestedingen"
+      },
       "shape": [
         {
           "key": "description",
@@ -29703,6 +30171,10 @@
       "label": {
         "en": "Project task",
         "nl": "Projecttaak"
+      },
+      "pluralLabel": {
+        "en": "Project tasks",
+        "nl": "Projecttaken"
       },
       "shape": [
         {
@@ -29952,6 +30424,10 @@
       "label": {
         "en": "Purchase order",
         "nl": "Inkoopopdracht"
+      },
+      "pluralLabel": {
+        "en": "Purchase orders",
+        "nl": "Inkoopopdrachten"
       },
       "shape": [
         {
@@ -30216,6 +30692,10 @@
       "label": {
         "en": "Purchase order line",
         "nl": "Inkoopopdrachtregel"
+      },
+      "pluralLabel": {
+        "en": "Purchase order lines",
+        "nl": "Inkoopopdrachtregels"
       },
       "shape": [
         {
@@ -30506,6 +30986,10 @@
         "en": "Quality Measurement Request",
         "nl": "Kwaliteitsmetingsverzoek"
       },
+      "pluralLabel": {
+        "en": "Quality measurement requests",
+        "nl": "Kwaliteitsmetingsverzoeken"
+      },
       "shape": [
         {
           "key": "code",
@@ -30761,6 +31245,10 @@
         "en": "Quality Measurement Result",
         "nl": "Kwaliteitsmetingsresultaat"
       },
+      "pluralLabel": {
+        "en": "Quality measurement results",
+        "nl": "Kwaliteitsmetingsresultaten"
+      },
       "shape": [
         {
           "key": "code",
@@ -30981,6 +31469,10 @@
       "label": {
         "en": "Quote",
         "nl": "Offerte"
+      },
+      "pluralLabel": {
+        "en": "Quotes",
+        "nl": "Offertes"
       },
       "shape": [
         {
@@ -31251,6 +31743,10 @@
       "label": {
         "en": "Quote line",
         "nl": "Offerteregel"
+      },
+      "pluralLabel": {
+        "en": "Quote lines",
+        "nl": "Offerteregels"
       },
       "shape": [
         {
@@ -31540,6 +32036,10 @@
       "label": {
         "en": "Relation",
         "nl": "Relatie"
+      },
+      "pluralLabel": {
+        "en": "Relations",
+        "nl": "Relaties"
       },
       "shape": [
         {
@@ -32517,6 +33017,10 @@
         "en": "Relation Association",
         "nl": "Relatiekoppeling"
       },
+      "pluralLabel": {
+        "en": "Relation associations",
+        "nl": "Relatiekoppelingen"
+      },
       "shape": [
         {
           "key": "type",
@@ -32713,6 +33217,10 @@
       "label": {
         "en": "Relation Group",
         "nl": "Relatiegroep"
+      },
+      "pluralLabel": {
+        "en": "Relation groups",
+        "nl": "Relatiegroepen"
       },
       "shape": [
         {
@@ -32938,6 +33446,10 @@
         "en": "Relation Group Membership",
         "nl": "Relatiegroepslidmaatschap"
       },
+      "pluralLabel": {
+        "en": "Relation group memberships",
+        "nl": "Relatiegroepslidmaatschappen"
+      },
       "shape": [
         {
           "key": "relationId",
@@ -33160,6 +33672,10 @@
       "label": {
         "en": "Relation Role",
         "nl": "Relatierol"
+      },
+      "pluralLabel": {
+        "en": "Relation roles",
+        "nl": "Relatierollen"
       },
       "shape": [
         {
@@ -33408,6 +33924,10 @@
       "label": {
         "en": "Research Assignment",
         "nl": "Onderzoeksopdracht"
+      },
+      "pluralLabel": {
+        "en": "Research assignments",
+        "nl": "Onderzoeksopdrachten"
       },
       "shape": [
         {
@@ -33674,6 +34194,10 @@
         "en": "Research Result",
         "nl": "Onderzoeksresultaat"
       },
+      "pluralLabel": {
+        "en": "Research results",
+        "nl": "Onderzoeksresultaten"
+      },
       "shape": [
         {
           "key": "code",
@@ -33789,6 +34313,10 @@
       },
       "label": {
         "en": "SLA Policy",
+        "nl": "SLA-beleid"
+      },
+      "pluralLabel": {
+        "en": "SLA policies",
         "nl": "SLA-beleid"
       },
       "shape": [
@@ -34045,6 +34573,10 @@
         "en": "Space",
         "nl": "Ruimte"
       },
+      "pluralLabel": {
+        "en": "Spaces",
+        "nl": "Ruimten"
+      },
       "shape": [
         {
           "key": "code",
@@ -34239,6 +34771,10 @@
         "en": "Standard price",
         "nl": "Standaardprijs"
       },
+      "pluralLabel": {
+        "en": "Standard prices",
+        "nl": "Standaardprijzen"
+      },
       "shape": [
         {
           "key": "code",
@@ -34397,7 +34933,7 @@
           "key": "maintenanceTaskCalculations",
           "label": {
             "en": "Maintenance task calculations",
-            "nl": "Onderhoudstaak voorcalculaties"
+            "nl": "Voorcalculaties onderhoudstaak"
           },
           "osfType": "MaintenanceTaskCalculation",
           "cardinality": "collection",
@@ -34423,6 +34959,10 @@
       "label": {
         "en": "Supplier",
         "nl": "Leverancier"
+      },
+      "pluralLabel": {
+        "en": "Suppliers",
+        "nl": "Leveranciers"
       },
       "shape": [
         {
@@ -34758,6 +35298,10 @@
         "en": "Support issue",
         "nl": "Supportverzoek"
       },
+      "pluralLabel": {
+        "en": "Support issues",
+        "nl": "Supportverzoeken"
+      },
       "shape": [
         {
           "key": "subject",
@@ -35091,6 +35635,10 @@
         "en": "Survey",
         "nl": "Vragenlijst"
       },
+      "pluralLabel": {
+        "en": "Surveys",
+        "nl": "Vragenlijsten"
+      },
       "shape": [
         {
           "key": "code",
@@ -35259,6 +35807,10 @@
       "label": {
         "en": "Survey Answer",
         "nl": "Vragenlijstantwoord"
+      },
+      "pluralLabel": {
+        "en": "Survey answers",
+        "nl": "Vragenlijstantwoorden"
       },
       "shape": [
         {
@@ -35434,6 +35986,10 @@
       "label": {
         "en": "Survey Question",
         "nl": "Vragenlijstregel"
+      },
+      "pluralLabel": {
+        "en": "Survey questions",
+        "nl": "Vragenlijstregels"
       },
       "shape": [
         {
@@ -35687,6 +36243,10 @@
       "label": {
         "en": "Task",
         "nl": "Taak"
+      },
+      "pluralLabel": {
+        "en": "Tasks",
+        "nl": "Taken"
       },
       "shape": [
         {
@@ -36705,6 +37265,10 @@
         "en": "Template",
         "nl": "Template"
       },
+      "pluralLabel": {
+        "en": "Templates",
+        "nl": "Templates"
+      },
       "shape": [
         {
           "key": "key",
@@ -36814,6 +37378,10 @@
         "en": "Template block",
         "nl": "Templateblok"
       },
+      "pluralLabel": {
+        "en": "Template blocks",
+        "nl": "Templateblokken"
+      },
       "shape": [
         {
           "key": "version",
@@ -36850,6 +37418,10 @@
       "label": {
         "en": "Template variant",
         "nl": "Template variant"
+      },
+      "pluralLabel": {
+        "en": "Template variants",
+        "nl": "Templatevarianten"
       },
       "shape": [
         {
@@ -36960,6 +37532,10 @@
       "label": {
         "en": "Template version",
         "nl": "Template version"
+      },
+      "pluralLabel": {
+        "en": "Template versions",
+        "nl": "Templateversies"
       },
       "shape": [
         {
@@ -37131,6 +37707,10 @@
       "label": {
         "en": "Tenant",
         "nl": "Tenant"
+      },
+      "pluralLabel": {
+        "en": "Tenants",
+        "nl": "Tenants"
       },
       "shape": [
         {
@@ -37341,6 +37921,10 @@
         "en": "Tenant Setting",
         "nl": "Tenantinstelling"
       },
+      "pluralLabel": {
+        "en": "Tenant settings",
+        "nl": "Tenantinstellingen"
+      },
       "shape": [
         {
           "key": "namespace",
@@ -37544,6 +38128,10 @@
         "en": "Text",
         "nl": "Tekst"
       },
+      "pluralLabel": {
+        "en": "Texts",
+        "nl": "Teksten"
+      },
       "shape": [
         {
           "key": "text",
@@ -37576,6 +38164,10 @@
       "label": {
         "en": "Time entry",
         "nl": "Tijdsbesteding"
+      },
+      "pluralLabel": {
+        "en": "Time entries",
+        "nl": "Tijdsbestedingen"
       },
       "shape": [
         {
@@ -37720,6 +38312,10 @@
       "label": {
         "en": "User organization permission",
         "nl": "Gebruikersrecht per organisatie"
+      },
+      "pluralLabel": {
+        "en": "User organization permissions",
+        "nl": "Gebruikersrechten per organisatie"
       },
       "shape": [
         {
@@ -37928,6 +38524,10 @@
         "en": "Vacancy",
         "nl": "Vacature"
       },
+      "pluralLabel": {
+        "en": "Vacancies",
+        "nl": "Vacatures"
+      },
       "shape": [
         {
           "key": "code",
@@ -38114,6 +38714,10 @@
         "en": "Valuation",
         "nl": "Waardering"
       },
+      "pluralLabel": {
+        "en": "Valuations",
+        "nl": "Waarderingen"
+      },
       "shape": [
         {
           "key": "valuationKind",
@@ -38279,6 +38883,10 @@
       "label": {
         "en": "VAT rate",
         "nl": "BTW-tarief"
+      },
+      "pluralLabel": {
+        "en": "VAT rates",
+        "nl": "BTW-tarieven"
       },
       "shape": [
         {
@@ -38452,7 +39060,7 @@
           "key": "agreementComponentCumulatives",
           "label": {
             "en": "Component cumulatives",
-            "nl": "Componentcumulatieven"
+            "nl": "Cumulatieven per component"
           },
           "osfType": "AgreementComponentCumulative",
           "cardinality": "collection",
@@ -38543,6 +39151,10 @@
       "label": {
         "en": "VAT return",
         "nl": "BTW-aangifte"
+      },
+      "pluralLabel": {
+        "en": "VAT returns",
+        "nl": "BTW-aangiften"
       },
       "shape": [
         {
@@ -38690,6 +39302,10 @@
         "en": "Warranty",
         "nl": "Garantie"
       },
+      "pluralLabel": {
+        "en": "Warranties",
+        "nl": "Garanties"
+      },
       "shape": [
         {
           "key": "code",
@@ -38833,6 +39449,10 @@
       "label": {
         "en": "Work Queue",
         "nl": "Werkqueue"
+      },
+      "pluralLabel": {
+        "en": "Work queues",
+        "nl": "Werkqueues"
       },
       "shape": [
         {
@@ -39219,7 +39839,7 @@
           "key": "slaPolicies",
           "label": {
             "en": "SLA policies",
-            "nl": "SLA-beleidsregels"
+            "nl": "SLA-beleid"
           },
           "osfType": "SlaPolicy",
           "cardinality": "collection",
@@ -39258,6 +39878,10 @@
       "label": {
         "en": "YouTube video",
         "nl": "YouTube-video"
+      },
+      "pluralLabel": {
+        "en": "YouTube videos",
+        "nl": "YouTube-video's"
       },
       "shape": [
         {

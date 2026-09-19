@@ -80,7 +80,6 @@ export function compileEntityValueStorage(
     if (constraints.some((constraint) => constraint.name === name)) throw new Error(`Entity value constraint collision: ${name}.`);
     constraints.push({
       compilerOwned: true,
-      replaceExisting: true,
       version: `0001_entity-value-${name.replaceAll("_", "-")}-${digest}`,
       name,
       kind: "check",

@@ -1903,7 +1903,8 @@ describe("generated REST OpenAPI artifact", () => {
 
   it("emits versioned paths only for rest-enabled tables and enabled operations", () => {
     const spec = openApiFor(restManifest);
-    expect(Object.keys(spec.paths)).toEqual([
+    // The artifact transport is documented for every host; entity paths follow the opt-in.
+    expect(Object.keys(spec.paths).filter((path) => !path.startsWith("/api/artifacts"))).toEqual([
       "/api/rest/v1/widgets",
       "/api/rest/v1/widgets/{id}",
     ]);
@@ -1935,9 +1936,9 @@ describe("generated REST OpenAPI artifact", () => {
     expect(update.required).toBeUndefined();
   });
 
-  it("always emits the artifact — with empty paths when no table opts in", () => {
+  it("always emits the artifact — with only the artifact transport when no table opts in", () => {
     const spec = openApiFor(manifest);
-    expect(spec.paths).toEqual({});
+    expect(Object.keys(spec.paths).sort()).toEqual(["/api/artifacts", "/api/artifacts/{artifactId}/contents"]);
   });
 
   it("is deterministic: two renders are byte-identical", () => {

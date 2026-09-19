@@ -178,6 +178,12 @@ Notes on what the compiler does with this:
   a provenance link — `PaymentDetail.relationId` is authored with it, so a
   payment detail cannot be re-pointed at a different relation after the fact
   (#177). The two are independent: a field may be either, both, or neither.
+- **A status field can be a state machine.** `transitions: { initial, rules }`
+  on a field with static options compiles each rule into the Operation
+  `<Entity>.<rule.key>` (REST, GraphQL, MCP and the web record actions), makes
+  the field and the rule's `writes` fields `writtenBy` it, and offers the rule
+  only while the record's status is in `from`. See
+  [operations.md](operations.md#transitions).
 - **Internal identifiers are derived, not entered.** A persisted required
   string field can declare
   `deriveOnCreate: { from: name, transform: slug, onConflict: suffix }`. The

@@ -223,8 +223,13 @@
       "additionalProperties": false,
       "required": ["component"],
       "properties": {
-        "component": { "type": "string", "minLength": 1 },
-        "props": { "type": "object" }
+        "component": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": { "title": { "en": "Component", "nl": "Component" } },
+          "x-osf-choice": "component"
+        },
+        "props": { "type": "object", "x-osf-i18n": { "title": { "en": "Properties", "nl": "Eigenschappen" } } }
       }
     },
     "fieldDefinition": {

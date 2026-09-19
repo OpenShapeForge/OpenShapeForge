@@ -521,6 +521,72 @@ describe("coreEntity properties the compiler implements", () => {
       .toThrow(/fieldDisplayMode/);
   });
 
+  it("marks every closed choice in interfaces.web with what it chooses from", () => {
+    // A schema-driven editor fills these from the entity (its fields,
+    // relationships, sortable fields, custom operations) or the host (its
+    // renderer registry, the component catalogue) — from the marker, never
+    // from a property's name or position. Every fieldKey reference and every
+    // operation, renderer or component key must carry one; a key that is an
+    // identifier of something else (a variable source) must not.
+    const defs = coreEntitySchema.$defs as Record<string, unknown>;
+    const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
+    const unmarked: string[] = [];
+    const seen: string[] = [];
+    const visited = new Set<unknown>();
+    // A choice site: a field key reference, a renderer key, or a string whose
+    // name says it is an operation, renderer or component — the places an
+    // editor must not treat as free text.
+    const isChoiceSite = (schema: Record<string, unknown>, path: string) => {
+      if (path.includes("variableSources")) return false;
+      if (schema.$ref === "#/$defs/fieldKey" || schema.$ref === "#/$defs/webRendererKeyV2") return true;
+      const name = path.split(/[.\]|>]/).at(-1) ?? "";
+      return schema.type === "string" && /^(actions\[|resultRenderer|component|render|<key>)$/.test(name) && !path.includes("i18n");
+    };
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+      const schema = node as Record<string, unknown>;
+      const choice = schema["x-osf-choice"];
+      if (choice !== undefined) {
+        const kind = typeof choice === "string" ? choice : (choice as { kind?: string }).kind;
+        if (!kind || !kinds.has(kind)) unmarked.push(`${path} has an unknown x-osf-choice ${JSON.stringify(choice)}`);
+        seen.push(path);
+      } else if (isChoiceSite(schema, path)) unmarked.push(path);
+      // Follow refs once per target, so a recursive definition terminates; the
+      // render definition lives in field-definition.schema.json.
+      if (typeof schema.$ref === "string") {
+        const local = schema.$ref.match(/^#\/\$defs\/(.+)$/);
+        const external = schema.$ref.match(/field-definition\.schema\.json#\/\$defs\/(.+)$/);
+        const name = local?.[1] ?? external?.[1];
+        const target = local ? defs[name!] : external ? (fieldDefinitionSchema.$defs as Record<string, unknown>)[name!] : undefined;
+        if (target && !visited.has(target)) { visited.add(target); walk(target, `${path}->${name}`); }
+      }
+      for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
+      if (schema.propertyNames && typeof schema.propertyNames === "object") walk(schema.propertyNames, `${path}.<key>`);
+      if (schema.items) walk(schema.items, `${path}[]`);
+      for (const combinator of ["oneOf", "anyOf", "allOf"]) {
+        for (const [index, variant] of ((schema[combinator] as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${combinator}${index}`);
+      }
+    };
+    walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
+    expect(unmarked).toEqual([]);
+    for (const expected of [
+      "web.views->webViewsV2.collection.columns[].key",
+      "web.views->webViewsV2.collection.defaultSort.key",
+      "web.views->webViewsV2.collection.actions[]",
+      "web.views->webViewsV2.record.badges[]",
+      "web.views->webViewsV2.record.layout.context.fields[]",
+      "web.views->webViewsV2.record.layout.context.relationships[]",
+      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.relationship",
+      "web.views->webViewsV2.record.layout.tabs[]->webViewGroupV2.fields[]->webFieldEntryV2|oneOf1.render",
+      "web.fields.<key>",
+      "web.fields.*.render->render.component",
+      "web.operations->webInterfaceOperationsV2.<key>",
+      "web.operations->webInterfaceOperationsV2.*|oneOf1.resultRenderer",
+    ]) expect(seen).toContain(expected);
+    expect(seen.some((path) => path.includes("variableSources"))).toBe(false);
+  });
+
   it("titles every interfaces.web schema node in both locales, for schema-driven editors", () => {
     // A node is every object schema and every property under it; the enum
     // members of a choice are titled too. Anything added later must be titled

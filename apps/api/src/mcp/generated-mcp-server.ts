@@ -110,6 +110,7 @@ import {
   requireCreateOperationConfirmation,
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
+import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -3114,16 +3115,6 @@ async function invokeTool(
             ),
           )
         : requireArguments(args);
-      if (canonical) {
-        requireCreateOperationConfirmation(
-          entityOperationContract(operationRef("create").id),
-          {
-            ...(typeof args.confirmed === "boolean"
-              ? { confirmed: args.confirmed }
-              : {}),
-          },
-        );
-      }
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -3136,6 +3127,20 @@ async function invokeTool(
       assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
+      // The model's payload against the write contract BEFORE the
+      // acknowledgement: an invalid create answers VALIDATION, never
+      // CONFIRMATION_REQUIRED. The completed-elicitation write below does not
+      // pass through executeEntityOperation, so this is its contract check.
+      assertEntityValuesValid(operation, table, modelValues, {
+        partial: typeof args.blueprintId === "string",
+      });
+      if (canonical) {
+        requireCreateOperationConfirmation(operation, {
+          ...(typeof args.confirmed === "boolean"
+            ? { confirmed: args.confirmed }
+            : {}),
+        });
+      }
       await assertPublishableWrite(db, session, tables, table, values);
       if (elicitationCompleted && elicitField) {
         const row = await createGeneratedEntityAfterElicitation(db, session, {
@@ -6775,6 +6780,24 @@ function buildServer(
         // the target field is discarded before the person is asked.
         delete modelArguments[elicit.into];
 
+        // Before anyone is asked for a secret: the model's own fields must
+        // already satisfy the write contract, or the person fills a secure
+        // form for a create that was going to answer VALIDATION anyway.
+        {
+          const contract = match.operationId
+            ? getEntityOperationContracts().find((operation) => operation.id === match.operationId)
+            : undefined;
+          if (contract && table) {
+            const modelFields = Object.fromEntries(
+              Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key)),
+            );
+            assertOperationWrittenFields(modelFields, table);
+            assertDeclaredProperties(match.inputSchema, modelFields, "field");
+            assertEntityValuesValid(contract, table, modelFields, {
+              partial: typeof modelArguments.blueprintId === "string",
+            });
+          }
+        }
         const sourceId = modelArguments[elicit.sourceField];
         const sourceTable = tables.get(elicit.sourceTable);
         let sourceRow: Record<string, unknown> | null = null;

@@ -866,16 +866,18 @@ export async function executeEntityOperation(
         };
       }
       case "create": {
+        const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
+        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // The payload first: an invalid create must answer VALIDATION, never
+        // a prerequisite or CONFIRMATION_REQUIRED it would only fail after. A
+        // blueprint create completes the caller's overlay from the blueprint
+        // before the row is written; the merged record is what the contract
+        // has to hold for, so it is validated in full once merged.
+        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };
-        const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
-        const values = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
-        // A blueprint create completes the caller's overlay from the blueprint
-        // before the row is written; the merged record is what the contract
-        // has to hold for, so it is validated in full once merged.
-        requireContractValues(operation, table, values, { partial: blueprintId !== undefined });
         const data = blueprintId !== undefined
           ? await createFromBlueprint(db, session, table, blueprintId, values,
               (merged) => assertEntityValuesValid(operation, table, merged, { partial: false }))

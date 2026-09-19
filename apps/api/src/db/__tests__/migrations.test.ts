@@ -230,6 +230,39 @@ describe("generated schema migration", () => {
           expect(await columnExists(db, "platform", "identity_relations", "onboarding_guides_read")).toBe(true);
           expect(await columnExists(db, "platform", "tenants", "relation_id")).toBe(true);
 
+          // Every reference into a tenant-scoped table binds the tenant on
+          // both sides: a foreign-key check bypasses row-level security, so
+          // the key shape is what keeps another tenant's row unreachable.
+          const tenantBound = await sql<{ name: string; columns: string[]; target: string[] }>`
+            select c.conname as name,
+              (select array_agg(a.attname order by k.ordinality)
+                 from unnest(c.conkey) with ordinality as k(attnum, ordinality)
+                 join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum) as columns,
+              (select array_agg(a.attname order by k.ordinality)
+                 from unnest(c.confkey) with ordinality as k(attnum, ordinality)
+                 join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum) as target
+            from pg_constraint c
+            where c.contype = 'f' and c.conname in (
+              'tenants_relation_id_fkey',
+              'identity_relations_relation_id_fkey',
+              'identity_relations_candidate_relation_id_fkey',
+              'org_unit_parent_id_fkey',
+              'api_keys_integration_id_fkey',
+              'connector_secrets_installation_id_fkey',
+              'jobs_tenant_id_fkey'
+            )
+            order by 1
+          `.execute(db);
+          expect(tenantBound.rows).toEqual([
+            { name: "api_keys_integration_id_fkey", columns: ["tenant_id", "integration_id"], target: ["tenant_id", "id"] },
+            { name: "connector_secrets_installation_id_fkey", columns: ["tenant_id", "installation_id"], target: ["tenant_id", "id"] },
+            { name: "identity_relations_candidate_relation_id_fkey", columns: ["tenant_id", "candidate_relation_id"], target: ["tenant_id", "id"] },
+            { name: "identity_relations_relation_id_fkey", columns: ["tenant_id", "relation_id"], target: ["tenant_id", "id"] },
+            { name: "jobs_tenant_id_fkey", columns: ["tenant_id"], target: ["id"] },
+            { name: "org_unit_parent_id_fkey", columns: ["tenant_id", "parent_id"], target: ["tenant_id", "id"] },
+            { name: "tenants_relation_id_fkey", columns: ["id", "relation_id"], target: ["tenant_id", "id"] },
+          ]);
+
           // What the migration files still own: the invariants the manifest
           // cannot express, present after the chain and idempotent on rerun.
           const invariants = await sql<{ name: string }>`

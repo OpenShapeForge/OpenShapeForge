@@ -521,6 +521,45 @@ describe("coreEntity properties the compiler implements", () => {
       .toThrow(/fieldDisplayMode/);
   });
 
+  it("marks every closed choice in interfaces.web with what it chooses from", () => {
+    // A schema-driven editor fills these from the entity (its fields,
+    // relationships, sortable fields, custom operations) or the host (its
+    // renderer registry, the component catalogue) — from the marker, never
+    // from a property's name or position. Every fieldKey use and every
+    // operation, renderer or component key must carry one.
+    const defs = coreEntitySchema.$defs as Record<string, unknown>;
+    const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
+    const unmarked: string[] = [];
+    const seen: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return;
+      const schema = node as Record<string, unknown>;
+      const choice = schema["x-osf-choice"];
+      if (choice !== undefined) {
+        const kind = typeof choice === "string" ? choice : (choice as { kind?: string }).kind;
+        if (!kind || !kinds.has(kind)) unmarked.push(`${path} has an unknown x-osf-choice ${JSON.stringify(choice)}`);
+        seen.push(path);
+      } else if (schema.$ref === "#/$defs/fieldKey" && !path.endsWith("|1.key")) unmarked.push(path);
+      for (const [key, child] of Object.entries((schema.properties as Record<string, unknown>) ?? {})) walk(child, `${path}.${key}`);
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") walk(schema.additionalProperties, `${path}.*`);
+      if (schema.propertyNames && typeof schema.propertyNames === "object") walk(schema.propertyNames, `${path}.<key>`);
+      if (schema.items) walk(schema.items, `${path}[]`);
+      for (const [index, variant] of ((schema.oneOf as unknown[] | undefined) ?? []).entries()) walk(variant, `${path}|${index}`);
+    };
+    walk((defs.entityInterfacesV2 as { properties: { web: unknown } }).properties.web, "web");
+    for (const def of ["webViewsV2", "webViewGroupV2", "webWriteModeV2", "webFieldEntryV2", "webInterfaceOperationsV2"]) walk(defs[def], def);
+    expect(unmarked).toEqual([]);
+    expect(seen).toContain("webViewsV2.collection.columns[].key");
+    expect(seen).toContain("webViewsV2.collection.defaultSort.key");
+    expect(seen).toContain("webViewsV2.record.layout.context.fields[]");
+    expect(seen).toContain("webViewsV2.record.layout.context.relationships[]");
+    expect(seen).toContain("webViewsV2.collection.actions[]");
+    expect(seen).toContain("webViewGroupV2.relationship");
+    expect(seen).toContain("webFieldEntryV2|1.render");
+    expect(seen).toContain("web.fields.<key>");
+    expect(seen).toContain("webInterfaceOperationsV2.*|1.resultRenderer");
+  });
+
   it("titles every interfaces.web schema node in both locales, for schema-driven editors", () => {
     // A node is every object schema and every property under it; the enum
     // members of a choice are titled too. Anything added later must be titled

@@ -168,13 +168,31 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
   });
 }
 
+/**
+ * Remove a member from the tenant in both systems: the Keycloak Organization
+ * membership AND the tenant's membership row with its roles, so a later
+ * re-invitation starts from nothing rather than restoring the old persona.
+ * The row goes first, inside this transaction — if Keycloak then refuses,
+ * the transaction rolls back and nothing changed; if Keycloak already had no
+ * such member (a retry), the row is still removed and the call reports
+ * `removed: false` for the provider half. Idempotent either way. The link
+ * cache entry is dropped so an open session loses the membership on its
+ * next request.
+ */
 export async function removeTenantMembership(deps: Dependencies, slug: string, memberId: string) {
   providerId(memberId, "memberId");
-  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, async (tenant) => ({
-    tenantSlug: slug,
-    memberId,
-    removed: await deps.members.removeMember(tenant.keycloak_organization_id!, memberId),
-  }));
+  return withTenant(deps, "control.remove-tenant-membership", slug, `member="${memberId}"`, async (tenant, trx) => {
+    const membership = (await membershipsBySubject(trx, tenant.id)).get(memberId);
+    if (membership) {
+      await sql`
+        delete from platform.identity_relations
+         where identity_id = ${membership.identity_id}::uuid and tenant_id = ${tenant.id}::uuid
+      `.execute(trx);
+    }
+    const removed = await deps.members.removeMember(tenant.keycloak_organization_id!, memberId);
+    if (membership) invalidateIdentityLink(membership.issuer, membership.subject, tenant.id);
+    return { tenantSlug: slug, memberId, removed, membershipRowRemoved: membership !== undefined };
+  });
 }
 
 export async function requestPasskeyRecovery(deps: Dependencies, slug: string, memberId: string) {

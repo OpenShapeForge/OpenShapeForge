@@ -121,3 +121,22 @@ test("compiler-authored fields resolve their base from the single osfType axis",
     },
   });
 });
+
+test("an enumeration on a typed field carries its values in that type", () => {
+  const schema = operationFieldObjectSchema([
+    { key: "priority", osfType: "integer", options: { type: "static", items: [{ value: "1", label: "Low" }, { value: "2", label: "High" }] } },
+    { key: "ratio", osfType: "number", options: { type: "static", items: [{ value: "0.5", label: "Half" }] } },
+    { key: "flag", osfType: "boolean", options: { type: "static", items: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] } },
+    { key: "code", osfType: "string", options: { type: "static", items: [{ value: "1", label: "One" }] } },
+  ], {});
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  expect(properties.priority).toMatchObject({ type: "integer", enum: [1, 2] });
+  expect(properties.ratio).toMatchObject({ type: "number", enum: [0.5] });
+  expect(properties.flag).toMatchObject({ type: "boolean", enum: [true, false] });
+  expect(properties.code).toMatchObject({ type: "string", enum: ["1"] });
+});
+
+test("an empty English label does not hide the Dutch one", () => {
+  const schema = operationFieldObjectSchema([{ key: "kind", osfType: "string", label: { en: "", nl: "Soort" } }], {});
+  expect((schema.properties as Record<string, Record<string, unknown>>).kind!.title).toBe("Soort");
+});

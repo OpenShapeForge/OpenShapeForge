@@ -36,7 +36,22 @@ export type {
 function localizedText(value: OperationLocalizedText | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.trim() || undefined;
-  return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
+  // An empty English string is absent, not a translation that hides the Dutch one.
+  return [value.en, value.nl, value.fr].map((text) => text?.trim()).find((text) => text) || undefined;
+}
+
+/**
+ * Authored option values are strings (the authoring schema admits nothing
+ * else); an enumeration on a typed field carries the values in that type, so
+ * `{ type: integer, enum: [1] }` validates what a client sends.
+ */
+export function typedEnumValues(values: readonly string[], valueType: string | undefined): (string | number | boolean)[] {
+  return values.map((value) => {
+    if (valueType === "integer" && /^-?\d+$/.test(value.trim())) return Number(value);
+    if (valueType === "number" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+    if (valueType === "boolean" && (value === "true" || value === "false")) return value === "true";
+    return value;
+  });
 }
 
 function ruleValue(rule: unknown): number | string | boolean | undefined {
@@ -252,7 +267,7 @@ function fieldSchema(
   }
   if (title) schema.title = title;
   const values = enumeration(field, registry);
-  if (values) schema.enum = values.values;
+  if (values) schema.enum = typedEnumValues(values.values, field.valueType);
   const descriptionParts = [
     localizedText(field.description) ?? title,
     localizedText(field.help),

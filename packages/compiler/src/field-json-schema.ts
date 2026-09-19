@@ -34,6 +34,7 @@ import workflowInspectorSchema from "../config/schemas/workflow-inspector.schema
 import {
   operationFieldObjectSchema,
   operationFieldSchema,
+  typedEnumValues,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
 } from "@openshapeforge/operations";
@@ -346,7 +347,8 @@ export function localizedText(
 ): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.trim() || undefined;
-  return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
+  // An empty English string is absent, not a translation that hides the Dutch one.
+  return [value.en, value.nl, value.fr].map((text) => text?.trim()).find((text) => text) || undefined;
 }
 
 /**
@@ -496,7 +498,7 @@ function addCompiledFieldMetadata(
     schema.title = title;
   }
   if (enumeration) {
-    schema.enum = enumeration.values;
+    schema.enum = typedEnumValues(enumeration.values, sourceBaseType(field));
   }
   if (field.options?.type === "entity") {
     if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);

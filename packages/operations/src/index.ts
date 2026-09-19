@@ -35,6 +35,7 @@ export type {
   OperationLocalizedText,
 } from "./field-schema.js";
 export {
+  typedEnumValues,
   operationFieldObjectSchema,
   operationFieldSchema,
 } from "./field-schema.js";

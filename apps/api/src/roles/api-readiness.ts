@@ -11,6 +11,7 @@ import { bootstrapIfEmpty } from "../db/bootstrap.js";
 import {
   checkGeneratedSchemaDrift,
   databaseNameFromUrl,
+  findLiveManifestSchemaTables,
   findUndeclaredDatabaseSchema,
   type GeneratedSchemaDriftResult,
   type UndeclaredDatabaseSchema,
@@ -212,11 +213,15 @@ export async function enforceGeneratedSchemaFreshness(
     );
     return;
   }
-  if (production) throw new Error(driftBanner(drift));
-  if (drift.status === "unmigrated" && (await bootstrapEmptyDatabase(log, options))) {
+  // A database with no generated-schema row but live declared tables is a
+  // leftover the chain refuses; the banner must not send anyone to db:migrate.
+  const leftovers = drift.status === "unmigrated" ? await findLiveManifestSchemaTables(db) : [];
+  const leftoverSchema: UndeclaredDatabaseSchema = { tables: leftovers, columns: [] };
+  if (production) throw new Error(driftBanner(drift, leftoverSchema));
+  if (drift.status === "unmigrated" && leftovers.length === 0 && (await bootstrapEmptyDatabase(log, options))) {
     return;
   }
-  log.warn(driftBanner(drift));
+  log.warn(driftBanner(drift, leftoverSchema));
 }
 
 /** Re-run dependency checks on every probe so recovery needs no restart. */

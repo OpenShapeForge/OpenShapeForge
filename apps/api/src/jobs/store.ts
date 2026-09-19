@@ -4,10 +4,12 @@
  *
  * Nothing here opens a session. A handler enqueues inside its own tenant
  * transaction (the outbox: the job commits with the domain write or not at
- * all), an operator lists and retries inside a request's tenant session, and
- * the worker claims, settles and sweeps inside the worker session that
- * `jobs/worker.ts` opens. The row-level policy on the table admits each of
- * those and nothing else, so the same SQL is safe from every caller.
+ * all), an operator lists and retries inside a request's tenant session, the
+ * worker claims and sweeps inside the worker session that `jobs/worker.ts`
+ * opens, and a completed run settles inside the handler's own tenant
+ * transaction (only a throwing or missing handler settles apart). The
+ * row-level policy on the table admits each of those and nothing else, so the
+ * same SQL is safe from every caller.
  *
  * A claim is a conditional update guarded by `for update skip locked`, so two
  * workers polling at once hand each job to exactly one of them. The claim

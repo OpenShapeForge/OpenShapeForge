@@ -62,7 +62,7 @@ describe("artifact REST adapter", () => {
         async read(_session, input) {
           owner = input;
           const bytes = new TextEncoder().encode("download");
-          return { descriptor: { artifactId: ARTIFACT_ID, version: 2, fileName: "rapport.pdf", mediaType: "application/pdf", sha256: "b".repeat(64), byteSize: bytes.byteLength }, bytes };
+          return { descriptor: { artifactId: ARTIFACT_ID, version: 2, fileName: "rapport.pdf", mediaType: "application/pdf", sha256: "b".repeat(64), byteSize: bytes.byteLength }, bytes, owner: input.owner };
         },
       },
     });

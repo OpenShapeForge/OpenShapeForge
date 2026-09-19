@@ -131,12 +131,14 @@ describe("smtp provider", () => {
     expect(() => readSmtpConfig({ OPENSHAPEFORGE_SMTP_URL: "http://x", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" })).toThrow(/scheme/);
   });
 
-  test("the worker needs a transport: SMTP, or the null provider opted into outside production", () => {
+  test("the worker needs a transport: SMTP, or the null provider opted into in explicit development", () => {
     expect(configuredMailProvider({ OPENSHAPEFORGE_SMTP_URL: "smtp://localhost:1025", OPENSHAPEFORGE_MAIL_FROM: "a@b.test" }).name).toBe("smtp");
-    expect(configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null" }).name).toBe("null");
+    expect(configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null", NODE_ENV: "development" }).name).toBe("null");
     expect(() => configuredMailProvider({})).toThrow(/No mail transport is configured/);
     expect(() => configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "carrier-pigeon" })).toThrow(/unknown/);
-    expect(() => configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null", NODE_ENV: "production" })).toThrow(/production/);
+    for (const NODE_ENV of ["production", "staging", "test", undefined]) {
+      expect(() => configuredMailProvider({ OPENSHAPEFORGE_MAIL_PROVIDER: "null", ...(NODE_ENV ? { NODE_ENV } : {}) })).toThrow(/NODE_ENV=development/);
+    }
     // The module resolves the transport when the worker starts, not when the API composes it.
     const module = createJobsRuntimeModule({ modules: () => [], env: {} });
     expect(Object.keys(module.jobHandlers ?? {})).toEqual(["mail.deliver"]);

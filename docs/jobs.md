@@ -8,7 +8,9 @@ one handler registry; plugins contribute job kinds and enqueue.
 | Piece | Where |
 | --- | --- |
 | `platform.jobs` | `packages/compiler/config/platform-schema.yaml`; invariants in `apps/api/src/db/migrations/jobs.ts` |
-| enqueue / claim / settle / resolve / list / sweep | `apps/api/src/jobs/store.ts` |
+| enqueue / claim | `apps/api/src/jobs/store.ts`; the persisted session in `actor-session.ts` |
+| the row lock and settle | `apps/api/src/jobs/settle.ts` |
+| resolve / list / sweep | `apps/api/src/jobs/queries.ts` |
 | the `job-worker` role and poll loop | `apps/api/src/jobs/worker.ts`, contributed by `apps/api/src/jobs/module.ts` |
 | the handler registry | `apps/api/src/jobs/handlers.ts` |
 | the `mail.deliver` kind and the SMTP provider | `apps/api/src/jobs/mail/` |
@@ -121,10 +123,13 @@ The handler's `db` is a tenant session that **replays the session of the
 person who enqueued the job**: tenant, user, roles, groups, RelationGroup
 memberships and scope, exactly as the row stored them at enqueue. Every row
 the handler touches is fenced the way that person's own request would be.
-`job-worker` is added to that session only as `app.worker_role` — which is
-what opens the module's own tables that declare `workerDml: true` — and
-never as a role, so it widens nothing an RLS policy predicates on
-`app.roles`. Nothing in the control plane is reachable.
+`job-worker` appears nowhere in it — not in `app.roles`, and not in
+`app.worker_role` either: that GUC is the cross-tenant widen of the queue's
+own policy, and a handler holding it could read every tenant's jobs. The
+module's own tables that declare `workerDml: true` are reachable through the
+GRANTs the worker connection holds, under the tenant predicate like
+everything else. Nothing in the control plane is reachable, and on
+`platform.jobs` the handler sees its own tenant's rows only.
 
 The run and its outcome are one transaction. Before the handler runs, that
 transaction locks the job's own row against the claim token
@@ -187,9 +192,11 @@ The provider is picked from the environment when the worker starts, and
   relay offers it, `smtps://` implicit TLS, `user:pass@` for AUTH PLAIN.
   `OPENSHAPEFORGE_MAIL_FROM` is required alongside it. The compose stack
   ships Mailpit: `smtp://localhost:1025`, inbox at http://localhost:8025.
-- `OPENSHAPEFORGE_MAIL_PROVIDER=null` — the **null provider**, a development
-  opt-in that is refused under `NODE_ENV=production`: every message is
-  logged at `warn` and the job ends **`failed`** with `MAIL_NOT_CONFIGURED`.
+- `OPENSHAPEFORGE_MAIL_PROVIDER=null` with `NODE_ENV=development` — the
+  **null provider**, an opt-in that only explicit development gets; staging,
+  production, test and an unlabelled environment are refused alike. Every
+  message is logged at `warn` and the job ends **`failed`** with
+  `MAIL_NOT_CONFIGURED`.
   A message nobody received is not delivered, and a `done` job would say it
   was; the queue keeps the truth for an operator to retry once a transport
   exists. Loud on purpose, so a developer sees what was dropped.
@@ -240,14 +247,14 @@ a decision an operator has not taken yet. See [retention.md](retention.md).
 - `apps/api/src/db/__tests__/jobs.test.ts` — the store under both database
   roles: idempotent enqueue, tenant isolation, concurrent claims, lease
   expiry, dead-lettering, `outcome_unknown` terminal, the replayed session
-  and `app.worker_role`, the row lock a running handler holds and the stale
+  (and that a handler sees no other tenant's jobs), the row lock a running handler holds and the stale
   claim that stops before any effect, the malformed outcome, `stop()`
   between jobs, the sequence cursor, the sweep, the Operations.
 - `apps/api/src/jobs/mail/smtp.test.ts` — the SMTP client against an
   in-process fake relay, one failure phase per test.
 - `apps/api/src/jobs/mail/smtp.test.ts` also covers provider selection: SMTP,
-  the null opt-in, its refusal in production, and the worker refusing to
-  start without either.
+  the null opt-in under explicit development, its refusal everywhere else,
+  and the worker refusing to start without either.
 - `apps/api/src/rest/__tests__/jobs.e2e.test.ts` — a `mail.deliver` job
   through the worker with the null provider, ending `failed`, administered
   over REST and GraphQL.

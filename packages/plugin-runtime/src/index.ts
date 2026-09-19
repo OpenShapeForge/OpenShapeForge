@@ -544,7 +544,14 @@ export type RuntimeJobOutcome =
 
 export type RuntimeJobHandlerContextContract<Database> = {
   job: RuntimeJobClaim;
-  /** A tenant session for the job's tenant and enqueuing actor, as the worker role. */
+  /**
+   * A tenant transaction that replays the session of the person who enqueued
+   * the job — tenant, user, roles, groups, RelationGroup memberships and
+   * scope as they were at enqueue — so the handler reaches exactly what that
+   * request could. It holds no worker role and no worker GUC: the queue's
+   * cross-tenant policy is the host's, never the handler's. The handler's
+   * writes commit together with the job's outcome.
+   */
   db: Database;
   log: RuntimeWorkerLogger;
 };

@@ -50,7 +50,7 @@ const resolved = { tenantId, artifactId, owner, documentVersionId };
 describe("Document artifact authorization", () => {
   test("bind accepts only the actor-owned provisional head without adding read or update authorization", async () => {
     const state = harness([{ documentVersionId }]);
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner, expectedArtifactVersion: 7 },
     )).resolves.toEqual(resolved);
@@ -74,7 +74,7 @@ describe("Document artifact authorization", () => {
 
   test("bind fails closed when the provisional association is absent", async () => {
     const state = harness([]);
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner },
     )).resolves.toBeUndefined();
@@ -84,7 +84,7 @@ describe("Document artifact authorization", () => {
 
   test("open proves the artifact is one of the Document's stored versions and asks the Document's get", async () => {
     const state = harness([{ documentVersionId }]);
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "open", artifactId, owner, expectedArtifactVersion: 9 },
     )).resolves.toEqual(resolved);
@@ -139,7 +139,7 @@ describe("Document artifact authorization", () => {
         return { rows: [{ documentVersionId }] };
       },
     };
-    await expect(authorization.resolveDocumentVersionArtifactAccess(
+    await expect(authorization.resolveDocumentArtifactAccess(
       transaction,
       { action: "open", artifactId, owner },
     )).resolves.toEqual(resolved);
@@ -163,7 +163,7 @@ describe("Document artifact authorization", () => {
         return { rows: [{ documentVersionId }] };
       },
     };
-    await expect(authorization.resolveDocumentVersionArtifactAccess(
+    await expect(authorization.resolveDocumentArtifactAccess(
       transaction,
       { action: "open", artifactId, owner },
     )).rejects.toBe(denial);
@@ -172,7 +172,7 @@ describe("Document artifact authorization", () => {
     ]);
     // An artifact that is not one of the Document's versions is refused before the oracle is asked.
     const unrelated = createDocumentArtifactAuthorization({ session, records: { assertAccess: async () => { throw new Error("must not be asked"); } } });
-    await expect(unrelated.resolveDocumentVersionArtifactAccess(
+    await expect(unrelated.resolveDocumentArtifactAccess(
       { async executeQuery() { return { rows: [] }; } },
       { action: "open", artifactId, owner },
     )).resolves.toBeUndefined();
@@ -184,19 +184,19 @@ describe("Document artifact authorization", () => {
       records: { assertAccess: async () => undefined },
     });
     const state = harness([{ documentVersionId }]);
-    await expect(invalidSession.resolveDocumentVersionArtifactAccess(
+    await expect(invalidSession.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner },
     )).resolves.toBeUndefined();
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner, expectedArtifactVersion: 1.5 },
     )).resolves.toBeUndefined();
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId: "not-an-id", owner },
     )).resolves.toBeUndefined();
-    await expect(state.authorization.resolveDocumentVersionArtifactAccess(
+    await expect(state.authorization.resolveDocumentArtifactAccess(
       state.transaction,
       { action: "bind", artifactId, owner: { entity: "DocumentVersion", id: documentVersionId } as never },
     )).resolves.toBeUndefined();

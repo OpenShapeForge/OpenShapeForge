@@ -46,7 +46,7 @@ function provider(
     providerId,
     stage: async () => descriptor,
     bind: async () => descriptor,
-    read: async () => ({ descriptor, bytes: Uint8Array.of(1, 2, 3) }),
+    read: async (_context, input) => ({ descriptor, bytes: Uint8Array.of(1, 2, 3), owner: input.owner }),
     ...overrides,
   };
 }
@@ -285,11 +285,12 @@ describe("ArtifactStorageRuntime", () => {
     const allowed = harness();
     allowed.live.add(session);
     let reads = 0;
-    allowed.runtime.configure([{ name: "storage", artifactStorage: provider({
-      read: async () => { reads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3) }; },
-    }) }], [providerId]);
+    // The provider is what proves the association: it answers with the record it found the artifact bound to.
     const relation = { artifactId, owner: { entity: "Relation", id: documentId } };
-    await expect(allowed.runtime.services.read(session, relation)).resolves.toMatchObject({ descriptor });
+    allowed.runtime.configure([{ name: "storage", artifactStorage: provider({
+      read: async () => { reads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: relation.owner }; },
+    }) }], [providerId]);
+    await expect(allowed.runtime.services.read(session, relation)).resolves.toMatchObject({ descriptor, owner: relation.owner });
     expect(allowed.access).toEqual([{ session, request: { entityName: "Relation", id: documentId, intent: "get" } }]);
     expect(reads).toBe(1);
 
@@ -297,7 +298,7 @@ describe("ArtifactStorageRuntime", () => {
     refused.live.add(session);
     let refusedReads = 0;
     refused.runtime.configure([{ name: "storage", artifactStorage: provider({
-      read: async () => { refusedReads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3) }; },
+      read: async () => { refusedReads += 1; return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: ownerInput.owner }; },
     }) }], [providerId]);
     await expectFailure(refused.runtime.services.read(session, ownerInput), "FORBIDDEN");
     expect(refusedReads).toBe(0);
@@ -316,9 +317,9 @@ describe("ArtifactStorageRuntime", () => {
   test("read rejects mismatched identity, non-byte contents, and descriptor length drift", async () => {
     const session = { id: "session-a" };
     const cases = [
-      { descriptor: { ...descriptor, artifactId: otherArtifactId }, bytes: Uint8Array.of(1, 2, 3) },
-      { descriptor, bytes: [1, 2, 3] as unknown as Uint8Array },
-      { descriptor, bytes: Uint8Array.of(1, 2) },
+      { descriptor: { ...descriptor, artifactId: otherArtifactId }, bytes: Uint8Array.of(1, 2, 3), owner: ownerInput.owner },
+      { descriptor, bytes: [1, 2, 3] as unknown as Uint8Array, owner: ownerInput.owner },
+      { descriptor, bytes: Uint8Array.of(1, 2), owner: ownerInput.owner },
     ];
     for (const contents of cases) {
       const current = harness();
@@ -329,6 +330,25 @@ describe("ArtifactStorageRuntime", () => {
       await expectFailure(
         current.runtime.services.read(session, ownerInput),
         "HANDLER_CONTRACT_VIOLATION",
+      );
+    }
+  });
+
+  test("read is refused unless the provider confirms the named owner as the bound record", async () => {
+    const session = { id: "session-a" };
+    // A session that reaches a Relation and knows a Document's artifact id opens nothing through the Relation.
+    const elsewhere = [
+      { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Document", id: documentId } },
+      { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Relation", id: otherArtifactId } },
+      { descriptor, bytes: Uint8Array.of(1, 2, 3) } as never,
+    ];
+    for (const contents of elsewhere) {
+      const current = harness();
+      current.live.add(session);
+      current.runtime.configure([{ name: "storage", artifactStorage: provider({ read: async () => contents }) }], [providerId]);
+      await expectFailure(
+        current.runtime.services.read(session, { artifactId, owner: { entity: "Relation", id: documentId } }),
+        "FORBIDDEN",
       );
     }
   });

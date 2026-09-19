@@ -23,23 +23,26 @@ export const MAIL_PROVIDER_ENV = "OPENSHAPEFORGE_MAIL_PROVIDER";
 /**
  * The transport a deployment configured, or a refusal. SMTP when
  * `OPENSHAPEFORGE_SMTP_URL` is set; the logging null provider only on the
- * explicit `OPENSHAPEFORGE_MAIL_PROVIDER=null`, and never under
- * `NODE_ENV=production` — a production worker that quietly dropped every
- * message would be worse than one that did not start. Nothing else is a
- * configuration, so the worker refuses to start on it.
+ * explicit `OPENSHAPEFORGE_MAIL_PROVIDER=null` **and** an explicit
+ * `NODE_ENV=development` — a staging or unlabelled worker that quietly
+ * dropped every message would be worse than one that did not start. Nothing
+ * else is a configuration, so the worker refuses to start on it.
  */
 export function configuredMailProvider(env: NodeJS.ProcessEnv = process.env): MailProvider {
   const smtp = readSmtpConfig(env);
   if (smtp) return createSmtpMailProvider(smtp);
   const selected = env[MAIL_PROVIDER_ENV]?.trim();
   if (selected === "null") {
-    if (env.NODE_ENV === "production") {
-      throw new Error(`${MAIL_PROVIDER_ENV}=null is a development setting; a production job-worker needs OPENSHAPEFORGE_SMTP_URL.`);
+    if (env.NODE_ENV !== "development") {
+      throw new Error(
+        `${MAIL_PROVIDER_ENV}=null is accepted only with NODE_ENV=development; ` +
+          `outside development a job-worker needs OPENSHAPEFORGE_SMTP_URL.`,
+      );
     }
     return createNullMailProvider();
   }
-  if (selected) throw new Error(`${MAIL_PROVIDER_ENV} "${selected}" is unknown; set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null in development.`);
-  throw new Error(`No mail transport is configured: set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null to log messages instead in development.`);
+  if (selected) throw new Error(`${MAIL_PROVIDER_ENV} "${selected}" is unknown; set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null with NODE_ENV=development.`);
+  throw new Error(`No mail transport is configured: set OPENSHAPEFORGE_SMTP_URL, or ${MAIL_PROVIDER_ENV}=null with NODE_ENV=development to log messages instead.`);
 }
 
 export type JobsRuntimeModuleOptions = {

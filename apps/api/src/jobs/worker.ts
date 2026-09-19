@@ -10,9 +10,12 @@
  * session that replays the session of the person who enqueued it — tenant,
  * user, roles, groups, RelationGroup memberships and scope, as the row
  * persisted them — so every row the handler touches is fenced the way that
- * person's own request would be. `job-worker` is added to that session only
- * as `app.worker_role`, never as a role: it opens the `workerDml` tables and
- * widens nothing else.
+ * person's own request would be. That session never names `job-worker`, in
+ * `app.roles` or in `app.worker_role`: the worker GUC is the cross-tenant
+ * widen of the queue's own policy, and a handler that held it could read
+ * every tenant's jobs. The lock and the settle below reach the job's row
+ * through the tenant predicate alone, and the `workerDml` tables through
+ * the GRANTs the connection already holds.
  *
  * One job per claim, claimed immediately before it runs, so the lease is
  * measured from the start of the run and a slow neighbour cannot eat it. The
@@ -31,7 +34,8 @@ import type { DB } from "../generated/db/types.js";
 import type { ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import type { JobHandlerRegistry } from "./handlers.js";
 import { sweepDoneJobs } from "./queries.js";
-import { claimJobs, lockClaimedJob, settleJob, type ClaimedJob, type SettleJobInput, type SettleJobResult } from "./store.js";
+import { lockClaimedJob, settleJob, type SettleJobInput, type SettleJobResult } from "./settle.js";
+import { claimJobs, type ClaimedJob } from "./store.js";
 
 /**
  * The worker role platform.jobs names in its policy (`workerAccess`). The
@@ -175,7 +179,6 @@ export async function runClaimedJob(
       { tenantId: job.tenantId, userId: job.actorId, ...job.actorSession },
       async (trx): Promise<JobRunResult> => {
         if (!(await lockClaimedJob(trx, job))) return { ran: false };
-        await sql`select set_config('app.worker_role', ${JOB_WORKER_ROLE}, true)`.execute(trx);
         const outcome = await registered.handler(job.payload, {
           job: {
             id: job.id,

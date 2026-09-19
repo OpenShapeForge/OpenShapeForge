@@ -35,9 +35,6 @@ export type DocumentArtifactOwner = Readonly<{
   id: string;
 }>;
 
-/** @deprecated The owner is the Document since the generic artifact owner; kept as an alias for one release. */
-export type DocumentVersionArtifactOwner = DocumentArtifactOwner;
-
 export type DocumentArtifactAccessInput<ArtifactId extends string> = Readonly<{
   action: "bind" | "open";
   artifactId: ArtifactId;
@@ -55,7 +52,7 @@ export type ResolvedDocumentArtifactAccess<ArtifactId extends string> = Readonly
 }>;
 
 export type DocumentArtifactAuthorization = Readonly<{
-  resolveDocumentVersionArtifactAccess<ArtifactId extends string>(
+  resolveDocumentArtifactAccess<ArtifactId extends string>(
     transaction: DocumentArtifactSqlExecutor,
     input: DocumentArtifactAccessInput<ArtifactId>,
   ): Promise<ResolvedDocumentArtifactAccess<ArtifactId> | undefined>;
@@ -171,7 +168,7 @@ export function createDocumentArtifactAuthorization(
   }>,
 ): DocumentArtifactAuthorization {
   return Object.freeze({
-    async resolveDocumentVersionArtifactAccess<ArtifactId extends string>(
+    async resolveDocumentArtifactAccess<ArtifactId extends string>(
       transaction: DocumentArtifactSqlExecutor,
       input: DocumentArtifactAccessInput<ArtifactId>,
     ): Promise<ResolvedDocumentArtifactAccess<ArtifactId> | undefined> {

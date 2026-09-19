@@ -598,10 +598,6 @@ export function renderOpenApiSpec(
     }),
   )].sort();
   const hasCanonicalEditLease = restEditLeaseOperationIds.length > 0;
-  // The transport is documented where the document entities that bind files
-  // through it are compiled in; any canonical record may own a file at runtime.
-  const hasArtifactTransport = contractsByEntityName.has("Document") &&
-    contractsByEntityName.has("DocumentVersion");
 
   const schemas: JsonObject = {
     Error: {
@@ -869,7 +865,9 @@ export function renderOpenApiSpec(
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
 
-  if (hasArtifactTransport) {
+  // Any canonical record may own a file, so the transport is not gated on the
+  // Document entities: it is registered whenever the module platform is, and
+  // storage itself is composed at runtime and fails closed when absent.
   tags.push({
     name: "Files",
     description: "Authenticated streaming transport for temporary and record-bound files. Storage policy and authorization remain server-side.",
@@ -948,7 +946,6 @@ export function renderOpenApiSpec(
       },
     },
   };
-  }
 
   if (hasCanonicalEditLease) {
     tags.push({

@@ -47,6 +47,13 @@ export type ListJobsInput = {
 };
 
 const CURSOR = /^[1-9][0-9]{0,18}$/;
+const BIGINT_MAX = 9223372036854775807n;
+
+/** A `sequence` value: digits only, within bigint, so a bad cursor is a 400 and never a database error. */
+function cursorOf(value: string): string {
+  if (!CURSOR.test(value) || BigInt(value) > BIGINT_MAX) throw new Error("Invalid jobs cursor.");
+  return value;
+}
 
 /**
  * Newest first, paged on the insertion `sequence`: a bigint identity, so two
@@ -60,10 +67,7 @@ export async function listJobs(db: JobExecutor, input: ListJobsInput): Promise<{
   if (input.subject) {
     query = query.where("subject_entity", "=", input.subject.entity).where("subject_id", "=", input.subject.id);
   }
-  if (input.cursor) {
-    if (!CURSOR.test(input.cursor)) throw new Error("Invalid jobs cursor.");
-    query = query.where("sequence", "<", input.cursor);
-  }
+  if (input.cursor) query = query.where("sequence", "<", cursorOf(input.cursor));
   const rows = await query.orderBy("sequence", "desc").limit(input.limit + 1).execute();
   const items = rows.slice(0, input.limit).map((row) => toRecord(row as Row));
   const last = items[items.length - 1];

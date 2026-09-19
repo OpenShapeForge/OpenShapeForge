@@ -117,7 +117,7 @@ describe("artifact record authorization transaction scope", () => {
           } catch (error) {
             bindError = error;
           }
-          return { descriptor, bytes: Uint8Array.of(1, 2, 3) };
+          return { descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Document", id: documentId } };
         }),
       },
     };

@@ -23,7 +23,8 @@ import { DEV_WORKER_ROLE_PASSWORD_DEFAULT, WORKER_ROLE } from "../migrations/wor
 import { composeJobHandlers } from "../../jobs/handlers.js";
 import { jobsOperationHandler } from "../../jobs/operations.js";
 import { getJob, listJobs, resolveJob, sweepDoneJobs } from "../../jobs/queries.js";
-import { claimJobs, enqueueJob, lockClaimedJob, settleJob, type ClaimedJob } from "../../jobs/store.js";
+import { lockClaimedJob, settleJob } from "../../jobs/settle.js";
+import { claimJobs, enqueueJob, type ClaimedJob } from "../../jobs/store.js";
 import { JOB_WORKER_ROLE, processJobBatch, runClaimedJob, withJobWorkerSession } from "../../jobs/worker.js";
 import type { ModuleJobHandler, ModuleOperationContext, ModuleWorkerLogger } from "../../modules/contract.js";
 
@@ -239,6 +240,9 @@ describe("platform.jobs", () => {
             const tenant = (await sql<{ t: string }>`select app.current_tenant()::text as t`.execute(db)).rows[0]!.t;
             seen.push(`${job.kind}:${tenant}:${JSON.stringify(payload)}`);
             seen.push(`roles=${await guc(db, "app.roles")} worker=${await guc(db, "app.worker_role")} scope=${await guc(db, "app.scope")} relation_groups=${await guc(db, "app.relation_group_ids")}`);
+            // The handler's session is not the worker's: platform.jobs shows it its own tenant only.
+            const tenants = (await sql<{ t: string }>`select distinct tenant_id::text as t from platform.jobs`.execute(db)).rows.map((row) => row.t);
+            seen.push(`job_tenants=${tenants.join(",")}`);
             return { outcome: "done", result: { echoed: payload } };
           }) as ModuleJobHandler,
           "probe.throws": (async () => { throw new Error("handler exploded"); }) as ModuleJobHandler,
@@ -263,7 +267,8 @@ describe("platform.jobs", () => {
     expect(await processJobBatch(suite.worker.db, handlers, silent, { kinds })).toEqual({ processed: 6 });
     expect(seen).toEqual([
       `probe.ok:${tenantA}:{"hello":"world"}`,
-      `roles=Alpha.Role,Zebra.Role worker=${JOB_WORKER_ROLE} scope=tenant relation_groups=${relationGroup}`,
+      `roles=Alpha.Role,Zebra.Role worker= scope=tenant relation_groups=${relationGroup}`,
+      `job_tenants=${tenantA}`,
     ]);
     const finished = (await appSession(sessionA, (trx) => getJob(trx, ok.id)))!;
     expect(finished.result).toEqual({ echoed: { hello: "world" } });

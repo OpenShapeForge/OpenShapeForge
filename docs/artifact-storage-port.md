@@ -24,14 +24,17 @@ exposes a non-replaceable `platform.artifacts` service to runtime modules.
 - Reading names the artifact and its owner. Core first asserts `get` on the
   owner through `platform.records.assertAccess` — the same oracle every
   module uses, so a capability grant reaches a file exactly when it reaches
-  the record — inside the transaction the provider then reads in. Storage
-  independently checks the association through its trusted policy adapter
-  (`@openshapeforge/documents/artifact-authorization` for a Document owner:
-  the artifact must be one of the Document's stored versions, and the
-  Document's `get` is asked again). Calling the port does not grant access
-  to a file. Core checks the returned identity and byte length, strips
-  provider-specific metadata, and returns the verified descriptor with the
-  bytes.
+  the record — inside the transaction the provider then reads in. The named
+  owner is a claim, not a proof: storage checks the association through its
+  trusted policy adapter (`@openshapeforge/documents/artifact-authorization`
+  for a Document owner: the artifact must be one of the Document's stored
+  versions, and the Document's `get` is asked again) and **returns the
+  record it found the artifact bound to** as `owner` on the result. Core
+  refuses the read unless that equals the owner named, so knowing an
+  artifact id and reaching some other record opens nothing. Calling the
+  port does not grant access to a file. Core also checks the returned
+  identity and byte length, strips provider-specific metadata, and returns
+  the verified descriptor with the bytes.
 - Over REST the owner is two query parameters:
   `GET /api/artifacts/:artifactId/contents?ownerEntity=Document&ownerId=<uuid>`.
 - There is deliberately no physical-delete method. Destructive storage work

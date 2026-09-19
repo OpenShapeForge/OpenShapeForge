@@ -37,9 +37,12 @@ function owner(input: RuntimeArtifactOwnerInput): { entity: string; id: string }
  * contribution. Any canonical record may own an artifact: a read is
  * authorized as `get` on the owner through the record-access oracle before
  * the provider is asked, so what a session — a grant included — reaches in
- * files is exactly what it reaches in records. A bind runs inside the
- * Operation transaction that creates or updates the owner, whose own
- * authorization it inherits; the provider proves the association.
+ * files is exactly what it reaches in records. The named owner is a claim,
+ * not a proof: the provider returns the record it found the artifact bound
+ * to, and a result whose owner is not the one named is refused, so knowing
+ * an artifact id and reaching some other record opens nothing. A bind runs
+ * inside the Operation transaction that creates or updates the owner, whose
+ * own authorization it inherits; the provider proves the association.
  */
 export class ArtifactStorageRuntime<Session, Transaction> {
   readonly services: RuntimeArtifactServices<Session>;
@@ -72,7 +75,7 @@ export class ArtifactStorageRuntime<Session, Transaction> {
           throw operationFailure({ code: "VALIDATION", message: "The expected file version is invalid." });
         }
         const transaction = options.currentTransaction(session);
-        if (!transaction) throw operationFailure({ code: "ARTIFACT_TRANSACTION_REQUIRED", message: "A file must be linked in the document version transaction." });
+        if (!transaction) throw operationFailure({ code: "ARTIFACT_TRANSACTION_REQUIRED", message: "A file must be linked in the owning record's Operation transaction." });
         const result = descriptor(await active.bind({ session, transaction }, input));
         if (result.artifactId !== input.artifactId) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The linked file identity does not match." });
         return result;
@@ -89,7 +92,11 @@ export class ArtifactStorageRuntime<Session, Transaction> {
           if (safe.artifactId !== input.artifactId || !(result.bytes instanceof Uint8Array) || result.bytes.byteLength !== safe.byteSize) {
             throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The returned file does not match its stored descriptor." });
           }
-          return { descriptor: safe, bytes: result.bytes };
+          const bound = result.owner;
+          if (!bound || bound.entity !== record.entity || bound.id !== record.id) {
+            throw operationFailure({ code: "FORBIDDEN", message: "The file is not bound to the named record." });
+          }
+          return { descriptor: safe, bytes: result.bytes, owner: Object.freeze({ entity: bound.entity, id: bound.id }) };
         });
       },
     });

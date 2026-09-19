@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   parseAgreementMilestoneBody,
   parseMilestoneBillingRunBody,
-  parseTriggerBody,
 } from "../rest-routes.js";
 
 describe("agreement milestone command input", () => {
@@ -46,30 +45,6 @@ describe("agreement milestone command input", () => {
       expect((error as Error).message).toBe("Request body is not valid JSON.");
       expect((error as Error).message).not.toContain("private-value");
     }
-  });
-});
-
-describe("trigger command input", () => {
-  test("accepts an empty body", () => {
-    expect(parseTriggerBody(undefined)).toEqual({});
-  });
-
-  test("accepts an optional triggeredBy", () => {
-    expect(parseTriggerBody({ triggeredBy: "workflow-instance:abc123" })).toEqual({
-      triggeredBy: "workflow-instance:abc123",
-    });
-  });
-
-  test("rejects a non-string triggeredBy", () => {
-    expect(() => parseTriggerBody({ triggeredBy: 42 })).toThrow(
-      /triggeredBy must be a string/,
-    );
-  });
-
-  test("rejects unknown fields", () => {
-    expect(() => parseTriggerBody({ status: "triggered" })).toThrow(
-      /Unknown request field "status"/,
-    );
   });
 });
 

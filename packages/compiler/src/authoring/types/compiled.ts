@@ -683,8 +683,29 @@ export interface CompiledBlueprint {
   operations: { list: string; status: string; reset: string; publish: string };
 }
 
+/** One status field lowered from `transitions`; the rule table the runtime handler and the interfaces read. */
+export interface CompiledTransitionField {
+  field: string;
+  initial: string;
+  rules: Array<{
+    key: string;
+    /** Canonical Operation id, `<Entity>.<key>`. */
+    operation: string;
+    from: string[];
+    to: string;
+    label: LocalizedText;
+    /** Record permission the rule checks on an entity with record-level permissions. */
+    recordPermission?: "edit";
+    preconditions?: Array<{ field: string; present: boolean }>;
+    writes?: string[];
+    stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
+  }>;
+}
+
 export interface CompiledEntityContract {
   blueprint?: CompiledBlueprint;
+  /** Status state machines declared on fields; absent when the entity has none. */
+  transitions?: CompiledTransitionField[];
   workerAccess?: string;
   authoringVersion: 1 | 2 | 3;
   contractVersion: number;

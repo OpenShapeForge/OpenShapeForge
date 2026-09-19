@@ -57,6 +57,52 @@ export type FieldDefinitionRelationshipConstraints = Record<
 
 export type FieldDefinitionValidation = FieldValidation;
 
+/** One arc of a status state machine; compiles to the Operation `<Entity>.<key>`. */
+export interface FieldDefinitionTransitionRule {
+  /** Operation key; becomes `<Entity>.<key>`, the REST segment and the web action. */
+  key: string;
+  /** Option values the record must currently hold. */
+  from: string[];
+  /** The option value the transition writes. */
+  to: string;
+  label?: LocalizedText;
+  description?: LocalizedText;
+  /**
+   * Who may invoke. `roles` defaults to the entity's update roles. A
+   * transition writes the record, so on an entity with record-level
+   * permissions it always requires `edit`; `recordPermission` may only restate
+   * that, and is refused on an entity without record permissions.
+   */
+  auth?: { roles?: string[]; recordPermission?: "edit" };
+  /**
+   * Record facts that must hold besides the current status. Deliberately a
+   * small vocabulary: a field is present (not null) or absent (null); an
+   * empty string is present. Anything richer belongs in an authored plugin
+   * Operation.
+   */
+  preconditions?: Array<{ field: string; present: boolean }>;
+  /** Fields this transition, and only this transition, may set from its input. */
+  writes?: string[];
+  /**
+   * Fields this transition, and only this transition, sets from the server:
+   * `now` (a datetime field) or `actor` (the session's linked Relation for a
+   * Relation reference, otherwise the user id). Never part of the input.
+   */
+  stamps?: Array<{ field: string; value: "now" | "actor" }>;
+  confirmation?: { mode: "none" | "acknowledgement" };
+}
+
+/**
+ * A status field as a declared state machine. The field is then written only
+ * by its transition Operations: generic create admits no value (the column
+ * defaults to `initial`) and generic update refuses it.
+ */
+export interface FieldDefinitionTransitions {
+  /** The option value every record starts in; must equal `defaultValue`. */
+  initial: string;
+  rules: FieldDefinitionTransitionRule[];
+}
+
 /**
  * How a single entity reference shapes the collection the compiler derives
  * for it on the target entity. Everything is optional: the key defaults to
@@ -217,6 +263,12 @@ export interface FieldDefinition {
    * A name that matches no compiled operation fails the build.
    */
   writtenBy?: string[];
+  /**
+   * Declares this status field as a state machine (see
+   * FieldDefinitionTransitions). Requires `options.type: static`; every rule
+   * compiles to an Operation `<Entity>.<rule.key>` and sets `writtenBy`.
+   */
+  transitions?: FieldDefinitionTransitions;
   /** Server-owned, persisted value derived once when the entity is created. */
   deriveOnCreate?: FieldDefinitionDeriveOnCreate;
   label?: LocalizedText;

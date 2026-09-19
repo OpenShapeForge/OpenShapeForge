@@ -2614,36 +2614,6 @@
       }
     }
   ],
-  "AGREEMENTMILESTONESTATUS": [
-    {
-      "value": "pending",
-      "label": {
-        "nl": "In afwachting",
-        "en": "Pending"
-      }
-    },
-    {
-      "value": "triggered",
-      "label": {
-        "nl": "Getriggerd",
-        "en": "Triggered"
-      }
-    },
-    {
-      "value": "invoiced",
-      "label": {
-        "nl": "Gefactureerd",
-        "en": "Invoiced"
-      }
-    },
-    {
-      "value": "cancelled",
-      "label": {
-        "nl": "Geannuleerd",
-        "en": "Cancelled"
-      }
-    }
-  ],
   "BILLINGRUNITEMSTATUS": [
     {
       "value": "planned",

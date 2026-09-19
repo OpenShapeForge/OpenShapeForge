@@ -41,6 +41,10 @@ should factor existing state checks into this shared policy rather than copy
 conditions into presentation code. Conditional writes and database constraints
 remain necessary to serialize concurrent changes; offers do not replace them.
 
+Status transitions declared on a field ([operations.md](operations.md#transitions))
+use this seam from core: the rule's `from` states and preconditions are the
+availability policy, evaluated once for the offer and again inside the write.
+
 Web and MCP receive the same canonical `available: false` and friendly error.
 Actions lacking role or record authorization are omitted instead of disclosed
 as disabled. OAuth scopes are also checked before an action is offered.

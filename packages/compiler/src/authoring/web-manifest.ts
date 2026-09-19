@@ -814,6 +814,12 @@ function projectEntity(
 
   return {
     ...(contract.blueprint ? { blueprint: contract.blueprint } : {}),
+    ...(contract.transitions
+      ? { transitions: contract.transitions.map((status) => ({
+          ...status,
+          rules: status.rules.map((rule) => ({ ...rule, label: localized(rule.label, rule.key) })),
+        })) }
+      : {}),
     entityId: entityName,
     ...(contract.entity.displayTemplate ? { displayTemplate: contract.entity.displayTemplate } : {}),
     entitySlug: source.slug,

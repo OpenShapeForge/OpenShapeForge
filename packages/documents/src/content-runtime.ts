@@ -223,7 +223,7 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       const templateId = uuid(version.template, "template");
       await platform.records.assertAccess(session, { entityName: "Template", id: templateId, intent: "get" });
       const frozen = templateSnapshotContent(version.snapshot, {
-        tenantId, templateId, channel, locale, carrier, allowedDefinitions: scope.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
+        tenantId, templateId, channel, carrier, allowedDefinitions: scope.allowedDefinitions, definitionVersionColumn: DEFINITION_VERSION_COLUMN,
       });
       parameterFields.set(id, frozen.parameterFields);
       return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: frozen.variants };

@@ -85,7 +85,7 @@ function fixture(options: { templateVersionId?: string | null; parameters?: unkn
           if (query.sql.includes("from erp.documents")) return { rows: [{ id: ids.document, template_version_id: templateVersionId, parameters: options.parameters === undefined ? { name: "Ada" } : options.parameters }] };
           if (query.sql.includes("from erp.template_versions")) return { rows: [{ id: query.parameters[1] }] };
           if (query.sql.includes("from erp.document_variants")) {
-            return { rows: query.parameters[2] === "document" && query.parameters[3] === "en" ? [{ id: ids.documentVariant, channel: "document", locale: "en" }] : [] };
+            return { rows: query.parameters[2] === "document" ? [{ id: ids.documentVariant, channel: "document", locale: "en" }] : [] };
           }
           if (query.sql.includes("from erp.blocks")) {
             expect(query.parameters[1]).toBe(ids.documentVariant);

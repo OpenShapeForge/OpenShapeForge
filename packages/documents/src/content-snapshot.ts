@@ -42,7 +42,6 @@ export type TemplateSnapshotSelection = {
   readonly tenantId: string;
   readonly templateId: string;
   readonly channel: string;
-  readonly locale: string;
   readonly carrier: RuntimeEntityValueCarrier;
   readonly allowedDefinitions: readonly string[];
   /** Physical column of the Block entity's `definitionVersion` field. */
@@ -110,9 +109,14 @@ function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapsh
   return contentBlockFromRow(entry.row, { column: BLOCK_OWNER_COLUMN, id: variantId }, selection);
 }
 
+/** Persisted column of the TemplateVariant entity's `isDefault` field (entities/core/template-variant.yaml). */
+export const VARIANT_DEFAULT_COLUMN = "is_default";
+
 /**
- * Selects the frozen variant(s) for a channel and locale, with their blocks in
- * the order publish() froze them (owned-collection position, then id).
+ * Selects the frozen variants of one channel, every locale, with their
+ * blocks in the order publish() froze them (owned-collection position, then
+ * id). The engine picks the locale (`selectContentTemplateVariant`): exact,
+ * same language, or the variant frozen as the channel's default.
  */
 export function templateSnapshotContent(snapshot: unknown, selection: TemplateSnapshotSelection): TemplateSnapshotContent {
   const root = head(snapshot, selection);
@@ -120,11 +124,16 @@ export function templateSnapshotContent(snapshot: unknown, selection: TemplateSn
   if (!Array.isArray(parameterFields) || !parameterFields.every(isObject)) invalid("The frozen template parameters are not canonical field definitions.");
   const variants: ContentTemplateVariant[] = [];
   for (const candidate of childRows(root, "template_variants", "variant")) {
-    if (candidate.row.channel !== selection.channel || candidate.row.locale !== selection.locale) continue;
+    if (candidate.row.channel !== selection.channel) continue;
     const variantId = uuid(candidate.row.id, "variant");
+    const locale = candidate.row.locale;
+    if (typeof locale !== "string" || !locale) invalid("The frozen variant has no locale.");
     if (candidate.row.tenant_id !== selection.tenantId || candidate.row[VARIANT_OWNER_COLUMN] !== selection.templateId) invalid("The frozen variant belongs to another template or tenant.");
     const blocks = childRows(candidate, selection.carrier.table, "block").map((entry) => block(entry, variantId, selection));
-    variants.push({ id: variantId, channel: selection.channel, locale: selection.locale, blocks, allowedDefinitions: [...selection.allowedDefinitions] });
+    variants.push({
+      id: variantId, channel: selection.channel, locale: locale as string, blocks, allowedDefinitions: [...selection.allowedDefinitions],
+      ...(candidate.row[VARIANT_DEFAULT_COLUMN] === true ? { default: true } : {}),
+    });
   }
   return { parameterFields: parameterFields as Record<string, unknown>[], variants };
 }

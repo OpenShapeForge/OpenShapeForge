@@ -37236,6 +37236,24 @@
           }
         },
         {
+          "key": "isDefault",
+          "label": {
+            "en": "Default for channel",
+            "nl": "Standaard voor kanaal"
+          },
+          "description": {
+            "en": "Served for this channel when no variant matches the requested language. At most one per channel.",
+            "nl": "Wordt voor dit kanaal geleverd als geen variant de gevraagde taal heeft. Hoogstens één per kanaal."
+          },
+          "osfType": "boolean",
+          "required": true,
+          "defaultValue": false,
+          "persisted": {
+            "column": "is_default",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "blocks",
           "label": {
             "en": "Blocks",

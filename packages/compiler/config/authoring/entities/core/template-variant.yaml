@@ -44,6 +44,15 @@ fields:
     validation: { pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
     label: { en: Content language, nl: Inhoudstaal }
     persisted: { column: locale, storageClass: core }
+  - key: isDefault
+    label: { en: Default for channel, nl: Standaard voor kanaal }
+    description:
+      en: Served for this channel when no variant matches the requested language. At most one per channel.
+      nl: Wordt voor dit kanaal geleverd als geen variant de gevraagde taal heeft. Hoogstens één per kanaal.
+    osfType: boolean
+    required: true
+    defaultValue: false
+    persisted: { column: is_default, storageClass: core }
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }
@@ -123,14 +132,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale, isDefault] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: blocks
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [template, channel, locale, isDefault] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [channel, locale, isDefault] }]

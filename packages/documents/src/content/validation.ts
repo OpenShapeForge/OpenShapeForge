@@ -306,18 +306,26 @@ export function defineContentTemplateVersion(
     );
   const ids = new Set<string>();
   const keys = new Set<string>();
+  const defaults = new Set<string>();
   for (const variant of version.variants) {
     assertContentRecord(variant, "variant");
-    exactKeys(variant, ["id", "channel", "locale", "blocks", "allowedDefinitions"], "variant");
+    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions"], "variant");
     assertContentName(variant.id, "variant id");
     assertContentName(variant.channel, "variant channel");
     assertContentName(variant.locale, "variant locale");
+    if (variant.default !== undefined && typeof variant.default !== "boolean")
+      contentError("INVALID_VALUE", "Variant default must be a boolean.");
     const key = canonicalJson([variant.channel, variant.locale]);
     if (ids.has(variant.id) || keys.has(key))
       contentError(
         "DUPLICATE",
         "Variant ids and channel/locale pairs must be unique within a version.",
       );
+    if (variant.default) {
+      if (defaults.has(variant.channel))
+        contentError("DUPLICATE", "A channel has at most one default variant.");
+      defaults.add(variant.channel);
+    }
     ids.add(variant.id);
     keys.add(key);
     if (!Array.isArray(variant.blocks) || variant.blocks.length > CONTENT_LIMITS.blocks)
@@ -351,6 +359,17 @@ export function defineContentTemplateVersion(
   return version;
 }
 
+/** The language subtag of a locale: `nl-NL` and `nl_NL` are both `nl`. */
+export function contentLanguage(locale: string): string {
+  return locale.trim().replace(/_/g, "-").split("-")[0]!.toLowerCase();
+}
+
+/**
+ * The variant a channel serves for a locale: the exact locale, else a variant
+ * of the same language (`nl` for `nl-NL`, the bare language preferred), else
+ * the channel's authored default. A channel without any of those is an error,
+ * never a silent switch to another language; another channel never is.
+ */
 export function selectContentTemplateVariant(
   version: ContentTemplateVersion,
   channel: string,
@@ -358,7 +377,13 @@ export function selectContentTemplateVariant(
 ) {
   const channels = version.variants.filter((variant) => variant.channel === channel);
   if (!channels.length) contentError("UNSUPPORTED_CHANNEL", `Template has no ${channel} variant.`);
-  const variant = channels.find((variant) => variant.locale === locale);
-  if (!variant) contentError("UNSUPPORTED_LOCALE", `Template has no ${channel}/${locale} variant.`);
+  const language = contentLanguage(locale);
+  const sameLanguage = channels.filter((variant) => contentLanguage(variant.locale) === language);
+  const variant =
+    channels.find((variant) => variant.locale === locale) ??
+    sameLanguage.find((variant) => variant.locale === language) ??
+    sameLanguage[0] ??
+    channels.find((variant) => variant.default);
+  if (!variant) contentError("UNSUPPORTED_LOCALE", `Template has no ${channel}/${locale} variant and no default ${channel} variant.`);
   return variant;
 }

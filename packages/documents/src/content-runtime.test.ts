@@ -32,7 +32,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
   const reads: string[] = [];
   const queries: string[] = [];
   const data = { text: "Hello {{local.name}} from {{chips.brand}}", chip: "Example", tenant: ids.tenant, unavailableOperation: false, disallowText: false,
-    redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK" };
+    redactChip: false, missingRead: "", snapshotTemplate: ids.template, liveText: "LIVE-ROW-MUST-NOT-LEAK", variantLocale: "en", variantDefault: false };
   const compiledCarrier = structuredClone({ ...carrier, definitions: { ...carrier.definitions,
     TextBlock: { ...carrier.definitions.TextBlock!, fields: [{ key: "text", osfType: "string", baseType: "string", required: true,
       ...(blockDefault === undefined ? {} : { defaultValue: blockDefault }) },
@@ -89,7 +89,7 @@ function fixture(blockDefault?: string, withReference = false, withBinding = fal
             const snapshot = { schemaVersion: 1, entity: "Template", head: { table: "templates",
               row: { id: data.snapshotTemplate, tenant_id: data.tenant, parameters: [{ key: "name", osfType: "string", defaultValue: "Reader" }] },
               children: { template_variants: [
-                { table: "template_variants", row: { id: ids.variant, tenant_id: data.tenant, template_id: ids.template, channel: "document", locale: "en" }, children: { blocks: [{ table: "blocks", row: blockRow, children: {} }] } },
+                { table: "template_variants", row: { id: ids.variant, tenant_id: data.tenant, template_id: ids.template, channel: "document", locale: data.variantLocale, is_default: data.variantDefault }, children: { blocks: [{ table: "blocks", row: blockRow, children: {} }] } },
                 { table: "template_variants", row: { id: ids.chip, tenant_id: data.tenant, template_id: ids.template, channel: "email", locale: "en" }, children: { blocks: [] } },
               ] } } };
             const records: Record<string, unknown> = {
@@ -156,6 +156,17 @@ describe("template materialization runtime adapter", () => {
     await expect(materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl" }, g.context)).rejects.toBeDefined();
     expect(g.executions).toHaveLength(0);
     expect(g.reads).toEqual(["TemplateVersion"]);
+  });
+  test("serves the frozen variant of the requested language, or the channel's frozen default", async () => {
+    const f = fixture();
+    f.data.variantLocale = "nl";
+    const served = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl-NL" }, f.context);
+    expect((served as { value: { templates: { variantId: string; version: { variants: { locale: string }[] } }[] } }).value.templates[0]!.version.variants[0]!.locale).toBe("nl");
+    const g = fixture();
+    g.data.variantDefault = true;
+    const fallback = await materializeTemplate({ templateVersionId: ids.version, channel: "document", locale: "nl" }, g.context);
+    expect((fallback as { value: { templates: { variantId: string }[] } }).value.templates[0]!.variantId).toBe(ids.variant);
+    expect(g.executions).toHaveLength(1);
   });
   test("never exposes a confidential Chip value when canonical get redacts it", async () => {
     const f = fixture();

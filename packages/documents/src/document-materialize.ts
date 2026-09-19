@@ -13,16 +13,19 @@ type DocumentRow = Readonly<{ id: string; template_version_id: string | null; pa
 const BLOCK_OWNER_COLUMN = "document_variant_id";
 
 /**
- * The document head's variants for one channel and locale, with their live
- * blocks in collection order (owning position, then id). Rows are shared for
- * the transaction so an edit cannot slip in between reading the variants and
- * hashing their content.
+ * The document head's variants for one channel, every locale, with their
+ * live blocks in collection order (owning position, then id). Which locale
+ * is served is the engine's choice, as for a template; the channel's default
+ * is the one the pinned template version froze as default, carried over by
+ * channel and locale (`defaultLocales`). Rows are shared for the transaction
+ * so an edit cannot slip in between reading the variants and hashing their
+ * content.
  */
-export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly locale: string },
+export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly defaultLocales?: ReadonlySet<string> },
   selection: BlockRowSelection, allowedDefinitions: readonly string[]): Promise<readonly ContentTemplateVariant[]> {
   const variants = await rows<{ id: string; channel: string; locale: string }>(trx,
-    "select id, channel, locale from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 and locale = $4 order by id for share",
-    [selection.tenantId, document.id, document.channel, document.locale]);
+    "select id, channel, locale from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
+    [selection.tenantId, document.id, document.channel]);
   const result: ContentTemplateVariant[] = [];
   for (const variant of variants) {
     const variantId = uuid(variant.id, "document variant");
@@ -30,7 +33,10 @@ export async function documentContentVariants(trx: unknown, document: { readonly
       "select to_jsonb(b.*) as row from erp.blocks b where tenant_id = $1 and document_variant_id = $2 order by document_variant_id_position, id for share",
       [selection.tenantId, variantId]);
     const blocks = found.map((entry) => contentBlockFromRow(object(entry.row, "document block"), { column: BLOCK_OWNER_COLUMN, id: variantId }, selection, "stored"));
-    result.push({ id: variantId, channel: document.channel, locale: document.locale, blocks, allowedDefinitions: [...allowedDefinitions] });
+    result.push({
+      id: variantId, channel: document.channel, locale: text(variant.locale, "document variant locale"), blocks, allowedDefinitions: [...allowedDefinitions],
+      ...(document.defaultLocales?.has(variant.locale) ? { default: true } : {}),
+    });
   }
   return result;
 }
@@ -70,7 +76,8 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
           const version = await frozen.resolveTemplateVersion(id, scope);
           if (!version || id !== templateVersionId) return version;
           const selection: BlockRowSelection = { tenantId, carrier, definitionVersionColumn: DEFINITION_VERSION_COLUMN };
-          return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, locale }, selection, documentCollection.allowedDefinitions) };
+          const defaultLocales = new Set(version.variants.filter((variant) => variant.default).map((variant) => variant.locale));
+          return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales }, selection, documentCollection.allowedDefinitions) };
         },
       };
       return materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);

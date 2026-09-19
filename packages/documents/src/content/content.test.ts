@@ -12,6 +12,7 @@ import {
   type CompiledContentBlockRegistry,
   type ContentBlock,
   type ContentResolvers,
+  type ContentTemplateVariant,
   type ContentTemplateVersion,
   type JsonObject,
   type MaterializeTemplateContentInput,
@@ -254,7 +255,7 @@ describe("template variants and local/global variables", () => {
     },
   );
 
-  test("does not silently fall back to a different channel or locale", async () => {
+  test("does not silently fall back to a different channel or language", async () => {
     const f = fixture();
     await rejectsCode(
       materializeTemplateContent({ ...f.request, channel: "sms" }, f.registry, f.resolvers),
@@ -264,6 +265,36 @@ describe("template variants and local/global variables", () => {
       materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers),
       "UNSUPPORTED_LOCALE",
     );
+  });
+
+  test("serves the variant of the requested language, then the channel's default variant", async () => {
+    const f = fixture();
+    const [document] = f.versions.root!.variants;
+    const withVariants = (variants: ContentTemplateVariant[]) => {
+      f.versions.root = { ...f.versions.root!, variants };
+    };
+    // nl-NL is served by the nl variant: the language subtag decides.
+    withVariants([{ ...document!, id: "root-nl", locale: "nl" }]);
+    let snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-NL" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl");
+    expect(snapshot.locale).toBe("nl-NL");
+    // The exact locale wins over the bare language, which wins over another region.
+    withVariants([{ ...document!, id: "root-nl-BE", locale: "nl-BE" }, { ...document!, id: "root-nl", locale: "nl" }, { ...document!, id: "root-nl-NL", locale: "nl-NL" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-NL" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl-NL");
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl-AW" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-nl");
+    // A language the template lacks is served by the channel's default variant.
+    withVariants([{ ...document!, id: "root-en", locale: "en", default: true }, { ...document!, id: "root-fr", locale: "fr" }]);
+    snapshot = await materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers);
+    expect(snapshot.templates[0]!.variantId).toBe("root-en");
+    expect(snapshot.templates[0]!.version.variants).toEqual([{ ...document!, id: "root-en", locale: "en", default: true }]);
+    // Without a default, the existing refusal.
+    withVariants([{ ...document!, id: "root-en", locale: "en" }, { ...document!, id: "root-fr", locale: "fr" }]);
+    await rejectsCode(materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers), "UNSUPPORTED_LOCALE");
+    // Two defaults on one channel are refused as a definition error.
+    withVariants([{ ...document!, id: "root-en", locale: "en", default: true }, { ...document!, id: "root-fr", locale: "fr", default: true }]);
+    await rejectsCode(materializeTemplateContent({ ...f.request, locale: "nl" }, f.registry, f.resolvers), "DUPLICATE");
   });
 
   test("rejects duplicate channels/locales, variant ids and block ids", () => {

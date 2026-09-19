@@ -67,6 +67,8 @@ export type ContentTemplateVariant = {
   readonly id: string;
   readonly channel: string;
   readonly locale: string;
+  /** Served for its channel when no variant matches the requested language; at most one per channel. */
+  readonly default?: boolean;
   /** The owning collection's order is authoritative. No second position property exists. */
   readonly blocks: readonly ContentBlock[];
   readonly allowedDefinitions?: readonly string[];

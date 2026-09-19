@@ -266,6 +266,8 @@ export type PluginPlatformServices = {
     organizationServiceIdentity(session: PluginSessionContext): Promise<{ serviceIdentityId: string }>;
   };
   db: PluginDatabase;
+  /** The durable outbox; see `RuntimeJobServices`. */
+  readonly jobs: RuntimeJobServices;
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
     json: RuntimeJsonSchemaValidator;
@@ -353,6 +355,91 @@ export type RuntimeResolvedOperationWork = {
 export type RuntimeWorkerOperationBroker = RuntimeWorkerOperationExecutor & {
   authorize(reference: RuntimeDurableWorkReference): Promise<RuntimeDurableOperationRequest>;
 };
+
+/**
+ * The durable job/outbox primitive. A module enqueues a job inside the same
+ * transaction as its domain write; the host's `job-worker` role claims it and
+ * runs the handler registered for its kind under a tenant session for the
+ * person who enqueued it.
+ */
+export type RuntimeJobSubject = { entity: string; id: string };
+
+export type RuntimeJobStatus = "queued" | "running" | "done" | "failed" | "dead" | "outcome_unknown";
+
+export type RuntimeJobEnqueueInput = {
+  /** Namespaced, e.g. `mail.deliver` or `<plugin>.<job>`. */
+  kind: string;
+  payload: Record<string, unknown>;
+  /**
+   * Idempotent enqueue: the same key for the same tenant and kind returns the
+   * existing job instead of a second one.
+   */
+  deliveryKey?: string;
+  /** Not before; defaults to now. */
+  availableAt?: Date;
+  maxAttempts?: number;
+  /** The record this job is about, so a screen can list the jobs of one record. */
+  subject?: RuntimeJobSubject;
+};
+
+export type RuntimeJobEnqueueResult = {
+  id: string;
+  /** False when `deliveryKey` matched an existing job, which is returned instead. */
+  created: boolean;
+  status: RuntimeJobStatus;
+};
+
+export type RuntimeJobServices = {
+  /**
+   * Enqueue under the live verified session's tenant, inside the active
+   * Operation transaction when there is one — the outbox pattern: the job
+   * exists exactly when the domain write does.
+   */
+  enqueue(session: PluginSessionContext, input: RuntimeJobEnqueueInput): Promise<RuntimeJobEnqueueResult>;
+};
+
+/** What a job handler may read about the job it is running. */
+export type RuntimeJobClaim = {
+  id: string;
+  tenantId: string;
+  actorId: string;
+  kind: string;
+  /** 1 on the first run. */
+  attempt: number;
+  maxAttempts: number;
+  subject: RuntimeJobSubject | null;
+};
+
+export type RuntimeJobError = { message: string; code?: string; detail?: Record<string, unknown> };
+
+/**
+ * How a handler ends. `retry` backs off with jitter and turns `dead` once the
+ * attempt bound is reached; `failed` is terminal without retry;
+ * `outcome_unknown` says an external effect MAY have happened and must never
+ * be repeated automatically — an operator decides. A handler that throws is
+ * treated as `retry`; one that returns nothing is `done`.
+ */
+export type RuntimeJobOutcome =
+  | { outcome: "done"; result?: Record<string, unknown> }
+  | { outcome: "retry"; error: RuntimeJobError; retryAt?: Date }
+  | { outcome: "failed"; error: RuntimeJobError }
+  | { outcome: "outcome_unknown"; error: RuntimeJobError };
+
+export type RuntimeJobHandlerContextContract<Database> = {
+  job: RuntimeJobClaim;
+  /** A tenant session for the job's tenant and enqueuing actor, as the worker role. */
+  db: Database;
+  log: RuntimeWorkerLogger;
+};
+
+export type RuntimeJobHandlerContract<Context> = (
+  payload: Record<string, unknown>,
+  context: Context,
+) => Promise<RuntimeJobOutcome | void>;
+
+export type RuntimeJobHandler = RuntimeJobHandlerContract<
+  RuntimeJobHandlerContextContract<Transaction<PluginDatabaseSchema>>
+>;
 
 /** Minimal structured logger shared by every contributed worker. */
 export type RuntimeWorkerLogger = {
@@ -522,6 +609,7 @@ export type RuntimeModuleContract<
   >,
   AvailabilityHandler = ModuleOperationAvailabilityHandler,
   ArtifactStorage = RuntimeArtifactStorageContribution<PluginSessionContext, Transaction<PluginDatabaseSchema>>,
+  JobHandler = RuntimeJobHandler,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -536,6 +624,12 @@ export type RuntimeModuleContract<
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
   workers?: Record<string, Worker>;
+  /**
+   * Handlers for durable job kinds, keyed by kind. A kind two active modules
+   * both register fails closed when the host composes its handlers; a queued
+   * job whose kind no module handles ends `dead`.
+   */
+  jobHandlers?: Record<string, JobHandler>;
   seeds?: Seed[];
 };
 

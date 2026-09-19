@@ -39,9 +39,10 @@ export type { CompiledPluginOperation } from "./plugins.js";
 /**
  * Runtime modules the API itself provides, so an Operation bound to one needs
  * no plugin runtime in the module registry: `osf-blueprints` serves the
- * blueprint Operations and `osf-control` the platform's own administration.
+ * blueprint Operations, `osf-control` the platform's own administration and
+ * `osf-jobs` the durable job queue.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-jobs"];
 
 /**
  * Platform-owned mutation controls are derived from the canonical Operation
@@ -130,6 +131,7 @@ const RESERVED_API_NAMESPACES = new Set([
   "entity-oauth",
   "graphql",
   "health",
+  "jobs",
   "live",
   "mcp",
   "metrics",
@@ -145,6 +147,7 @@ const RESERVED_API_NAMESPACES = new Set([
  */
 const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
   ["control", "osf-control"],
+  ["jobs", "osf-jobs"],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {

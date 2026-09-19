@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { blueprintOperationHandler } from "./entity/blueprints.js";
 import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
+import { JOBS_PLUGIN, jobsOperationHandler } from "../jobs/operations.js";
 import {
   bearerIssuerOf,
   controlSessionHttpError,
@@ -596,6 +597,14 @@ export function bindOperationHandlers(
     if (operation.plugin === CONTROL_PLUGIN) {
       if (modulesByName.has(CONTROL_PLUGIN)) throw new Error("The core control runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
+      continue;
+    }
+    // The durable job queue is core as well: its handlers (jobs/operations.ts)
+    // bind in every process, so a deployment administers its outbox without
+    // an operation module.
+    if (operation.plugin === JOBS_PLUGIN) {
+      if (modulesByName.has(JOBS_PLUGIN)) throw new Error("The core jobs runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: jobsOperationHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "entity-type-list") {
@@ -1792,7 +1801,9 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  const activePlugins = new Set(modules.map((module) => module.name));
+  // The core jobs Operations project in every process, as their REST and MCP
+  // surfaces do: the handlers ship with the runtime, not with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

@@ -505,11 +505,12 @@ question the database can answer.
 Nothing is bypassed, so nothing is audited — the break-glass trail stays
 readable rather than being buried under a poll loop's heartbeat.
 
-Five tables declare it today: `workflow.control_commands`,
+Six tables declare it today: `workflow.control_commands`,
 `workflow.schedules`, `workflow.schedule_fires`, `workflow.waits` and
-`workflow.collection_waits`. Notably *not* `workflow.instances` or
-`workflow.node_states` — those are reached only after a command is claimed,
-from a session scoped to that command's tenant.
+`workflow.collection_waits` for the `workflow-worker`, and core's own
+`platform.jobs` for the `job-worker` ([jobs.md](jobs.md)). Notably *not*
+`workflow.instances` or `workflow.node_states` — those are reached only after
+a command is claimed, from a session scoped to that command's tenant.
 
 Two properties worth being explicit about:
 

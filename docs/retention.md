@@ -47,6 +47,18 @@ rule) when a declared retention policy cannot resolve a usable clock:
 This prevents an entity from advertising a statutory retention window that
 compiles to nothing.
 
+## What is swept today: finished jobs
+
+One runtime sweep exists, and it is deliberately narrow. The `job-worker`
+role ([jobs.md](jobs.md#retention)) deletes rows of `platform.jobs` in status
+`done` whose `completed_at` is older than
+`OPENSHAPEFORGE_JOBS_DONE_RETENTION_DAYS` (default 30; `0` disables it), once
+an hour, under the worker session. It touches no other status: a `failed`,
+`dead` or `outcome_unknown` job is an operator decision still to be taken, and
+a queue that forgot those would forget the very rows retention exists to
+account for. It reads no entity retention metadata and is not the executor
+described below — the queue is platform bookkeeping, not a business record.
+
 ## Runtime enforcement: NOT IMPLEMENTED (follow-up)
 
 **There is no retention-enforcement runtime.** Nothing in `apps/api` reads the

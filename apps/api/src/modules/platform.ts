@@ -5,6 +5,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
+import { enqueueJob } from "../jobs/store.js";
 import { appendEntityEvent, appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
@@ -350,6 +351,23 @@ export class ModulePlatformRuntime {
             return fn(active.trx);
           }
           return withDbSession(this.#db, session, fn);
+        },
+      },
+      jobs: {
+        // The outbox: inside the active Operation transaction when there is
+        // one, so the job commits exactly when the handler's own writes do.
+        enqueue: (session, input) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Job enqueue requires a live verified session.");
+          }
+          if (!session.tenantId || !session.userId) {
+            throw new Error("Job enqueue requires an authenticated tenant session.");
+          }
+          const tenantId = session.tenantId;
+          const actorId = session.userId;
+          return this.services.db.withSession(session, (trx) =>
+            enqueueJob(trx, { ...input, tenantId, actorId }),
+          );
         },
       },
       schemas: {

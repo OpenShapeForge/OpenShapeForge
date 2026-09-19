@@ -143,6 +143,19 @@ services:
     networks:
       - service-net
 
+  # Catches every message the `mail.deliver` job sends locally (docs/jobs.md):
+  # SMTP on 1025 for OPENSHAPEFORGE_SMTP_URL=smtp://localhost:1025, and a web
+  # inbox on 8025. Nothing leaves the machine.
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: openshapeforge-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - service-net
+
 volumes:
   # Suffixed with the Postgres major version the data belongs to. A major
   # version bump needs a fresh volume — there is no in-place upgrade — so the

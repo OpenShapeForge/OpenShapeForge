@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
 import { collectBlueprintOperations } from "./blueprint-operations.js";
+import { collectJobOperations } from "./job-operations.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
@@ -347,6 +348,7 @@ export async function collectAllArtifacts(
     .map(({ document }) => document);
   const operations = [
     ...collectBlueprintOperations(entities),
+    ...collectJobOperations(),
     ...collectPluginOperations(plugins, operationContext),
     ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),

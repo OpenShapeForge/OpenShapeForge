@@ -44,7 +44,8 @@
  *      per table family, each idempotent on every run: employee invitations
  *      (checks, the one-pending-per-address partial expression index,
  *      policy), the tenant's organization-Relation write policy, update
- *      notices (policies), execution receipts (checks, policy), blueprints
+ *      notices (policies), execution receipts (checks, policy), jobs (the
+ *      status vocabulary and per-status shape of the core outbox), blueprints
  *      (checks, compound provenance reference, policies, the SECURITY
  *      DEFINER read function and its ownership transfer).
  *   4.  grants                — sweep DML grants over ALL now-existing tables
@@ -84,6 +85,7 @@ import { applyOrganizationRelationLinkMigration } from "./migrations/organizatio
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
+import { applyJobsMigration } from "./migrations/jobs.js";
 import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
@@ -148,6 +150,7 @@ export async function runMigrationChain(
   await applyOrganizationRelationLinkMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
+  await applyJobsMigration(db);
   await applyBlueprintsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);

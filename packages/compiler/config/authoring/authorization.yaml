@@ -248,6 +248,11 @@ clientRoles:
     # Platform.* role, so it is never emitted by an entity's authorization
     # block and cannot be acquired through ordinary business access.
     - Platform.ApiKeys.Manage
+    # Grants the durable job queue's operator surface (jobs.list / jobs.get /
+    # jobs.retry, docs/jobs.md): reading a tenant's background jobs and
+    # requeueing or closing the ones that stopped. Same family as the API-key
+    # role above — never emitted by an entity's authorization block.
+    - Platform.Jobs.Manage
     - CaseFile.All.Read
     - Energy.All.Read
     - Maintenance.All.Read

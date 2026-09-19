@@ -776,10 +776,10 @@ describe("web manifest projection", () => {
     ] as never;
 
     const projected = buildWebManifest([deal], { requireTranslations: true }).entities.Deal!;
-    const publish = projected.operations.publish as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
+    const publish = projected.operations.publish as unknown as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
     expect(publish.input.schema.required).toEqual(["id", "expectedVersion"]);
     expect(publish.input.schema.properties.expectedVersion).toMatchObject({ type: "string", format: "date-time" });
-    const archive = projected.operations.archive as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
+    const archive = projected.operations.archive as unknown as { input: { schema: { required: string[]; properties: Record<string, unknown> } } };
     expect(archive.input.schema.required).toEqual(["id", "expectedVersion", "leaseToken"]);
     expect(Object.keys(archive.input.schema.properties)).toEqual(["id", "expectedVersion", "leaseToken", "confirmed"]);
   });
@@ -1191,7 +1191,7 @@ describe("standalone Operation pages", () => {
 
   test("projects standalone Operations with the compiled, control-augmented input schema", () => {
     const manifest = buildWebManifest([], { requireTranslations: true }, standalone(controlCatalog));
-    const update = manifest.operations!["control.update-tenant"] as { input: { schema: { properties: Record<string, unknown> } } };
+    const update = manifest.operations!["control.update-tenant"] as unknown as { input: { schema: { properties: Record<string, unknown> } } };
     expect(Object.keys(update.input.schema.properties)).toEqual(["slug", "name", "confirmed"]);
   });
 

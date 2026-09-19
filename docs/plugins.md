@@ -21,7 +21,7 @@ Contracts and loaders: `packages/compiler/src/plugins.ts` (tests in
 Commands and purpose-built queries belong in `CompilerPlugin.operations`, not
 in transport-specific fragments. Each operation has one stable, plugin-prefixed
 key; method/path; JSON Schema 2020-12 input, output, and errors; authenticated
-session/public/custom authentication; tenant and idempotency semantics; a runtime handler key;
+session/public/capability/custom authentication; tenant and idempotency semantics; a runtime handler key;
 and explicit REST, MCP, GraphQL, and TypeScript projections.
 
 Generation validates the whole catalog before emitting anything. Duplicate
@@ -54,7 +54,12 @@ the runtime boundary on REST, MCP, and GraphQL. Session roles and OAuth scopes
 are enforced centrally across verified bearer, API-key, and signed trusted-context
 identities. API keys deliberately cannot invoke operations that require OAuth
 scopes until keys have their own persisted scope subset; a custom scheme is handler-owned, fully described as an OpenAPI
-security scheme, and only available through its REST projection.
+security scheme, and only available through its REST projection. A
+`capability` Operation is REST-only too, but core owns its credential: a
+hashed, expiring, recipient-bound **capability grant** that core resolves
+into a grant session (`credential: "grant"`, tenant, no roles,
+`session.grant`) before the handler runs, and counts as used inside the
+handler's transaction — see [capability-grants.md](capability-grants.md).
 
 A handler can return a declared failure without throwing an untyped transport
 error:

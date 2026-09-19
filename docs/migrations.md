@@ -51,7 +51,7 @@ the DDL itself:
    - `core-invariants.ts`: the org-unit closure trigger, the document
      authority guards and tenant-qualified compound keys, the logical
      document commands (`document_internal.*`), the artifact binding;
-   - `identity-link.ts`, `employee-invitations.ts`,
+   - `identity-link.ts`, `employee-invitations.ts`, `capability-grants.ts`,
      `organization-relation-link.ts`, `update-notices.ts`,
      `operation-execution-receipts.ts`, `blueprints.ts`: the checks,
      expression indexes, functions and policies of the runtime tables;

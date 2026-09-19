@@ -706,6 +706,13 @@ comma-separated) yields scope `tenant`; else `group` when groups exist; else
 `self`. With no rowScope policies live, scope currently has no effect on
 visibility.
 
+**4. Capability grants** — `Authorization: Grant <grantId>.<secret>`, accepted
+only by Operations declared with `auth.mode: capability`. Not a session
+resolver path: the operations runtime resolves the token into a grant
+session with a tenant, no user and no roles, so a grant reaches exactly the
+Operations it lists on exactly one record, and nothing else on this surface.
+See [capability-grants.md](capability-grants.md).
+
 ## The entity-event journal
 
 `platform.entity_events` (defined in `config/platform-schema.yaml`;

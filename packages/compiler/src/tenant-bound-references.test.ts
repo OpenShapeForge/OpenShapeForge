@@ -218,4 +218,21 @@ describe("tenant-bound references", () => {
       "erp.settings.tenant_id is the row's tenant identity and may only reference erp.tenants.id, not (tenant_id).",
     );
   });
+
+  it("emits restrictive INSERT and DELETE policies for a table carrying the tenant-registry mark", () => {
+    const registry = tenantTable("tenants");
+    const plain = tenantTable("customers");
+    registry.constraints = [{
+      compilerOwned: true, version: "0001_tenant-identity-tenants", name: tenantIdentityCheckName(registry),
+      kind: "check", expression: TENANT_IDENTITY_CHECK_EXPRESSION,
+    }];
+    const sql = schemaSql(manifest(registry, plain));
+    expect(sql).toContain(
+      'CREATE POLICY "tenants_registry_insert" ON "erp"."tenants"\n  AS RESTRICTIVE FOR INSERT\n  WITH CHECK (app.bypass_rls());',
+    );
+    expect(sql).toContain(
+      'CREATE POLICY "tenants_registry_delete" ON "erp"."tenants"\n  AS RESTRICTIVE FOR DELETE\n  USING (app.bypass_rls());',
+    );
+    expect(sql).not.toContain("customers_registry_insert");
+  });
 });

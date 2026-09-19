@@ -54,39 +54,14 @@ import { WORKER_ROLE } from "./worker-role.js";
  *      constraint trigger makes that transaction uncommittable until the
  *      trusted descriptor returned by artifact storage has finalized the
  *      row. Provider object keys never enter the Document schema.
- *
- *   5. TENANT REGISTRY OWNERSHIP. erp.tenants is written by tenant
- *      provisioning alone (control/provisioning.ts, in a system session),
- *      beside the platform registry row and with the same id. The generated
- *      tenant policy would let any session of a tenant insert or delete its
- *      own registry row; a restrictive policy keeps INSERT and DELETE to the
- *      bypass session, so the interface layer's "no create, no delete" on
- *      the Tenant contract holds in the database as well.
  */
 export async function applyCoreInvariants(db: OpenShapeForgeDatabase): Promise<void> {
   await applyOrgUnitClosure(db);
   await applyDocumentAuthority(db);
   await applyDocumentCommands(db);
   await applyArtifactBinding(db);
-  await applyTenantRegistryOwnership(db);
 }
 
-async function applyTenantRegistryOwnership(db: OpenShapeForgeDatabase): Promise<void> {
-  // RESTRICTIVE: ANDed with the generated permissive tenant policy rather
-  // than OR'd beside it, so it can only narrow. Reads and updates keep the
-  // generated policy alone; a tenant edits its own registry row through the
-  // Tenant contract's update Operation.
-  await sql`
-    drop policy if exists tenants_registry_insert on erp.tenants;
-    create policy tenants_registry_insert on erp.tenants
-      as restrictive for insert
-      with check (app.bypass_rls());
-    drop policy if exists tenants_registry_delete on erp.tenants;
-    create policy tenants_registry_delete on erp.tenants
-      as restrictive for delete
-      using (app.bypass_rls());
-  `.execute(db);
-}
 
 async function applyOrgUnitClosure(db: OpenShapeForgeDatabase): Promise<void> {
   // INSERT: self-row (NEW.id, NEW.id, 0) + copy parent's ancestor paths +1.

@@ -2,6 +2,7 @@
 
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../../generated/db/types.js";
+import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../../db/session.js";
 
 type KeycloakTokenStore = {
   defaultToken: Promise<string | null> | null;
@@ -86,7 +87,13 @@ export async function seedKeycloakTokenPeople(
       values (${claims.iss}, ${claims.sub}, ${claims.email}, ${displayName})
       on conflict (issuer, subject) do nothing
     `.execute(db);
-    await sql`
+    // The roles column is guarded by a trigger that admits only an
+    // organization administrator or the audited bypass; the seed is the
+    // latter, the same way the runtime's own elevated write is.
+    await withSystemSession(
+      db,
+      { actorSubject: "e2e-seed", roles: [SYSTEM_BYPASS_ROLE], reason: "e2e: seed realm test people", tenantId: claims.tid },
+      (trx) => sql`
       insert into platform.identity_relations
         (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
       select i.id, ${claims.tid}, 'linked', r.id, now(), 'e2e-seed',
@@ -105,7 +112,8 @@ export async function seedKeycloakTokenPeople(
             linked_by = coalesce(platform.identity_relations.linked_by, 'e2e-seed'),
             roles = excluded.roles,
             updated_at = now()
-    `.execute(db);
+    `.execute(trx),
+    );
   }
 }
 

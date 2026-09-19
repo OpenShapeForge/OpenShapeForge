@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  operationChoiceKeyword,
   operationFieldObjectSchema,
   operationI18nKeyword,
   operationInputFieldsKeyword,
@@ -30,7 +31,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     // Match canonical Operation validation: this is presentation metadata,
     // never an alternative to the artifact object's actual value constraints.
     ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
-    ajv.addKeyword({ keyword: "x-osf-choice", schemaType: "string", valid: true });
+    ajv.addKeyword(operationChoiceKeyword);
     try {
       if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);

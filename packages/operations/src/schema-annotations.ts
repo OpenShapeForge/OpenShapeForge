@@ -61,3 +61,26 @@ export const operationI18nKeyword = {
     },
   },
 };
+
+/**
+ * Editor metadata: which catalogue a closed choice is filled from (a field,
+ * a sortable field, a relationship, an operation with its scope, a renderer or
+ * a component). Never validated against the value; a consumer that cannot
+ * fill the choice treats the node as free text.
+ */
+export const operationChoiceKeyword = {
+  keyword: "x-osf-choice", valid: true,
+  metaSchema: {
+    anyOf: [
+      { type: "string", enum: ["field", "sortableField", "relationship", "operation", "renderer", "component"] },
+      {
+        type: "object", additionalProperties: false, required: ["kind"],
+        properties: {
+          kind: { type: "string", enum: ["operation"] },
+          scope: { type: "string", enum: ["collection", "record"] },
+        },
+      },
+    ],
+  },
+};
+

@@ -105,7 +105,7 @@ describe("status transitions against PostgreSQL", () => {
     privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 1 });
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
-      create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, unique(tenant_id,id));
+      create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, activated_at timestamptz, amount numeric, unique(tenant_id,id));
       create table erp.agreement_milestones(${columnDdl()}, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
@@ -261,6 +261,38 @@ describe("status transitions against PostgreSQL", () => {
     expect(await executeTransition(restricted!.db, session, inBinding, { id: await milestone("pending", tenant, listed) })).toMatchObject({ status: "triggered" });
     await expect(executeTransition(restricted!.db, session, inBinding, { id: await milestone() })).rejects.toMatchObject({
       operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
+    });
+  });
+
+  test("in is compared in SQL against the typed column for datetime and numeric", async () => {
+    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
+    const column = (name: string, type: string, sourceField: string) => ({
+      name, type, required: false, primaryKey: false, generated: null, sourceField,
+    });
+    const bindingFor = (field: string, fieldColumn: { name: string; type: string; required: boolean; primaryKey: boolean; generated: null; sourceField: string }, allowed: Array<string | number | boolean>): TransitionBinding => ({
+      ...transitionBinding(operation),
+      referenced: [{ ...via, field, fieldColumn, in: allowed }],
+    });
+    const seed = async (values: { activatedAt?: string; amount?: string }) => {
+      const id = randomUUID();
+      await sql`insert into erp.agreements (id, tenant_id, activated_at, amount)
+        values (${id}::uuid, ${tenant}::uuid, ${values.activatedAt ?? null}::timestamptz, ${values.amount ?? null}::numeric)`.execute(privileged!.db);
+      return milestone("pending", tenant, id);
+    };
+
+    const instant = "2026-03-01T09:30:00.000Z";
+    const datetime = bindingFor("activatedAt", column("activated_at", "timestamptz", "activatedAt"), [instant]);
+    expect(await executeTransition(restricted!.db, session, datetime, { id: await seed({ activatedAt: "2026-03-01 09:30:00+00" }) }))
+      .toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, datetime, { id: await seed({ activatedAt: "2026-03-01 09:31:00+00" }) })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.activatedAt to be one of 2026-03-01T09:30:00.000Z." },
+    });
+
+    const numeric = bindingFor("amount", column("amount", "numeric", "amount"), [1.5]);
+    expect(await executeTransition(restricted!.db, session, numeric, { id: await seed({ amount: "1.50" }) }))
+      .toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, numeric, { id: await seed({ amount: "1.51" }) })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.amount to be one of 1.5." },
     });
   });
 });

@@ -140,13 +140,31 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
 
+/** The record a `via` names, plus SQL-evaluated `in` membership per field. */
+export type TransitionReferencedRow = {
+  row: GeneratedEntityRow;
+  inHolds: ReadonlyMap<string, boolean>;
+};
+
 /** Strictly nullish: a stored empty string is a present value, as the contract says. */
 function present(value: unknown): boolean {
   return value !== null && value !== undefined;
 }
 
-function inSet(value: unknown, allowed: readonly (string | number | boolean)[]): boolean {
-  return allowed.some((candidate) => candidate === value);
+/** Authored `in` value as a typed SQL literal of the column's type. */
+function typedInLiteral(column: GeneratedCrudColumn, value: string | number | boolean) {
+  return sql`cast(${String(value)} as ${sql.raw(column.type)})`;
+}
+
+/**
+ * `in` membership the way `agreesOn` compares: one expression, typed literals,
+ * `IS NOT DISTINCT FROM` against `= ANY` of the authored set.
+ */
+function inHoldsSql(alias: string, column: GeneratedCrudColumn, values: readonly (string | number | boolean)[]) {
+  return sql`exists (
+    select 1 from unnest(array[${sql.join(values.map((value) => typedInLiteral(column, value)))}]) as allowed(value)
+    where ${sql.id(alias, column.name)} is not distinct from allowed.value
+  )`;
 }
 
 function invalidState(message: string): OperationError {
@@ -157,12 +175,13 @@ function invalidState(message: string): OperationError {
  * Why the rule cannot fire on this row, or undefined when it can. The same
  * decision serves the offer list and the execution, so what a caller is
  * shown is what the write checks. `referenced` is the record each `via`
- * names in this tenant; a missing entry is a refusal, never a skip.
+ * names in this tenant; a missing entry is a refusal, never a skip. `in`
+ * membership is the SQL result, not a JavaScript `===` against `to_jsonb`.
  */
 export function transitionRefusal(
   binding: TransitionBinding,
   row: Readonly<GeneratedEntityRow>,
-  referenced: ReadonlyMap<string, GeneratedEntityRow | undefined> = new Map(),
+  referenced: ReadonlyMap<string, TransitionReferencedRow | undefined> = new Map(),
 ): OperationError | undefined {
   const entity = binding.table.source?.authoringEntityName ?? binding.table.name;
   const current = row[binding.statusColumn.name];
@@ -185,11 +204,11 @@ export function transitionRefusal(
       const target = precondition.target.source?.authoringEntityName ?? precondition.target.name;
       return invalidState(`${binding.rule.key} requires ${named} on a ${target} in this tenant.`);
     }
-    const value = remote[precondition.fieldColumn.name];
+    const value = remote.row[precondition.fieldColumn.name];
     if (precondition.present !== undefined && present(value) !== precondition.present) {
       return invalidState(`${binding.rule.key} requires ${named} to be ${precondition.present ? "set" : "empty"}.`);
     }
-    if (precondition.in && !inSet(value, precondition.in)) {
+    if (precondition.in && remote.inHolds.get(precondition.field) !== true) {
       return invalidState(`${binding.rule.key} requires ${named} to be one of ${precondition.in.join(", ")}.`);
     }
   }
@@ -214,14 +233,49 @@ async function lockedRows(
   return new Map(result.rows.map(({ id, row }) => [id, row]));
 }
 
+type ReferencedFetchRow = { id: string; row: GeneratedEntityRow } & Record<string, unknown>;
+
+/** One read of a target table: the rows, and `in` membership against the typed column. */
+async function fetchReferenced(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  target: GeneratedCrudTable,
+  ids: readonly string[],
+  inChecks: readonly TransitionReferencedPrecondition[],
+  lock: boolean,
+): Promise<Map<string, TransitionReferencedRow>> {
+  if (ids.length === 0) return new Map();
+  const tenantWhere = target.tenantScoped
+    ? sql`and ${sql.id("remote", "tenant_id")} = ${session.tenantId}::uuid`
+    : sql``;
+  const inSelects = inChecks.map((precondition, index) =>
+    sql`${inHoldsSql("remote", precondition.fieldColumn, precondition.in!)} as ${sql.raw(`in_${index}`)}`,
+  );
+  const result = await sql<ReferencedFetchRow>`
+    select ${sql.id("remote", target.primaryKey!)}::text as id, to_jsonb(remote.*) as row
+      ${inSelects.length ? sql`, ${sql.join(inSelects)}` : sql``}
+    from ${sql.id(target.schema, target.table)} as remote
+    where ${sql.id("remote", target.primaryKey!)}::text in (${sql.join([...ids])})
+      ${tenantWhere}
+    ${lock ? sql`for share of remote` : sql``}
+  `.execute(trx);
+  return new Map(result.rows.map((entry) => {
+    const inHolds = new Map<string, boolean>();
+    inChecks.forEach((precondition, index) => {
+      inHolds.set(precondition.field, entry[`in_${index}`] === true);
+    });
+    return [entry.id, { row: entry.row, inHolds }];
+  }));
+}
+
 async function referencedRecords(
   trx: Transaction<DB>,
   session: DbSessionInput,
   binding: TransitionBinding,
   row: Readonly<GeneratedEntityRow>,
   lock: boolean,
-): Promise<Map<string, GeneratedEntityRow | undefined>> {
-  const found = new Map<string, GeneratedEntityRow | undefined>();
+): Promise<Map<string, TransitionReferencedRow | undefined>> {
+  const found = new Map<string, TransitionReferencedRow | undefined>();
   for (const precondition of binding.referenced) {
     if (found.has(precondition.via)) continue;
     const viaValue = row[precondition.viaColumn.name];
@@ -229,17 +283,9 @@ async function referencedRecords(
       found.set(precondition.via, undefined);
       continue;
     }
-    const tenantWhere = precondition.target.tenantScoped
-      ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}::uuid`
-      : sql``;
-    const result = await sql<{ row: GeneratedEntityRow }>`
-      select to_jsonb(${sql.id(precondition.target.table)}.*) as row
-      from ${sql.id(precondition.target.schema, precondition.target.table)}
-      where ${sql.id(precondition.target.primaryKey!)}::text = ${String(viaValue)}
-        ${tenantWhere}
-      ${lock ? sql`for share` : sql``}
-    `.execute(trx);
-    found.set(precondition.via, result.rows[0]?.row);
+    const inChecks = binding.referenced.filter((candidate) => candidate.via === precondition.via && candidate.in?.length);
+    const fetched = await fetchReferenced(trx, session, precondition.target, [String(viaValue)], inChecks, lock);
+    found.set(precondition.via, fetched.get(String(viaValue)));
   }
   return found;
 }

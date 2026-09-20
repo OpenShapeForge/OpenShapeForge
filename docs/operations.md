@@ -194,9 +194,12 @@ row is present (not null) or absent (null), or a field of the record a
 single entity reference names is present/absent or holds one of `in`; an
 empty string is a present value; a missing referenced record is a refusal,
 never a skip. The generic handler reads that record under RLS in the same
-transaction (`FOR SHARE`, tenant-scoped, like `agreesOn`) and refuses with
-`INVALID_STATE` in the same shape as a row-level precondition, naming the
-via field and the referenced field. Richer checks belong in an authored
+transaction (`FOR SHARE`, tenant-scoped, like `agreesOn`) and evaluates `in`
+in that query against the typed column — typed literals, `IS DISTINCT FROM` /
+`= ANY` — so a timestamptz matches an authored ISO string and a numeric
+matches without JSON precision loss, then refuses with `INVALID_STATE` in
+the same shape as a row-level precondition, naming the via field and the
+referenced field. Richer checks belong in an authored
 plugin Operation.
 
 `AgreementMilestone.status` is the first core state machine: `trigger` moves

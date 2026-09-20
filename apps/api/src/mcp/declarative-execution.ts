@@ -1781,11 +1781,3 @@ export function orderedBindingRecords(raw: unknown): JsonRecord[] {
     })
     .sort((a, b) => (a.order as number) - (b.order as number));
 }
-
-/** Bindings stored as a JSON collection on the owner row. */
-export function orderedBindings(
-  row: JsonRecord,
-  bindingsField: string,
-): JsonRecord[] {
-  return orderedBindingRecords(row[bindingsField]);
-}

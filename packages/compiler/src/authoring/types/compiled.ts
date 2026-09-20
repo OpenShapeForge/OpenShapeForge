@@ -55,7 +55,6 @@ import type {
   RestOperationKey,
   ThirdPartyApiEndpoint,
 } from "./authoring.js";
-import type { CanonicalCompilerKernel } from "../compiler/canonical/index.js";
 
 export interface CompiledViewRender {
   component: string;
@@ -795,6 +794,5 @@ export interface CompiledEntityContract {
   permissions?: EntityPermissions;
   authorization: CompiledAuthorization;
   views: Record<string, CompiledViewContext>;
-  canonical: CanonicalCompilerKernel;
   profiles: Record<string, CompiledProfile>;
 }

@@ -87,7 +87,6 @@ const contract = (
       profileAuthorizations: {},
     },
     views: {},
-    canonical: {} as never,
     profiles: {},
     entityOperations: {},
   } as unknown as CompiledEntityContract;

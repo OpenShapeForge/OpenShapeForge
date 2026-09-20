@@ -150,7 +150,6 @@ function entity(
       graphql: {} as CompiledEntityContract["graphql"],
       authorization,
       views: { core: view },
-      canonical: { contexts: {} },
       profiles: {},
     },
   };

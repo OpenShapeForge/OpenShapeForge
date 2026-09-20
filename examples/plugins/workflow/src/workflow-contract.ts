@@ -24,7 +24,7 @@ import {
 import { generateWorkflowNodeConfigArtifacts } from "./workflow-node-config.js";
 import { loadOsfTypes } from "../../../../packages/compiler/src/authoring/loader.js";
 
-// The canonical kernel and authoring type sources stay in the compiler core —
+// The canonical condition sources and authoring types stay in the compiler core —
 // they are part of every compiled entity contract. This plugin only *copies*
 // them into consumer-facing generated artifacts, so it reads them from the
 // compiler package by path (deep reach-in is acceptable for an example plugin).

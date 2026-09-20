@@ -30,7 +30,6 @@ import { buildMcp } from "./mcp.js";
 import { buildViews } from "./views.js";
 import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
-import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
 import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
@@ -196,11 +195,6 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
   }
   const tableName = deriveTableName(coreEntity.entity);
-  const canonical = buildCanonicalCompilerKernel({
-    model: { fields: modelFields, relationships },
-    graphql,
-    views,
-  });
 
   resolveDerivedOnCreateBindings({
     entityName: coreEntity.entity,
@@ -304,7 +298,6 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     permissions: coreEntity.permissions,
     authorization,
     views,
-    canonical,
     profiles: compiledProfiles,
   };
 }

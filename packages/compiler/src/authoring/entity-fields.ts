@@ -27,7 +27,7 @@ export function resolveBaseType(
   osfType: string | undefined,
   catalog: Record<string, OsfTypeDefinition>,
 ): FieldDefinitionValueType | undefined {
-  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.valueType;
+  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.baseType;
 }
 
 /** Embedded values need a policy adapter before any protected leaf may be used. */
@@ -84,7 +84,7 @@ export function deriveEntityOsfTypes(
       kind: "entity",
       entity: entity.entity,
       entityIdentity: entity.baseEntity !== false || entity.fields.some((field) => field.key === "id"),
-      valueType: "string",
+      baseType: "string",
       validation: { format: "uuid" },
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       pluralLabel: defaultInverseLabel(entity),
@@ -102,7 +102,7 @@ export function deriveEntityOsfTypes(
     // The identity alias is distinct from a relationship to that entity: an
     // entity's own primary key must never acquire a self-referencing FK.
     result[identityKey] = {
-      kind: "entityId", entity: entity.entity, valueType: "string",
+      kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       validation: { format: "uuid" },
       listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,
@@ -153,7 +153,7 @@ export function deriveProviderOsfTypes(
       // the web manifest; the provider projection stays reachable only there.
       if (result[name]?.kind === "entity") continue;
       if (result[name]) throw new Error(`Osf type ${name} duplicates a loaded entity or provider entity.`);
-      result[name] = { kind: "provider", entity: name, valueType: "object", label: entity.title };
+      result[name] = { kind: "provider", entity: name, baseType: "object", label: entity.title };
     }
   }
   return result;
@@ -181,7 +181,7 @@ export function normalizeEntityFields(
     if (entity.baseEntity === false && !entity.fields.some((field) => field.key === "id")) {
       assertEntityValueFieldPolicies(field, path, semantic);
     }
-    const baseType = isBaseType(field.osfType) ? field.osfType : semantic?.valueType;
+    const baseType = isBaseType(field.osfType) ? field.osfType : semantic?.baseType;
     if (!baseType) throw new Error(`${path}: unknown osfType ${field.osfType}.`);
     // Inline identifier values (for example arguments in a stored template)
     // are not entity relationships. Preserve their scalar semantic type;

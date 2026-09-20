@@ -134,13 +134,13 @@ describe("loadEntity content validation (integration)", () => {
     try {
       mkdirSync(join(root, "catalogs"));
       const path = join(root, "catalogs/osf-types.yaml");
-      const write = (valueType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, valueType } } }));
+      const write = (baseType: string) => writeFileSync(path, JSON.stringify({ types: { example: { label: { en: "Example" }, baseType } } }));
       write("string");
       const first = loadOsfTypes(root);
       first.example!.label.en = "Changed by caller";
       expect(loadOsfTypes(root).example!.label.en).toBe("Example");
       write("number");
-      expect(loadOsfTypes(root).example!.valueType).toBe("number");
+      expect(loadOsfTypes(root).example!.baseType).toBe("number");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -5,7 +5,7 @@ kind: osfTypeCatalog
 types:
   email:
     label: { en: Email, nl: E-mail }
-    valueType: string
+    baseType: string
     icon: AtSign
     validation:
       pattern: "^[^@]+@[^@]+\\.[^@]+$"
@@ -20,7 +20,7 @@ types:
 
   phone:
     label: { en: Phone number, nl: Telefoonnummer }
-    valueType: string
+    baseType: string
     icon: Phone
     validation:
       pattern: "^\\+?[0-9\\s\\-()]{7,20}$"
@@ -33,7 +33,7 @@ types:
 
   iban:
     label: { en: IBAN, nl: IBAN }
-    valueType: string
+    baseType: string
     icon: CreditCard
     validation:
       pattern: "^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$"
@@ -56,7 +56,7 @@ types:
 
   url:
     label: { en: URL, nl: URL }
-    valueType: string
+    baseType: string
     icon: Link
     validation:
       pattern: "^https?://"
@@ -67,7 +67,7 @@ types:
 
   webUrl:
     label: { en: Web URL, nl: Web-URL }
-    valueType: string
+    baseType: string
     icon: Globe
     validation:
       pattern: "^https?://"
@@ -78,7 +78,7 @@ types:
 
   mailtoLink:
     label: { en: Email link, nl: E-maillink }
-    valueType: string
+    baseType: string
     icon: Mail
     validation:
       pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+(?:\\?.*)?$"
@@ -92,7 +92,7 @@ types:
 
   phoneLink:
     label: { en: Phone link, nl: Telefoonlink }
-    valueType: string
+    baseType: string
     icon: PhoneCall
     validation:
       pattern: "^tel:\\+?[0-9][0-9\\s\\-().]{5,30}$"
@@ -106,7 +106,7 @@ types:
 
   smsLink:
     label: { en: SMS link, nl: SMS-link }
-    valueType: string
+    baseType: string
     icon: MessageCircle
     validation:
       pattern: "^sms:\\+?[0-9][0-9\\s\\-().]{5,30}(?:\\?.*)?$"
@@ -120,7 +120,7 @@ types:
 
   whatsappLink:
     label: { en: WhatsApp link, nl: WhatsApp-link }
-    valueType: string
+    baseType: string
     icon: MessageCircle
     validation:
       pattern: "^(?:https://wa\\.me/\\+?[0-9]{7,15}(?:\\?.*)?|https://api\\.whatsapp\\.com/send\\?phone=\\+?[0-9]{7,15}(?:&.*)?|whatsapp://send\\?phone=\\+?[0-9]{7,15}(?:&.*)?)$"
@@ -134,7 +134,7 @@ types:
 
   deeplink:
     label: { en: Deeplink, nl: Deeplink }
-    valueType: string
+    baseType: string
     icon: Link
     validation:
       pattern: "^(?:https?|mailto|tel|sms|whatsapp|openshapeforge|geo|maps):"
@@ -145,7 +145,7 @@ types:
 
   conversationId:
     label: { en: Conversation ID, nl: Conversatie-ID }
-    valueType: string
+    baseType: string
     icon: MessageSquare
     lookup:
       provider: messaging.conversations
@@ -158,7 +158,7 @@ types:
   identityAssuranceLevel:
     label: { en: Identity assurance level, nl: Identificatieniveau }
     pluralLabel: { en: Identity assurance levels, nl: Identificatieniveaus }
-    valueType: string
+    baseType: string
     icon: ShieldCheck
     render:
       display: TextDisplay
@@ -178,7 +178,7 @@ types:
   workflowDefinitionId:
     label: { en: Workflow definition ID, nl: Workflow-definitie-ID }
     pluralLabel: { en: Workflow definition IDs, nl: Workflow-definitie-IDs }
-    valueType: string
+    baseType: string
     icon: Workflow
     render:
       display: WorkflowDefinitionReferenceDisplay
@@ -189,7 +189,7 @@ types:
 
   postalCode:
     label: { en: Postal code, nl: Postcode }
-    valueType: string
+    baseType: string
     icon: MapPin
     validation:
       pattern: "^[0-9]{4}\\s?[A-Z]{2}$"
@@ -199,7 +199,7 @@ types:
 
   currency:
     label: { en: Currency amount, nl: Geldbedrag }
-    valueType: number
+    baseType: number
     icon: Banknote
     render:
       display: MoneyInput
@@ -208,7 +208,7 @@ types:
       currency: EUR
 
   condition:
-    valueType: object
+    baseType: object
     label: { en: Condition, nl: Conditie }
     icon: GitBranch
     render:
@@ -218,7 +218,7 @@ types:
       mode: free
 
   variableTemplate:
-    valueType: string
+    baseType: string
     label: { en: Variable template, nl: Variabele-template }
     icon: Braces
     render:
@@ -226,7 +226,7 @@ types:
       input: VariableTemplateInput
 
   fieldDefinition:
-    valueType: object
+    baseType: object
     label: { en: Field definition, nl: Velddefinitie }
     pluralLabel: { en: Field definitions, nl: Velddefinities }
     icon: ListChecks

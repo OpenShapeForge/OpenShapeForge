@@ -20,7 +20,7 @@ describe("semantic renderer mapping", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       boundedTags: {
         label: { en: "Tags" },
-        valueType: "string",
+        baseType: "string",
         cardinality: { min: 1, max: 3 },
       },
     };
@@ -49,7 +49,7 @@ describe("semantic renderer mapping", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "ReferenceSelect" },
         props: { clearable: false },
       },
@@ -71,7 +71,7 @@ describe("semantic renderer mapping", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "FileUpload" },
         props: {
           fileNameField: "fileName",
@@ -103,7 +103,7 @@ test("inherits semantic choices recursively while explicit options win", () => {
     { key: "override", osfType: "choice", options: { type: "static", items: [] } },
     { key: "nested", osfType: "object", children: [{ key: "choice", osfType: "choice" }] },
     { key: "items", osfType: "string", cardinality: "collection", item: { key: "choice", osfType: "choice" } },
-  ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
+  ], catalog, { choice: { label: { en: "Choice" }, baseType: "string", options } });
   expect(fields[0]!.options).toEqual(options);
   expect(fields[1]!.options?.items).toEqual([]);
   expect(fields[2]!.children?.[0]?.options).toEqual(options);

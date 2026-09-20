@@ -77,7 +77,7 @@ fields:
       column: display_name
       storageClass: core
   - key: relationType
-    osfType: referenceDataCode   # a catalog entry: its valueType is the base
+    osfType: referenceDataCode   # a catalog entry: its baseType is the base
     required: true
     persisted: { column: relation_type, storageClass: core }
     options: { type: referentiedata, referentieGroep: RELATIESOORT }
@@ -350,7 +350,7 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   group via `render.props.referentieGroep`.
 - **`osf-types.yaml`** — reusable field semantics: validation pattern,
   render components, data classification (`pii`, `confidential`, …),
-  retention, icon. Every entry declares the base `valueType` it resolves to.
+  retention, icon. Every entry declares the `baseType` it resolves to.
   A field opts in with `osfType: email`; the compiler derives the field's
   `baseType` from the entry. Keys are camelCase — PascalCase names are
   entities, and the seven base types are not catalog entries. Resolution

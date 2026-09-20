@@ -41,7 +41,7 @@ const osfTypeEntries: [string, OsfTypeDefinition][] = [
     {
       kind: "entityId",
       label: { en: "Relation", nl: "Relatie" },
-      valueType: "string",
+      baseType: "string",
       listUrl: "/api/options/relations",
     },
   ],
@@ -49,12 +49,12 @@ const osfTypeEntries: [string, OsfTypeDefinition][] = [
   // to attach a remote source.
   [
     "orphanId",
-    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, valueType: "string" },
+    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string" },
   ],
   // Not an entity reference at all — the enricher must leave it untouched.
   [
     "plainText",
-    { kind: "scalar", label: { en: "Plain", nl: "Tekst" }, valueType: "string" },
+    { kind: "scalar", label: { en: "Plain", nl: "Tekst" }, baseType: "string" },
   ],
 ];
 

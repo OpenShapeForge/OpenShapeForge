@@ -16,7 +16,7 @@
       },
       "additionalProperties": {
         "type": "object",
-        "required": ["label", "valueType"],
+        "required": ["label", "baseType"],
         "properties": {
           "kind": {
             "type": "string",
@@ -25,13 +25,17 @@
           },
           "label": { "type": "object" },
           "pluralLabel": { "type": "object" },
-          "valueType": { "type": "string" },
+          "baseType": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"],
+            "description": "The base type every transport maps this type to: storage, GraphQL and JSON Schema."
+          },
           "validation": { "type": "object" },
           "options": {
             "$ref": "core-entity.schema.json#/$defs/field/properties/options"
           },
           "schema": {
-            "description": "The complete value schema of this type, as a $ref into the bundled field-definition definitions. A type that declares one is projected through it instead of through valueType and shape.",
+            "description": "The complete value schema of this type, as a $ref into the bundled field-definition definitions. A type that declares one is projected through it instead of through baseType and shape.",
             "type": "object",
             "required": ["$ref"],
             "additionalProperties": false,

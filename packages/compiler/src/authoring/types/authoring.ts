@@ -39,7 +39,7 @@ import type {
 export interface Field extends FieldDefinition {
   /**
    * Compiler-derived base of `osfType`: the type itself for a base type, the
-   * catalog entry's `valueType` otherwise. Never authored.
+   * catalog entry's `baseType` otherwise. Never authored.
    */
   baseType?: FieldDefinitionValueType;
   /**
@@ -96,7 +96,8 @@ export interface OsfTypeDefinition {
   kind?: "scalar" | "entityId" | "entity" | "object" | "provider";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType:
+  /** The base type every transport maps this type to: storage, GraphQL and JSON Schema. */
+  baseType:
     | "string"
     | "integer"
     | "number"
@@ -110,7 +111,7 @@ export interface OsfTypeDefinition {
   /**
    * The complete value schema of this type: a `$ref` into the bundled
    * field-definition definitions. A type that declares one is projected
-   * through it instead of through `valueType` and `shape`, which is how a
+   * through it instead of through `baseType` and `shape`, which is how a
    * recursive contract (a stored FieldDefinition) is a catalog type like any
    * other, with no engine code that knows its name.
    */

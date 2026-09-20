@@ -87,7 +87,7 @@ describe("compiler plugins", () => {
       typePickerUsage: "requestInput",
     });
     expect(fieldAuthoringRegistry.osfTypes.email).toMatchObject({
-      valueType: "string",
+      baseType: "string",
       classification: { sensitivity: "pii" },
     });
     expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE).toMatchObject({

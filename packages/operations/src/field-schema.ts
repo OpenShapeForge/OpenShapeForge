@@ -155,10 +155,10 @@ export function resolveFieldBaseType(
 ): OperationFieldBaseType {
   if (isBaseType(field.osfType)) return field.osfType;
   const semantic = Object.hasOwn(osfTypes, field.osfType) ? osfTypes[field.osfType] : undefined;
-  if (!semantic || !isBaseType(semantic.valueType)) {
+  if (!semantic || !isBaseType(semantic.baseType)) {
     throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
   }
-  return semantic.valueType;
+  return semantic.baseType;
 }
 
 function slug(entity: string): string {

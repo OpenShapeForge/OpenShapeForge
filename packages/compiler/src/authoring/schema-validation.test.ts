@@ -222,7 +222,7 @@ describe("the schema registry", () => {
 
 describe("a violation is rejected, with the offending path named", () => {
   it("rejects a core entity field in the superseded v1 shape", () => {
-    // `type` was the v1 spelling, long superseded (first by `valueType`, now by
+    // `type` was the v1 spelling, long superseded (first by `baseType`, now by
     // `osfType`), but core-entity.schema.json still required `type` — the exact
     // drift that made every shipped entity fail its own schema.
     expect(() =>

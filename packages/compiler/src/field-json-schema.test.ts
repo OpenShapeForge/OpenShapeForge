@@ -387,7 +387,7 @@ describe("compiled field JSON Schema projection", () => {
   it("projects a stored field of a catalog type through the schema that type declares, by contract not by name", () => {
     const declared = createFieldSchemaCompiler({
       componentCatalog,
-      osfTypes: { fieldDefinition: { valueType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } } },
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } } },
     });
     const schema = declared.object([{ key: "form", osfType: "object", children: [{ key: "fields", osfType: "fieldDefinition", cardinality: "collection" }] }]);
     const form = (schema.properties as Record<string, Record<string, unknown>>).form!;
@@ -402,7 +402,7 @@ describe("compiled field JSON Schema projection", () => {
     // The name carries nothing: the same key without a declared schema is a plain object.
     const undeclared = createFieldSchemaCompiler({
       componentCatalog,
-      osfTypes: { fieldDefinition: { valueType: "object", label: { en: "Field" } } },
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" } } },
     });
     expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" })).toMatchObject({ type: "object" });
     expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" }).$ref).toBeUndefined();

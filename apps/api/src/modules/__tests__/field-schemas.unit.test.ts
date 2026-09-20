@@ -18,11 +18,11 @@ const compiler = createRuntimeFieldSchemaCompiler({
   },
   osfTypes: {
     code: {
-      valueType: "string",
+      baseType: "string",
       label: { en: "Code" },
       validation: { minLength: 2, maxLength: 12 },
     },
-    fieldDefinition: { valueType: "object", label: { en: "Field" } },
+    fieldDefinition: { baseType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } },
   },
   fieldDefinitionDefinitions: {
     fieldDefinition: {

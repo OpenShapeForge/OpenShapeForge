@@ -320,7 +320,7 @@ export interface FieldDefinitionOsfType {
   kind?: FieldDefinitionOsfTypeKind;
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType: FieldDefinitionValueType;
+  baseType: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   validation?: FieldDefinitionValidation;
   options?: FieldOptions;

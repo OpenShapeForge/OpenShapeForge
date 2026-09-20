@@ -26,13 +26,13 @@ export type FieldShapeKind =
 /**
  * The base type behind a field's `osfType`: compiled fields carry it as
  * `baseType`; an authored field resolves a base type to itself and a
- * catalog key to the entry's `valueType`.
+ * catalog key to the entry's `baseType`.
  */
 export function fieldValueType(field: Pick<Field, "osfType" | "baseType">): FieldValueType {
   if (field.baseType) return field.baseType;
   if (isBaseType(field.osfType)) return field.osfType;
-  const semantic = COMPILER_OSF_TYPES[field.osfType as keyof typeof COMPILER_OSF_TYPES] as { valueType?: string } | undefined;
-  return (semantic?.valueType ?? "string") as FieldValueType;
+  const semantic = COMPILER_OSF_TYPES[field.osfType as keyof typeof COMPILER_OSF_TYPES] as { baseType?: string } | undefined;
+  return (semantic?.baseType ?? "string") as FieldValueType;
 }
 
 export function fieldCardinality(field: Field): FieldCardinality {

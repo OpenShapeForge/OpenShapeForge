@@ -72,7 +72,7 @@ export type OperationFieldDefinition = {
 export type OperationFieldOsfType = {
   kind?: string;
   entity?: string;
-  valueType: OperationFieldBaseType;
+  baseType: OperationFieldBaseType;
   /**
    * The complete value schema of this type, as a `$ref` into the bundled
    * definitions (`fieldDefinitionDefinitions`). A type that declares one is

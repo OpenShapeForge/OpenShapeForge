@@ -10,7 +10,7 @@ import type { OsfTypeDefinition } from "../types/authoring.js";
 
 /** A catalog type that declares its own value schema, the way `fieldDefinition` does. */
 const catalog: Record<string, OsfTypeDefinition> = {
-  fieldDefinition: { valueType: "object", label: { en: "Field definition" }, schema: { $ref: "#/$defs/fieldDefinition" } },
+  fieldDefinition: { baseType: "object", label: { en: "Field definition" }, schema: { $ref: "#/$defs/fieldDefinition" } },
 };
 
 describe("connector field schemas", () => {
@@ -34,7 +34,7 @@ describe("connector field schemas", () => {
   });
 
   it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
-    const osfTypes = { amount: { valueType: "number" as const, label: { en: "Amount" } } };
+    const osfTypes = { amount: { baseType: "number" as const, label: { en: "Amount" } } };
     const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
     expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0 });
     // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.

@@ -13,23 +13,23 @@ const entity = (name: string, fields: Field[]): CoreEntity => ({
 const page = entity("Page", []);
 const block = entity("Block", [{ key: "page", osfType: "Page", required: true, relationship: { inverse: { key: "blocks", ownership: "owned", sortable: true } } }]);
 const catalog = () => deriveEntityOsfTypes([page, block], {
-  title: { label: { en: "Title" }, valueType: "string" },
+  title: { label: { en: "Title" }, baseType: "string" },
 });
 
 describe("one relational field contract", () => {
   test("derives an entity type and its presentation from the loaded entity", () => {
-    expect(catalog().Block).toMatchObject({ kind: "entity", entity: "Block", valueType: "string", shape: block.fields });
+    expect(catalog().Block).toMatchObject({ kind: "entity", entity: "Block", baseType: "string", shape: block.fields });
     expect(catalog().Page).toMatchObject({ shape: [{ key: "blocks", osfType: "Block", cardinality: "collection", sortable: true, relationship: { inverse: "page", ownership: "owned" } }] });
     expect(() => deriveEntityOsfTypes([block], { Block: catalog().Block! })).toThrow("PascalCase names are entities");
   });
   test("derives the identity alias of every entity with one spelling, and refuses an authored copy", () => {
     expect(catalog().pageId).toMatchObject({
-      kind: "entityId", entity: "Page", valueType: "string", validation: { format: "uuid" }, listUrl: "/pages",
+      kind: "entityId", entity: "Page", baseType: "string", validation: { format: "uuid" }, listUrl: "/pages",
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     });
     expect(catalog().Page!.entity).toBe(catalog().pageId!.entity);
     expect(() => deriveEntityOsfTypes([page], {
-      pageId: { kind: "scalar", label: { en: "Page ID" }, valueType: "string" },
+      pageId: { kind: "scalar", label: { en: "Page ID" }, baseType: "string" },
     })).toThrow("Osf type pageId is the identity alias of entity Page; it is derived, not authored.");
   });
   test("infers scalar types without duplicate authoring", () => {
@@ -109,14 +109,14 @@ describe("one relational field contract", () => {
     expect(() => normalizeEntityFields(source, catalog())).toThrow("not IDs inside JSON");
   });
   test("cannot hide an entity reference inside an object semantic type", () => {
-    const types = { ...catalog(), hiddenReference: { label: { en: "Hidden" }, valueType: "object" as const, shape: [{ key: "page", osfType: "Page" }] } };
+    const types = { ...catalog(), hiddenReference: { label: { en: "Hidden" }, baseType: "object" as const, shape: [{ key: "page", osfType: "Page" }] } };
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", osfType: "hiddenReference" }]), types)).toThrow("not IDs inside JSON");
   });
   test("validates inherited collection items and refuses recursive item types", () => {
     const types = {
       ...catalog(),
-      referenceItems: { label: { en: "Items" }, valueType: "object" as const, cardinality: "collection" as const, item: { key: "item", osfType: "Page" } },
-      recursiveItems: { label: { en: "Recursive" }, valueType: "object" as const, cardinality: "collection" as const, item: { key: "item", osfType: "recursiveItems" } },
+      referenceItems: { label: { en: "Items" }, baseType: "object" as const, cardinality: "collection" as const, item: { key: "item", osfType: "Page" } },
+      recursiveItems: { label: { en: "Recursive" }, baseType: "object" as const, cardinality: "collection" as const, item: { key: "item", osfType: "recursiveItems" } },
     };
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", osfType: "referenceItems" }]), types)).toThrow("not IDs inside JSON");
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", osfType: "recursiveItems" }]), types)).toThrow("cyclic inline");
@@ -141,7 +141,7 @@ describe("provider-backed reference", () => {
   const relation = (account: Field) => entity("Relation", [{ key: "id", osfType: "string" }, account]);
 
   test("registers a catalog's web entities as provider osf types, next to the loaded entities", () => {
-    expect(withProviders().Account).toEqual({ kind: "provider", entity: "Account", valueType: "object", label: { en: "Account" } });
+    expect(withProviders().Account).toEqual({ kind: "provider", entity: "Account", baseType: "object", label: { en: "Account" } });
     expect(withProviders().Block).toMatchObject({ kind: "entity" });
     expect(() => deriveProviderOsfTypes([accountCatalog], withProviders())).toThrow("duplicates a loaded entity or provider entity");
   });

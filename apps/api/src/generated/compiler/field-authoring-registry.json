@@ -263,7 +263,7 @@
         "en": "Typed entity values",
         "nl": "Getypeerde entiteitswaarden"
       },
-      "valueType": "object"
+      "baseType": "object"
     },
     "entityTypeName": {
       "options": {
@@ -274,7 +274,7 @@
         "en": "Entity type",
         "nl": "Entiteitstype"
       },
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "minLength": 1,
         "maxLength": 120
@@ -285,7 +285,7 @@
         "en": "Badge variant",
         "nl": "Badgevariant"
       },
-      "valueType": "string",
+      "baseType": "string",
       "options": {
         "type": "static",
         "items": [
@@ -329,7 +329,7 @@
         "en": "Label output type",
         "nl": "Labeluitvoertype"
       },
-      "valueType": "string",
+      "baseType": "string",
       "options": {
         "type": "static",
         "items": [
@@ -366,7 +366,7 @@
         "en": "Label validity",
         "nl": "Labelgeldigheid"
       },
-      "valueType": "string",
+      "baseType": "string",
       "options": {
         "type": "static",
         "items": [
@@ -403,7 +403,7 @@
         "en": "Multiline text",
         "nl": "Meerregelige tekst"
       },
-      "valueType": "string",
+      "baseType": "string",
       "render": {
         "display": "TextDisplay",
         "input": "Textarea"
@@ -417,7 +417,7 @@
         "en": "Email",
         "nl": "E-mail"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "AtSign",
       "validation": {
         "pattern": "^[^@]+@[^@]+\\.[^@]+$",
@@ -438,7 +438,7 @@
         "en": "Phone number",
         "nl": "Telefoonnummer"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Phone",
       "validation": {
         "pattern": "^\\+?[0-9\\s\\-()]{7,20}$"
@@ -457,7 +457,7 @@
         "en": "IBAN",
         "nl": "IBAN"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "CreditCard",
       "validation": {
         "pattern": "^[A-Z]{2}[0-9]{2}[A-Z0-9]{4,30}$",
@@ -491,7 +491,7 @@
         "en": "URL",
         "nl": "URL"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Link",
       "validation": {
         "pattern": "^https?://",
@@ -507,7 +507,7 @@
         "en": "Web URL",
         "nl": "Web-URL"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Globe",
       "validation": {
         "pattern": "^https?://",
@@ -523,7 +523,7 @@
         "en": "Email link",
         "nl": "E-maillink"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Mail",
       "validation": {
         "pattern": "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+(?:\\?.*)?$",
@@ -543,7 +543,7 @@
         "en": "Phone link",
         "nl": "Telefoonlink"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "PhoneCall",
       "validation": {
         "pattern": "^tel:\\+?[0-9][0-9\\s\\-().]{5,30}$",
@@ -563,7 +563,7 @@
         "en": "SMS link",
         "nl": "SMS-link"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "MessageCircle",
       "validation": {
         "pattern": "^sms:\\+?[0-9][0-9\\s\\-().]{5,30}(?:\\?.*)?$",
@@ -583,7 +583,7 @@
         "en": "WhatsApp link",
         "nl": "WhatsApp-link"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "MessageCircle",
       "validation": {
         "pattern": "^(?:https://wa\\.me/\\+?[0-9]{7,15}(?:\\?.*)?|https://api\\.whatsapp\\.com/send\\?phone=\\+?[0-9]{7,15}(?:&.*)?|whatsapp://send\\?phone=\\+?[0-9]{7,15}(?:&.*)?)$",
@@ -603,7 +603,7 @@
         "en": "Deeplink",
         "nl": "Deeplink"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Link",
       "validation": {
         "pattern": "^(?:https?|mailto|tel|sms|whatsapp|openshapeforge|geo|maps):",
@@ -619,7 +619,7 @@
         "en": "Conversation ID",
         "nl": "Conversatie-ID"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "MessageSquare",
       "lookup": {
         "provider": "messaging.conversations",
@@ -640,7 +640,7 @@
         "en": "Identity assurance levels",
         "nl": "Identificatieniveaus"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "ShieldCheck",
       "render": {
         "display": "TextDisplay",
@@ -702,7 +702,7 @@
         "en": "Reference value",
         "nl": "Referentiewaarde"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "List",
       "render": {
         "display": "TextDisplay",
@@ -717,7 +717,7 @@
         "en": "File",
         "nl": "Bestand"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "File",
       "render": {
         "display": "TextDisplay",
@@ -738,7 +738,7 @@
         "en": "Workflow definition IDs",
         "nl": "Workflow-definitie-IDs"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "Workflow",
       "render": {
         "display": "WorkflowDefinitionReferenceDisplay",
@@ -750,7 +750,7 @@
         "en": "Postal code",
         "nl": "Postcode"
       },
-      "valueType": "string",
+      "baseType": "string",
       "icon": "MapPin",
       "validation": {
         "pattern": "^[0-9]{4}\\s?[A-Z]{2}$"
@@ -765,7 +765,7 @@
         "en": "Currency amount",
         "nl": "Geldbedrag"
       },
-      "valueType": "number",
+      "baseType": "number",
       "icon": "Banknote",
       "render": {
         "display": "MoneyInput",
@@ -776,7 +776,7 @@
       }
     },
     "condition": {
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Condition",
         "nl": "Conditie"
@@ -791,7 +791,7 @@
       }
     },
     "labelSet": {
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Labels",
         "nl": "Labels"
@@ -803,7 +803,7 @@
       }
     },
     "variableTemplate": {
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Variable template",
         "nl": "Variabele-template"
@@ -815,7 +815,7 @@
       }
     },
     "fieldDefinition": {
-      "valueType": "object",
+      "baseType": "object",
       "schema": {
         "$ref": "#/$defs/fieldDefinition"
       },
@@ -837,7 +837,7 @@
       "kind": "entity",
       "entity": "Account",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -1112,7 +1112,7 @@
     "accountId": {
       "kind": "entityId",
       "entity": "Account",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Account",
         "nl": "Account"
@@ -1133,7 +1133,7 @@
       "kind": "entity",
       "entity": "Address",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -1419,7 +1419,7 @@
     "addressId": {
       "kind": "entityId",
       "entity": "Address",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Address",
         "nl": "Adres"
@@ -1440,7 +1440,7 @@
       "kind": "entity",
       "entity": "AddressAssignment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -1612,7 +1612,7 @@
     "addressAssignmentId": {
       "kind": "entityId",
       "entity": "AddressAssignment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Address Assignment",
         "nl": "Adrestoewijzing"
@@ -1633,7 +1633,7 @@
       "kind": "entity",
       "entity": "AdminRegion",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -1807,7 +1807,7 @@
     "adminRegionId": {
       "kind": "entityId",
       "entity": "AdminRegion",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Administrative region",
         "nl": "Bestuurlijk gebied"
@@ -1828,7 +1828,7 @@
       "kind": "entity",
       "entity": "Agreement",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -2434,7 +2434,7 @@
     "agreementId": {
       "kind": "entityId",
       "entity": "Agreement",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement",
         "nl": "Overeenkomst"
@@ -2455,7 +2455,7 @@
       "kind": "entity",
       "entity": "AgreementComponent",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -2788,7 +2788,7 @@
     "agreementComponentId": {
       "kind": "entityId",
       "entity": "AgreementComponent",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement component",
         "nl": "Overeenkomstcomponent"
@@ -2809,7 +2809,7 @@
       "kind": "entity",
       "entity": "AgreementComponentCumulative",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -3108,7 +3108,7 @@
     "agreementComponentCumulativeId": {
       "kind": "entityId",
       "entity": "AgreementComponentCumulative",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Component cumulative",
         "nl": "Component cumulatief"
@@ -3129,7 +3129,7 @@
       "kind": "entity",
       "entity": "AgreementComponentType",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -3347,7 +3347,7 @@
     "agreementComponentTypeId": {
       "kind": "entityId",
       "entity": "AgreementComponentType",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement component type",
         "nl": "Overeenkomstcomponenttype"
@@ -3368,7 +3368,7 @@
       "kind": "entity",
       "entity": "AgreementLink",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -3477,7 +3477,7 @@
     "agreementLinkId": {
       "kind": "entityId",
       "entity": "AgreementLink",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement link",
         "nl": "Overeenkomstkoppeling"
@@ -3498,7 +3498,7 @@
       "kind": "entity",
       "entity": "AgreementMilestone",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -3799,7 +3799,7 @@
     "agreementMilestoneId": {
       "kind": "entityId",
       "entity": "AgreementMilestone",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement milestone",
         "nl": "Overeenkomstmijlpaal"
@@ -3820,7 +3820,7 @@
       "kind": "entity",
       "entity": "AgreementParty",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -4174,7 +4174,7 @@
     "agreementPartyId": {
       "kind": "entityId",
       "entity": "AgreementParty",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Agreement party",
         "nl": "Overeenkomstpartij"
@@ -4195,7 +4195,7 @@
       "kind": "entity",
       "entity": "Alert",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -4464,7 +4464,7 @@
     "alertId": {
       "kind": "entityId",
       "entity": "Alert",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Alert",
         "nl": "Melding"
@@ -4485,7 +4485,7 @@
       "kind": "entity",
       "entity": "Appointment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -4683,7 +4683,7 @@
     "appointmentId": {
       "kind": "entityId",
       "entity": "Appointment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Appointment",
         "nl": "Afspraak"
@@ -4704,7 +4704,7 @@
       "kind": "entity",
       "entity": "AppointmentOption",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -4860,7 +4860,7 @@
     "appointmentOptionId": {
       "kind": "entityId",
       "entity": "AppointmentOption",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Appointment option",
         "nl": "Afspraakoptie"
@@ -4881,7 +4881,7 @@
       "kind": "entity",
       "entity": "AppointmentRequest",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -5124,7 +5124,7 @@
     "appointmentRequestId": {
       "kind": "entityId",
       "entity": "AppointmentRequest",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Appointment request",
         "nl": "Afspraakverzoek"
@@ -5145,7 +5145,7 @@
       "kind": "entity",
       "entity": "Area",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -5308,7 +5308,7 @@
     "areaId": {
       "kind": "entityId",
       "entity": "Area",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Area",
         "nl": "Oppervlakte"
@@ -5329,7 +5329,7 @@
       "kind": "entity",
       "entity": "Asset",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -5724,7 +5724,7 @@
     "assetId": {
       "kind": "entityId",
       "entity": "Asset",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Asset",
         "nl": "Object"
@@ -5745,7 +5745,7 @@
       "kind": "entity",
       "entity": "AssetCondition",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -5892,7 +5892,7 @@
     "assetConditionId": {
       "kind": "entityId",
       "entity": "AssetCondition",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Asset condition",
         "nl": "Conditie"
@@ -5913,7 +5913,7 @@
       "kind": "entity",
       "entity": "AssetGroup",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6065,7 +6065,7 @@
     "assetGroupId": {
       "kind": "entityId",
       "entity": "AssetGroup",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Asset group",
         "nl": "Objectgroep"
@@ -6086,7 +6086,7 @@
       "kind": "entity",
       "entity": "Assignment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6274,7 +6274,7 @@
     "assignmentId": {
       "kind": "entityId",
       "entity": "Assignment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Assignment",
         "nl": "Toewijzing"
@@ -6295,7 +6295,7 @@
       "kind": "entity",
       "entity": "Attachment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6433,7 +6433,7 @@
     "attachmentId": {
       "kind": "entityId",
       "entity": "Attachment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Attachment",
         "nl": "Bijlage"
@@ -6454,7 +6454,7 @@
       "kind": "entity",
       "entity": "BankReconciliation",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6558,7 +6558,7 @@
     "bankReconciliationId": {
       "kind": "entityId",
       "entity": "BankReconciliation",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Bank reconciliation",
         "nl": "Aflettering"
@@ -6579,7 +6579,7 @@
       "kind": "entity",
       "entity": "BankStatement",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6744,7 +6744,7 @@
     "bankStatementId": {
       "kind": "entityId",
       "entity": "BankStatement",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Bank statement",
         "nl": "Bankafschrift"
@@ -6765,7 +6765,7 @@
       "kind": "entity",
       "entity": "BankStatementLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -6984,7 +6984,7 @@
     "bankStatementLineId": {
       "kind": "entityId",
       "entity": "BankStatementLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Bank statement line",
         "nl": "Bankafschriftregel"
@@ -7005,7 +7005,7 @@
       "kind": "entity",
       "entity": "BillingRun",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -7314,7 +7314,7 @@
     "billingRunId": {
       "kind": "entityId",
       "entity": "BillingRun",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Billing run",
         "nl": "Facturatie-run"
@@ -7335,7 +7335,7 @@
       "kind": "entity",
       "entity": "BillingRunItem",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -7640,7 +7640,7 @@
     "billingRunItemId": {
       "kind": "entityId",
       "entity": "BillingRunItem",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Billing run item",
         "nl": "Facturatie-run-item"
@@ -7661,7 +7661,7 @@
       "kind": "entity",
       "entity": "BillingSchedule",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -7868,7 +7868,7 @@
     "billingScheduleId": {
       "kind": "entityId",
       "entity": "BillingSchedule",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Billing schedule",
         "nl": "Facturatieschema"
@@ -7889,7 +7889,7 @@
       "kind": "entity",
       "entity": "Block",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -8116,7 +8116,7 @@
     "blockId": {
       "kind": "entityId",
       "entity": "Block",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Block",
         "nl": "Block"
@@ -8137,7 +8137,7 @@
       "kind": "entity",
       "entity": "Budget",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -8290,7 +8290,7 @@
     "budgetId": {
       "kind": "entityId",
       "entity": "Budget",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Budget",
         "nl": "Begroting"
@@ -8311,7 +8311,7 @@
       "kind": "entity",
       "entity": "BudgetLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -8450,7 +8450,7 @@
     "budgetLineId": {
       "kind": "entityId",
       "entity": "BudgetLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Budget line",
         "nl": "Begrotingsregel"
@@ -8471,7 +8471,7 @@
       "kind": "entity",
       "entity": "Building",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -8676,7 +8676,7 @@
     "buildingId": {
       "kind": "entityId",
       "entity": "Building",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Building",
         "nl": "Pand"
@@ -8697,7 +8697,7 @@
       "kind": "entity",
       "entity": "BuildingPart",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -8847,7 +8847,7 @@
     "buildingPartId": {
       "kind": "entityId",
       "entity": "BuildingPart",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Building part",
         "nl": "Bouwdeel"
@@ -8868,7 +8868,7 @@
       "kind": "entity",
       "entity": "Case",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -9706,7 +9706,7 @@
     "caseId": {
       "kind": "entityId",
       "entity": "Case",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case",
         "nl": "Zaak"
@@ -9727,7 +9727,7 @@
       "kind": "entity",
       "entity": "CaseFile",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -10041,7 +10041,7 @@
     "caseFileId": {
       "kind": "entityId",
       "entity": "CaseFile",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case file",
         "nl": "Dossier"
@@ -10062,7 +10062,7 @@
       "kind": "entity",
       "entity": "CaseFileType",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -10180,7 +10180,7 @@
     "caseFileTypeId": {
       "kind": "entityId",
       "entity": "CaseFileType",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case file type",
         "nl": "Dossiertype"
@@ -10201,7 +10201,7 @@
       "kind": "entity",
       "entity": "CaseObjectLink",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -10324,7 +10324,7 @@
     "caseObjectLinkId": {
       "kind": "entityId",
       "entity": "CaseObjectLink",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Object Link",
         "nl": "Zaakobjectkoppeling"
@@ -10345,7 +10345,7 @@
       "kind": "entity",
       "entity": "CaseParty",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -10508,7 +10508,7 @@
     "casePartyId": {
       "kind": "entityId",
       "entity": "CaseParty",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Party",
         "nl": "Zaakbetrokkene"
@@ -10529,7 +10529,7 @@
       "kind": "entity",
       "entity": "CaseStatusEvent",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -10713,7 +10713,7 @@
     "caseStatusEventId": {
       "kind": "entityId",
       "entity": "CaseStatusEvent",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Status Event",
         "nl": "Zaakstatusgebeurtenis"
@@ -10734,7 +10734,7 @@
       "kind": "entity",
       "entity": "CaseStepAction",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -11042,7 +11042,7 @@
     "caseStepActionId": {
       "kind": "entityId",
       "entity": "CaseStepAction",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Step Action",
         "nl": "Zaakstapactie"
@@ -11063,7 +11063,7 @@
       "kind": "entity",
       "entity": "CaseStepTemplate",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -11647,7 +11647,7 @@
     "caseStepTemplateId": {
       "kind": "entityId",
       "entity": "CaseStepTemplate",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Step Template",
         "nl": "Zaakstapsjabloon"
@@ -11668,7 +11668,7 @@
       "kind": "entity",
       "entity": "CaseTemplate",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -11953,7 +11953,7 @@
     "caseTemplateId": {
       "kind": "entityId",
       "entity": "CaseTemplate",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Template",
         "nl": "Zaaksjabloon"
@@ -11974,7 +11974,7 @@
       "kind": "entity",
       "entity": "CaseType",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -12139,7 +12139,7 @@
     "caseTypeId": {
       "kind": "entityId",
       "entity": "CaseType",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Type",
         "nl": "Zaaktype"
@@ -12160,7 +12160,7 @@
       "kind": "entity",
       "entity": "Chip",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -12304,7 +12304,7 @@
     "chipId": {
       "kind": "entityId",
       "entity": "Chip",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Chip",
         "nl": "Chip"
@@ -12325,7 +12325,7 @@
       "kind": "entity",
       "entity": "Comment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -12425,7 +12425,7 @@
     "commentId": {
       "kind": "entityId",
       "entity": "Comment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Comment",
         "nl": "Opmerking"
@@ -12446,7 +12446,7 @@
       "kind": "entity",
       "entity": "CommunicationPreference",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -12689,7 +12689,7 @@
     "communicationPreferenceId": {
       "kind": "entityId",
       "entity": "CommunicationPreference",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Communication Preference",
         "nl": "Communicatievoorkeur"
@@ -12710,7 +12710,7 @@
       "kind": "entity",
       "entity": "ConditionAssessment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -12872,7 +12872,7 @@
     "conditionAssessmentId": {
       "kind": "entityId",
       "entity": "ConditionAssessment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Condition assessment",
         "nl": "Conditiemeting"
@@ -12893,7 +12893,7 @@
       "kind": "entity",
       "entity": "ContactDetail",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -13202,7 +13202,7 @@
     "contactDetailId": {
       "kind": "entityId",
       "entity": "ContactDetail",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Contact Detail",
         "nl": "Contactgegeven"
@@ -13223,7 +13223,7 @@
       "kind": "entity",
       "entity": "ContactMoment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -13462,7 +13462,7 @@
     "contactMomentId": {
       "kind": "entityId",
       "entity": "ContactMoment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Contact Moment",
         "nl": "Contactmoment"
@@ -13483,7 +13483,7 @@
       "kind": "entity",
       "entity": "CostDimension",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -13693,7 +13693,7 @@
     "costDimensionId": {
       "kind": "entityId",
       "entity": "CostDimension",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Cost dimension",
         "nl": "Kostendimensie"
@@ -13714,7 +13714,7 @@
       "kind": "entity",
       "entity": "Creditor",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -14032,7 +14032,7 @@
     "creditorId": {
       "kind": "entityId",
       "entity": "Creditor",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Creditor",
         "nl": "Crediteur"
@@ -14053,7 +14053,7 @@
       "kind": "entity",
       "entity": "Debtor",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -14367,7 +14367,7 @@
     "debtorId": {
       "kind": "entityId",
       "entity": "Debtor",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Debtor",
         "nl": "Debiteur"
@@ -14388,7 +14388,7 @@
       "kind": "entity",
       "entity": "DirectDebitMandate",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -14630,7 +14630,7 @@
     "directDebitMandateId": {
       "kind": "entityId",
       "entity": "DirectDebitMandate",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Direct debit mandate",
         "nl": "Incassomachtiging"
@@ -14651,7 +14651,7 @@
       "kind": "entity",
       "entity": "DirectDebitOrder",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -14839,7 +14839,7 @@
     "directDebitOrderId": {
       "kind": "entityId",
       "entity": "DirectDebitOrder",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Direct debit order",
         "nl": "Incasso-opdracht"
@@ -14860,7 +14860,7 @@
       "kind": "entity",
       "entity": "Document",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -15358,7 +15358,7 @@
     "documentId": {
       "kind": "entityId",
       "entity": "Document",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Document",
         "nl": "Document"
@@ -15379,7 +15379,7 @@
       "kind": "entity",
       "entity": "DocumentType",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -15496,7 +15496,7 @@
     "documentTypeId": {
       "kind": "entityId",
       "entity": "DocumentType",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Document Type",
         "nl": "Documenttype"
@@ -15517,7 +15517,7 @@
       "kind": "entity",
       "entity": "DocumentVariant",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -15638,7 +15638,7 @@
     "documentVariantId": {
       "kind": "entityId",
       "entity": "DocumentVariant",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Document variant",
         "nl": "Documentvariant"
@@ -15659,7 +15659,7 @@
       "kind": "entity",
       "entity": "DocumentVersion",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -16054,7 +16054,7 @@
     "documentVersionId": {
       "kind": "entityId",
       "entity": "DocumentVersion",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Document Version",
         "nl": "Documentversie"
@@ -16075,7 +16075,7 @@
       "kind": "entity",
       "entity": "Employee",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -16300,7 +16300,7 @@
     "employeeId": {
       "kind": "entityId",
       "entity": "Employee",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Employee",
         "nl": "Medewerker"
@@ -16321,7 +16321,7 @@
       "kind": "entity",
       "entity": "EmployeeBudget",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -16511,7 +16511,7 @@
     "employeeBudgetId": {
       "kind": "entityId",
       "entity": "EmployeeBudget",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Employee budget",
         "nl": "Medewerkerbudget"
@@ -16532,7 +16532,7 @@
       "kind": "entity",
       "entity": "EmployeeRole",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -16791,7 +16791,7 @@
     "employeeRoleId": {
       "kind": "entityId",
       "entity": "EmployeeRole",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Employee role",
         "nl": "Medewerkerrol"
@@ -16812,7 +16812,7 @@
       "kind": "entity",
       "entity": "Encumbrance",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17019,7 +17019,7 @@
     "encumbranceId": {
       "kind": "entityId",
       "entity": "Encumbrance",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Encumbrance",
         "nl": "Zekerheid"
@@ -17040,7 +17040,7 @@
       "kind": "entity",
       "entity": "EnergyPerformance",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17202,7 +17202,7 @@
     "energyPerformanceId": {
       "kind": "entityId",
       "entity": "EnergyPerformance",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Energy performance",
         "nl": "Energieprestatie"
@@ -17223,7 +17223,7 @@
       "kind": "entity",
       "entity": "EnergyPerformanceMeasurement",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17334,7 +17334,7 @@
     "energyPerformanceMeasurementId": {
       "kind": "entityId",
       "entity": "EnergyPerformanceMeasurement",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Energy performance measurement",
         "nl": "Energieprestatiemeting"
@@ -17355,7 +17355,7 @@
       "kind": "entity",
       "entity": "FiscalPeriod",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17600,7 +17600,7 @@
     "fiscalPeriodId": {
       "kind": "entityId",
       "entity": "FiscalPeriod",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Fiscal period",
         "nl": "Boekjaarperiode"
@@ -17621,7 +17621,7 @@
       "kind": "entity",
       "entity": "FiscalYear",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17765,7 +17765,7 @@
     "fiscalYearId": {
       "kind": "entityId",
       "entity": "FiscalYear",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Fiscal year",
         "nl": "Boekjaar"
@@ -17786,7 +17786,7 @@
       "kind": "entity",
       "entity": "InspectionReport",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -17929,7 +17929,7 @@
     "inspectionReportId": {
       "kind": "entityId",
       "entity": "InspectionReport",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Inspection report",
         "nl": "Inspectierapport"
@@ -17950,7 +17950,7 @@
       "kind": "entity",
       "entity": "Invoice",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -18493,7 +18493,7 @@
     "invoiceId": {
       "kind": "entityId",
       "entity": "Invoice",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice",
         "nl": "Factuur"
@@ -18514,7 +18514,7 @@
       "kind": "entity",
       "entity": "InvoiceCollectionItem",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -18654,7 +18654,7 @@
     "invoiceCollectionItemId": {
       "kind": "entityId",
       "entity": "InvoiceCollectionItem",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice collection item",
         "nl": "Factuurincasso-regel"
@@ -18675,7 +18675,7 @@
       "kind": "entity",
       "entity": "InvoiceLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -18967,7 +18967,7 @@
     "invoiceLineId": {
       "kind": "entityId",
       "entity": "InvoiceLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice line",
         "nl": "Factuurregel"
@@ -18988,7 +18988,7 @@
       "kind": "entity",
       "entity": "InvoicePayment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -19116,7 +19116,7 @@
     "invoicePaymentId": {
       "kind": "entityId",
       "entity": "InvoicePayment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice payment",
         "nl": "Factuurbetaling"
@@ -19137,7 +19137,7 @@
       "kind": "entity",
       "entity": "InvoiceSequence",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -19300,7 +19300,7 @@
     "invoiceSequenceId": {
       "kind": "entityId",
       "entity": "InvoiceSequence",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice sequence",
         "nl": "Factuurreeks"
@@ -19321,7 +19321,7 @@
       "kind": "entity",
       "entity": "InvoiceVatBucket",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -19407,7 +19407,7 @@
     "invoiceVatBucketId": {
       "kind": "entityId",
       "entity": "InvoiceVatBucket",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Invoice VAT bucket",
         "nl": "BTW-totaal"
@@ -19428,7 +19428,7 @@
       "kind": "entity",
       "entity": "LabelRule",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -19747,7 +19747,7 @@
     "labelRuleId": {
       "kind": "entityId",
       "entity": "LabelRule",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Label Rule",
         "nl": "Labelregel"
@@ -19768,7 +19768,7 @@
       "kind": "entity",
       "entity": "LedgerAccount",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -20149,7 +20149,7 @@
     "ledgerAccountId": {
       "kind": "entityId",
       "entity": "LedgerAccount",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Ledger account",
         "nl": "Grootboekrekening"
@@ -20170,7 +20170,7 @@
       "kind": "entity",
       "entity": "LedgerPosting",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -20367,7 +20367,7 @@
     "ledgerPostingId": {
       "kind": "entityId",
       "entity": "LedgerPosting",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Ledger posting",
         "nl": "Boeking"
@@ -20388,7 +20388,7 @@
       "kind": "entity",
       "entity": "LedgerPostingLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -20609,7 +20609,7 @@
     "ledgerPostingLineId": {
       "kind": "entityId",
       "entity": "LedgerPostingLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Ledger posting line",
         "nl": "Boekingsregel"
@@ -20630,7 +20630,7 @@
       "kind": "entity",
       "entity": "LegalEntity",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -20799,7 +20799,7 @@
     "legalEntityId": {
       "kind": "entityId",
       "entity": "LegalEntity",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Legal Entity",
         "nl": "Rechtspersoon"
@@ -20820,7 +20820,7 @@
       "kind": "entity",
       "entity": "MaintenanceOrder",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -21170,7 +21170,7 @@
     "maintenanceOrderId": {
       "kind": "entityId",
       "entity": "MaintenanceOrder",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance order",
         "nl": "Onderhoudsorder"
@@ -21191,7 +21191,7 @@
       "kind": "entity",
       "entity": "MaintenanceOrderParty",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -21447,7 +21447,7 @@
     "maintenanceOrderPartyId": {
       "kind": "entityId",
       "entity": "MaintenanceOrderParty",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance order party",
         "nl": "Partij op onderhoudsorder"
@@ -21468,7 +21468,7 @@
       "kind": "entity",
       "entity": "MaintenanceRequest",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -21688,7 +21688,7 @@
     "maintenanceRequestId": {
       "kind": "entityId",
       "entity": "MaintenanceRequest",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance request",
         "nl": "Onderhoudsverzoek"
@@ -21709,7 +21709,7 @@
       "kind": "entity",
       "entity": "MaintenanceRequestSettlement",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -21830,7 +21830,7 @@
     "maintenanceRequestSettlementId": {
       "kind": "entityId",
       "entity": "MaintenanceRequestSettlement",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance request settlement",
         "nl": "Onderhoudsverzoek-verrekening"
@@ -21851,7 +21851,7 @@
       "kind": "entity",
       "entity": "MaintenanceSpending",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -21992,7 +21992,7 @@
     "maintenanceSpendingId": {
       "kind": "entityId",
       "entity": "MaintenanceSpending",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance spending",
         "nl": "Onderhoudsbesteding"
@@ -22013,7 +22013,7 @@
       "kind": "entity",
       "entity": "MaintenanceTask",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -22196,7 +22196,7 @@
     "maintenanceTaskId": {
       "kind": "entityId",
       "entity": "MaintenanceTask",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance task",
         "nl": "Onderhoudstaak"
@@ -22217,7 +22217,7 @@
       "kind": "entity",
       "entity": "MaintenanceTaskCalculation",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -22360,7 +22360,7 @@
     "maintenanceTaskCalculationId": {
       "kind": "entityId",
       "entity": "MaintenanceTaskCalculation",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Maintenance task calculation",
         "nl": "Onderhoudstaak voorcalculatie"
@@ -22381,7 +22381,7 @@
       "kind": "entity",
       "entity": "Milestone",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -22596,7 +22596,7 @@
     "milestoneId": {
       "kind": "entityId",
       "entity": "Milestone",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Milestone",
         "nl": "Mijlpaal"
@@ -22617,7 +22617,7 @@
       "kind": "entity",
       "entity": "MonitorInterval",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -22713,7 +22713,7 @@
     "monitorIntervalId": {
       "kind": "entityId",
       "entity": "MonitorInterval",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Monitor interval",
         "nl": "Monitorinterval"
@@ -22734,7 +22734,7 @@
       "kind": "entity",
       "entity": "MonitorLog",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -22893,7 +22893,7 @@
     "monitorLogId": {
       "kind": "entityId",
       "entity": "MonitorLog",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Monitor log",
         "nl": "Monitorlog"
@@ -22914,7 +22914,7 @@
       "kind": "entity",
       "entity": "MonitorLogEntry",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23009,7 +23009,7 @@
     "monitorLogEntryId": {
       "kind": "entityId",
       "entity": "MonitorLogEntry",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Monitor log entry",
         "nl": "Monitorlogregel"
@@ -23030,7 +23030,7 @@
       "kind": "entity",
       "entity": "MonitorMeasurement",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23149,7 +23149,7 @@
     "monitorMeasurementId": {
       "kind": "entityId",
       "entity": "MonitorMeasurement",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Monitor measurement",
         "nl": "Monitormeting"
@@ -23170,7 +23170,7 @@
       "kind": "entity",
       "entity": "MonitorReading",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23261,7 +23261,7 @@
     "monitorReadingId": {
       "kind": "entityId",
       "entity": "MonitorReading",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Monitor reading",
         "nl": "Monitorwaarde"
@@ -23282,7 +23282,7 @@
       "kind": "entity",
       "entity": "NaturalPerson",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23619,7 +23619,7 @@
     "naturalPersonId": {
       "kind": "entityId",
       "entity": "NaturalPerson",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Natural Person",
         "nl": "Natuurlijk Persoon"
@@ -23640,7 +23640,7 @@
       "kind": "entity",
       "entity": "Notebook",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23704,7 +23704,7 @@
     "notebookId": {
       "kind": "entityId",
       "entity": "Notebook",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Notebook",
         "nl": "Notitieboek"
@@ -23725,7 +23725,7 @@
       "kind": "entity",
       "entity": "NotebookVersion",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -23866,7 +23866,7 @@
     "notebookVersionId": {
       "kind": "entityId",
       "entity": "NotebookVersion",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Notebook version",
         "nl": "Notitieboekversie"
@@ -23887,7 +23887,7 @@
       "kind": "entity",
       "entity": "OrgUnit",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -24114,7 +24114,7 @@
     "orgUnitId": {
       "kind": "entityId",
       "entity": "OrgUnit",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Org unit",
         "nl": "Organisatorische eenheid"
@@ -24135,7 +24135,7 @@
       "kind": "entity",
       "entity": "OrganizationPermission",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -24291,7 +24291,7 @@
     "organizationPermissionId": {
       "kind": "entityId",
       "entity": "OrganizationPermission",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Organization permission",
         "nl": "Organisatierecht"
@@ -24312,7 +24312,7 @@
       "kind": "entity",
       "entity": "PaymentDetail",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -24546,7 +24546,7 @@
     "paymentDetailId": {
       "kind": "entityId",
       "entity": "PaymentDetail",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Payment Detail",
         "nl": "Betaalgegevens"
@@ -24567,7 +24567,7 @@
       "kind": "entity",
       "entity": "PaymentMethod",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -24793,7 +24793,7 @@
     "paymentMethodId": {
       "kind": "entityId",
       "entity": "PaymentMethod",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Payment method",
         "nl": "Betaalwijze"
@@ -24814,7 +24814,7 @@
       "kind": "entity",
       "entity": "PaymentOrder",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -24976,7 +24976,7 @@
     "paymentOrderId": {
       "kind": "entityId",
       "entity": "PaymentOrder",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Payment order",
         "nl": "Betaalopdracht"
@@ -24997,7 +24997,7 @@
       "kind": "entity",
       "entity": "PaymentPlan",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25180,7 +25180,7 @@
     "paymentPlanId": {
       "kind": "entityId",
       "entity": "PaymentPlan",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Payment plan",
         "nl": "Betalingsregeling"
@@ -25201,7 +25201,7 @@
       "kind": "entity",
       "entity": "PaymentPlanInstalment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25325,7 +25325,7 @@
     "paymentPlanInstalmentId": {
       "kind": "entityId",
       "entity": "PaymentPlanInstalment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Payment plan instalment",
         "nl": "Termijn"
@@ -25346,7 +25346,7 @@
       "kind": "entity",
       "entity": "PeriodBalance",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25469,7 +25469,7 @@
     "periodBalanceId": {
       "kind": "entityId",
       "entity": "PeriodBalance",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Period balance",
         "nl": "Periodesaldo"
@@ -25490,7 +25490,7 @@
       "kind": "entity",
       "entity": "PersonalPreference",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25582,7 +25582,7 @@
     "personalPreferenceId": {
       "kind": "entityId",
       "entity": "PersonalPreference",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Personal preference",
         "nl": "Persoonlijke voorkeur"
@@ -25603,7 +25603,7 @@
       "kind": "entity",
       "entity": "Point",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25734,7 +25734,7 @@
     "pointId": {
       "kind": "entityId",
       "entity": "Point",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Point",
         "nl": "Punt"
@@ -25755,7 +25755,7 @@
       "kind": "entity",
       "entity": "Position",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -25954,7 +25954,7 @@
     "positionId": {
       "kind": "entityId",
       "entity": "Position",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Position",
         "nl": "Functie"
@@ -25975,7 +25975,7 @@
       "kind": "entity",
       "entity": "Preference",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -26128,7 +26128,7 @@
     "preferenceId": {
       "kind": "entityId",
       "entity": "Preference",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Preference",
         "nl": "Voorkeur"
@@ -26149,7 +26149,7 @@
       "kind": "entity",
       "entity": "PriceAdjustment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -26308,7 +26308,7 @@
     "priceAdjustmentId": {
       "kind": "entityId",
       "entity": "PriceAdjustment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Price adjustment",
         "nl": "Prijsaanpassing"
@@ -26329,7 +26329,7 @@
       "kind": "entity",
       "entity": "Process",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -26790,7 +26790,7 @@
     "processId": {
       "kind": "entityId",
       "entity": "Process",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Case Step Container",
         "nl": "Zaakstapcontainer"
@@ -26811,7 +26811,7 @@
       "kind": "entity",
       "entity": "ProcessRole",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -26999,7 +26999,7 @@
     "processRoleId": {
       "kind": "entityId",
       "entity": "ProcessRole",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Process role",
         "nl": "Procesrol"
@@ -27020,7 +27020,7 @@
       "kind": "entity",
       "entity": "ProcessStep",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -27558,7 +27558,7 @@
     "processStepId": {
       "kind": "entityId",
       "entity": "ProcessStep",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Process Step",
         "nl": "Processtap"
@@ -27579,7 +27579,7 @@
       "kind": "entity",
       "entity": "Project",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -27911,7 +27911,7 @@
     "projectId": {
       "kind": "entityId",
       "entity": "Project",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project",
         "nl": "Project"
@@ -27932,7 +27932,7 @@
       "kind": "entity",
       "entity": "ProjectBudgetLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -28071,7 +28071,7 @@
     "projectBudgetLineId": {
       "kind": "entityId",
       "entity": "ProjectBudgetLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project budget line",
         "nl": "Projectbudgetregel"
@@ -28092,7 +28092,7 @@
       "kind": "entity",
       "entity": "ProjectObjective",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -28245,7 +28245,7 @@
     "projectObjectiveId": {
       "kind": "entityId",
       "entity": "ProjectObjective",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project objective",
         "nl": "Projectdoelstelling"
@@ -28266,7 +28266,7 @@
       "kind": "entity",
       "entity": "ProjectOrder",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -28449,7 +28449,7 @@
     "projectOrderId": {
       "kind": "entityId",
       "entity": "ProjectOrder",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project order",
         "nl": "Projectopdracht"
@@ -28470,7 +28470,7 @@
       "kind": "entity",
       "entity": "ProjectPhase",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -28670,7 +28670,7 @@
     "projectPhaseId": {
       "kind": "entityId",
       "entity": "ProjectPhase",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project phase",
         "nl": "Projectfase"
@@ -28691,7 +28691,7 @@
       "kind": "entity",
       "entity": "ProjectPhaseDecision",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -28822,7 +28822,7 @@
     "projectPhaseDecisionId": {
       "kind": "entityId",
       "entity": "ProjectPhaseDecision",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project phase decision",
         "nl": "Projectfasebesluit"
@@ -28843,7 +28843,7 @@
       "kind": "entity",
       "entity": "ProjectRole",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -29069,7 +29069,7 @@
     "projectRoleId": {
       "kind": "entityId",
       "entity": "ProjectRole",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project role",
         "nl": "Projectrol"
@@ -29090,7 +29090,7 @@
       "kind": "entity",
       "entity": "ProjectSpending",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -29226,7 +29226,7 @@
     "projectSpendingId": {
       "kind": "entityId",
       "entity": "ProjectSpending",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project spending",
         "nl": "Projectbesteding"
@@ -29247,7 +29247,7 @@
       "kind": "entity",
       "entity": "ProjectTask",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -29499,7 +29499,7 @@
     "projectTaskId": {
       "kind": "entityId",
       "entity": "ProjectTask",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Project task",
         "nl": "Projecttaak"
@@ -29520,7 +29520,7 @@
       "kind": "entity",
       "entity": "PurchaseOrder",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -29787,7 +29787,7 @@
     "purchaseOrderId": {
       "kind": "entityId",
       "entity": "PurchaseOrder",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Purchase order",
         "nl": "Inkoopopdracht"
@@ -29808,7 +29808,7 @@
       "kind": "entity",
       "entity": "PurchaseOrderLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -30100,7 +30100,7 @@
     "purchaseOrderLineId": {
       "kind": "entityId",
       "entity": "PurchaseOrderLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Purchase order line",
         "nl": "Inkoopopdrachtregel"
@@ -30121,7 +30121,7 @@
       "kind": "entity",
       "entity": "QualityMeasurementRequest",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -30379,7 +30379,7 @@
     "qualityMeasurementRequestId": {
       "kind": "entityId",
       "entity": "QualityMeasurementRequest",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Quality Measurement Request",
         "nl": "Kwaliteitsmetingsverzoek"
@@ -30400,7 +30400,7 @@
       "kind": "entity",
       "entity": "QualityMeasurementResult",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -30624,7 +30624,7 @@
     "qualityMeasurementResultId": {
       "kind": "entityId",
       "entity": "QualityMeasurementResult",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Quality Measurement Result",
         "nl": "Kwaliteitsmetingsresultaat"
@@ -30645,7 +30645,7 @@
       "kind": "entity",
       "entity": "Quote",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -30918,7 +30918,7 @@
     "quoteId": {
       "kind": "entityId",
       "entity": "Quote",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Quote",
         "nl": "Offerte"
@@ -30939,7 +30939,7 @@
       "kind": "entity",
       "entity": "QuoteLine",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -31231,7 +31231,7 @@
     "quoteLineId": {
       "kind": "entityId",
       "entity": "QuoteLine",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Quote line",
         "nl": "Offerteregel"
@@ -31252,7 +31252,7 @@
       "kind": "entity",
       "entity": "Relation",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -32231,7 +32231,7 @@
     "relationId": {
       "kind": "entityId",
       "entity": "Relation",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Relation",
         "nl": "Relatie"
@@ -32252,7 +32252,7 @@
       "kind": "entity",
       "entity": "RelationAssociation",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -32452,7 +32452,7 @@
     "relationAssociationId": {
       "kind": "entityId",
       "entity": "RelationAssociation",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Relation Association",
         "nl": "Relatiekoppeling"
@@ -32473,7 +32473,7 @@
       "kind": "entity",
       "entity": "RelationGroup",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -32694,7 +32694,7 @@
     "relationGroupId": {
       "kind": "entityId",
       "entity": "RelationGroup",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Relation Group",
         "nl": "Relatiegroep"
@@ -32715,7 +32715,7 @@
       "kind": "entity",
       "entity": "RelationGroupMembership",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -32921,7 +32921,7 @@
     "relationGroupMembershipId": {
       "kind": "entityId",
       "entity": "RelationGroupMembership",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Relation Group Membership",
         "nl": "Relatiegroepslidmaatschap"
@@ -32942,7 +32942,7 @@
       "kind": "entity",
       "entity": "RelationRole",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -33193,7 +33193,7 @@
     "relationRoleId": {
       "kind": "entityId",
       "entity": "RelationRole",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Relation Role",
         "nl": "Relatierol"
@@ -33214,7 +33214,7 @@
       "kind": "entity",
       "entity": "ResearchAssignment",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -33482,7 +33482,7 @@
     "researchAssignmentId": {
       "kind": "entityId",
       "entity": "ResearchAssignment",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Research Assignment",
         "nl": "Onderzoeksopdracht"
@@ -33503,7 +33503,7 @@
       "kind": "entity",
       "entity": "ResearchResult",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -33623,7 +33623,7 @@
     "researchResultId": {
       "kind": "entityId",
       "entity": "ResearchResult",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Research Result",
         "nl": "Onderzoeksresultaat"
@@ -33644,7 +33644,7 @@
       "kind": "entity",
       "entity": "SlaPolicy",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -33901,7 +33901,7 @@
     "slaPolicyId": {
       "kind": "entityId",
       "entity": "SlaPolicy",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "SLA Policy",
         "nl": "SLA-beleid"
@@ -33922,7 +33922,7 @@
       "kind": "entity",
       "entity": "Space",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -34119,7 +34119,7 @@
     "spaceId": {
       "kind": "entityId",
       "entity": "Space",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Space",
         "nl": "Ruimte"
@@ -34140,7 +34140,7 @@
       "kind": "entity",
       "entity": "StandardPrice",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -34328,7 +34328,7 @@
     "standardPriceId": {
       "kind": "entityId",
       "entity": "StandardPrice",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Standard price",
         "nl": "Standaardprijs"
@@ -34349,7 +34349,7 @@
       "kind": "entity",
       "entity": "SupplierRole",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -34686,7 +34686,7 @@
     "supplierRoleId": {
       "kind": "entityId",
       "entity": "SupplierRole",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Supplier",
         "nl": "Leverancier"
@@ -34707,7 +34707,7 @@
       "kind": "entity",
       "entity": "SupportIssue",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -35043,7 +35043,7 @@
     "supportIssueId": {
       "kind": "entityId",
       "entity": "SupportIssue",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Support issue",
         "nl": "Supportverzoek"
@@ -35064,7 +35064,7 @@
       "kind": "entity",
       "entity": "Survey",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -35236,7 +35236,7 @@
     "surveyId": {
       "kind": "entityId",
       "entity": "Survey",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Survey",
         "nl": "Vragenlijst"
@@ -35257,7 +35257,7 @@
       "kind": "entity",
       "entity": "SurveyAnswer",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -35435,7 +35435,7 @@
     "surveyAnswerId": {
       "kind": "entityId",
       "entity": "SurveyAnswer",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Survey Answer",
         "nl": "Vragenlijstantwoord"
@@ -35456,7 +35456,7 @@
       "kind": "entity",
       "entity": "SurveyQuestion",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -35712,7 +35712,7 @@
     "surveyQuestionId": {
       "kind": "entityId",
       "entity": "SurveyQuestion",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Survey Question",
         "nl": "Vragenlijstregel"
@@ -35733,7 +35733,7 @@
       "kind": "entity",
       "entity": "Task",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -36723,7 +36723,7 @@
     "taskId": {
       "kind": "entityId",
       "entity": "Task",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Task",
         "nl": "Taak"
@@ -36744,7 +36744,7 @@
       "kind": "entity",
       "entity": "Template",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -36856,7 +36856,7 @@
     "templateId": {
       "kind": "entityId",
       "entity": "Template",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Template",
         "nl": "Template"
@@ -36877,7 +36877,7 @@
       "kind": "entity",
       "entity": "TemplateBlock",
       "entityIdentity": false,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -36918,7 +36918,7 @@
       "kind": "entity",
       "entity": "TemplateVariant",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37049,7 +37049,7 @@
     "templateVariantId": {
       "kind": "entityId",
       "entity": "TemplateVariant",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Template variant",
         "nl": "Template variant"
@@ -37070,7 +37070,7 @@
       "kind": "entity",
       "entity": "TemplateVersion",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37224,7 +37224,7 @@
     "templateVersionId": {
       "kind": "entityId",
       "entity": "TemplateVersion",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Template version",
         "nl": "Template version"
@@ -37245,7 +37245,7 @@
       "kind": "entity",
       "entity": "Tenant",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37457,7 +37457,7 @@
     "tenantId": {
       "kind": "entityId",
       "entity": "Tenant",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Tenant",
         "nl": "Tenant"
@@ -37478,7 +37478,7 @@
       "kind": "entity",
       "entity": "TenantSetting",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37678,7 +37678,7 @@
     "tenantSettingId": {
       "kind": "entityId",
       "entity": "TenantSetting",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Tenant Setting",
         "nl": "Tenantinstelling"
@@ -37699,7 +37699,7 @@
       "kind": "entity",
       "entity": "TextBlock",
       "entityIdentity": false,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37736,7 +37736,7 @@
       "kind": "entity",
       "entity": "TimeEntry",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -37883,7 +37883,7 @@
     "timeEntryId": {
       "kind": "entityId",
       "entity": "TimeEntry",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Time entry",
         "nl": "Tijdsbesteding"
@@ -37904,7 +37904,7 @@
       "kind": "entity",
       "entity": "UserOrganizationPermission",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -38082,7 +38082,7 @@
     "userOrganizationPermissionId": {
       "kind": "entityId",
       "entity": "UserOrganizationPermission",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "User organization permission",
         "nl": "Gebruikersrecht per organisatie"
@@ -38103,7 +38103,7 @@
       "kind": "entity",
       "entity": "Vacancy",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -38292,7 +38292,7 @@
     "vacancyId": {
       "kind": "entityId",
       "entity": "Vacancy",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Vacancy",
         "nl": "Vacature"
@@ -38313,7 +38313,7 @@
       "kind": "entity",
       "entity": "Valuation",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -38482,7 +38482,7 @@
     "valuationId": {
       "kind": "entityId",
       "entity": "Valuation",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Valuation",
         "nl": "Waardering"
@@ -38503,7 +38503,7 @@
       "kind": "entity",
       "entity": "VatRate",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -38770,7 +38770,7 @@
     "vatRateId": {
       "kind": "entityId",
       "entity": "VatRate",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "VAT rate",
         "nl": "BTW-tarief"
@@ -38791,7 +38791,7 @@
       "kind": "entity",
       "entity": "VatReturn",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -38940,7 +38940,7 @@
     "vatReturnId": {
       "kind": "entityId",
       "entity": "VatReturn",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "VAT return",
         "nl": "BTW-aangifte"
@@ -38961,7 +38961,7 @@
       "kind": "entity",
       "entity": "Warranty",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -39108,7 +39108,7 @@
     "warrantyId": {
       "kind": "entityId",
       "entity": "Warranty",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Warranty",
         "nl": "Garantie"
@@ -39129,7 +39129,7 @@
       "kind": "entity",
       "entity": "WorkQueue",
       "entityIdentity": true,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -39557,7 +39557,7 @@
     "workQueueId": {
       "kind": "entityId",
       "entity": "WorkQueue",
-      "valueType": "string",
+      "baseType": "string",
       "label": {
         "en": "Work Queue",
         "nl": "Werkqueue"
@@ -39578,7 +39578,7 @@
       "kind": "entity",
       "entity": "YouTubeEmbed",
       "entityIdentity": false,
-      "valueType": "string",
+      "baseType": "string",
       "validation": {
         "format": "uuid"
       },
@@ -39635,7 +39635,7 @@
     "TenantMember": {
       "kind": "provider",
       "entity": "TenantMember",
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Members",
         "nl": "Leden"
@@ -39644,7 +39644,7 @@
     "TenantInvitation": {
       "kind": "provider",
       "entity": "TenantInvitation",
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Invitations",
         "nl": "Uitnodigingen"
@@ -39653,7 +39653,7 @@
     "TenantCredential": {
       "kind": "provider",
       "entity": "TenantCredential",
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Credentials",
         "nl": "Credentials"
@@ -39662,7 +39662,7 @@
     "CatalogEntry": {
       "kind": "provider",
       "entity": "CatalogEntry",
-      "valueType": "object",
+      "baseType": "object",
       "label": {
         "en": "Services",
         "nl": "Services"

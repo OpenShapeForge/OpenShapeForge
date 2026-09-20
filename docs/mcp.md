@@ -407,10 +407,14 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   exists; `name`/`kind` describe that candidate and the summary says "A record
   with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
   (no record yet). An API key that reached the organization has recorded its
-  identity and an empty pending link, and the summary names the identity id
-  an administrator passes to `link_identity`; a person's summary says their
-  e-mail or identity id works. `explanation` is one fixed line saying what a
-  Relation is. Beyond that identity id, no ids leave the answer.
+  identity and an empty pending link; its summary calls it unlinked and says
+  an organization administrator finds it under `list_pending_members`
+  (`unlinked`) and links it with `link_identity`. A person's summary says an
+  administrator links them by e-mail address. `name` is what the credential
+  knows — the token's claims, or for an API key the integration's display
+  name — and "unlinked" is said only of a recorded identity with neither a
+  record nor a candidate. `explanation` is one fixed line saying what a
+  Relation is. No ids leave the answer, the identity id included.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;

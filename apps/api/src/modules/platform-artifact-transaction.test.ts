@@ -349,15 +349,18 @@ describe("artifact record authorization transaction scope", () => {
     const db = database(observations);
     const platform = new ModulePlatformRuntime(db);
     const sessions = [trustedSession(userId), trustedSession("20000000-0000-4000-8000-000000000002")];
+    // The live capability each stage runs under — the session object the
+    // runtime handed the contribution, which is what the transaction store keys on.
+    const live: TrustedSessionContext[] = [];
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
-    let waiting = 0;
     const crossed: unknown[] = [];
     platform.registerArtifactStorage([stagingModule(platform, async (context) => {
-      if (++waiting === 2) release();
+      live.push(context.session);
+      if (live.length === 2) release();
       await gate; // both stages are open at once before either enqueues
       await platform.services.jobs.enqueue(context.session, { ...gcJob, deliveryKey: context.session.userId! });
-      const other = sessions.find((candidate) => candidate !== context.session)!;
+      const other = live.find((candidate) => candidate !== context.session)!;
       try { await platform.services.jobs.enqueue(other, gcJob); } catch (error) { crossed.push(error); }
     })]);
     try {
@@ -373,9 +376,57 @@ describe("artifact record authorization transaction scope", () => {
         expect(own.some((entry) => entry.sql.includes('into "platform"."jobs"'))).toBe(true);
         expect(own.at(-1)?.sql).toBe("<commit>");
       }
-      // The other stage's session is not this call's live session: refused, and nothing crossed connections.
-      expect(crossed).toHaveLength(2);
-      expect(String(crossed[0])).toContain("session");
+      // The other stage's capability is live in its own operation session, not
+      // in this one: the liveness gate every platform service passes first
+      // refuses it, before the transaction join (whose own "belongs to another
+      // session" check stands behind this gate as a second fence) is reached.
+      // Either way nothing is enqueued on the other stage's connection.
+      expect(crossed.map(String)).toEqual([
+        "Error: Job enqueue requires a live verified session.",
+        "Error: Job enqueue requires a live verified session.",
+      ]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("the production path: an Operation stages a file, and the stage's enqueue lands on the Operation transaction", async () => {
+    const observations: QueryObservation[] = [];
+    const db = database(observations);
+    const platform = new ModulePlatformRuntime(db);
+    platform.registerArtifactStorage([stagingModule(platform, (context) => platform.services.jobs.enqueue(context.session, gcJob).then(() => undefined))]);
+    try {
+      await withModuleOperationSession(platform.services, trustedSession(userId), (active) =>
+        platform.withOperationTransaction(active!, async (trx) => {
+          await sql`select 1 as operation_marker`.execute(trx);
+          await platform.services.artifacts.stage(active!, stageInput());
+        }));
+      const ids = ["operation_marker", "provider_stage_marker", 'into "platform"."jobs"']
+        .map((marker) => observations.find((entry) => entry.sql.includes(marker))?.connectionId);
+      expect(ids.every((id) => id !== undefined && id === ids[0])).toBe(true);
+      expect(connectionsOf(observations).size).toBe(1);
+      expect(observations.filter((entry) => entry.sql === "<commit>")).toHaveLength(1);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("a bind inside a stage, with no Operation around it, is still refused: the artifact transaction is not an Operation's", async () => {
+    const observations: QueryObservation[] = [];
+    const db = database(observations);
+    const platform = new ModulePlatformRuntime(db);
+    let bindError: unknown;
+    platform.registerArtifactStorage([stagingModule(platform, async (context) => {
+      try {
+        await platform.services.artifacts.bind(context.session, { artifactId, owner: { entity: "Document", id: documentId }, expectedArtifactVersion: 1 });
+      } catch (error) {
+        bindError = error;
+      }
+    })]);
+    try {
+      await withModuleOperationSession(platform.services, trustedSession(userId), (active) =>
+        platform.services.artifacts.stage(active!, stageInput()));
+      expect(operationErrorOf(bindError)?.code).toBe("ARTIFACT_TRANSACTION_REQUIRED");
     } finally {
       await db.destroy();
     }

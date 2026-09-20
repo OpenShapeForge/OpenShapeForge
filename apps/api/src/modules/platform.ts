@@ -6,7 +6,7 @@ import type { Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import { enqueueJob } from "../jobs/store.js";
-import { appendEntityEvent, appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
+import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
 import type {
@@ -325,11 +325,7 @@ export class ModulePlatformRuntime {
     this.#capabilityOperations = options.capabilityOperations;
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
-      currentTransaction: (session) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        return active?.session === session ? active.trx : undefined;
-      },
+      currentTransaction: (session) => this.#activeTransaction(session, "Record authorization transaction"),
       withSession: (session, work) => {
         const active = this.#activeTransaction(session, "Record authorization transaction");
         return active ? work(active) : withDbSession(this.#db, session, work);
@@ -401,9 +397,8 @@ export class ModulePlatformRuntime {
             relationGroupIds: session.relationGroupIds ?? [],
             scope: session.scope,
           };
-          const active = this.#activeTransaction(session, "Job enqueue");
-          if (active) return enqueueJob(active, { ...input, tenantId, actorId, actorSession });
-          return withDbSession(this.#db, session, (trx) =>
+          // One path in: the module session join (or open) is what fences the tenant.
+          return this.services.db.withSession(session, (trx) =>
             enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
           );
         },
@@ -420,15 +415,13 @@ export class ModulePlatformRuntime {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
-          const active = this.#activeTransaction(session, "Module event");
-          if (active) {
-            await appendScopedEntityEventInTransaction(active, { ...event, payload: event.payload as Json });
-            return;
-          }
-          await appendEntityEvent(this.#db, session, {
-            ...event,
-            payload: event.payload as Json,
-          });
+          if (!session.tenantId) throw new Error("Module event append requires an authenticated tenant session.");
+          const tenantId = session.tenantId;
+          // The same join-or-open as every module write, and the same tenant
+          // check on both: the session's tenant must be the transaction's.
+          await this.services.db.withSession(session, (trx) =>
+            appendEntityEventInTransaction(trx, { ...event, tenantId, payload: event.payload as Json }),
+          );
         },
       },
       grants: {

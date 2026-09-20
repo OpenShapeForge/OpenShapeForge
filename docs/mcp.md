@@ -579,9 +579,13 @@ import { sessionRelation } from "../auth/identity-link.js";
 const party = sessionRelation(session); // { relationId, displayName } | null
 ```
 
-`null` means "not linked": pending, never resolved, or a session that carries
-no person at all (trusted-context and API key sessions never link). Resolution
-is cached per (identity, tenant) for a minute inside a process; a link made
+`null` means "not linked": pending, or no link yet. Every credential kind
+resolves through the same row: a bearer session with its token's claims, a
+trusted-context session by the realm this deployment trusts and its user id
+(the identity subject), an API-key session likewise — its first use records
+the service account's identity and an empty pending link, so `link_identity`
+can make the integration act as a Relation like anyone else. Resolution is
+cached per (identity, tenant) for a minute inside a process; a link made
 through the tools invalidates it there and shows up elsewhere within the TTL.
 
 Not part of this: Keycloak user attributes as a data source, relation ids in

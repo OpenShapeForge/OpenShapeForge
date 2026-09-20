@@ -106,11 +106,19 @@ under `/api/rest/v1/<basePath>`:
 
 | Route | Operation flag | Success |
 | --- | --- | --- |
-| `GET /api/rest/v1/<basePath>` | `list` | `200 { items, totalCount, nextCursor }` |
-| `GET /api/rest/v1/<basePath>/:id` | `get` | `200` row (`404` if not visible) |
-| `POST /api/rest/v1/<basePath>` | `create` | `201` row |
-| `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200` row (partial update) |
-| `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `204` |
+| `GET /api/rest/v1/<basePath>` | `list` | `200 { data: { items, totalCount, nextCursor }, operations }` |
+| `GET /api/rest/v1/<basePath>/:id` | `get` | `200 { data, operations }` (`404` if not visible) |
+| `POST /api/rest/v1/<basePath>` | `create` | `201 { data, operations }` |
+| `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200 { data, operations }` (partial update) |
+| `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `200 { data: { deleted }, operations }` |
+
+Every route is a projection of the entity's canonical Operation: the record,
+the writable values, the list page and the mutation controls are built once
+(`packages/compiler/src/entity-operation-json-schema.ts`) and `openapi.json`
+spells them flat, with the errors the Operation declares as its `4xx`
+responses (`packages/compiler/src/authoring/compiler/entity-operation-errors.ts`
+derives that list from the Operation's concurrency, confirmation and
+record-permission flags; MCP tools carry the same list).
 
 Handlers delegate to the same `generated-crud.ts` functions as the GraphQL
 resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS

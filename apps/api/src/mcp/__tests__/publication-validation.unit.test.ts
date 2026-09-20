@@ -48,12 +48,20 @@ const BINDING: Row = {
   operationId: "op-1",
 };
 
+function matchesFilter(row: Row, filter: Row): boolean {
+  return Object.entries(filter).every(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value) && "in" in value) {
+      const membership = (value as { in?: unknown }).in;
+      return Array.isArray(membership) && membership.includes(row[key]);
+    }
+    return row[key] === value;
+  });
+}
+
 function readerFor(data: Record<string, Row[]>) {
   const tables: Record<string, Row[]> = { "core.bindings": [BINDING], ...data };
   return async (table: string, filter: Row): Promise<Row[]> =>
-    (tables[table] ?? []).filter((row) =>
-      Object.entries(filter).every(([key, value]) => row[key] === value),
-    );
+    (tables[table] ?? []).filter((row) => matchesFilter(row, filter));
 }
 
 const PROVIDER: Row = {
@@ -92,6 +100,45 @@ async function failure(input: Parameters<typeof validateVisibleDefinition>[0]): 
 }
 
 describe("validateVisibleDefinition", () => {
+  it("loads referenced operations and providers in one membership read each", async () => {
+    const seen: Array<{ table: string; filter: Row }> = [];
+    const base = readerFor({
+      "core.operations": [
+        OPERATION,
+        { ...OPERATION, id: "op-2", key: "create", providerId: "prov-2" },
+      ],
+      "core.providers": [
+        PROVIDER,
+        { ...PROVIDER, id: "prov-2", name: "Mail" },
+      ],
+      "core.connections": [
+        CONNECTION,
+        { ...CONNECTION, id: "conn-2", providerId: "prov-2" },
+      ],
+      "core.bindings": [
+        BINDING,
+        { ...BINDING, id: "bind-2", order: 2, operationId: "op-2" },
+      ],
+      "core.services": [ROW],
+    });
+    await validateVisibleDefinition({
+      entry: ENTRY,
+      row: ROW,
+      rowId: "svc-1",
+      reservedNames: new Set(),
+      readRows: async (table, filter) => {
+        seen.push({ table, filter });
+        return base(table, filter);
+      },
+    });
+    expect(seen.filter((call) => call.table === "core.operations")).toEqual([
+      { table: "core.operations", filter: { id: { in: ["op-1", "op-2"] } } },
+    ]);
+    expect(seen.filter((call) => call.table === "core.providers")).toEqual([
+      { table: "core.providers", filter: { id: { in: ["prov-1", "prov-2"] } } },
+    ]);
+  });
+
   it("passes a complete chain with a usable tenant connection", async () => {
     await validateVisibleDefinition({
       entry: ENTRY,

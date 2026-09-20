@@ -193,8 +193,33 @@ export async function validateVisibleDefinition(
     }
   }
 
-  // Provider rows collected across bindings so each connection is judged once.
+  const asId = (value: unknown): value is string =>
+    typeof value === "string" && value.length > 0;
+  const operationIds = [
+    ...new Set(
+      bindings
+        .map((binding) => (binding && typeof binding === "object" ? binding[execution.operationRef] : undefined))
+        .filter(asId),
+    ),
+  ];
+  const operationsById = new Map<string, JsonRecord>();
+  if (operationIds.length > 0) {
+    for (const row of await readRows(execution.operationTable, { id: { in: operationIds } })) {
+      if (asId(row.id)) operationsById.set(row.id, row);
+    }
+  }
+  const providerIds = [
+    ...new Set(
+      [...operationsById.values()].map((operation) => operation[execution.providerRef]).filter(asId),
+    ),
+  ];
   const providers = new Map<string, JsonRecord>();
+  if (providerIds.length > 0) {
+    for (const row of await readRows(execution.providerTable, { id: { in: providerIds } })) {
+      if (asId(row.id)) providers.set(row.id, row);
+    }
+  }
+
   for (const [index, binding] of bindings.entries()) {
     const position = `binding ${index + 1}`;
     if (!binding || typeof binding !== "object") {
@@ -239,7 +264,7 @@ export async function validateVisibleDefinition(
       problems.push(`${position} names no ${execution.operationEntity} (${execution.operationRef}).`);
       continue;
     }
-    const [operationRow] = await readRows(execution.operationTable, { id: operationId });
+    const operationRow = operationsById.get(operationId);
     if (!operationRow) {
       problems.push(
         `${position} references ${execution.operationEntity} ${operationId}, which does not exist.`,
@@ -254,18 +279,14 @@ export async function validateVisibleDefinition(
       );
       continue;
     }
-    let providerRow = providers.get(providerId);
+    const providerRow = providers.get(providerId);
     if (!providerRow) {
-      [providerRow] = await readRows(execution.providerTable, { id: providerId });
-      if (!providerRow) {
-        problems.push(
-          `${position}: ${execution.operationEntity} ` +
-            `${JSON.stringify(operationRow.key ?? operationId)} references ` +
-            `${execution.providerEntity} ${providerId}, which does not exist.`,
-        );
-        continue;
-      }
-      providers.set(providerId, providerRow);
+      problems.push(
+        `${position}: ${execution.operationEntity} ` +
+          `${JSON.stringify(operationRow.key ?? operationId)} references ` +
+          `${execution.providerEntity} ${providerId}, which does not exist.`,
+      );
+      continue;
     }
     try {
       requestHeaderMappings(operationRow, providerRow.auth);

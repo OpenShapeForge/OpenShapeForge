@@ -178,23 +178,30 @@ function overlayBindingReader(
   };
 }
 
+function rowMatchesFilter(
+  row: Record<string, unknown>,
+  filter: Record<string, unknown>,
+): boolean {
+  return Object.entries(filter).every(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "in")) {
+      const membership = (value as { in?: unknown }).in;
+      return Array.isArray(membership) && membership.includes(row[key]);
+    }
+    return row[key] === value;
+  });
+}
+
 function overlayRowReader(
   readRows: PublicationRowReader,
   table: string,
   overlay: ReferencedRowOverlay,
 ): PublicationRowReader {
-  const matches = (row: Record<string, unknown>, filter: Record<string, unknown>) =>
-    Object.entries(filter).every(([key, value]) => row[key] === value);
   return async (rowTable, filter) => {
     const rows = await readRows(rowTable, filter);
     if (rowTable !== table) return rows;
     const without = rows.filter((row) => row.id !== overlay.id);
-    if (overlay.kind === "delete") {
-      if (filter.id === overlay.id) return [];
-      return without;
-    }
-    if (filter.id === overlay.id) return matches(overlay.after, filter) ? [overlay.after] : [];
-    return matches(overlay.after, filter) ? [...without, overlay.after] : without;
+    if (overlay.kind === "delete") return without;
+    return rowMatchesFilter(overlay.after, filter) ? [...without, overlay.after] : without;
   };
 }
 

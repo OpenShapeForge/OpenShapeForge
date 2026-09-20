@@ -214,12 +214,6 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         tables: catalog.tables,
         ...(catalog.derivedTools ? { entries: catalog.derivedTools } : {}),
       };
-      if (createOp && insertValues) {
-        await assertPublishableRelatedMutationInTransaction(trx, session, target, {
-          kind: "create",
-          values: insertValues,
-        }, relatedOptions);
-      }
       if (editing) {
         const current = rows.find((row) => row.id === request.childId);
         if (current) {
@@ -240,7 +234,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         }
       }
       if (createOp) {
-        const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables });
+        const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables, ...(catalog.derivedTools ? { derivedTools: catalog.derivedTools } : {}) });
         childId = String(created.id);
         await permission(trx, session, target, childId, readOp, "view");
         await permission(trx, session, target, childId, createOp, "view");

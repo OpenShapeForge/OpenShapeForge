@@ -67,7 +67,13 @@ const BINDING = {
 function readerFor(data: Record<string, Record<string, unknown>[]>) {
   return async (table: string, filter: Record<string, unknown>) =>
     (data[table] ?? []).filter((row) =>
-      Object.entries(filter).every(([key, value]) => row[key] === value),
+      Object.entries(filter).every(([key, value]) => {
+        if (value && typeof value === "object" && !Array.isArray(value) && "in" in value) {
+          const membership = (value as { in?: unknown }).in;
+          return Array.isArray(membership) && membership.includes(row[key]);
+        }
+        return row[key] === value;
+      }),
     );
 }
 
@@ -225,10 +231,7 @@ describe("published owner revalidation after a binding mutation", () => {
       row: OWNER,
       rowId: "svc-1",
       reservedNames: new Set(),
-      readRows: async (table, filter) => {
-        if (table === "core.operations" && filter.id === "op-1") return [];
-        return readerFor(data)(table, filter);
-      },
+      readRows: readerFor({ ...data, "core.operations": [] }),
       readBindingPages: async () => ({ rows: [BINDING], nextCursor: null }),
     });
     expect(message).toContain("does not exist");
@@ -240,10 +243,7 @@ describe("published owner revalidation after a binding mutation", () => {
       row: OWNER,
       rowId: "svc-1",
       reservedNames: new Set(),
-      readRows: async (table, filter) => {
-        if (table === "core.providers" && filter.id === "prov-1") return [];
-        return readerFor(data)(table, filter);
-      },
+      readRows: readerFor({ ...data, "core.providers": [] }),
       readBindingPages: async () => ({ rows: [BINDING], nextCursor: null }),
     });
     expect(message).toContain("does not exist");

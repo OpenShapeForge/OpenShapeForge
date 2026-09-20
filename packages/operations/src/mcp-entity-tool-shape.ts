@@ -7,7 +7,7 @@
  * compiler measures the listing with it, so the bytes it budgets are the
  * bytes a client receives.
  */
-import type { McpToolShape } from "./mcp-static-tools.js";
+import type { McpToolShape } from "./mcp-tool-shape.js";
 
 /** The URI of the private configuration app a create that elicits links to. */
 export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";

@@ -50,22 +50,17 @@ export {
   genericTextLanguage,
   genericToolText,
 } from "./mcp-generic-projection.js";
+export type { McpToolShape } from "./mcp-tool-shape.js";
+export { ARTIFACT_UPLOAD_TOOL_NAME, uploadToolDefinition } from "./mcp-upload-tool.js";
+export { EDIT_LEASE_TOOL_NAMES, editLeaseToolDefinitions } from "./mcp-edit-lease-tools.js";
 export {
-  ARTIFACT_UPLOAD_TOOL_NAME,
   DEFAULT_OPERATION_SEARCH_RESULTS,
-  EDIT_LEASE_TOOL_NAMES,
   MAX_OPERATION_SEARCH_RESULTS,
-  connectHelperTool,
-  discoveryToolDefinition,
-  dryRunHelperTool,
-  editLeaseToolDefinitions,
-  guideToolDefinition,
-  personalizationHelperTool,
   searchableOperationToolDefinitions,
-  testToolDefinition,
-  uploadToolDefinition,
-} from "./mcp-static-tools.js";
-export type { McpToolShape, SearchableOperationToolNames } from "./mcp-static-tools.js";
+} from "./mcp-search-tools.js";
+export type { SearchableOperationToolNames } from "./mcp-search-tools.js";
+export { connectHelperTool, dryRunHelperTool, personalizationHelperTool } from "./mcp-derived-helper-tools.js";
+export { discoveryToolDefinition, guideToolDefinition, testToolDefinition } from "./mcp-entity-static-tools.js";
 export { connectorMcpTools, connectorToolAnnotations } from "./mcp-connector-tools.js";
 export type {
   ConnectorMcpContractShape,

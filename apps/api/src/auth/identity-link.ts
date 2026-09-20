@@ -83,6 +83,7 @@ import { SessionAuthenticationUnavailableError } from "./session-unavailable.js"
 import {
   insertLinkRow,
   readLinkRow,
+  readLinkRowBySubject,
   relationsWithEmail,
   toState,
   upsertIdentity,
@@ -164,7 +165,10 @@ export type SessionRelation = {
 
 /**
  * The Relation a session is linked to, or null: not linked yet (pending, or
- * no link), or a session that cannot link at all (trusted-context, API key).
+ * no link). Every session kind carries the link the same way — the bearer
+ * path resolves it with the token's claims, a trusted-context or API-key
+ * session reads it by its user id (`readSessionLink`) — so this is the one
+ * place anything that acts as a Relation asks.
  */
 export function sessionRelation(
   session: { relation?: IdentityLinkState | null | undefined } | null | undefined,
@@ -241,12 +245,49 @@ function cacheKey(issuer: string, subject: string, tenantId: string): string {
 
 export function invalidateIdentityLink(issuer: string, subject: string, tenantId: string): void {
   linkCache.delete(cacheKey(issuer, subject, tenantId));
+  subjectLinkCache.delete(`${tenantId}\n${subject}`);
 }
 
 /** Test-only. */
 export function __resetIdentityLinkForTests(): void {
   linkCache.clear();
   inFlight.clear();
+  subjectLinkCache.clear();
+}
+
+const subjectLinkCache = new Map<string, { state: IdentityLinkState | null; expiresAtMs: number }>();
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The link state of the identity whose subject is this session's user id —
+ * for a session that carries no token claims (trusted-context, an API key):
+ * the same row the bearer path resolves, read under the session's own
+ * policies, never created. Null when no linked or pending row exists. A
+ * failure to read it is a 503, as on the bearer path: a session that
+ * silently acts as nobody would refuse every stamp it should have carried.
+ */
+export async function readSessionLink(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+): Promise<IdentityLinkState | null> {
+  // A tenant or user that is not a uuid can hold no link (the tables key on
+  // uuids); such a session is refused later, by whatever it touches, not here.
+  if (!UUID_SHAPE.test(session.tenantId) || !UUID_SHAPE.test(session.userId)) return null;
+  const key = `${session.tenantId}\n${session.userId}`;
+  const cached = subjectLinkCache.get(key);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.state;
+  try {
+    const row = await withDbSession(db, session, (trx) => readLinkRowBySubject(trx, session.userId, session.tenantId));
+    const state = row ? toState(row, { issuer: row.issuer, subject: row.subject }) : null;
+    subjectLinkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
+    return state;
+  } catch (error) {
+    console.warn(
+      "[auth] Reading the session's identity ↔ Relation link failed; refusing the session (503):",
+      error instanceof Error ? error.message : String(error),
+    );
+    throw new SessionAuthenticationUnavailableError("The identity link could not be read; try again.");
+  }
 }
 
 // ---------------------------------------------------------------------------

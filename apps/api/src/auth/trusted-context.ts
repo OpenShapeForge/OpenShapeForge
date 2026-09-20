@@ -102,9 +102,10 @@ export type TrustedSessionContext = {
   grant?: CapabilityGrantSession;
   // ---- identity ↔ Relation link (auth/identity-link.ts) ----
   /**
-   * The party this login acts as in the tenant: the link state resolved on
-   * the bearer path. Read it through `sessionRelation(session)`; absent on
-   * trusted-context and API key sessions, which carry no person.
+   * The party this session acts as in the tenant: the identity ↔ Relation
+   * link, resolved with the token's claims on the bearer path and read by
+   * user id for a trusted-context or API-key session (identity.ts,
+   * withSessionRelation). Read it through `sessionRelation(session)`.
    */
   relation?: IdentityLinkState | null;
   // ---- end identity ↔ Relation link ----

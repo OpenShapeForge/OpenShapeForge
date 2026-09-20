@@ -11,6 +11,7 @@ import { looksLikeApiKey } from "./api-key/format.js";
 import {
   NotInvitedError,
   identityClaimsFromToken,
+  readSessionLink,
   resolveIdentityLink,
   type IdentityClaims,
   type IdentityLinkState,
@@ -220,6 +221,34 @@ function sessionIdentityRoles(identity: AuthIdentity): string[] {
 }
 
 /**
+ * The acting Relation for a session that carries no token claims: a
+ * trusted-context or API-key session is linked through the same
+ * platform.identity_relations row a person's bearer session is, read here
+ * by its user id so `sessionRelation(session)` answers for every credential
+ * kind — a transition's `actor` stamp, a document's author, whatever acts as
+ * a Relation asks that one function and nothing else.
+ */
+async function withSessionRelation(
+  session: TrustedSessionContext,
+  options: ResolveSessionOptions,
+): Promise<TrustedSessionContext> {
+  if (session.credential !== "trusted-context" && session.credential !== "api-key") return session;
+  if (!options.db || !session.tenantId || !session.userId) return session;
+  const relation = await readSessionLink(options.db, {
+    tenantId: session.tenantId,
+    userId: session.userId,
+    roles: [...session.roles],
+    groups: [...session.groups],
+    scope: session.scope,
+  });
+  return {
+    ...session,
+    relation,
+    ...(relation?.displayName && !session.userDisplayName ? { userDisplayName: relation.displayName } : {}),
+  };
+}
+
+/**
  * Resolves the canonical session context for a request, and refuses it when
  * the request's short address names another organization than the
  * credential's (see {@link assertSessionAddressesOrganization}).
@@ -228,7 +257,7 @@ export async function resolveSessionContext(
   headers: Headers,
   options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
-  const session = await resolveCredentialSession(headers, options);
+  const session = await withSessionRelation(await resolveCredentialSession(headers, options), options);
   return assertSessionAddressesOrganization(
     headers,
     session,

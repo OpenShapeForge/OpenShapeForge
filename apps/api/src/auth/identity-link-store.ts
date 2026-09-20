@@ -79,6 +79,24 @@ export async function readLinkRow(
   return result.rows[0] ?? null;
 }
 
+/**
+ * The link row for the identity whose subject is this session's user id, in
+ * this tenant — the same row `readLinkRow` reads, found from the side a
+ * session without token claims has: `app.user_id` IS the identity subject
+ * (the identities visibility policy says so), whatever credential proved it.
+ */
+export async function readLinkRowBySubject(
+  trx: Transaction<DB>,
+  subject: string,
+  tenantId: string,
+): Promise<LinkRow | null> {
+  const identity = await sql<{ id: string }>`
+    select id from platform.identities where subject = ${subject}
+  `.execute(trx);
+  const identityId = identity.rows[0]?.id;
+  return identityId ? readLinkRow(trx, identityId, tenantId) : null;
+}
+
 /** The roles column, bound as jsonb and unpacked: the driver serialises a JS
  * array as JSON for a jsonb parameter but not as a PostgreSQL array literal. */
 function rolesArray(roles: readonly string[]) {

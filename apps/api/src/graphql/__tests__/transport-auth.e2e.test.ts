@@ -153,7 +153,11 @@ describe("transport and authentication", () => {
       undefined,
       { bearer: "not-a-real-token" },
     );
-    expect(result.errors?.[0]?.extensions?.code).toBe("UNAUTHENTICATED");
+    // Fails closed either way: a configured verifier refuses the token, a
+    // deployment without one refuses to guess (503) — never nobody.
+    const code = result.errors?.[0]?.extensions?.code;
+    expect(code === "UNAUTHENTICATED" || code === "AUTHENTICATION_UNAVAILABLE").toBe(true);
+    expect(result.data ?? null).toBeNull();
   });
 
   const writable = tablesWritableWith(keycloakToken, ["read", "create", "delete"]);

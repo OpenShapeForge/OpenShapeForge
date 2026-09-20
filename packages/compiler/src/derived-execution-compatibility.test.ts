@@ -71,6 +71,63 @@ describe("buildMcpCatalog execution compatibility", () => {
     });
   });
 
+  const serviceOwner = () => {
+    const owner = ownerInput({ ...executionBase, bindingsRelation: "capabilityBindings" });
+    owner.contract.mcp = {
+      toolPrefix: "service",
+      tools: "dedicated",
+      operations: { list: false, get: true, create: false, update: false, delete: false },
+    };
+    return owner;
+  };
+  const withAudience = (audience?: string[]) => {
+    const contribution = compatibility({ ...executionBase, bindingsRelation: "capabilityBindings" });
+    if (audience) contribution.records![0]!.audience = audience;
+    return [{ plugin: "demo", contribution }];
+  };
+
+  it("gives the derived tools the definition entity's read roles when no audience is named", () => {
+    const owner = serviceOwner();
+    const readRoles = owner.contract.entityOperations.get!.authorization.roles;
+    expect(readRoles.length).toBeGreaterThan(0);
+    const catalog = buildMcpCatalog(catalogInputs(owner), "test", {}, [], withAudience(), undefined, [], new Set(readRoles));
+    expect(catalog.derivedTools[0]?.roles).toEqual([...readRoles]);
+  });
+
+  it("gives the derived tools the record's audience when one is named, beyond the read roles", () => {
+    // Users who may call the tools without reading the definitions: the
+    // audience is wider than the entity's read roles, which stay as they are.
+    const catalog = buildMcpCatalog(
+      catalogInputs(serviceOwner()),
+      "test",
+      {},
+      [],
+      withAudience(["integration_user", "integration_admin"]),
+      undefined,
+      [],
+      new Set(["integration_user", "integration_admin", "Integrations.All.Read"]),
+    );
+    expect(catalog.derivedTools[0]?.roles).toEqual(["integration_user", "integration_admin"]);
+  });
+
+  it("refuses an audience role the realm does not declare, and an empty audience", () => {
+    expect(() =>
+      buildMcpCatalog(
+        catalogInputs(serviceOwner()),
+        "test",
+        {},
+        [],
+        withAudience(["integration_user", "integration_ghost"]),
+        undefined,
+        [],
+        new Set(["integration_user", "integration_admin"]),
+      ),
+    ).toThrow(/record "Service" audience names "integration_ghost", which the realm does not declare/);
+    expect(() =>
+      buildMcpCatalog(catalogInputs(serviceOwner()), "test", {}, [], withAudience([]), undefined, [], new Set()),
+    ).toThrow(/declares an empty audience/);
+  });
+
   it("refuses leftover bindingsField on execution compatibility", () => {
     const owner = ownerInput({
       ...executionBase,

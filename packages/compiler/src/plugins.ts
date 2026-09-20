@@ -119,6 +119,15 @@ export type PluginExecutionCompatibility = {
     visibleWhen?: { field: string; equals: string };
     visibleToRolesField?: string;
     internalOnlyField?: string;
+    /**
+     * The roles a session must hold for the rows to project as tools and to
+     * execute — the audience of the derived tools. Absent, the audience is
+     * the roles of the definition entity's canonical read, which ties "may
+     * use the tools" to "may read the definitions"; a plugin whose users
+     * may call what only its administrators may read names the wider set
+     * here. Every role must exist in the realm; the build fails otherwise.
+     */
+    audience?: string[];
     execution: {
       /**
        * Owned hasMany collection on the owner whose target rows are the

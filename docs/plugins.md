@@ -139,12 +139,23 @@ Do not author `bindingsEntity` or `parentRef`: they are inferred from the
 owned collection. The catalog still carries the resolved names so the runtime
 can join without knowing the plugin.
 
+**Audience.** The roles a session must hold for the rows to project as tools
+and to execute are, by default, the roles of the definition entity's canonical
+read — "may use the tools" then means "may read the definitions". A plugin
+whose users may call what only its administrators may read names the wider
+set on the record as `audience: ["integration_user", "integration_admin"]`;
+the entity's read roles stay as authored. Every audience role must exist in
+the generated realm (declared in `authorization.yaml`, or named by an entity
+or Operation the realm generator emits); an unknown role or an empty audience
+fails the build.
+
 ```ts
 executionCompatibility: {
   version: 1,
   records: [{
     entity: "Service",
     // ...
+    audience: ["integration_user", "integration_admin"], // optional; default: Service read roles
     execution: {
       bindingsRelation: "capabilityBindings", // owned hasMany on Service
       operationRef: "capabilityId",

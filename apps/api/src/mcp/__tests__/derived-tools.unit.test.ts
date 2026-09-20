@@ -88,6 +88,20 @@ describe("sessionInAudience", () => {
   });
 });
 
+describe("sessionInAudience with an authored audience", () => {
+  it("admits a role of the record's audience that holds no read on the definition entity", () => {
+    // The catalogue entry's roles are the record's `audience` when the
+    // plugin names one (generate-mcp.ts); the entity's read roles do not
+    // enter the check, so a user who may not read the definitions may
+    // still be listed and execute the tools — the integration case that
+    // answered OPERATION_NOT_FOUND while the roles were the read roles.
+    const entry = { roles: ["integration_user", "integration_admin"] };
+    expect(sessionInAudience(entry, ["integration_user"])).toBe(true);
+    expect(sessionInAudience(entry, ["Integrations.All.Read"])).toBe(false);
+    expect(sessionInAudience({ roles: ["Integrations.All.Read"] }, ["integration_user"])).toBe(false);
+  });
+});
+
 describe("derivedToolsFromRows", () => {
   const entry = {
     entity: "Service",

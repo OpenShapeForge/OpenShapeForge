@@ -99,3 +99,22 @@ export function buildRoleComposites(realms: readonly KeycloakRealmArtifact[]): R
 export function renderRoleComposites(composites: RoleCompositesByRealm): string {
   return `${JSON.stringify(composites, null, 2)}\n`;
 }
+
+/**
+ * Every role name the generated realms declare — realm roles and every
+ * client's roles, composites included — read from the realm exports so it
+ * is exactly what Keycloak will know, entity- and Operation-derived roles
+ * included. What an audience or another authored role reference is checked
+ * against.
+ */
+export function realmRoleNames(realms: readonly KeycloakRealmArtifact[]): Set<string> {
+  const names = new Set<string>();
+  for (const artifact of realms) {
+    const realm = JSON.parse(artifact.contents) as RealmExport;
+    for (const role of realm.roles?.realm ?? []) if (role.name) names.add(role.name);
+    for (const roles of Object.values(realm.roles?.client ?? {})) {
+      for (const role of roles) if (role.name) names.add(role.name);
+    }
+  }
+  return names;
+}

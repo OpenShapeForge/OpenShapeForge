@@ -15,6 +15,7 @@ import {
 } from "./authoring/generate-keycloak-artifacts.js";
 import {
   buildRoleComposites,
+  realmRoleNames,
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
 } from "./authoring/role-composites.js";
@@ -489,6 +490,9 @@ export async function collectAllArtifacts(
           operationToolProjection,
           // The connector tools share the listing, so they share its byte budget.
           connectorMcpTools(connectors),
+          // An execution compatibility record's audience must name roles the
+          // realm knows; the realm exports are what Keycloak will import.
+          realmRoleNames(keycloakArtifacts),
         ),
       },
     ],

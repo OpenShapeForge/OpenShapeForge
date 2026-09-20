@@ -1228,6 +1228,13 @@ export function buildMcpCatalog(
   requestedOperationToolProjection?: McpOperationToolProjection,
   /** The connector tools the same listing carries, for the byte budget. */
   connectorTools: readonly McpToolShape[] = [],
+  /**
+   * Every role the generated realm declares (client roles, realm roles,
+   * composites, the ones entities and Operations name), for validating an
+   * execution compatibility record's audience. Undefined skips that check
+   * (callers without a realm, such as unit fixtures).
+   */
+  knownRoles?: ReadonlySet<string>,
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -1717,10 +1724,32 @@ export function buildMcpCatalog(
           "personalization.instructionField",
         );
       }
+      // The audience of the derived tools: the record's own when it names
+      // one (validated against the realm's roles), else the definition
+      // entity's read roles.
+      if (record.audience !== undefined) {
+        if (record.audience.length === 0) {
+          throw new Error(
+            `Plugin "${plugin}" execution compatibility record "${record.entity}" ` +
+              `declares an empty audience; name at least one role or omit it.`,
+          );
+        }
+        const unknown = knownRoles
+          ? record.audience.filter((role) => !knownRoles.has(role))
+          : [];
+        if (unknown.length > 0) {
+          throw new Error(
+            `Plugin "${plugin}" execution compatibility record "${record.entity}" ` +
+              `audience names ${unknown.map((role) => JSON.stringify(role)).join(", ")}, ` +
+              `which the realm does not declare. Declare the role in authorization.yaml ` +
+              `(or on an entity or Operation that the realm generator emits) first.`,
+          );
+        }
+      }
       derivedTools.push({
         entity: record.entity,
         table: entity.table,
-        roles: [...readOperation.authorization.roles],
+        roles: [...(record.audience ?? readOperation.authorization.roles)],
         keyField: record.keyField,
         ...(record.titleField ? { titleField: record.titleField } : {}),
         descriptionField: record.descriptionField,
@@ -1963,6 +1992,7 @@ export function renderMcpCatalog(
   executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
   operationToolProjection?: McpOperationToolProjection,
   connectorTools: readonly McpToolShape[] = [],
+  knownRoles?: ReadonlySet<string>,
 ): string {
   return `${JSON.stringify(buildMcpCatalog(
     inputs,
@@ -1972,5 +2002,6 @@ export function renderMcpCatalog(
     executionCompatibility,
     operationToolProjection,
     connectorTools,
+    knownRoles,
   ), null, 2)}\n`;
 }

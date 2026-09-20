@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import type { AuthoredDerivedExecution } from "./derived-execution.js";
-import { buildMcpCatalog } from "./generate-mcp.js";
+import { advertisedToolSizes, buildMcpCatalog, selectOperationToolProjection } from "./generate-mcp.js";
 import type { CompiledPluginOperation, PluginExecutionCompatibility } from "./plugins.js";
 import {
   catalogInputs,
@@ -180,6 +180,36 @@ describe("buildMcpCatalog execution compatibility", () => {
       expect.objectContaining({ plugin: "demo", operation: "demo.service.dry-run", toolName: "dry_run_service" }),
     ]));
     expect(catalog.executionCompatibility.filter((entry) => entry.operation === "demo.service.dry-run")).toHaveLength(1);
+
+    // The byte budget counts the helpers the runtime lists: in the searchable
+    // projection under their public names; in the dedicated projection the
+    // Operation tools of the same names are counted instead, once.
+    const searchable = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: catalog.operationTools,
+      projection: "searchable",
+      derivedTools: catalog.derivedTools,
+    }).map((size) => size.name);
+    expect(searchable).toContain("connect_service");
+    expect(searchable).toContain("dry_run_service");
+    const dedicated = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: catalog.operationTools,
+      projection: "dedicated",
+      derivedTools: catalog.derivedTools,
+    }).map((size) => size.name);
+    expect(dedicated.filter((name) => name === "connect_service")).toHaveLength(1);
+    expect(dedicated.filter((name) => name === "dry_run_service")).toHaveLength(1);
+  });
+
+  it("counts compatibility helpers once against the dedicated tool cap", () => {
+    // Two helpers plus their two Operations: 2 dedicated-style tools and 0
+    // further Operations, so a cap of 2 still lists everything dedicated,
+    // a cap of 1 is refused on the helpers alone.
+    expect(selectOperationToolProjection(2, 0, 2)).toBe("dedicated");
+    expect(() => selectOperationToolProjection(2, 0, 1)).toThrow(/over the 1 limit/);
   });
 
   it("refuses leftover bindingsField on execution compatibility", () => {

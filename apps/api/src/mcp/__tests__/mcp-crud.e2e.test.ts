@@ -757,7 +757,7 @@ describe("generated MCP server", () => {
     });
     // A reference an Operation writes (`writtenBy`) is nobody's to set through
     // create or update; mcp-reference-policy.e2e.test.ts proves that refusal.
-    const relationshipKeys = referenceColumns.filter((column) => !operationWrittenReferences(table, tablesByName).some((reference) => reference.column === column));
+    const relationshipKeys = referenceColumns.filter((column) => !operationWrittenReferences(table).some((reference) => reference.column === column));
     for (const column of relationshipKeys) {
       const key = fieldName(column);
       const targetTable = tablesByName.get(foreignKeyTargets(table).get(column.name)!)!;

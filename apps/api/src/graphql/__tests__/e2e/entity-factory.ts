@@ -6,7 +6,7 @@
  * column rules so the suite can never drift from the API.
  */
 import { expect } from "bun:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import {
   createGeneratedEntity,
@@ -16,6 +16,8 @@ import {
   isTenantRegistryTable,
   isWritableColumn,
 } from "../../generated-crud.js";
+import fieldAuthoringRegistry from "../../../generated/compiler/field-authoring-registry.json" with { type: "json" };
+import { createGeneratedEntityForTable } from "../../../operations/entity/mutations.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
 import {
   createdRows,
@@ -203,18 +205,44 @@ export function schemaSample(
   if (typeof rawSample !== "string") return rawSample;
   let sample: string = rawSample;
   if (schema?.pattern && !new RegExp(schema.pattern).test(sample)) {
-    const identifier = `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`;
-    if (!new RegExp(schema.pattern).test(identifier)) {
+    // An identifier-shaped candidate first; then the marker's digest, which
+    // is what a checksum column (a content hash) is authored to hold.
+    const candidates = [
+      `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`,
+      createHash("sha256").update(`${marker}:${fieldName(column)}`).digest("hex"),
+    ];
+    const fitting = candidates.find((candidate) => new RegExp(schema.pattern!).test(candidate));
+    if (fitting === undefined) {
       throw new Error(`No deterministic sample satisfies ${fieldName(column)} pattern ${schema.pattern}.`);
     }
-    sample = identifier;
+    sample = fitting;
   }
   return schema?.maxLength !== undefined ? sample.slice(0, schema.maxLength) : sample;
 }
 
-/** `schemaSample` against the field's projected create schema on `table`. */
+/**
+ * The authored value contract of a field on a table with no create of its
+ * own (a template's versions are made by its publish): the static options
+ * and pattern the compiler also turns into the column's CHECK, read from the
+ * compiled field registry the engine ships, so the runtime-owned seed of such
+ * a row satisfies the same rules a create would.
+ */
+function authoredFieldSchema(table: GeneratedTable, field: string): Pick<FieldSchema, "enum" | "maxLength" | "pattern"> | undefined {
+  const shape = (fieldAuthoringRegistry as { osfTypes?: Record<string, { shape?: Array<{ key: string; validation?: { pattern?: string; maxLength?: number }; options?: { type?: string; items?: Array<{ value: string }> } }> }> })
+    .osfTypes?.[table.source?.authoringEntityName ?? ""]?.shape?.find((entry) => entry.key === field);
+  if (!shape) return undefined;
+  const items = shape.options?.type === "static" ? shape.options.items?.map((item) => item.value) : undefined;
+  return {
+    ...(items?.length ? { enum: items } : {}),
+    ...(shape.validation?.pattern ? { pattern: shape.validation.pattern } : {}),
+    ...(shape.validation?.maxLength !== undefined ? { maxLength: shape.validation.maxLength } : {}),
+  };
+}
+
+/** `schemaSample` against the field's projected create schema on `table`, or its authored contract when there is no create. */
 export function contractSample(table: GeneratedTable, column: Column, marker: string): unknown {
-  return schemaSample(column, createFieldSchema(table, fieldName(column)), marker);
+  const field = fieldName(column);
+  return schemaSample(column, createFieldSchema(table, field) ?? authoredFieldSchema(table, field), marker);
 }
 
 /**
@@ -275,11 +303,14 @@ export async function createRow(
 
   const input = await columnInput(table, identity, overrides, depth);
 
-  if (!graphql || graphql.operations?.create === false) {
-    const row = await createGeneratedEntity(getRuntime().db, identity, {
-      table: table.name,
-      values: input,
-    });
+  if (!graphql || graphql.operations?.create === false || !isGeneratedCrudOperationEnabled(table, "create")) {
+    // A table without a caller-facing create (a template's versions are made
+    // by its publish) is seeded through the runtime-owned path the engine's
+    // own Operations use: the same validation, tenant column and journal
+    // event, without the operation gate a caller would meet.
+    const row = isGeneratedCrudOperationEnabled(table, "create")
+      ? await createGeneratedEntity(getRuntime().db, identity, { table: table.name, values: input })
+      : await createGeneratedEntityForTable(getRuntime().db, identity, table, input);
     const id = String(row[table.primaryKey!]);
     expect(id).toBeTruthy();
     createdRows.push({ table, id, identity });

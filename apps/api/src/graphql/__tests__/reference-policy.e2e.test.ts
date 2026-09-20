@@ -14,10 +14,10 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { createInput, createRow, graphqlTables as tables, tablesByName } from "./e2e/entity-factory.js";
+import { createInput, createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
 import { collectionOf, createDoc, fetchRecord, listDoc, updateDoc } from "./e2e/gql-shapes.js";
 import { isEntityBackedCreate } from "./e2e/operations.js";
-import { operationWrittenReferences, plantReference } from "./e2e/reference-policy.js";
+import { operationWrittenReferences, plantReference, referenceTarget } from "./e2e/reference-policy.js";
 import { describe, gql, registerSuiteLifecycle, tenantA, tenantB, test, type Identity } from "./e2e/harness.js";
 
 registerSuiteLifecycle();
@@ -34,9 +34,10 @@ describe("GraphQL transport: operation-written references", () => {
       return collectionOf(table, await gql(identity, doc, { filter: { [field]: value } }), graphql.listQueryName).items.map((item: any) => item.id);
     };
 
-    for (const reference of operationWrittenReferences(table, tablesByName)) {
+    for (const reference of operationWrittenReferences(table)) {
       const { field, writers, column } = reference;
-      const targetTable = tablesByName.get(reference.targetTable)!;
+      // A partial-policy target (no create of its own) is seeded through the engine fixture.
+      const targetTable = referenceTarget(reference);
 
       test(`${typeName}: ${field} is written by ${writers.join(", ")} only — omitted from the input types, which say so`, async () => {
         for (const input of [...(isEntityBackedCreate(table) ? [`Create${typeName}Input`] : []), `Update${typeName}Input`]) {

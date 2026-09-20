@@ -14,12 +14,12 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { tablesByName } from "../../graphql/__tests__/e2e/entity-factory.js";
+import { createRow } from "../../graphql/__tests__/e2e/entity-factory.js";
 import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
-import { expectCreateWriteRefusal, expectWriterRefusal, operationWrittenReferences, plantReference } from "../../graphql/__tests__/e2e/reference-policy.js";
+import { expectCreateWriteRefusal, expectWriterRefusal, operationWrittenReferences, plantReference, referenceTarget } from "../../graphql/__tests__/e2e/reference-policy.js";
 import { createdRows, describe, registerSuiteLifecycle, tenantA, tenantB, test, type Identity } from "../../graphql/__tests__/e2e/harness.js";
 import {
-  advertisedSchema, argsFor, callTool, createArgs, createMcpRow, mcpCreateTables, rpc, toolError, toolNameFor, toolPayload, type CrudOperation, type McpTable,
+  advertisedSchema, argsFor, callTool, createArgs, mcpCreateTables, rpc, toolError, toolNameFor, toolPayload, type CrudOperation, type McpTable,
 } from "./e2e/mcp-sweep.js";
 
 registerSuiteLifecycle();
@@ -32,9 +32,11 @@ describe("generated MCP server: operation-written references", () => {
     const listedIds = async (identity: Identity, field: string, value: string) =>
       toolPayload((await call(identity, "list", { filter: { [field]: value } })).body).items.map((item: any) => item.id);
 
-    for (const reference of operationWrittenReferences(table, tablesByName)) {
+    for (const reference of operationWrittenReferences(table)) {
       const { field, writers, column } = reference;
-      const targetTable = tablesByName.get(reference.targetTable)!;
+      // A partial-policy target (no create of its own) is seeded through the engine fixture.
+      const targetTable = referenceTarget(reference);
+      const target = (identity: Identity) => createRow(targetTable, identity);
 
       test(`${prefix}: ${field} is written by ${writers.join(", ")} only — a filter, never create or update input`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
@@ -61,14 +63,14 @@ describe("generated MCP server: operation-written references", () => {
         // The value is another tenant's real key, on another tenant's real
         // row: row security answers with nothing, as a list without the
         // filter would. A row of this tenant that carries the value is found.
-        const foreignTargetId = await createMcpRow(targetTable, tenantB);
+        const foreignTargetId = await target(tenantB);
         const foreignRow = toolPayload((await call(tenantB, "create", await createArgs(table, tenantB))).body);
         createdRows.push({ table, id: foreignRow.id, identity: tenantB });
         await plantReference(table, foreignRow.id, column, foreignTargetId);
         expect(await listedIds(tenantB, field, foreignTargetId)).toEqual([foreignRow.id]);
         expect(await listedIds(tenantA, field, foreignTargetId)).toEqual([]);
 
-        const targetId = await createMcpRow(targetTable, tenantA);
+        const targetId = await target(tenantA);
         const row = toolPayload((await call(tenantA, "create", await createArgs(table, tenantA))).body);
         createdRows.push({ table, id: row.id, identity: tenantA });
         await plantReference(table, row.id, column, targetId);

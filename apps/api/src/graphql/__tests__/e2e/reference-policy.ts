@@ -9,8 +9,7 @@
 import { expect } from "bun:test";
 import { sql } from "kysely";
 import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
-import { fieldName, foreignKeyTargets, referencingRows } from "./entity-factory.js";
-import { isEntityBackedCreate } from "./operations.js";
+import { eligibleTablesByName, fieldName, foreignKeyTargets, referencingRows } from "./entity-factory.js";
 import { getSeedRuntime, type GeneratedTable, type Identity } from "./harness.js";
 
 type Column = GeneratedTable["columns"][number];
@@ -57,20 +56,23 @@ export type OperationWrittenReference = { column: Column; field: string; targetT
 /**
  * The optional reference columns an Operation writes (`writtenBy`): nobody's
  * to set through create or update, still a filter, and refused naming every
- * writer. Only references to a generated table, so the sweep can build a
- * plausible value for the refusal.
+ * writer. Every reference to a GraphQL-exposed table counts, partial-policy
+ * targets included (a document's template version): the sweep seeds such a
+ * target through the shared engine fixture (createRow) rather than skip it.
  */
-export function operationWrittenReferences(
-  table: GeneratedTable,
-  tablesByName: ReadonlyMap<string, GeneratedTable>,
-): OperationWrittenReference[] {
+export function operationWrittenReferences(table: GeneratedTable): OperationWrittenReference[] {
   const targets = foreignKeyTargets(table);
   return table.columns.flatMap((column) => {
     if (column.primaryKey || column.required || !isOperationWrittenColumn(column)) return [];
     const targetTable = targets.get(column.name);
-    if (!targetTable || !tablesByName.has(targetTable)) return [];
+    if (!targetTable || !eligibleTablesByName.has(targetTable)) return [];
     return [{ column, field: fieldName(column), targetTable, writers: (column.writtenBy ?? []).map((writer) => writer.operation) }];
   });
+}
+
+/** The generated table a swept reference points at, partial-policy ones included. */
+export function referenceTarget(reference: OperationWrittenReference): GeneratedTable {
+  return eligibleTablesByName.get(reference.targetTable)!;
 }
 
 /** The refusal of a write naming an operation-written field: BAD_USER_INPUT, the field, every writer. */
@@ -82,25 +84,19 @@ export function expectWriterRefusal(refusal: { code?: string | undefined; messag
 }
 
 /**
- * The refusal of a create naming an operation-written field. An entity-backed
- * create refuses it the way an update does: BAD_USER_INPUT naming the field
- * and every writer. A plugin-backed create has a closed authored contract of
- * its own, so the field is refused as not part of that contract — VALIDATION
- * with a violation on the field — unless the transport checks the write
- * policy first and answers with the writer refusal (MCP does). Either names
- * the field; only the entity-backed answer must name the writers.
+ * The refusal of a create naming an operation-written field: the same as an
+ * update's, on every interface and whether the create is entity- or
+ * plugin-backed — the write policy speaks before a plugin's own contract
+ * (operations/entity/plugin-executor.ts), so the answer is BAD_USER_INPUT
+ * naming the field and every writer, never "unknown property".
  */
 export function expectCreateWriteRefusal(
-  table: GeneratedTable,
-  refusal: { code?: string | undefined; message?: string | undefined; text?: string | undefined; violations?: Array<{ field?: string }> | undefined },
+  _table: GeneratedTable,
+  refusal: { code?: string | undefined; message?: string | undefined; text?: string | undefined },
   field: string,
   writers: readonly string[],
 ): void {
-  if (isEntityBackedCreate(table)) return expectWriterRefusal(refusal, field, writers);
-  const text = refusal.text ?? `${refusal.code ?? ""} ${refusal.message ?? ""} ${JSON.stringify(refusal.violations ?? [])}`;
-  if (text.includes("BAD_USER_INPUT")) return expectWriterRefusal(refusal, field, writers);
-  expect(text).toContain("VALIDATION");
-  expect(text).toContain(field);
+  expectWriterRefusal(refusal, field, writers);
 }
 
 /**
@@ -122,11 +118,17 @@ export async function expectedDeleteOutcome(
 
 /**
  * Set an operation-written reference on a row the way its writer would —
- * directly in storage, past the write policy every transport enforces — so
- * a sweep can prove the filter finds a row that carries the value. The
- * writer Operation's own behaviour is that Operation's suite, not the
- * sweep's; this is a fixture, and it says so.
+ * directly in storage, past the write policy every transport enforces and
+ * past the row triggers that guard a column for its writer (a document's
+ * template version is the link command's alone) — so a sweep can prove the
+ * filter finds a row that carries the value. The writer Operation's own
+ * behaviour is that Operation's suite, not the sweep's; this is a fixture,
+ * and it says so: it runs as the privileged seed runtime with user triggers
+ * off for its one statement.
  */
 export async function plantReference(table: GeneratedTable, id: string, column: Column, value: string): Promise<void> {
-  await sql`update ${sql.id(table.schema, table.table)} set ${sql.id(column.name)} = ${value}::uuid where id = ${id}::uuid`.execute(getSeedRuntime().db);
+  await getSeedRuntime().db.transaction().execute(async (trx) => {
+    await sql`set local session_replication_role = replica`.execute(trx);
+    await sql`update ${sql.id(table.schema, table.table)} set ${sql.id(column.name)} = ${value}::uuid where id = ${id}::uuid`.execute(trx);
+  });
 }

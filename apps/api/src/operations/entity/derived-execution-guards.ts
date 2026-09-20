@@ -368,6 +368,23 @@ export async function assertPublishableRelatedMutationInTransaction(
         ? mutation.row
         : { ...mutation.before, ...mutation.values };
 
+  type OwnerWork = {
+    entry: DerivedToolsCatalogEntry;
+    ownerId: string;
+    overlay?: BindingRowOverlay;
+    referenced?: { table: string; overlay: ReferencedRowOverlay };
+  };
+  const jobs = new Map<string, OwnerWork>();
+  const addWork = (
+    entry: DerivedToolsCatalogEntry,
+    ownerId: string,
+    extra: Partial<Pick<OwnerWork, "overlay" | "referenced">>,
+  ) => {
+    const key = `${entry.entity}\0${entry.table}\0${ownerId}`;
+    const current = jobs.get(key) ?? { entry, ownerId };
+    jobs.set(key, { ...current, ...extra });
+  };
+
   const bindingEntries = derivedToolEntriesForBindingTable(table.name, entries);
   if (bindingEntries.length > 0) {
     const overlay: BindingRowOverlay =
@@ -383,65 +400,69 @@ export async function assertPublishableRelatedMutationInTransaction(
             };
     for (const entry of bindingEntries) {
       for (const ownerId of bindingOwnerIdsFromOverlay(entry.execution!, overlay)) {
-        await revalidatePublishedOwner(db, session, tables, trx, entry, ownerId, {
-          overlay,
-        });
+        addWork(entry, ownerId, { overlay });
       }
     }
-    return;
   }
 
   const referenced = derivedToolEntriesForReferencedTable(table.name, entries);
-  if (referenced.length === 0) return;
-  if (mutation.kind === "create") return;
-  const pages = runtimeBindingReader(db, session, tables);
-  const referencedOverlay: ReferencedRowOverlay =
-    mutation.kind === "delete"
-      ? { kind: "delete", id: mutation.id }
-      : { kind: "update", id: mutation.id, after: serialized };
-  for (const entry of referenced) {
-    const execution = entry.execution!;
-    let ownerIds: string[] = [];
-    if (execution.operationTable === table.name) {
-      ownerIds = await ownerIdsForOperation(execution, mutation.id, pages);
-    } else if (execution.providerTable === table.name) {
-      ownerIds = await ownerIdsForProvider(
-        execution,
-        mutation.id,
-        db,
-        session,
-        tables,
-        pages,
-      );
-    } else if (execution.connectionTable === table.name) {
-      const providerIds = new Set<string>();
-      const takeProvider = (row: Record<string, unknown>) => {
-        const providerId = row[execution.connectionProviderRef];
-        if (typeof providerId === "string" && providerId.length > 0) {
-          providerIds.add(providerId);
-        }
-      };
-      takeProvider(serialized);
-      if (mutation.kind === "update") takeProvider(mutation.before);
-      const owners = new Set<string>();
-      for (const providerId of providerIds) {
-        for (const ownerId of await ownerIdsForProvider(
+  if (mutation.kind !== "create" && referenced.length > 0) {
+    const pages = runtimeBindingReader(db, session, tables);
+    const referencedOverlay: ReferencedRowOverlay =
+      mutation.kind === "delete"
+        ? { kind: "delete", id: mutation.id }
+        : { kind: "update", id: mutation.id, after: serialized };
+    for (const entry of referenced) {
+      const execution = entry.execution!;
+      let ownerIds: string[] = [];
+      if (execution.operationTable === table.name) {
+        ownerIds = await ownerIdsForOperation(execution, mutation.id, pages);
+      } else if (execution.providerTable === table.name) {
+        ownerIds = await ownerIdsForProvider(
           execution,
-          providerId,
+          mutation.id,
           db,
           session,
           tables,
           pages,
-        )) {
-          owners.add(ownerId);
+        );
+      } else if (execution.connectionTable === table.name) {
+        const providerIds = new Set<string>();
+        const takeProvider = (row: Record<string, unknown>) => {
+          const providerId = row[execution.connectionProviderRef];
+          if (typeof providerId === "string" && providerId.length > 0) {
+            providerIds.add(providerId);
+          }
+        };
+        takeProvider(serialized);
+        if (mutation.kind === "update") takeProvider(mutation.before);
+        const owners = new Set<string>();
+        for (const providerId of providerIds) {
+          for (const ownerId of await ownerIdsForProvider(
+            execution,
+            providerId,
+            db,
+            session,
+            tables,
+            pages,
+          )) {
+            owners.add(ownerId);
+          }
         }
+        ownerIds = [...owners];
       }
-      ownerIds = [...owners];
+      for (const ownerId of ownerIds) {
+        addWork(entry, ownerId, {
+          referenced: { table: table.name, overlay: referencedOverlay },
+        });
+      }
     }
-    for (const ownerId of ownerIds) {
-      await revalidatePublishedOwner(db, session, tables, trx, entry, ownerId, {
-        referenced: { table: table.name, overlay: referencedOverlay },
-      });
-    }
+  }
+
+  for (const work of jobs.values()) {
+    await revalidatePublishedOwner(db, session, tables, trx, work.entry, work.ownerId, {
+      ...(work.overlay ? { overlay: work.overlay } : {}),
+      ...(work.referenced ? { referenced: work.referenced } : {}),
+    });
   }
 }

@@ -100,6 +100,29 @@ describe("derivedToolEntriesForBindingTable", () => {
 });
 
 describe("derivedToolEntriesForReferencedTable", () => {
+  it("maps the same table as a binding for one contract and an operation for another", () => {
+    const asOperation: DerivedToolsCatalogEntry = {
+      ...ENTRY,
+      entity: "Other",
+      table: "core.other",
+      execution: {
+        ...ENTRY.execution!,
+        bindingsTable: "core.other_bindings",
+        operationTable: "core.bindings",
+      },
+    };
+    expect(
+      derivedToolEntriesForBindingTable("core.bindings", [ENTRY, asOperation]).map(
+        (entry) => entry.entity,
+      ),
+    ).toEqual(["Service"]);
+    expect(
+      derivedToolEntriesForReferencedTable("core.bindings", [ENTRY, asOperation]).map(
+        (entry) => entry.entity,
+      ),
+    ).toEqual(["Other"]);
+  });
+
   it("maps operation, provider and connection tables back to published owners", () => {
     expect(
       derivedToolEntriesForReferencedTable("core.operations", [ENTRY]).map(

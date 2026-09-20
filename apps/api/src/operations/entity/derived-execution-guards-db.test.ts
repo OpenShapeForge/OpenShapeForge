@@ -35,6 +35,32 @@ const column = (name: string, type: string, extra: Partial<GeneratedCrudColumn> 
   name, type, required: true, primaryKey: name === "id", generated: null, ...extra,
 });
 
+const ENTRY_ALT: DerivedToolsCatalogEntry = {
+  entity: "AltVariant",
+  table: "erp.template_variants",
+  roles: ["employee"],
+  keyField: "key",
+  descriptionField: "key",
+  inputFieldsField: "key",
+  visibleWhen: { field: "status", equals: "published" },
+  execution: {
+    bindingsRelation: "altBindings",
+    bindingsEntity: "AltBinding",
+    bindingsTable: "erp.alt_bindings",
+    parentRef: "parent",
+    operationRef: "operationId",
+    operationEntity: "Block",
+    operationTable: "erp.blocks",
+    providerRef: "providerId",
+    providerEntity: "Provider",
+    providerTable: "public.svc_providers",
+    connectionEntity: "Connection",
+    connectionTable: "public.svc_connections",
+    connectionProviderRef: "providerId",
+    connectionValuesField: "values",
+  },
+};
+
 const ENTRY: DerivedToolsCatalogEntry = {
   entity: "TemplateVariant",
   table: "erp.template_variants",
@@ -248,6 +274,9 @@ const fails = (promise: Promise<unknown>, code: string) =>
       create table public.svc_connections(
         id uuid primary key, tenant_id uuid not null, provider_id uuid not null, owner_user_id uuid,
         values jsonb not null, unique(tenant_id,id));
+      create table erp.alt_bindings(
+        id uuid primary key, tenant_id uuid not null, parent uuid not null,
+        operation_id uuid not null, sort_order integer not null, unique(tenant_id,id));
       create table platform.entity_events(
         id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,
@@ -257,11 +286,13 @@ const fails = (promise: Promise<unknown>, code: string) =>
       alter table public.svc_operations enable row level security; alter table public.svc_operations force row level security;
       alter table public.svc_providers enable row level security; alter table public.svc_providers force row level security;
       alter table public.svc_connections enable row level security; alter table public.svc_connections force row level security;
+      alter table erp.alt_bindings enable row level security; alter table erp.alt_bindings force row level security;
       create policy tenant on erp.template_variants using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       create policy tenant on erp.blocks using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       create policy tenant on public.svc_operations using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       create policy tenant on public.svc_providers using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       create policy tenant on public.svc_connections using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
+      create policy tenant on erp.alt_bindings using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       grant usage on schema app, erp, public, platform to openshapeforge_app;
       grant select,insert,update,delete on all tables in schema erp, public, platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
@@ -271,7 +302,7 @@ const fails = (promise: Promise<unknown>, code: string) =>
   }, 30_000);
 
   beforeEach(async () => {
-    await sql`truncate erp.blocks, erp.template_variants, public.svc_connections, public.svc_operations, public.svc_providers, platform.entity_events`
+    await sql`truncate erp.alt_bindings, erp.blocks, erp.template_variants, public.svc_connections, public.svc_operations, public.svc_providers, platform.entity_events`
       .execute(privileged!.db);
   });
 
@@ -366,6 +397,52 @@ const fails = (promise: Promise<unknown>, code: string) =>
       (await sql<{ provider: string }>`select provider_id::text as provider from public.svc_connections where id = ${seeded.connectionId}::uuid`
         .execute(privileged!.db)).rows[0]!.provider,
     ).toBe(seeded.providerId);
+  });
+
+  test("a binding table that is another contract's operation table revalidates both", async () => {
+    const seeded = await seed(2);
+    const altOwner = randomUUID();
+    const altTable = {
+      name: "erp.alt_bindings", schema: "erp", table: "alt_bindings", tenantScoped: true,
+      primaryKey: "id", domainInternal: false, generatedCrudEligible: true,
+      columns: [
+        column("id", "uuid"), column("tenant_id", "uuid"),
+        column("parent", "uuid", { sourceField: "parent" }),
+        column("operation_id", "uuid", { sourceField: "operationId" }),
+        column("sort_order", "integer", { sourceField: "order" }),
+      ],
+      source: { authoringEntityName: "AltBinding", graphql: { typeName: "AltBinding", relationships: [] } },
+    } as unknown as GeneratedCrudTable;
+    await sql`insert into erp.template_variants(id, tenant_id, title, key, status)
+      values (${altOwner}::uuid, ${tenant}::uuid, 'Alt', 'alt-tickets', 'published')`.execute(privileged!.db);
+    await sql`insert into erp.alt_bindings(id, tenant_id, parent, operation_id, sort_order)
+      values (${randomUUID()}::uuid, ${tenant}::uuid, ${altOwner}::uuid, ${seeded.childIds[0]!}::uuid, 1)`
+      .execute(privileged!.db);
+    await fails(
+      withDbSession(restricted!.db, session, (trx) =>
+        assertPublishableRelatedMutationInTransaction(
+          trx,
+          session,
+          seeded.f.child,
+          {
+            kind: "delete",
+            id: seeded.childIds[0]!,
+            row: {
+              id: seeded.childIds[0]!,
+              parent: seeded.ownerId,
+              operationId: seeded.operationId,
+              order: 1,
+            },
+          },
+          {
+            tables: [...seeded.f.catalogTables, altTable],
+            entries: [ENTRY, ENTRY_ALT],
+            db: restricted!.db,
+          },
+        ),
+      ),
+      "NOT_PUBLISHABLE",
+    );
   });
 
   test("two sessions deleting the last two bindings do not both succeed", async () => {

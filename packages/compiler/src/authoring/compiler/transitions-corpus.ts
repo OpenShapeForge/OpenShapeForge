@@ -13,6 +13,9 @@ export const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "bo
 /** Postgres `integer` / GraphQL Int; a value outside this fails CAST at runtime. */
 const INTEGER_MIN = -2_147_483_648;
 const INTEGER_MAX = 2_147_483_647;
+/** Postgres `bigint`; compared as BigInt so a JS number past 2^53 stays exact. */
+const BIGINT_MIN = -9223372036854775808n;
+const BIGINT_MAX = 9223372036854775807n;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -71,12 +74,26 @@ function authoredInValueError(
   if (asUuid && (typeof value !== "string" || !UUID_PATTERN.test(value))) return "is not a uuid";
   if (asDate && (typeof value !== "string" || !isCalendarDate(value))) return "is not a date";
   if (asDateTime && (typeof value !== "string" || !isDateTime(value))) return "is not a datetime";
-  if (typeof value === "number" && Number.isInteger(value)) {
-    if (columnType === "integer" && (value < INTEGER_MIN || value > INTEGER_MAX)) return "is out of range for integer";
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const storageError = integerStorageError(value, columnType);
+    if (storageError) return storageError;
     const minimum = numericRule(field.validation?.min);
     const maximum = numericRule(field.validation?.max);
     if (minimum !== undefined && value < minimum) return "is out of range";
     if (maximum !== undefined && value > maximum) return "is out of range";
+  }
+  return undefined;
+}
+
+/** int4/int8 CAST needs an integer inside the column's range; a decimal is not exact. */
+function integerStorageError(value: number, columnType: string): string | undefined {
+  if (columnType !== "integer" && columnType !== "bigint") return undefined;
+  const label = columnType === "integer" ? "integer" : "bigint";
+  if (!Number.isInteger(value)) return `is not exact for ${label}`;
+  if (columnType === "integer" && (value < INTEGER_MIN || value > INTEGER_MAX)) return "is out of range for integer";
+  if (columnType === "bigint") {
+    const asBigint = BigInt(value);
+    if (asBigint < BIGINT_MIN || asBigint > BIGINT_MAX) return "is out of range for bigint";
   }
   return undefined;
 }
@@ -139,7 +156,7 @@ export function assertTransitionAgreements(entities: ReadonlyArray<AgreementCont
  * Corpus-wide half of a referenced precondition: `via` must name a compiled
  * entity (core or plugin), and `field` a persisted single field of it. `in`
  * values must match that field's base type, the resolved storage scalar
- * (uuid/date/datetime strings, integer range) and the field's format/range,
+ * (uuid/date/datetime strings, int4/int8 range and exactness) and the field's format/range,
  * and when it has static options or a referentiedata group, sit in that set
  * (collectAllArtifacts holds the snapshot). A reference no compiled entity
  * answers to is refused, never skipped.

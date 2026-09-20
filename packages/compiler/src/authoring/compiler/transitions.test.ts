@@ -276,6 +276,17 @@ describe("status transitions", () => {
     expect(withIn({ field: "code", in: [11] }, retarget({ baseType: "integer", columnType: "integer", validation: { max: 10 } }))).toThrow(
       "in value 11 is out of range",
     );
+    expect(withIn({ field: "code", in: [1.5] }, retarget({ baseType: "number", columnType: "numeric", validation: { max: 1 } }))).toThrow(
+      "in value 1.5 is out of range",
+    );
+    expect(withIn({ field: "code", in: [1.5] }, retarget({ baseType: "number", columnType: "numeric", validation: { max: 2 } }))).not.toThrow();
+    expect(withIn({ field: "code", in: [1.5] }, retarget({ baseType: "number", columnType: "integer" }))).toThrow(
+      "in value 1.5 is not exact for integer",
+    );
+    expect(withIn({ field: "code", in: [2_147_483_648] }, retarget({ baseType: "integer", columnType: "bigint" }))).not.toThrow();
+    expect(withIn({ field: "code", in: [2 ** 63] }, retarget({ baseType: "integer", columnType: "bigint" }))).toThrow(
+      "in value 9223372036854776000 is out of range for bigint",
+    );
   });
 
   test("an entity without transitions is returned untouched", () => {

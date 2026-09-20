@@ -24,7 +24,7 @@ type AgreementContract = {
       osfType: string;
       baseType: string;
       cardinality: string;
-      options?: { type?: string; items?: Array<{ value: string }> };
+      options?: { type?: string; items?: Array<{ value: string }>; referentieGroep?: string };
     }>;
   };
   storage: { columns: ReadonlyArray<{ field: string; type: string }> };
@@ -72,11 +72,14 @@ export function assertTransitionAgreements(entities: ReadonlyArray<AgreementCont
 /**
  * Corpus-wide half of a referenced precondition: `via` must name a compiled
  * entity (core or plugin), and `field` a persisted single field of it. `in`
- * values must match that field's base type and, when it has static options,
- * sit in that set. A reference no compiled entity answers to is refused,
- * never skipped.
+ * values must match that field's base type and, when it has static options
+ * or a referentiedata group, sit in that set (collectAllArtifacts holds the
+ * snapshot). A reference no compiled entity answers to is refused, never skipped.
  */
-export function assertTransitionReferencedPreconditions(entities: ReadonlyArray<AgreementContract>): void {
+export function assertTransitionReferencedPreconditions(
+  entities: ReadonlyArray<AgreementContract>,
+  snapshot: Readonly<Record<string, ReadonlyArray<{ value: string }>>> = {},
+): void {
   const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
   const describe = (contract: AgreementContract, key: string) => {
     const field = contract.model.fields.find((candidate) => candidate.key === key);
@@ -120,6 +123,17 @@ export function assertTransitionReferencedPreconditions(entities: ReadonlyArray<
               if (!options.includes(String(value))) {
                 throw new Error(
                   `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not one of the static options.`,
+                );
+              }
+            }
+          }
+          if (remote.options?.type === "referentiedata") {
+            const groep = remote.options.referentieGroep;
+            const allowed = groep ? snapshot[groep]?.map((item) => item.value) ?? [] : [];
+            for (const value of precondition.in) {
+              if (!allowed.includes(String(value))) {
+                throw new Error(
+                  `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not one of the referentiedata group ${groep ?? "(missing)"}.`,
                 );
               }
             }

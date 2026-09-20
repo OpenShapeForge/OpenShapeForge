@@ -186,7 +186,8 @@ single entity reference and `field` a persisted single field of the
 referenced entity — checked the same way across every compiled entity, core
 and plugin alike (a reference no compiled entity answers to is refused,
 never skipped); `in` values must match the field's comparable base type and,
-when it has static options, sit in that set; and
+when it has static options or a referentiedata group, sit in that set
+(collectAllArtifacts holds the snapshot); and
 neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field of this

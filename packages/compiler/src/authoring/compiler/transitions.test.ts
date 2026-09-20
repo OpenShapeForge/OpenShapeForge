@@ -186,7 +186,11 @@ describe("status transitions", () => {
       'precondition "agreementId.code" is not a persisted single field of Agreement',
     );
 
-    const withIn = (patch: { field: string; in: Array<string | number | boolean> }, target: typeof agreement = agreement) => {
+    const withIn = (
+      patch: { field: string; in: Array<string | number | boolean> },
+      target: typeof agreement = agreement,
+      snapshot: Readonly<Record<string, ReadonlyArray<{ value: string }>>> = {},
+    ) => {
       const entity = {
         ...contract,
         transitions: contract.transitions!.map((status) => ({
@@ -198,7 +202,7 @@ describe("status transitions", () => {
           ),
         })),
       };
-      return () => assertTransitionReferencedPreconditions([entity, target]);
+      return () => assertTransitionReferencedPreconditions([entity, target], snapshot);
     };
     expect(withIn({ field: "code", in: ["AGR-1"] })).not.toThrow();
     expect(withIn({ field: "code", in: [1] })).toThrow('in value 1 is not a string');
@@ -223,6 +227,22 @@ describe("status transitions", () => {
     };
     expect(withIn({ field: "code", in: ["open"] }, optioned)).not.toThrow();
     expect(withIn({ field: "code", in: ["missing"] }, optioned)).toThrow("is not one of the static options");
+    const grouped = {
+      ...agreement,
+      model: {
+        ...agreement.model,
+        fields: agreement.model.fields.map((field) =>
+          field.key === "code"
+            ? { ...field, options: { type: "referentiedata" as const, referentieGroep: "AGREEMENTKIND" } }
+            : field,
+        ),
+      },
+    };
+    const snapshot = { AGREEMENTKIND: [{ value: "service" }, { value: "license" }] };
+    expect(withIn({ field: "code", in: ["service"] }, grouped, snapshot)).not.toThrow();
+    expect(withIn({ field: "code", in: ["missing"] }, grouped, snapshot)).toThrow(
+      "is not one of the referentiedata group AGREEMENTKIND",
+    );
   });
 
   test("an entity without transitions is returned untouched", () => {

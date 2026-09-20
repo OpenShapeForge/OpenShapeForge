@@ -14,6 +14,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationAvailabilityHandler, ModuleOperationHandler } from "../../modules/contract.js";
 import { sessionRelation } from "../../auth/identity-link.js";
+import { readDatabaseError } from "../../db/database-refusals.js";
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { updateGeneratedEntityForTable } from "./mutations.js";
@@ -21,10 +22,12 @@ import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { serializeEntityRow } from "./serialize-result.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import {
+  lockTransitionParticipants,
   present,
   referencedInHoldsKey,
   referencedRecords,
   referencedRecordsByRow,
+  referencedViaSignature,
   type TransitionReferencedRow,
 } from "./transitions-referenced.js";
 
@@ -320,10 +323,33 @@ async function writtenValues(
   return values;
 }
 
+const TRANSITION_LOCK_ATTEMPTS = 3;
+
+function sqlstateOf(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const facts = current instanceof Error ? readDatabaseError(current) : undefined;
+    if (facts) return facts.sqlstate;
+    const raw = current as { errno?: unknown; code?: unknown; cause?: unknown };
+    const direct = [raw.errno, raw.code].find(
+      (candidate): candidate is string => typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate),
+    );
+    if (direct) return direct;
+    current = raw.cause;
+  }
+  return undefined;
+}
+
+function isTransitionLockRetry(error: unknown): boolean {
+  return (error instanceof Error && error.name === "TransitionLockRetry") || sqlstateOf(error) === "40P01";
+}
+
 /**
- * Execute one rule: lock the row, check the record permission the rule
- * carries, recheck the decision, write `to`, the caller's `writes` and the
- * server's `stamps`, journal the update.
+ * Execute one rule: lock every participating row in (table, pk) order, check
+ * the record permission the rule carries, recheck the decision, write `to`,
+ * the caller's `writes` and the server's `stamps`, journal the update.
  */
 export async function executeTransition(
   db: OpenShapeForgeDatabase,
@@ -332,24 +358,41 @@ export async function executeTransition(
   input: Readonly<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
   const id = typeof input.id === "string" ? input.id : "";
-  return withDbSession(db, session, async (trx) => {
-    if (binding.rule.recordPermission) {
-      await assertRecordPermissionInTransaction(trx, session, binding.table, id, binding.rule.recordPermission);
+  let last: unknown;
+  for (let attempt = 0; attempt < TRANSITION_LOCK_ATTEMPTS; attempt++) {
+    try {
+      return await withDbSession(db, session, async (trx) => {
+        if (binding.rule.recordPermission) {
+          await assertRecordPermissionInTransaction(trx, session, binding.table, id, binding.rule.recordPermission);
+        }
+        const snapshot = (await lockedRows(trx, session, binding.table, [id], false)).get(id);
+        if (!snapshot) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        await lockTransitionParticipants(trx, session, binding, id, snapshot);
+        const current = (await lockedRows(trx, session, binding.table, [id], false)).get(id);
+        if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        if (referencedViaSignature(binding, current) !== referencedViaSignature(binding, snapshot)) {
+          const retry = new Error("Transition lock set changed; retry the transaction.");
+          retry.name = "TransitionLockRetry";
+          throw retry;
+        }
+        const referenced = await referencedRecords(trx, session, binding, current, false);
+        const refusal = transitionRefusal(binding, current, referenced);
+        if (refusal) throw operationFailure(refusal);
+        const values: Record<string, unknown> = {
+          [binding.status.field]: binding.rule.to,
+          ...(await writtenValues(trx, session, binding, id, input)),
+          ...stampValues(binding, session),
+        };
+        const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
+        if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        return serializeEntityRow(binding.table, row);
+      });
+    } catch (error) {
+      last = error;
+      if (attempt === TRANSITION_LOCK_ATTEMPTS - 1 || !isTransitionLockRetry(error)) throw error;
     }
-    const current = (await lockedRows(trx, session, binding.table, [id], true)).get(id);
-    if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-    const referenced = await referencedRecords(trx, session, binding, current, true);
-    const refusal = transitionRefusal(binding, current, referenced);
-    if (refusal) throw operationFailure(refusal);
-    const values: Record<string, unknown> = {
-      [binding.status.field]: binding.rule.to,
-      ...(await writtenValues(trx, session, binding, id, input)),
-      ...stampValues(binding, session),
-    };
-    const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
-    if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-    return serializeEntityRow(binding.table, row);
-  });
+  }
+  throw last;
 }
 
 export function transitionOperationHandler(

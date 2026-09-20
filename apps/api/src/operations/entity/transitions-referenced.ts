@@ -74,7 +74,7 @@ async function fetchReferenced(
     from ${sql.id(target.schema, target.table)} as remote
     where ${sql.id("remote", target.primaryKey!)}::text in (${sql.join([...ids])})
       ${tenantWhere}
-    ${lock ? sql`for share of remote` : sql``}
+    ${lock ? sql`order by ${sql.id("remote", target.primaryKey!)}::text for share of remote` : sql``}
   `.execute(trx);
   return new Map(result.rows.map((entry) => {
     const inHolds = new Map<string, boolean>();
@@ -85,7 +85,89 @@ async function fetchReferenced(
   }));
 }
 
-/** One locked (or unlocked) row per via of this record. */
+type LockParticipant = {
+  schema: string;
+  table: string;
+  pk: string;
+  mode: "update" | "share";
+  target: GeneratedCrudTable;
+};
+
+function participantKey(schema: string, table: string, pk: string): string {
+  return `${schema}.${table}\0${pk}`;
+}
+
+/** The via values this row would share-lock; a change after the exclusive lock means retry. */
+export function referencedViaSignature(
+  binding: TransitionBinding,
+  row: Readonly<GeneratedEntityRow>,
+): string {
+  return binding.referenced
+    .map((precondition) => {
+      const value = row[precondition.viaColumn.name];
+      return `${precondition.via}\0${present(value) ? String(value) : ""}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Local exclusive lock plus every referenced share-lock, in (schema, table, pk)
+ * order. Two transitions over a cycle otherwise take opposite orders and
+ * deadlock. A row that is both local and referenced takes the exclusive lock.
+ */
+export async function lockTransitionParticipants(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  binding: TransitionBinding,
+  id: string,
+  row: Readonly<GeneratedEntityRow>,
+): Promise<void> {
+  const byKey = new Map<string, LockParticipant>();
+  const add = (item: LockParticipant) => {
+    const key = participantKey(item.schema, item.table, item.pk);
+    const existing = byKey.get(key);
+    if (!existing || (item.mode === "update" && existing.mode !== "update")) byKey.set(key, item);
+  };
+  add({
+    schema: binding.table.schema,
+    table: binding.table.table,
+    pk: id,
+    mode: "update",
+    target: binding.table,
+  });
+  for (const precondition of binding.referenced) {
+    const viaValue = row[precondition.viaColumn.name];
+    if (!present(viaValue) || !precondition.target.primaryKey) continue;
+    add({
+      schema: precondition.target.schema,
+      table: precondition.target.table,
+      pk: String(viaValue),
+      mode: "share",
+      target: precondition.target,
+    });
+  }
+  const ordered = [...byKey.values()].sort(
+    (left, right) =>
+      left.schema.localeCompare(right.schema) ||
+      left.table.localeCompare(right.table) ||
+      left.pk.localeCompare(right.pk),
+  );
+  for (const item of ordered) {
+    const tenantWhere = item.target.tenantScoped
+      ? sql`and ${sql.id("target", "tenant_id")} = ${session.tenantId}::uuid`
+      : sql``;
+    const lock = item.mode === "update" ? sql`for update of target` : sql`for share of target`;
+    await sql`
+      select 1
+      from ${sql.id(item.schema, item.table)} as target
+      where ${sql.id("target", item.target.primaryKey!)}::text = ${item.pk}
+        ${tenantWhere}
+      ${lock}
+    `.execute(trx);
+  }
+}
+
+/** One row per via of this record. Execution share-locks first, then reads. */
 export async function referencedRecords(
   trx: Transaction<DB>,
   session: DbSessionInput,
@@ -110,7 +192,7 @@ export async function referencedRecords(
 
 /**
  * Offer path: gather every `via` value across the page and read each target
- * table once. Execution keeps `referencedRecords` — one locked row per via.
+ * table once. Execution locks participants in (table, pk) order, then reads.
  */
 export async function referencedRecordsByRow(
   trx: Transaction<DB>,

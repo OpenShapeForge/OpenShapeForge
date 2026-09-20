@@ -72,6 +72,50 @@ function protectedBinding(): TransitionBinding {
   };
   return { ...base, table, statusColumn: table.columns.find((column) => column.name === "status")!, rule: { ...base.rule, recordPermission: "edit" } };
 }
+/** Self-reference on the scratch table so two milestones can name each other. */
+function cyclicBinding(): TransitionBinding {
+  const base = transitionBinding(operation);
+  const relatedColumn = {
+    name: "related_milestone_id", type: "uuid", required: false, primaryKey: false, generated: null, sourceField: "relatedMilestoneId",
+  };
+  const table: GeneratedCrudTable = {
+    ...structuredClone(base.table),
+    columns: [...base.table.columns, relatedColumn],
+    source: {
+      ...structuredClone(base.table.source!),
+      graphql: {
+        ...base.table.source!.graphql!,
+        relationships: [
+          ...(base.table.source!.graphql!.relationships ?? []),
+          {
+            name: "relatedMilestoneId", target: "AgreementMilestone", type: "AgreementMilestone", resolve: "belongsTo",
+            foreignKey: "related_milestone_id", fieldKey: "relatedMilestoneId", kind: "belongsTo", ownership: "reference",
+          },
+        ],
+      },
+    },
+  };
+  return {
+    ...base,
+    table,
+    statusColumn: table.columns.find((column) => column.name === "status")!,
+    referenced: [{
+      via: "relatedMilestoneId",
+      viaColumn: relatedColumn,
+      field: "description",
+      fieldColumn: table.columns.find((column) => column.name === "description")!,
+      target: table,
+      present: true,
+    }],
+  };
+}
+async function relatedMilestones(): Promise<[string, string]> {
+  const first = await milestone();
+  const second = await milestone();
+  await sql`update erp.agreement_milestones set related_milestone_id = ${second}::uuid where id = ${first}::uuid`.execute(privileged!.db);
+  await sql`update erp.agreement_milestones set related_milestone_id = ${first}::uuid where id = ${second}::uuid`.execute(privileged!.db);
+  return first < second ? [first, second] : [second, first];
+}
 async function agreement(tenantId = tenant, code: string | null = "AGR-1"): Promise<string> {
   const id = randomUUID();
   await sql`insert into erp.agreements (id, tenant_id, code) values (${id}::uuid, ${tenantId}::uuid, ${code})`.execute(privileged!.db);
@@ -106,7 +150,7 @@ describe("status transitions against PostgreSQL", () => {
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
       create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, activated_at timestamptz, amount numeric, unique(tenant_id,id));
-      create table erp.agreement_milestones(${columnDdl()}, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
+      create table erp.agreement_milestones(${columnDdl()}, related_milestone_id uuid, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,
@@ -121,7 +165,8 @@ describe("status transitions against PostgreSQL", () => {
       grant select,insert,update,delete on all tables in schema erp,platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`).execute(privileged.db);
-    restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 2 });
+    await sql.raw(`alter database "${scratchName}" set deadlock_timeout = '200ms'`).execute(privileged.db);
+    restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
     registerEntityOperationAvailability(restricted.db, bindOperationHandlers([]));
   }, 30_000);
   beforeEach(async () => {
@@ -338,5 +383,39 @@ describe("status transitions against PostgreSQL", () => {
     await expect(executeTransition(restricted!.db, session, binding, { id: signed })).rejects.toMatchObject({
       operationError: { message: "trigger requires agreementId.code to be one of approved." },
     });
+  });
+
+  test("execution locks participating rows in table-then-pk order", async () => {
+    const [smaller, larger] = await relatedMilestones();
+    const binding = cyclicBinding();
+    const statements: Array<{ sql: string; parameters: readonly unknown[] }> = [];
+    await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: CompiledQuery) => {
+        statements.push({ sql: query.sql, parameters: query.parameters });
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return executeTransition(restricted!.db, session, binding, { id: larger });
+    });
+    const locks = statements.filter((statement) => /for (update|share)/i.test(statement.sql));
+    expect(locks.length).toBeGreaterThanOrEqual(2);
+    expect(locks[0]!.sql).toMatch(/for share/i);
+    expect(locks[0]!.parameters).toContain(smaller);
+    expect(locks[1]!.sql).toMatch(/for update/i);
+    expect(locks[1]!.parameters).toContain(larger);
+    expect((await row(larger))!.status).toBe("triggered");
+  });
+
+  test("concurrent transitions over a cyclic reference do not deadlock", async () => {
+    const binding = cyclicBinding();
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const [first, second] = await relatedMilestones();
+      const results = await Promise.all([
+        executeTransition(restricted!.db, session, binding, { id: first }),
+        executeTransition(restricted!.db, session, binding, { id: second }),
+      ]);
+      expect(results.map((result) => result.status)).toEqual(["triggered", "triggered"]);
+    }
   });
 });

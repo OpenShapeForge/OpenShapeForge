@@ -28,7 +28,6 @@ import type { ConnectorDefinition } from "./types/connector.js";
 import fieldDefinitionSchema from "../../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
-import fieldV2Schema from "../../config/schemas/field-v2.schema.json" with { type: "json" };
 import coreEntitySchema from "../../config/schemas/core-entity.schema.json" with { type: "json" };
 import workflowInspectorSchema from "../../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
@@ -86,7 +85,6 @@ describe("the schema registry", () => {
     expect(validator.schemaFiles).toContain("core-entity.schema.json");
     expect(validator.schemaFiles).toContain("connector.schema.json");
     expect(validator.schemaFiles).toContain("field-definition.schema.json");
-    expect(validator.schemaFiles).toContain("field-v2.schema.json");
     expect(validator.schemaFiles).toContain("settings-definition.schema.json");
     expect(validator.schemaFiles).toContain("settings-provider.schema.json");
   });
@@ -99,68 +97,23 @@ describe("the schema registry", () => {
     }
   });
 
-  it("keeps the FieldV2 schema id as an equivalent compatibility entry point", () => {
-    const ajv = new Ajv2020.default({ strict: false });
-    ajv.addSchema(workflowInspectorSchema);
-    ajv.addSchema(fieldDefinitionSchema);
-    ajv.addSchema(fieldV2Schema);
-    const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
-    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
-    const compatibilityDefinition = ajv.getSchema(
-      `${fieldV2Schema.$id}#/$defs/fieldV2`,
-    )!;
-    const compatibilityProperties = ajv.getSchema(
-      `${fieldV2Schema.$id}#/$defs/fieldV2Properties`,
-    )!;
-    const recursiveDefinition = {
-      key: "address",
-      osfType: "object",
-      children: [
-        { key: "street", osfType: "string" },
-        {
-          key: "residents",
-          osfType: "object",
-          cardinality: "collection",
-          item: { key: "resident", osfType: "object" },
-        },
-      ],
-    };
-
-    expect(canonical(recursiveDefinition)).toBe(true);
-    expect(compatibility(recursiveDefinition)).toBe(true);
-    expect(compatibilityDefinition(recursiveDefinition)).toBe(true);
-    expect(compatibilityProperties(recursiveDefinition)).toBe(true);
-    expect(canonical({ osfType: "string" })).toBe(false);
-    expect(compatibility({ osfType: "string" })).toBe(false);
-    expect(compatibilityDefinition({ osfType: "string" })).toBe(false);
-    expect(compatibilityProperties({ osfType: "string" })).toBe(false);
-
-    for (const definition of Object.keys(fieldV2Schema.$defs)) {
-      expect(ajv.getSchema(`${fieldV2Schema.$id}#/$defs/${definition}`)).toBeDefined();
-    }
-  });
-
   it("rejects a fieldDefinition semantic value with a second authored shape", () => {
     const ajv = new Ajv2020.default({ strict: false });
     ajv.addSchema(workflowInspectorSchema);
     ajv.addSchema(fieldDefinitionSchema);
-    ajv.addSchema(fieldV2Schema);
     const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
-    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
 
     const semanticField = {
       key: "definition",
       osfType: "fieldDefinition",
     };
     expect(canonical(semanticField)).toBe(true);
-    expect(compatibility(semanticField)).toBe(true);
 
     for (const ambiguous of [
       { ...semanticField, children: [{ key: "extra", osfType: "string" }] },
       { ...semanticField, item: { key: "extra", osfType: "string" } },
     ]) {
       expect(canonical(ambiguous)).toBe(false);
-      expect(compatibility(ambiguous)).toBe(false);
     }
 
     expect(

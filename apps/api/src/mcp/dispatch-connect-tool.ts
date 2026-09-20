@@ -10,12 +10,12 @@ import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { withDbSession } from "../db/session.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
 import { deriveToolName, derivedToolsFromRows, sessionInAudience } from "./derived-tools.js";
-import { orderedBindings } from "./declarative-execution.js";
+import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
-import { runtimeRowByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { type DirectCallScope } from "./tool-dispatch.js";
 import { failed, ok } from "./tool-results.js";
 export async function connectToolCall(
@@ -92,9 +92,10 @@ export async function connectToolCall(
       // The provider derives from the target's exact chain; the caller
       // chooses nothing. Exactly one distinct provider per connection.
       const providerIds = new Set<string>();
-      for (const binding of orderedBindings(
+      for (const binding of await loadOrderedBindings(
+        execution,
         definitionRow,
-        execution.bindingsField,
+        runtimeBindingReader(db, session, tables),
       )) {
         const operationId = binding[execution.operationRef];
         const operationRow =
@@ -199,9 +200,10 @@ export async function connectToolCall(
         try {
           const rowProviders = new Set<string>();
           const rowScopes: string[] = [];
-          for (const binding of orderedBindings(
+          for (const binding of await loadOrderedBindings(
+            execution,
             row,
-            execution.bindingsField,
+            runtimeBindingReader(db, session, tables),
           )) {
             const operationId = binding[execution.operationRef];
             const operationRow =

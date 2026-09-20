@@ -21,7 +21,7 @@ import {
   mergeOutputs,
   operationBaseUrlTemplate,
   extractPath,
-  orderedBindings,
+  orderedBindingRecords,
   providerUrlTemplates,
   requestHeaderMappings,
   resolveTemplate,
@@ -400,31 +400,19 @@ describe("mapping helpers", () => {
     expect(extractPath({ a: 1 }, undefined)).toEqual({ a: 1 });
   });
 
-  it("orders bindings and refuses an empty set", () => {
+  it("orders binding records and refuses an empty or colliding set", () => {
     expect(
-      orderedBindings(
-        {
-          bindings: [
-            { order: 2, id: "b" },
-            { order: 1, id: "a" },
-          ],
-        },
-        "bindings",
-      ).map((binding) => binding.id),
+      orderedBindingRecords([
+        { order: 2, id: "b" },
+        { order: 1, id: "a" },
+      ]).map((binding) => binding.id),
     ).toEqual(["a", "b"]);
-    expect(() => orderedBindings({ bindings: [] }, "bindings")).toThrow(
-      /no bindings/,
+    expect(() => orderedBindingRecords([])).toThrow(/no bindings/);
+    expect(() => orderedBindingRecords([{ order: 1 }, { order: 1 }])).toThrow(
+      /unique integer order/,
     );
-    expect(() =>
-      orderedBindings(
-        { bindings: [{ order: 1 }, { order: 1 }] },
-        "bindings",
-      ),
-    ).toThrow(/unique integer order/);
     for (const order of [undefined, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
-      expect(() =>
-        orderedBindings({ bindings: [{ order }] }, "bindings"),
-      ).toThrow(/unique integer order/);
+      expect(() => orderedBindingRecords([{ order }])).toThrow(/unique integer order/);
     }
   });
 });

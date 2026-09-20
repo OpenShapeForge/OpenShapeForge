@@ -279,7 +279,9 @@ platform's fixed tools and 128 KB for tools that exist only at run time —
 over and which tools weigh most. The fixed tools' shapes, the searchable pair,
 the edit-lease trio, the derived-tool helpers and the connector projection live
 in `@openshapeforge/operations`, imported by both the runtime and the compiler,
-so the compiler measures what the runtime lists.
+so the compiler measures what the runtime lists. Binding rows for a derived
+tool come from `bindingsRelation`, an owned collection on the owner; see
+[plugins.md](plugins.md#derived-tool-execution-bindings).
 Both are build failures rather than runtime surprises, matching how the rest of
 the compiler fails closed.
 

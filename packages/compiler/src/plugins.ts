@@ -120,7 +120,11 @@ export type PluginExecutionCompatibility = {
     visibleToRolesField?: string;
     internalOnlyField?: string;
     execution: {
-      bindingsField: string;
+      /**
+       * Owned hasMany collection on the owner whose target rows are the
+       * execution steps.
+       */
+      bindingsRelation: string;
       operationRef: string;
       operationEntity: string;
       providerRef: string;

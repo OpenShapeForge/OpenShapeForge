@@ -125,8 +125,18 @@ describe("generated MCP runtime module security boundary", () => {
               definition_version integer not null,
               status text not null,
               visible_roles jsonb not null,
-              internal_only boolean not null,
-              bindings jsonb not null
+              internal_only boolean not null
+            )
+          `.execute(trx);
+          await sql`
+            create table public.module_binding_test (
+              id uuid primary key,
+              tenant_id uuid not null,
+              service_id uuid not null,
+              operation_id uuid not null,
+              "order" integer not null,
+              optional boolean,
+              "when" jsonb
             )
           `.execute(trx);
           await sql`
@@ -164,6 +174,7 @@ describe("generated MCP runtime module security boundary", () => {
           `.execute(trx);
           for (const tableName of [
             "module_service_test",
+            "module_binding_test",
             "module_operation_test",
             "module_provider_test",
             "module_connection_test",
@@ -210,33 +221,28 @@ describe("generated MCP runtime module security boundary", () => {
         await admin.connection().execute(async (trx) => {
           await sql`insert into public.module_service_test
             (id, tenant_id, key, description, input_fields, output_fields, definition_version,
-             status, visible_roles, internal_only, bindings)
+             status, visible_roles, internal_only)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
              '[{"key":"sourceReference","osfType":"string"},{"key":"scope","osfType":"string"},{"key":"provider","osfType":"string"}]'::jsonb,
              '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
-             1, 'published', '["reader"]'::jsonb, false,
-             jsonb_build_array(
-               jsonb_build_object(
-                 'order', 1,
-                 'operationId', ${operationId}::text,
-                 'when', jsonb_build_object('field', 'provider', 'equals', 'first')
-               ),
-               jsonb_build_object(
-                 'order', 2,
-                 'operationId', ${secondOperationId}::text,
-                 'optional', true,
-                 'when', jsonb_build_object('field', 'provider', 'equals', 'second')
-               )
-             )),
+             1, 'published', '["reader"]'::jsonb, false),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
              '[]'::jsonb,
              '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
-             7, 'published', '["reader"]'::jsonb, true,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
+             7, 'published', '["reader"]'::jsonb, true),
             (${wrongKeyDefinitionId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'Wrong key read',
-             '[]'::jsonb, '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${wrongKeyOperationId}::text)))
+             '[]'::jsonb, '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false)
+          `.execute(trx);
+          await sql`insert into public.module_binding_test
+            (id, tenant_id, service_id, operation_id, "order", optional, "when")
+          values
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${publicDefinitionId}::uuid, ${operationId}::uuid, 1, null,
+             '{"field":"provider","equals":"first"}'::jsonb),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${publicDefinitionId}::uuid, ${secondOperationId}::uuid, 2, true,
+             '{"field":"provider","equals":"second"}'::jsonb),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${hiddenDefinitionId}::uuid, ${operationId}::uuid, 1, null, null),
+            (${randomUUID()}::uuid, ${tenantId}::uuid, ${wrongKeyDefinitionId}::uuid, ${wrongKeyOperationId}::uuid, 1, null, null)
           `.execute(trx);
           await sql`insert into public.module_operation_test
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
@@ -291,7 +297,15 @@ describe("generated MCP runtime module security boundary", () => {
             column("status", "status"),
             column("visible_roles", "visibleRoles", "jsonb"),
             column("internal_only", "internalOnly", "boolean"),
-            column("bindings", "bindings", "jsonb"),
+          ]),
+          table("module_binding_test", [
+            column("id", "id", "uuid"),
+            column("tenant_id", "tenantId", "uuid"),
+            column("service_id", "serviceId", "uuid"),
+            column("operation_id", "operationId", "uuid"),
+            column("order", "order", "integer"),
+            column("optional", "optional", "boolean"),
+            column("when", "when", "jsonb"),
           ]),
           table("module_operation_test", [
             column("id", "id", "uuid"),
@@ -335,7 +349,10 @@ describe("generated MCP runtime module security boundary", () => {
           visibleToRolesField: "visibleRoles",
           internalOnlyField: "internalOnly",
           execution: {
-            bindingsField: "bindings",
+            bindingsRelation: "capabilityBindings",
+            bindingsEntity: "Binding",
+            bindingsTable: "public.module_binding_test",
+            parentRef: "serviceId",
             operationRef: "operationId",
             operationEntity: "Operation",
             operationTable: "public.module_operation_test",
@@ -1223,12 +1240,9 @@ describe("generated MCP runtime module security boundary", () => {
           const beforeAmbiguousInterceptor = hiddenInterceptors;
           const beforeAmbiguousEgress = egressRequests.length;
           await admin.connection().execute((trx) => sql`
-            update public.module_service_test
-               set bindings = jsonb_build_array(
-                 jsonb_build_object('order', 1, 'operationId', ${operationId}::text),
-                 jsonb_build_object('order', 2, 'operationId', ${operationId}::text)
-               )
-             where id = ${hiddenDefinitionId}::uuid
+            insert into public.module_binding_test
+              (id, tenant_id, service_id, operation_id, "order")
+            values (${randomUUID()}::uuid, ${tenantId}::uuid, ${hiddenDefinitionId}::uuid, ${operationId}::uuid, 2)
           `.execute(trx));
           expect(JSON.parse(resourceText(
             await client.readResource({ uri: "app://internal/valid" }),
@@ -1236,11 +1250,8 @@ describe("generated MCP runtime module security boundary", () => {
           expect(hiddenInterceptors).toBe(beforeAmbiguousInterceptor);
           expect(egressRequests).toHaveLength(beforeAmbiguousEgress);
           await admin.connection().execute((trx) => sql`
-            update public.module_service_test
-               set bindings = jsonb_build_array(
-                 jsonb_build_object('order', 1, 'operationId', ${operationId}::text)
-               )
-             where id = ${hiddenDefinitionId}::uuid
+            delete from public.module_binding_test
+             where service_id = ${hiddenDefinitionId}::uuid and "order" = 2
           `.execute(trx));
 
           const beforeHiddenCollision = hiddenInterceptors;

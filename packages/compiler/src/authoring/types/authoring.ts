@@ -343,6 +343,21 @@ export interface McpDeclarativeRequestMapping {
   headers?: McpDeclarativeRequestHeaderMapping[];
 }
 
+/**
+ * Where a derived tool's ordered binding rows live: an owned hasMany
+ * collection whose target carries the binding vocabulary.
+ */
+export interface McpDerivedExecutionConfig {
+  bindingsRelation: string;
+  operationRef: string;
+  operationEntity: string;
+  providerRef: string;
+  providerEntity: string;
+  connectionEntity: string;
+  connectionProviderRef: string;
+  connectionValuesField: string;
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate

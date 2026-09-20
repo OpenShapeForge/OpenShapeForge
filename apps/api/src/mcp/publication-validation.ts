@@ -25,8 +25,14 @@
  * interpretation of stored data, like declarative execution itself.
  */
 import { HttpError } from "../rest/http-error.js";
-import { requestHeaderMappings } from "./declarative-execution.js";
+import { orderedBindingRecords, requestHeaderMappings } from "./declarative-execution.js";
 import { deriveToolName, type DerivedToolsCatalogEntry } from "./derived-tools.js";
+import {
+  BindingOverflowError,
+  MAX_BINDINGS_PER_OWNER,
+  readBindingRows,
+  type BindingRowReader,
+} from "./execution-bindings.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -105,6 +111,8 @@ export type ValidateVisibleDefinitionInput = {
   /** Field on the provider row holding its FieldDefinition collection, if declared. */
   providerDefinitionsField?: string | undefined;
   readRows: PublicationRowReader;
+  /** Paged reader for relation bindings; defaults to `readRows` as one complete page. */
+  readBindingPages?: BindingRowReader;
 };
 
 /**
@@ -145,14 +153,73 @@ export async function validateVisibleDefinition(
     }
   }
 
-  const bindingsRaw = row[execution.bindingsField];
-  const bindings = Array.isArray(bindingsRaw) ? (bindingsRaw as JsonRecord[]) : [];
-  if (bindings.length === 0) {
-    problems.push(`the ${execution.bindingsField} collection is empty; nothing would execute.`);
+  const collection = execution.bindingsRelation;
+  const bindingReader: BindingRowReader =
+    input.readBindingPages ??
+    (async (table, filter) => ({
+      rows: await readRows(table, filter),
+      nextCursor: null,
+    }));
+  let bindings: JsonRecord[] = [];
+  let overflowed = false;
+  try {
+    bindings = await readBindingRows(execution, row, bindingReader);
+  } catch (error) {
+    if (error instanceof BindingOverflowError) {
+      overflowed = true;
+      problems.push(
+        `the ${collection} collection exceeds ${MAX_BINDINGS_PER_OWNER} bindings.`,
+      );
+    } else {
+      throw error;
+    }
+  }
+  if (bindings.length === 0 && !overflowed) {
+    problems.push(`the ${collection} collection is empty; nothing would execute.`);
+  } else if (bindings.length > 0) {
+    // Discovery sorts with orderedBindingRecords and throws SERVICE_MISCONFIGURED
+    // on a colliding order. Publication must refuse that write here, as
+    // NOT_PUBLISHABLE, so the tenant never stores an unexecutable chain.
+    try {
+      bindings = orderedBindingRecords(bindings);
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "SERVICE_MISCONFIGURED") {
+        problems.push(
+          error.message.replace(/^Binding /, "binding ").replace(/\.$/, ""),
+        );
+      } else {
+        throw error;
+      }
+    }
   }
 
-  // Provider rows collected across bindings so each connection is judged once.
+  const asId = (value: unknown): value is string =>
+    typeof value === "string" && value.length > 0;
+  const operationIds = [
+    ...new Set(
+      bindings
+        .map((binding) => (binding && typeof binding === "object" ? binding[execution.operationRef] : undefined))
+        .filter(asId),
+    ),
+  ];
+  const operationsById = new Map<string, JsonRecord>();
+  if (operationIds.length > 0) {
+    for (const row of await readRows(execution.operationTable, { id: { in: operationIds } })) {
+      if (asId(row.id)) operationsById.set(row.id, row);
+    }
+  }
+  const providerIds = [
+    ...new Set(
+      [...operationsById.values()].map((operation) => operation[execution.providerRef]).filter(asId),
+    ),
+  ];
   const providers = new Map<string, JsonRecord>();
+  if (providerIds.length > 0) {
+    for (const row of await readRows(execution.providerTable, { id: { in: providerIds } })) {
+      if (asId(row.id)) providers.set(row.id, row);
+    }
+  }
+
   for (const [index, binding] of bindings.entries()) {
     const position = `binding ${index + 1}`;
     if (!binding || typeof binding !== "object") {
@@ -197,7 +264,7 @@ export async function validateVisibleDefinition(
       problems.push(`${position} names no ${execution.operationEntity} (${execution.operationRef}).`);
       continue;
     }
-    const [operationRow] = await readRows(execution.operationTable, { id: operationId });
+    const operationRow = operationsById.get(operationId);
     if (!operationRow) {
       problems.push(
         `${position} references ${execution.operationEntity} ${operationId}, which does not exist.`,
@@ -212,18 +279,14 @@ export async function validateVisibleDefinition(
       );
       continue;
     }
-    let providerRow = providers.get(providerId);
+    const providerRow = providers.get(providerId);
     if (!providerRow) {
-      [providerRow] = await readRows(execution.providerTable, { id: providerId });
-      if (!providerRow) {
-        problems.push(
-          `${position}: ${execution.operationEntity} ` +
-            `${JSON.stringify(operationRow.key ?? operationId)} references ` +
-            `${execution.providerEntity} ${providerId}, which does not exist.`,
-        );
-        continue;
-      }
-      providers.set(providerId, providerRow);
+      problems.push(
+        `${position}: ${execution.operationEntity} ` +
+          `${JSON.stringify(operationRow.key ?? operationId)} references ` +
+          `${execution.providerEntity} ${providerId}, which does not exist.`,
+      );
+      continue;
     }
     try {
       requestHeaderMappings(operationRow, providerRow.auth);

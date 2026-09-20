@@ -11,6 +11,8 @@ import { appendGeneratedCrudEvent, generatedCrudError, getGeneratedCrudTables, i
 import { fieldNameForColumn } from "./columns.js";
 import { collectionManagedFields } from "./collection-policy.js";
 import { createGeneratedEntityInTransaction } from "./mutations.js";
+import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
+import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { draftOwningHead, draftRule } from "./versioned-head.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
@@ -86,7 +88,13 @@ async function permission(trx: Transaction<DB>, session: DbSessionInput, table: 
 }
 
 /** Injectable only at server construction (also used by scratch DB tests). */
-export function createCollectionMutationExecutor(catalog: { tables: readonly GeneratedCrudTable[]; operations: readonly EntityOperationContract[]; entityValues?: typeof generatedEntityValues }) {
+function fieldRow(table: GeneratedCrudTable, row: GeneratedEntityRow): Record<string, unknown> {
+  return Object.fromEntries(
+    table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
+  );
+}
+
+export function createCollectionMutationExecutor(catalog: { tables: readonly GeneratedCrudTable[]; operations: readonly EntityOperationContract[]; entityValues?: typeof generatedEntityValues; derivedTools?: readonly DerivedToolsCatalogEntry[] }) {
   async function execute(db: OpenShapeForgeDatabase | undefined, session: DbSessionInput, binding: CollectionMutationBinding, request: CollectionMutationRequest, transaction?: Transaction<DB>): Promise<CollectionMutationResult> {
     if (!["insert", "move", "update", "remove"].includes(binding.action)) unsupported("Only insert, move, update and remove are supported.");
     if (!request || typeof request !== "object" || Array.isArray(request)) invalid("Collection mutation input must be an object.");
@@ -202,8 +210,31 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // All siblings whose positions can change need their own authored edit rights.
       if (updateOp) for (const row of rows) await permission(trx, session, target, String(row.id), updateOp, "edit");
       let childId = request.childId!;
+      const relatedOptions = {
+        tables: catalog.tables,
+        ...(catalog.derivedTools ? { entries: catalog.derivedTools } : {}),
+      };
+      if (editing) {
+        const current = rows.find((row) => row.id === request.childId);
+        if (current) {
+          await assertPublishableRelatedMutationInTransaction(
+            trx,
+            session,
+            target,
+            binding.action === "remove"
+              ? { kind: "delete", id: request.childId!, row: fieldRow(target, current) }
+              : {
+                  kind: "update",
+                  id: request.childId!,
+                  before: fieldRow(target, current),
+                  values: request.values ?? {},
+                },
+            relatedOptions,
+          );
+        }
+      }
       if (createOp) {
-        const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables });
+        const created = await createGeneratedEntityInTransaction(trx, session, target, { ...insertValues, ...(relation.sortable ? { [fieldNameForColumn(position!)]: rows.length } : {}) }, { registry: entityValues, tables: catalog.tables, ...(catalog.derivedTools ? { derivedTools: catalog.derivedTools } : {}) });
         childId = String(created.id);
         await permission(trx, session, target, childId, readOp, "view");
         await permission(trx, session, target, childId, createOp, "view");

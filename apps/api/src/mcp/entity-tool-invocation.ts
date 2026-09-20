@@ -259,11 +259,12 @@ export async function invokeTool(
     }
 
     case "delete": {
+      const id = requireId(args);
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("delete"),
         offerIntents,
         input: {
-          id: requireId(args),
+          id,
           ...entityMutationControls(args),
         },
       });

@@ -11,9 +11,14 @@ import { fieldNameForColumn } from "./columns.js";
 import { generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "./catalog.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 
 /** Server-owned injection only; never accepted in a request body. */
-export type EntityValueIOContext = { registry?: RuntimeEntityValueRegistry; tables?: readonly GeneratedCrudTable[] };
+export type EntityValueIOContext = {
+  registry?: RuntimeEntityValueRegistry;
+  tables?: readonly GeneratedCrudTable[];
+  derivedTools?: readonly DerivedToolsCatalogEntry[];
+};
 
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
 const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);

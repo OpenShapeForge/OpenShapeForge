@@ -346,7 +346,10 @@ const SERVICE_ENTRY: DerivedToolsCatalogEntry = {
     set: { name: "set_my_preferences", description: "" },
   },
   execution: {
-    bindingsField: "capabilityBindings",
+    bindingsRelation: "capabilityBindings",
+    bindingsEntity: "ServiceCapabilityBinding",
+    bindingsTable: "integration.service_capability_bindings",
+    parentRef: "serviceId",
     operationRef: "capabilityId",
     operationEntity: "Capability",
     operationTable: "integration.capabilities",
@@ -357,7 +360,7 @@ const SERVICE_ENTRY: DerivedToolsCatalogEntry = {
     connectionTable: "integration.connections",
     connectionProviderRef: "adapterId",
     connectionValuesField: "configurationValues",
-  } as NonNullable<DerivedToolsCatalogEntry["execution"]>,
+  },
 };
 
 const GOOGLE = "google-adapter";
@@ -369,16 +372,15 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
   return {
     "integration.services": [
       // The narrow tool sorts first alphabetically; the entry point binds more.
-      { id: "svc-cancel", key: "afspraak-annuleren", capabilityBindings: [{ order: 1, capabilityId: "cap-google-calendar" }] },
-      {
-        id: "svc-google",
-        key: "google-koppelen",
-        capabilityBindings: [
-          { order: 1, capabilityId: "cap-google-mail" },
-          { order: 2, capabilityId: "cap-google-calendar" },
-        ],
-      },
-      { id: "svc-slack", key: "post-message", capabilityBindings: [{ order: 1, capabilityId: "cap-slack" }] },
+      { id: "svc-cancel", key: "afspraak-annuleren" },
+      { id: "svc-google", key: "google-koppelen" },
+      { id: "svc-slack", key: "post-message" },
+    ],
+    "integration.service_capability_bindings": [
+      { id: "b-cancel", serviceId: "svc-cancel", order: 1, capabilityId: "cap-google-calendar" },
+      { id: "b-google-1", serviceId: "svc-google", order: 1, capabilityId: "cap-google-mail" },
+      { id: "b-google-2", serviceId: "svc-google", order: 2, capabilityId: "cap-google-calendar" },
+      { id: "b-slack", serviceId: "svc-slack", order: 1, capabilityId: "cap-slack" },
     ],
     "integration.capabilities": [
       { id: "cap-google-mail", adapterId: GOOGLE },

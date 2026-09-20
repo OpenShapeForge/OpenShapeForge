@@ -139,6 +139,10 @@ fields:
           description:
             en: Mark this milestone as reached so the next milestone billing run invoices it
             nl: Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert
+          # The agreement this milestone bills must still exist in this tenant
+          # with a code; a dangling or cross-tenant reference is a refusal.
+          preconditions:
+            - { via: agreementId, field: code, present: true }
           stamps:
             - { field: triggeredAt, value: now }
             - { field: triggeredBy, value: actor }

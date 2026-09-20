@@ -113,7 +113,10 @@ fields:
           to: submitted
           label: { en: Submit, nl: Indienen }
           auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
-          preconditions: [ { field: reviewerId, present: true } ]
+          preconditions:
+            - { field: reviewerId, present: true }      # a field of this row
+            - { via: quoteId, field: approvalStatus, in: [approved] }  # a field of the record quoteId names
+            - { via: quoteId, field: expiresAt, present: true }
           writes:                                       # input fields only this rule may set
             - comment                                   # optional input
             - { field: reviewerId, required: true, agreesOn: [teamId] }  # required, and the Relation it names must share this record's teamId
@@ -132,7 +135,8 @@ What the compiler makes of it:
   `FORBIDDEN`, `NOT_FOUND`, `INVALID_STATE` and `VERSION_CONFLICT`. It is
   projected as `POST /api/rest/v1/<basePath>/:id/<key>`, the MCP tool
   `<entity>_<key>`, the GraphQL mutation `<entity><Key>` and a web record
-  action; the tool description names the `from` and `to` states.
+  action; the tool description names the `from` and `to` states and any
+  preconditions.
 - The status field and every `writes` and `stamps` field become `writtenBy`
   the rule's Operation: generic create admits no value (the column defaults to
   `initial`), generic update refuses them with a message naming the Operation
@@ -158,7 +162,8 @@ What the compiler makes of it:
   a rule is offered on a record only while its status is in `from` and its
   preconditions hold, and execution re-evaluates the same decision after
   locking the row. A refused rule answers `INVALID_STATE` naming the current
-  state and the rule's `from` and `to`.
+  state and the rule's `from` and `to`, or naming the via field and the
+  referenced field when a referenced precondition fails.
 - The web manifest carries the rule table (`transitions` on the entity, with
   `from`/`to`/`label` per rule) so a renderer can show the offered rules as
   the record's transition buttons; the backend manifest carries the same
@@ -176,16 +181,28 @@ that the referenced entity carries with the same base type and column type
 — checked across every compiled entity, core and plugin alike, when the
 artifacts are collected (a reference no compiled entity answers to is
 refused, never skipped), and again against the manifest's columns when the
-runtime binds the rule at boot; and
+runtime binds the rule at boot; a referenced precondition's `via` must be a
+single entity reference and `field` a persisted single field of the
+referenced entity — checked the same way across every compiled entity, core
+and plugin alike (a reference no compiled entity answers to is refused,
+never skipped); `in` values must match the field's comparable base type and,
+when it has static options, sit in that set; and
 neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
-status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
-present (not null) or absent (null); an empty string is a present value — and
-richer checks belong in an authored plugin Operation.
+status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field of this
+row is present (not null) or absent (null), or a field of the record a
+single entity reference names is present/absent or holds one of `in`; an
+empty string is a present value; a missing referenced record is a refusal,
+never a skip. The generic handler reads that record under RLS in the same
+transaction (`FOR SHARE`, tenant-scoped, like `agreesOn`) and refuses with
+`INVALID_STATE` in the same shape as a row-level precondition, naming the
+via field and the referenced field. Richer checks belong in an authored
+plugin Operation.
 
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
 `pending` to `triggered` and stamps `triggeredAt` with the transaction time
-and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
+and `triggeredBy` with the actor, and is offered only while the milestone's
+agreement exists in this tenant with a `code`; `cancel` moves `pending` or `triggered` to
 `cancelled`; `invoice` moves `triggered` to `invoiced` under the finance role
 and requires `producedInvoiceId`, an Invoice that agrees with the milestone
 on `agreementId` — no milestone is invoiced against nothing or against

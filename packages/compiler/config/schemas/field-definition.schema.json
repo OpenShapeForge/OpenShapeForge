@@ -340,11 +340,51 @@
                   },
                   "preconditions": {
                     "type": "array",
+                    "description": "Facts that must hold besides the current status. `{ field, present }` is a field of this row; `{ via, field, present }` and `{ via, field, in }` read a persisted single field of the record named by `via` (a single entity reference on this row). A missing referenced record is a refusal, never a skip. An empty string is a present value.",
                     "items": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": ["field", "present"],
-                      "properties": { "field": { "type": "string", "minLength": 1 }, "present": { "type": "boolean" } }
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["field", "present"],
+                          "properties": {
+                            "field": { "type": "string", "minLength": 1 },
+                            "present": { "type": "boolean" }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["via", "field", "present"],
+                          "properties": {
+                            "via": { "type": "string", "minLength": 1, "description": "Single entity reference field on this row." },
+                            "field": { "type": "string", "minLength": 1, "description": "Persisted single field on the referenced entity." },
+                            "present": { "type": "boolean" }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["via", "field", "in"],
+                          "properties": {
+                            "via": { "type": "string", "minLength": 1, "description": "Single entity reference field on this row." },
+                            "field": { "type": "string", "minLength": 1, "description": "Persisted single comparable field on the referenced entity." },
+                            "in": {
+                              "type": "array",
+                              "uniqueItems": true,
+                              "minItems": 1,
+                              "items": {
+                                "anyOf": [
+                                  { "type": "string" },
+                                  { "type": "number" },
+                                  { "type": "boolean" }
+                                ]
+                              },
+                              "description": "Closed set of values the referenced field must hold. When that field has static options, each value must be one of them."
+                            }
+                          }
+                        }
+                      ]
                     }
                   },
                   "writes": {

@@ -71,6 +71,17 @@ export interface FieldDefinitionTransitionWrite {
   agreesOn?: string[];
 }
 
+/**
+ * A fact that must hold besides the current status. Row-level: a field of
+ * this record is present (not null) or absent (null). Referenced: a field of
+ * the record named by `via` is present/absent, or holds one of `in`. An empty
+ * string is a present value. A missing referenced record is a refusal.
+ */
+export type FieldDefinitionTransitionPrecondition =
+  | { field: string; present: boolean }
+  | { via: string; field: string; present: boolean }
+  | { via: string; field: string; in: Array<string | number | boolean> };
+
 export interface FieldDefinitionTransitionRule {
   /** Operation key; becomes `<Entity>.<key>`, the REST segment and the web action. */
   key: string;
@@ -89,11 +100,12 @@ export interface FieldDefinitionTransitionRule {
   auth?: { roles?: string[]; recordPermission?: "edit" };
   /**
    * Record facts that must hold besides the current status. Deliberately a
-   * small vocabulary: a field is present (not null) or absent (null); an
-   * empty string is present. Anything richer belongs in an authored plugin
-   * Operation.
+   * small vocabulary: a field is present (not null) or absent (null), on this
+   * row or on the record a single entity reference names; `in` is a closed
+   * set of values on that referenced field. An empty string is present.
+   * Anything richer belongs in an authored plugin Operation.
    */
-  preconditions?: Array<{ field: string; present: boolean }>;
+  preconditions?: FieldDefinitionTransitionPrecondition[];
   /**
    * Fields this transition, and only this transition, may set from its
    * input. A bare key is optional input; the object form makes it required

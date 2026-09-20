@@ -3697,6 +3697,13 @@
                   "en": "Mark this milestone as reached so the next milestone billing run invoices it",
                   "nl": "Markeer deze mijlpaal als bereikt zodat de volgende mijlpaalfacturatie hem factureert"
                 },
+                "preconditions": [
+                  {
+                    "via": "agreementId",
+                    "field": "code",
+                    "present": true
+                  }
+                ],
                 "stamps": [
                   {
                     "field": "triggeredAt",

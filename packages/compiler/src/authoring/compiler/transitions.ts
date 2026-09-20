@@ -19,7 +19,11 @@ import type {
   LocalizedText,
   OsfTypeDefinition,
 } from "../types.js";
-import type { FieldDefinitionTransitionRule, FieldDefinitionTransitionWrite } from "../types/field-definition.js";
+import type {
+  FieldDefinitionTransitionPrecondition,
+  FieldDefinitionTransitionRule,
+  FieldDefinitionTransitionWrite,
+} from "../types/field-definition.js";
 import type { CompiledTransitionField } from "../types/compiled.js";
 import { compiledFieldSchemaWithoutDefinitions } from "../../field-json-schema.js";
 import { resolveModelFields } from "./model.js";
@@ -102,8 +106,7 @@ function assertRule(
   }
   const fields = new Map(entity.fields.map((entry) => [entry.key, entry]));
   for (const precondition of rule.preconditions ?? []) {
-    const target = fields.get(precondition.field);
-    if (!target?.persisted) fail(entity, field, `${where} precondition names "${precondition.field}", which is not a persisted field.`);
+    assertPrecondition(entity, field, where, precondition, fields);
   }
   const permission = rule.auth?.recordPermission;
   if (permission && !entity.authorization?.rowAccess?.recordPermissions) {
@@ -146,8 +149,77 @@ function assertRule(
   seen.set(rule.key, rule.key);
 }
 
+function referencedField(precondition: FieldDefinitionTransitionPrecondition): string {
+  return "via" in precondition && precondition.via
+    ? `${precondition.via}.${precondition.field}`
+    : precondition.field;
+}
+
+/**
+ * Per-entity half of a precondition: a row-level `field` must be persisted
+ * here; a `via` must be a persisted single entity reference. That the
+ * referenced entity carries `field` is the corpus-wide check.
+ */
+function assertPrecondition(
+  entity: CoreEntity,
+  field: Field,
+  where: string,
+  precondition: FieldDefinitionTransitionPrecondition,
+  fields: Map<string, Field>,
+): void {
+  const hasPresent = "present" in precondition && precondition.present !== undefined;
+  const hasIn = "in" in precondition && precondition.in !== undefined;
+  if (hasPresent === hasIn) {
+    fail(entity, field, `${where} precondition on "${referencedField(precondition)}" must set present or in, not both.`);
+  }
+  if ("via" in precondition && precondition.via) {
+    const via = fields.get(precondition.via);
+    if (!via?.persisted || !via.relationship || fieldCardinality(via) !== "single") {
+      fail(entity, field, `${where} precondition via "${precondition.via}" is not a persisted single entity reference.`);
+    }
+    if (hasIn && (!Array.isArray(precondition.in) || precondition.in.length === 0)) {
+      fail(entity, field, `${where} precondition on "${referencedField(precondition)}" in is empty.`);
+    }
+    return;
+  }
+  if (hasIn) {
+    fail(entity, field, `${where} precondition in requires via.`);
+  }
+  const target = fields.get(precondition.field);
+  if (!target?.persisted) fail(entity, field, `${where} precondition names "${precondition.field}", which is not a persisted field.`);
+}
+
+/** How the Operation description names the offer window, including preconditions. */
+function offerClause(status: string, rule: FieldDefinitionTransitionRule): LocalizedText {
+  const from = rule.from.join(" or ");
+  const fromNl = rule.from.join(" of ");
+  const parts = (rule.preconditions ?? []).map((entry) => {
+    const name = referencedField(entry);
+    if ("in" in entry && entry.in) {
+      const listed = entry.in.map((value) => String(value));
+      return { en: `${name} is ${listed.join(" or ")}`, nl: `${name} ${listed.join(" of ")} is` };
+    }
+    const present = "present" in entry && entry.present;
+    return {
+      en: `${name} is ${present ? "set" : "empty"}`,
+      nl: `${name} ${present ? "gezet" : "leeg"} is`,
+    };
+  });
+  return {
+    en: `offered only while ${status} is ${from}${parts.map((part) => ` and ${part.en}`).join("")}.`,
+    nl: `alleen aangeboden zolang ${status} ${fromNl} is${parts.map((part) => ` en ${part.nl}`).join("")}.`,
+  };
+}
+
 /** Base types a database can compare exactly; an object has no equality worth a refusal. */
 const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
+
+function valueMatchesBaseType(value: unknown, baseType: string): boolean {
+  if (baseType === "boolean") return typeof value === "boolean";
+  if (baseType === "integer") return typeof value === "number" && Number.isInteger(value);
+  if (baseType === "number") return typeof value === "number" && Number.isFinite(value);
+  return typeof value === "string";
+}
 
 /**
  * `agreesOn` names fields the referenced record must share with this one:
@@ -178,7 +250,15 @@ function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target:
  */
 type AgreementContract = {
   transitions?: CompiledTransitionField[];
-  model: { fields: ReadonlyArray<{ key: string; osfType: string; baseType: string; cardinality: string }> };
+  model: {
+    fields: ReadonlyArray<{
+      key: string;
+      osfType: string;
+      baseType: string;
+      cardinality: string;
+      options?: { type?: string; items?: Array<{ value: string }> };
+    }>;
+  };
   storage: { columns: ReadonlyArray<{ field: string; type: string }> };
   entity: { name: string };
 };
@@ -205,6 +285,67 @@ export function assertTransitionAgreements(entities: ReadonlyArray<AgreementCont
               throw new Error(
                 `[${contract.entity.name}] ${rule.operation} agreesOn "${key}", but ${target.entity.name}.${key} (${remote ?? "absent"}) is not a persisted single field of the same type as ${contract.entity.name}.${key} (${local ?? "absent"}).`,
               );
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Corpus-wide half of a referenced precondition: `via` must name a compiled
+ * entity (core or plugin), and `field` a persisted single field of it. `in`
+ * values must match that field's base type and, when it has static options,
+ * sit in that set. A reference no compiled entity answers to is refused,
+ * never skipped.
+ */
+export function assertTransitionReferencedPreconditions(entities: ReadonlyArray<AgreementContract>): void {
+  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
+  const describe = (contract: AgreementContract, key: string) => {
+    const field = contract.model.fields.find((candidate) => candidate.key === key);
+    const column = contract.storage.columns.find((candidate) => candidate.field === key);
+    return field && column && field.cardinality === "single" ? field : undefined;
+  };
+  for (const contract of entities) {
+    for (const status of contract.transitions ?? []) {
+      for (const rule of status.rules) {
+        for (const precondition of rule.preconditions ?? []) {
+          if (!precondition.via) continue;
+          const reference = contract.model.fields.find((candidate) => candidate.key === precondition.via);
+          const target = reference && byName.get(reference.osfType);
+          if (!target) {
+            throw new Error(
+              `[${contract.entity.name}] ${rule.operation} precondition via "${precondition.via}" references no compiled entity.`,
+            );
+          }
+          const remote = describe(target, precondition.field);
+          if (!remote) {
+            throw new Error(
+              `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" is not a persisted single field of ${target.entity.name}.`,
+            );
+          }
+          if (!precondition.in?.length) continue;
+          if (!COMPARABLE_BASE_TYPES.has(remote.baseType)) {
+            throw new Error(
+              `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in requires a comparable field, not ${remote.baseType}.`,
+            );
+          }
+          for (const value of precondition.in) {
+            if (!valueMatchesBaseType(value, remote.baseType)) {
+              throw new Error(
+                `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not a ${remote.baseType}.`,
+              );
+            }
+          }
+          const options = remote.options?.type === "static" ? remote.options.items?.map((item) => item.value) : undefined;
+          if (options?.length) {
+            for (const value of precondition.in) {
+              if (!options.includes(String(value))) {
+                throw new Error(
+                  `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not one of the static options.`,
+                );
+              }
             }
           }
         }
@@ -259,12 +400,13 @@ function ruleOperation(
   const label = text(rule.label, rule.key);
   const summary = text(rule.description, "");
   const path = `${field.key}: ${rule.from.join(" | ")} -> ${rule.to}`;
+  const offered = offerClause(field.key, rule);
   return {
     id: `${entity.entity}.${rule.key}`,
     name: label,
     description: {
-      en: `${summary.en || `${label.en} this ${text(entity.labels, entity.title).en!.toLowerCase()}`}. Moves ${path}; offered only while ${field.key} is ${rule.from.join(" or ")}.`,
-      nl: `${summary.nl || label.nl}. Zet ${path}; alleen aangeboden zolang ${field.key} ${rule.from.join(" of ")} is.`,
+      en: `${summary.en || `${label.en} this ${text(entity.labels, entity.title).en!.toLowerCase()}`}. Moves ${path}; ${offered.en}`,
+      nl: `${summary.nl || label.nl}. Zet ${path}; ${offered.nl}`,
     },
     implementation: { type: "plugin", plugin: TRANSITIONS_PLUGIN, handler: `transition${entity.entity}${rule.key[0]!.toUpperCase()}${rule.key.slice(1)}` },
     target: { scope: "record", inputField: "id" },

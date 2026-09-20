@@ -48,7 +48,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
-import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions.js";
 import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
   auditOperationSurfaceCollisions,
@@ -356,8 +356,12 @@ export async function collectAllArtifacts(
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
   // Every compiled entity, core and plugin alike: a transition's agreesOn
-  // reaches across entities, so it is checked here where all of them are.
-  assertTransitionAgreements(entities.map((entity) => entity.contract));
+  // and referenced preconditions reach across entities, so they are checked
+  // here where all of them are. A reference no compiled entity answers to
+  // is refused, never skipped.
+  const contracts = entities.map((entity) => entity.contract);
+  assertTransitionAgreements(contracts);
+  assertTransitionReferencedPreconditions(contracts);
   // The member of an owned collection learns it here, where every owner is
   // compiled: its generic writes then declare the collection refusal.
   withOwnedChildErrors(entities.map((entity) => entity.contract));

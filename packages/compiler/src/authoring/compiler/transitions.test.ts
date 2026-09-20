@@ -7,7 +7,7 @@ import { compile } from "./index.js";
 import { withStatusTransitions } from "./transitions.js";
 import { buildWebManifest } from "../web-manifest.js";
 import { collectAuthoredEntityPluginOperations } from "../../generate-operations.js";
-import { assertTransitionAgreements } from "./transitions.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./transitions.js";
 
 const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");
@@ -50,6 +50,7 @@ describe("status transitions", () => {
       "VALIDATION", "FORBIDDEN", "NOT_FOUND", "INVALID_STATE", "VERSION_CONFLICT",
     ]);
     expect((operation.definition.description as { en: string }).en).toContain("status: pending -> triggered");
+    expect((operation.definition.description as { en: string }).en).toContain("agreementId.code is set");
     expect(operation.interfaces.rest).toEqual({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/trigger" });
   });
 
@@ -82,6 +83,7 @@ describe("status transitions", () => {
       rules: [
         {
           key: "trigger", operation: "AgreementMilestone.trigger", from: ["pending"], to: "triggered", label: { en: "Trigger", nl: "Triggeren" },
+          preconditions: [{ via: "agreementId", field: "code", present: true }],
           stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
         },
         { key: "cancel", operation: "AgreementMilestone.cancel", from: ["pending", "triggered"], to: "cancelled", label: { en: "Cancel", nl: "Annuleren" } },
@@ -137,6 +139,89 @@ describe("status transitions", () => {
     expect(() => assertTransitionAgreements([contract, retyped])).toThrow('Invoice.agreementId (string text) is not a persisted single field of the same type as AgreementMilestone.agreementId (string uuid)');
     const missing = { ...invoice, model: { ...invoice.model, fields: invoice.model.fields.filter((field) => field.key !== "agreementId") } };
     expect(() => assertTransitionAgreements([contract, missing])).toThrow('Invoice.agreementId (absent) is not a persisted single field');
+  });
+
+  test("across the corpus, a referenced precondition field must be a persisted single field of a compiled entity", () => {
+    const agreement = compile(loadEntity(authoringDir, "agreement"));
+    expect(() => assertTransitionReferencedPreconditions([contract, agreement])).not.toThrow();
+    const pluginEntity = {
+      ...contract,
+      entity: { ...contract.entity, name: "PluginMilestone" },
+      transitions: contract.transitions!.map((status) => ({
+        ...status,
+        rules: status.rules.map((rule) => ({
+          ...rule,
+          operation: rule.operation.replace("AgreementMilestone", "PluginMilestone"),
+        })),
+      })),
+    };
+    expect(() => assertTransitionReferencedPreconditions([pluginEntity, agreement])).not.toThrow();
+    expect(() => assertTransitionReferencedPreconditions([pluginEntity])).toThrow(
+      '[PluginMilestone] PluginMilestone.trigger precondition via "agreementId" references no compiled entity',
+    );
+    expect(() => assertTransitionReferencedPreconditions([contract])).toThrow("references no compiled entity");
+    const withoutCode = {
+      ...agreement,
+      model: { ...agreement.model, fields: agreement.model.fields.filter((field) => field.key !== "code") },
+    };
+    expect(() => assertTransitionReferencedPreconditions([contract, withoutCode])).toThrow(
+      'precondition "agreementId.code" is not a persisted single field of Agreement',
+    );
+    const unpersisted = {
+      ...agreement,
+      storage: { ...agreement.storage, columns: agreement.storage.columns.filter((column) => column.field !== "code") },
+    };
+    expect(() => assertTransitionReferencedPreconditions([contract, unpersisted])).toThrow(
+      'precondition "agreementId.code" is not a persisted single field of Agreement',
+    );
+    const collection = {
+      ...agreement,
+      model: {
+        ...agreement.model,
+        fields: agreement.model.fields.map((field) => (field.key === "code" ? { ...field, cardinality: "collection" } : field)),
+      },
+    };
+    expect(() => assertTransitionReferencedPreconditions([contract, collection])).toThrow(
+      'precondition "agreementId.code" is not a persisted single field of Agreement',
+    );
+
+    const withIn = (patch: { field: string; in: Array<string | number | boolean> }, target: typeof agreement = agreement) => {
+      const entity = {
+        ...contract,
+        transitions: contract.transitions!.map((status) => ({
+          ...status,
+          rules: status.rules.map((rule) =>
+            rule.key === "trigger"
+              ? { ...rule, preconditions: [{ via: "agreementId", ...patch }] }
+              : rule,
+          ),
+        })),
+      };
+      return () => assertTransitionReferencedPreconditions([entity, target]);
+    };
+    expect(withIn({ field: "code", in: ["AGR-1"] })).not.toThrow();
+    expect(withIn({ field: "code", in: [1] })).toThrow('in value 1 is not a string');
+    const objectField = {
+      ...agreement,
+      model: {
+        ...agreement.model,
+        fields: agreement.model.fields.map((field) => (field.key === "code" ? { ...field, baseType: "object" as const } : field)),
+      },
+    };
+    expect(withIn({ field: "code", in: ["x"] }, objectField as typeof agreement)).toThrow("in requires a comparable field, not object");
+    const optioned = {
+      ...agreement,
+      model: {
+        ...agreement.model,
+        fields: agreement.model.fields.map((field) =>
+          field.key === "code"
+            ? { ...field, options: { type: "static" as const, items: [{ value: "open", label: { en: "open" } }, { value: "closed", label: { en: "closed" } }] } }
+            : field,
+        ),
+      },
+    };
+    expect(withIn({ field: "code", in: ["open"] }, optioned)).not.toThrow();
+    expect(withIn({ field: "code", in: ["missing"] }, optioned)).toThrow("is not one of the static options");
   });
 
   test("an entity without transitions is returned untouched", () => {
@@ -198,6 +283,30 @@ describe("status transition validation", () => {
       { key: "cancel", from: ["pending"], to: "cancelled", writes: ["triggeredAt"] },
     ] } }, formless))).toThrow('rule "trigger" already writes');
     expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, preconditions: [{ field: "nope", present: true }] }] } }, formless))).toThrow('precondition names "nope"');
+  });
+
+  test("a referenced precondition via must be a persisted single entity reference, with present or in", () => {
+    const via = (preconditions: unknown[]) => withStatus({ transitions: { initial: "pending", rules: [{ ...rule, preconditions }] } }, formless);
+    expect(lower(via([{ via: "nope", field: "code", present: true }]))).toThrow('precondition via "nope" is not a persisted single entity reference');
+    expect(lower(via([{ via: "expectedAt", field: "code", present: true }]))).toThrow('precondition via "expectedAt" is not a persisted single entity reference');
+    expect(lower(via([{ via: "producedInvoiceId", field: "code", present: true, in: ["x"] }]))).toThrow("must set present or in, not both");
+    expect(lower(via([{ via: "agreementId", field: "code" }]))).toThrow("must set present or in, not both");
+    expect(lower(via([{ via: "agreementId", field: "code", in: [] }]))).toThrow("in is empty");
+    expect(lower(via([{ field: "expectedAt", in: ["x"] }]))).toThrow("precondition in requires via");
+    const collection = {
+      key: "agreements",
+      osfType: "Agreement",
+      baseType: "string",
+      cardinality: "collection" as const,
+      persisted: { column: "agreements", storageClass: "core" as const },
+      relationship: { ownership: "reference" as const },
+    };
+    expect(lower(withStatus(
+      { transitions: { initial: "pending", rules: [{ ...rule, preconditions: [{ via: "agreements", field: "code", present: true }] }] } },
+      { ...formless, fields: [...milestone.coreEntity.fields, collection] },
+    ))).toThrow('precondition via "agreements" is not a persisted single entity reference');
+    expect(lower(via([{ via: "agreementId", field: "code", present: true }]))).not.toThrow();
+    expect(lower(via([{ via: "agreementId", field: "status", in: ["active"] }]))).not.toThrow();
   });
 
   test("a written field that is required without a default would make the entity uncreatable", () => {

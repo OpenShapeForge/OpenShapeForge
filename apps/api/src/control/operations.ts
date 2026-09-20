@@ -56,6 +56,7 @@ import {
   type CatalogKind,
   getCatalogEntry,
   getPlatformTenant,
+  installCurrentCatalogForTenant,
   listCatalogEntries,
   listPlatformTenants,
   type PlatformCatalogDeps,
@@ -239,11 +240,13 @@ const HANDLERS: Readonly<Record<string, ControlHandler>> = {
   listTenants: (input, context) => listPlatformTenants(catalogDeps(context), input),
   getTenant: (input, context) =>
     getPlatformTenant(catalogDeps(context), requireSlug(input, "slug")),
-  createTenant: (input, context) => {
+  createTenant: async (input, context) => {
     const slug = requireSlug(input, "slug");
     const name = input.name;
     assertDisplayName(name, "name");
-    return provisionTenant(controlDeps(context), { slug, name });
+    const result = await provisionTenant(controlDeps(context), { slug, name });
+    await installCurrentCatalogForTenant(catalogDeps(context), slug, result.tenant.id);
+    return result;
   },
   updateTenant: (input, context) => {
     const slug = requireSlug(input, "slug");

@@ -104,6 +104,15 @@ export type TenantInstallationSummary = {
   updatesAvailable: number;
 };
 
+export type TenantCatalogInstallResult = {
+  tenantId: string;
+  installed: number;
+  updated: number;
+  flagged: number;
+  unchanged: number;
+  skipped: number;
+};
+
 /**
  * What a runtime module supplies to administer its catalog. `db` is the
  * control plane's transaction (a Kysely `Transaction`, which the plugin
@@ -132,6 +141,7 @@ export type PlatformCatalogProvider = {
     kind: string,
     key: string,
   ): Promise<ApplyCatalogUpdateResult>;
+  installForTenant(db: unknown, tenantId: string): Promise<TenantCatalogInstallResult>;
   installationSummary(db: unknown): Promise<TenantInstallationSummary[]>;
 };
 
@@ -394,6 +404,23 @@ export async function getPlatformTenant(deps: PlatformCatalogDeps, slug: string)
       : undefined;
     return toPlatformTenant(row, summary);
   });
+}
+
+/**
+ * Project the loaded module's current catalog into one tenant. Provider
+ * absence is a supported deployment shape, so tenant provisioning remains
+ * available when no runtime module owns a catalog.
+ */
+export async function installCurrentCatalogForTenant(
+  deps: PlatformCatalogDeps,
+  slug: string,
+  tenantId: string,
+): Promise<TenantCatalogInstallResult | null> {
+  if (!deps.provider) return null;
+  assertSlug(slug, "slug");
+  return elevated(deps, `control.create-tenant install current catalog tenant="${slug}"`, (trx) =>
+    deps.provider!.installForTenant(trx, tenantId),
+  );
 }
 
 // ── the catalog, with tenants named by slug ─────────────────────────────────

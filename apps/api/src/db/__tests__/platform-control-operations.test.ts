@@ -47,9 +47,20 @@ test("control Operations delegate tenant, organization and reconciliation tasks 
     const keycloak = fakeSpi();
     const keycloakAdmin = fakeAdmin(keycloak);
     const organizationScopes = fakeOrganizationScopes();
+    const catalogInstallations: string[] = [];
     const context = {
       db: runtime.db,
       control: createControlRuntime({
+        modules: [{
+          name: "test-catalog",
+          platformCatalog: {
+            installForTenant: async (_db: unknown, tenantId: string) => {
+              catalogInstallations.push(tenantId);
+              return { tenantId, installed: 0, updated: 0, flagged: 0, unchanged: 0, skipped: 0 };
+            },
+            installationSummary: async () => [],
+          } as never,
+        } as never],
         config: {
           ok: true,
           config: {
@@ -90,6 +101,12 @@ test("control Operations delegate tenant, organization and reconciliation tasks 
 
     const tenant = await run("createTenant", { slug: "acme", name: "Acme" });
     expect(tenant.created).toBe(true);
+    const replayedTenant = await run("createTenant", { slug: "acme", name: "Acme" });
+    expect(replayedTenant.created).toBe(false);
+    expect(catalogInstallations).toEqual([
+      (tenant.tenant as { id: string }).id,
+      (tenant.tenant as { id: string }).id,
+    ]);
 
     const organization = await run("createTenantOrganization", { tenantSlug: "acme", slug: "sales", name: "Sales" });
     expect(organization.created).toBe(true);
@@ -111,6 +128,7 @@ test("control Operations delegate tenant, organization and reconciliation tasks 
     expect(reapplied.actions).toEqual([]);
 
     await run("createTenant", { slug: "beta", name: "Beta" });
+    expect(catalogInstallations).toHaveLength(3);
     const acmeScope = organizationScopes.scopeNamed("mcp-resource:acme");
     const betaScope = organizationScopes.scopeNamed("mcp-resource:beta");
     expect(acmeScope).toBeDefined();
@@ -139,10 +157,10 @@ test("control Operations delegate tenant, organization and reconciliation tasks 
     // whether the call came over REST, MCP or the generic Operation route.
     const visibleAudit = await run("listPlatformAudit", { action: "control.create-tenant" });
     const entries = visibleAudit.entries as { action: string; target: string | null }[];
-    expect(entries).toHaveLength(4);
+    expect(entries).toHaveLength(9);
     expect(entries.every((entry) => entry.action === "control.create-tenant")).toBe(true);
-    expect(entries.filter((entry) => entry.target?.includes("acme"))).toHaveLength(2);
-    expect(entries.filter((entry) => entry.target?.includes("beta"))).toHaveLength(2);
+    expect(entries.filter((entry) => entry.target?.includes("acme"))).toHaveLength(6);
+    expect(entries.filter((entry) => entry.target?.includes("beta"))).toHaveLength(3);
     const libraryAudit = await run("listPlatformAudit", { action: "control.assign-blueprint-library" });
     expect(libraryAudit.entries).toEqual([
       expect.objectContaining({ action: "control.assign-blueprint-library", target: 'assign blueprint library "beta" to tenant slug="acme"', result: "succeeded" }),

@@ -522,8 +522,11 @@ export type RuntimeJobEnqueueResult = {
 export type RuntimeJobServices = {
   /**
    * Enqueue under the live verified session's tenant, inside the active
-   * Operation transaction when there is one — the outbox pattern: the job
-   * exists exactly when the domain write does.
+   * transaction when there is one — the outbox pattern: the job exists
+   * exactly when the domain write does. The active transaction is the
+   * Operation's, or, for a storage contribution called from `stage` or
+   * `read`, the one that artifact call opened (`context.withTransaction`),
+   * so a staged row and the job that collects it commit together.
    */
   enqueue(session: PluginSessionContext, input: RuntimeJobEnqueueInput): Promise<RuntimeJobEnqueueResult>;
 };

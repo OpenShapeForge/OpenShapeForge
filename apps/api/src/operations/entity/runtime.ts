@@ -782,9 +782,12 @@ export async function executeEntityOperation(
           "INTERNAL_SERVER_ERROR",
         );
       }
-      // The payload before prerequisites, the same order as the entity path:
-      // an invalid request answers VALIDATION, not a prerequisite it would
-      // only fail after.
+      // The write policy before the plugin's own contract, as the entity path
+      // does: a field an Operation writes is refused as such, naming the
+      // Operation to call, not as a property the authored input does not know.
+      // Then the payload before prerequisites: an invalid request answers
+      // VALIDATION, not a prerequisite it would only fail after.
+      if (operation.intent !== "delete") assertNoOperationWrittenValues(table, request.input ?? {});
       assertOperationInputValid(operation, request.input ?? {});
       await requireOperationPrerequisites(db, session, operation);
       if (operation.intent === "delete") {

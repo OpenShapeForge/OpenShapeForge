@@ -45,17 +45,28 @@ export const INTEGER_TEXT_PATTERN = "^-?(?:0|[1-9][0-9]*)$";
 /**
  * The wire text of a numeric or bigint value the database or a handler
  * produced: text stays text, a bigint prints exactly, a finite number prints
- * without exponent. Anything else is returned as is for the caller to refuse.
+ * every digit of its shortest round-trip representation without exponent
+ * notation (1e-21 is "0.000000000000000000001", 1e21 is
+ * "1000000000000000000000"). Anything else is returned as is for the caller
+ * to refuse.
  */
 export function decimalText(value: unknown): unknown {
   if (typeof value === "string") return value;
   if (typeof value === "bigint") return value.toString();
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const text = value.toString();
-    if (!text.includes("e")) return text;
-    return value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return expandExponent(value.toString());
   return value;
+}
+
+/** `d.dddde±x` as plain decimal digits, moving the point without touching a digit. */
+function expandExponent(text: string): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (!match) return text;
+  const [, sign, integer, fraction = "", exponent] = match;
+  const digits = `${integer}${fraction}`;
+  const point = integer!.length + Number(exponent);
+  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${"0".repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 export type ScalarProjection = {

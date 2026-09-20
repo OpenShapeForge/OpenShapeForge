@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql } from "kysely";
+import { sql, type CompiledQuery } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { withDbSession } from "../../db/session.js";
@@ -230,7 +230,7 @@ describe("status transitions against PostgreSQL", () => {
     const decisions = await withDbSession(restricted!.db, session, async (trx) => {
       const executor = trx.getExecutor();
       const original = executor.executeQuery.bind(executor);
-      executor.executeQuery = ((query: { sql: string }) => {
+      executor.executeQuery = ((query: CompiledQuery) => {
         statements.push(query.sql);
         return original(query);
       }) as typeof executor.executeQuery;

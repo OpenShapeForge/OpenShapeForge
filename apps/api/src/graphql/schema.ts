@@ -17,6 +17,7 @@ import {
   type ValueNode,
 } from "graphql";
 import { createSchema } from "graphql-yoga";
+import { DECIMAL_PATTERN, decimalText } from "@openshapeforge/operations";
 import {
   generatedEntityMutationFields,
   generatedEntityQueryFields,
@@ -103,6 +104,13 @@ export function buildGraphqlSchema(
   typeDefs: /* GraphQL */ `
     scalar JSON
 
+    """
+    A decimal number as a string, exact: a numeric or 64-bit integer column
+    is answered as \"12.50\" or \"9007199254740993\", never as a Float that would
+    round it. An input takes the number a form sends or the same string.
+    """
+    scalar Decimal
+
     ${generatedEntityTypeDefs}
 
     ${connectorTypeDefs}
@@ -158,6 +166,14 @@ ${sortRootFieldDefinitions(moduleGraphql.mutationFields)}
       serialize: (value: unknown) => value,
       parseValue: (value: unknown) => value,
       parseLiteral: parseJsonLiteral,
+    },
+    Decimal: {
+      serialize: decimalText,
+      parseValue: parseDecimalValue,
+      parseLiteral: (ast: ValueNode) =>
+        ast.kind === Kind.INT || ast.kind === Kind.FLOAT || ast.kind === Kind.STRING
+          ? parseDecimalValue(ast.kind === Kind.STRING ? ast.value : Number(ast.value))
+          : parseDecimalValue(undefined),
     },
     ...objectResolvers(),
     ...connectorObjectResolvers(connectorResolvers),
@@ -299,6 +315,19 @@ function objectResolvers() {
   const { Query: _query, Mutation: _mutation, ...objects } = generatedEntityResolvers;
   return objects;
 }
+
+/**
+ * A Decimal input: the JSON number a form sends, or a decimal string. Either
+ * reaches the entity runtime as the number its input schema validates; the
+ * exactness a stored value keeps is the database's, on the way out.
+ */
+function parseDecimalValue(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && DECIMAL.test(value)) return Number(value);
+  throw new GraphQLError("Decimal expects a finite number or a decimal string.");
+}
+
+const DECIMAL = new RegExp(DECIMAL_PATTERN);
 
 function parseJsonLiteral(ast: ValueNode): unknown {
   switch (ast.kind) {

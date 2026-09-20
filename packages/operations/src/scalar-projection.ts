@@ -8,9 +8,13 @@
  * switches disagreed (a `bigint` was `integer` on one transport and `number`
  * on another). The table below is the one answer; a new scalar is one row.
  *
- * `bigint` crosses JSON as an integer and Kysely as a string (pg returns it
- * as text so nothing is rounded); `numeric` crosses JSON as a number and
- * GraphQL as Float, which is the precision the runtime gives it today.
+ * `numeric` and `bigint` cross every transport as decimal strings
+ * (`"12.50"`, `"9007199254740993"`): a JSON number is an IEEE double and
+ * GraphQL Float is the same double, and money and 64-bit counters do not
+ * survive either. Postgres hands both to the driver as text, the row
+ * serializer keeps them text, and the schemas say so. Inputs are the JSON
+ * numbers a form sends; the exactness a value needs is the value's, not the
+ * transport's, and a create or update sends what a person typed.
  */
 
 export type ScalarType =
@@ -28,16 +32,39 @@ export type ScalarType =
 export type ScalarJsonSchema = {
   type?: "string" | "boolean" | "integer" | "number" | "array";
   format?: "uuid" | "date" | "date-time";
+  pattern?: string;
+  description?: string;
   items?: { type: "string" };
 };
+
+/** A decimal number as text: an optional sign, digits, an optional fraction. */
+export const DECIMAL_PATTERN = "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$";
+/** A 64-bit integer as text. */
+export const INTEGER_TEXT_PATTERN = "^-?(?:0|[1-9][0-9]*)$";
+
+/**
+ * The wire text of a numeric or bigint value the database or a handler
+ * produced: text stays text, a bigint prints exactly, a finite number prints
+ * without exponent. Anything else is returned as is for the caller to refuse.
+ */
+export function decimalText(value: unknown): unknown {
+  if (typeof value === "string") return value;
+  if (typeof value === "bigint") return value.toString();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const text = value.toString();
+    if (!text.includes("e")) return text;
+    return value.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+  }
+  return value;
+}
 
 export type ScalarProjection = {
   /** The Postgres column type. */
   sql: string;
   /** The Kysely row type, as `generate.ts` names it in the generated `DB`. */
   ts: string;
-  /** The GraphQL scalar. */
-  gql: "ID" | "String" | "Boolean" | "Int" | "Float" | "JSON" | "[String!]";
+  /** The GraphQL scalar; `Decimal` is the platform's own, a decimal string. */
+  gql: "ID" | "String" | "Boolean" | "Int" | "Decimal" | "JSON" | "[String!]";
   /** The JSON Schema of one value. `jsonb` is unconstrained. */
   json: ScalarJsonSchema;
 };
@@ -47,8 +74,18 @@ export const SCALAR_PROJECTION: Readonly<Record<ScalarType, ScalarProjection>> =
   text: { sql: "text", ts: "string", gql: "String", json: { type: "string" } },
   boolean: { sql: "boolean", ts: "boolean", gql: "Boolean", json: { type: "boolean" } },
   integer: { sql: "integer", ts: "number", gql: "Int", json: { type: "integer" } },
-  bigint: { sql: "bigint", ts: "string", gql: "Float", json: { type: "integer" } },
-  numeric: { sql: "numeric", ts: "Numeric", gql: "Float", json: { type: "number" } },
+  bigint: {
+    sql: "bigint",
+    ts: "string",
+    gql: "Decimal",
+    json: { type: "string", pattern: INTEGER_TEXT_PATTERN, description: "A 64-bit integer as a decimal string, exact." },
+  },
+  numeric: {
+    sql: "numeric",
+    ts: "Numeric",
+    gql: "Decimal",
+    json: { type: "string", pattern: DECIMAL_PATTERN, description: "A decimal number as a string, e.g. \"12.50\", exact." },
+  },
   date: { sql: "date", ts: "DateOnly", gql: "String", json: { type: "string", format: "date" } },
   timestamptz: {
     sql: "timestamptz",

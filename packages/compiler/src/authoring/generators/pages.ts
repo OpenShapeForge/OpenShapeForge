@@ -1873,7 +1873,8 @@ function graphQlFieldTypeToFormValueType(type: string): GeneratedFormFieldConfig
     ID: "string",
     String: "string",
     Int: "integer",
-    Float: "number",
+    // A form edits a decimal as a number; the record it reads it back from carries a string.
+    Decimal: "number",
     Boolean: "boolean",
     JSON: "object",
   };

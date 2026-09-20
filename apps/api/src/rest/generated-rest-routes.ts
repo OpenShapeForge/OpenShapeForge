@@ -19,6 +19,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { OperationFailure } from "@openshapeforge/operations";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
+import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "@openshapeforge/operations";
+
+const DECIMAL = new RegExp(DECIMAL_PATTERN);
+const INTEGER_TEXT = new RegExp(INTEGER_TEXT_PATTERN);
 import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -226,8 +230,7 @@ function coerceFilterValue(column: GeneratedColumn, raw: string): unknown {
         `Filter field ${fieldNameForColumn(column)} expects "true" or "false".`,
       );
     }
-    case "integer":
-    case "bigint": {
+    case "integer": {
       const parsed = Number.parseInt(raw, 10);
       if (!Number.isInteger(parsed) || String(parsed) !== raw.trim()) {
         throw new HttpError(
@@ -238,16 +241,27 @@ function coerceFilterValue(column: GeneratedColumn, raw: string): unknown {
       }
       return parsed;
     }
-    case "numeric": {
-      const parsed = Number(raw);
-      if (!Number.isFinite(parsed)) {
+    // A bigint or numeric filter value stays the decimal text the column
+    // holds: comparing as text in the database is exact, a JS number is not.
+    case "bigint": {
+      if (!INTEGER_TEXT.test(raw.trim())) {
         throw new HttpError(
           400,
           "BAD_USER_INPUT",
-          `Filter field ${fieldNameForColumn(column)} expects a number.`,
+          `Filter field ${fieldNameForColumn(column)} expects an integer.`,
         );
       }
-      return parsed;
+      return raw.trim();
+    }
+    case "numeric": {
+      if (!DECIMAL.test(raw.trim())) {
+        throw new HttpError(
+          400,
+          "BAD_USER_INPUT",
+          `Filter field ${fieldNameForColumn(column)} expects a decimal number.`,
+        );
+      }
+      return raw.trim();
     }
     default:
       return raw;

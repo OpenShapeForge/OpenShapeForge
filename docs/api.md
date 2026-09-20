@@ -112,6 +112,16 @@ under `/api/rest/v1/<basePath>`:
 | `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200 { data, operations }` (partial update) |
 | `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `200 { data: { deleted }, operations }` |
 
+Numbers on the wire: an `integer` column is a JSON integer; a `numeric`
+(money, quantities) or `bigint` column is a **decimal string** (`"12.50"`,
+`"9007199254740993"`) on REST, MCP and GraphQL (the `Decimal` scalar),
+because a JSON number and a GraphQL Float are the same IEEE double and would
+round both. The row serializer prints every such value as text whatever the
+driver or a handler produced, and the record schemas declare `type: string`
+with the decimal pattern (`packages/operations/src/scalar-projection.ts` is
+the one table every projection reads). Inputs take the JSON number a form
+sends; GraphQL's `Decimal` also accepts the string.
+
 Every route is a projection of the entity's canonical Operation: the record,
 the writable values, the list page and the mutation controls are built once
 (`packages/compiler/src/entity-operation-json-schema.ts`) and `openapi.json`

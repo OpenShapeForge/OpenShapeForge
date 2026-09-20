@@ -119,22 +119,37 @@
     "connectors/afas-profit": {
       "name": "@openshapeforge/connector-afas-profit",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/dynamics-finance": {
       "name": "@openshapeforge/connector-dynamics-finance",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/exact-online": {
       "name": "@openshapeforge/connector-exact-online",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "connectors/twinfield": {
       "name": "@openshapeforge/connector-twinfield",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "examples/connectors/object-store": {
       "name": "@openshapeforge/connector-example-object-store",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/plugin-runtime": "workspace:*",
+      },
     },
     "examples/plugins/workflow": {
       "name": "@openshapeforge/example-plugin-workflow",

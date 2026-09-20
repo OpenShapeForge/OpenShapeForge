@@ -408,6 +408,11 @@ describe("mapping helpers", () => {
       ]).map((binding) => binding.id),
     ).toEqual(["a", "b"]);
     expect(() => orderedBindingRecords([])).toThrow(/no bindings/);
+    // A row of the owned binding entity carries NULL for an unset forEach
+    // column; the record reads it as absent, so no consumer has to.
+    const [projected] = orderedBindingRecords([{ order: 1, id: "a", forEach: null }]);
+    expect(projected!.forEach).toBeUndefined();
+    expect("forEach" in projected!).toBe(true);
     expect(() => orderedBindingRecords([{ order: 1 }, { order: 1 }])).toThrow(
       /unique integer order/,
     );
@@ -1879,6 +1884,22 @@ describe("executeBindingStep", () => {
     operation: { method: "GET", pathTemplate: "/records/{providerId}" },
     responseMapping: { fieldPaths: [{ field: "record", path: "$" }] },
   };
+
+  it("runs a row whose forEach column is NULL as a plain binding", async () => {
+    // The row as the owned binding entity delivers it, through the one
+    // projection that turns rows into binding records.
+    const [plain] = orderedBindingRecords([{ ...binding, forEach: null, inputMapping: [] }]);
+    const outputs = await executeBindingStep({
+      binding: plain!,
+      operationRow: { ...operationRow, operation: { method: "GET", pathTemplate: "/records/one" } },
+      providerRow,
+      connectionValues: {},
+      serviceInputs: {},
+      secretScope: "unused",
+      fetchImpl: (async () => Response.json({ id: "one", title: "Title one" })) as typeof fetch,
+    });
+    expect(outputs).toEqual({ records: { id: "one", title: "Title one" } });
+  });
 
   it("fans a query out over an earlier collection and preserves its order", async () => {
     const calls: string[] = [];

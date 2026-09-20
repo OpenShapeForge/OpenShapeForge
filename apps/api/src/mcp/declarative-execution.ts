@@ -1777,7 +1777,10 @@ export function orderedBindingRecords(raw: unknown): JsonRecord[] {
         );
       }
       seenOrders.add(order);
-      return binding;
+      // Rows come from the owned binding entity, whose optional object
+      // columns are NULL when unset; a consumer reads an absent option as
+      // undefined, so the absence is spelled once here, not per consumer.
+      return binding.forEach === null ? { ...binding, forEach: undefined } : binding;
     })
     .sort((a, b) => (a.order as number) - (b.order as number));
 }

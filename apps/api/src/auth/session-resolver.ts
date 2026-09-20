@@ -36,11 +36,6 @@ export type ResolveSessionOptions = {
    * Host organization mode refuses sessions without registry proof.
    */
   db?: OpenShapeForgeDatabase | undefined;
-  /**
-   * Preserve authentication-service unavailability as a distinct failure.
-   * Ordinary callers keep the historical anonymous-session fallback.
-   */
-  failOnUnavailable?: boolean;
   /** Exact resource audience required in addition to the configured verifier audience.
    * Supplying this makes the endpoint bearer-only (no API key or trusted context).
    */
@@ -160,9 +155,12 @@ async function verifyBearerIdentity(
  *   explicit signal to authenticate by bearer. That signal must not be
  *   downgrade-attackable, so it is resolved ONLY by the bearer verifier:
  *     - Verifier configured + token valid → use the resulting identity.
- *     - Verifier configured + verification fails → fail closed (EMPTY_SESSION).
- *     - Verifier NOT configured → fail closed (EMPTY_SESSION). We do NOT fall
- *       through to trusted-context, because doing so would silently swap the
+ *     - Verifier configured + token refused → fail closed (EMPTY_SESSION).
+ *     - Verifier configured but unreachable (JWKS outage) → 503
+ *       AUTHENTICATION_UNAVAILABLE: the deployment cannot decide, so it says
+ *       so instead of answering as nobody.
+ *     - Verifier NOT configured → 503 AUTHENTICATION_UNAVAILABLE as well. We
+ *       do NOT fall through to trusted-context, because doing so would swap the
  *       active trust boundary (a rollout/config error that leaves the bearer
  *       env unset would trust inbound HMAC-signed context headers instead of
  *       verifying the presented token — a materially larger attack surface
@@ -208,10 +206,9 @@ export async function resolveCredentialSession(
             "(needs a database, OPENSHAPEFORGE_API_KEY_SECRET_KEYS, and a complete " +
             "bearer verifier). Rejecting.",
         );
-        if (options.failOnUnavailable) {
-          throw new SessionAuthenticationUnavailableError();
-        }
-        return EMPTY_SESSION;
+        throw new SessionAuthenticationUnavailableError(
+          "API keys cannot be verified: the key path needs a database, OPENSHAPEFORGE_API_KEY_SECRET_KEYS and a complete bearer verifier.",
+        );
       }
 
       const session = await resolveApiKeySession(
@@ -283,8 +280,12 @@ export async function resolveCredentialSession(
         "[auth] Bearer verification failed:",
         error instanceof Error ? error.message : String(error),
       );
-      if (options.failOnUnavailable && bearerVerifierUnavailable(error)) {
-        throw new SessionAuthenticationUnavailableError();
+      // An outage of the verifier (JWKS unreachable, unusable key material)
+      // is not a refusal of this token: 503, never an anonymous session.
+      if (bearerVerifierUnavailable(error)) {
+        throw new SessionAuthenticationUnavailableError(
+          "Bearer tokens cannot be verified: the remote bearer verifier is unavailable.",
+        );
       }
       return EMPTY_SESSION;
     }

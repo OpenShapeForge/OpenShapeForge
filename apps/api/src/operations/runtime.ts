@@ -1681,20 +1681,13 @@ export function registerOperationRestRoutes(
     const handler = async (request: FastifyRequest, reply: FastifyReply) => {
       let session: TrustedSessionContext | undefined;
       try {
-        const declaresAuthenticationUnavailable = entry.operation.errors.some((error) =>
-          error.status === 503 && error.code === "AUTHENTICATION_UNAVAILABLE"
-        );
         session = entry.operation.auth.mode === "custom"
           ? undefined
           : entry.operation.auth.mode === "control"
           ? await resolveControlRestSession(request, context)
           : entry.operation.auth.mode === "capability"
           ? await resolveCapabilityRestSession(request, context, entry.operation)
-          : await resolveSessionContext(headersFromFastify(request.headers), {
-              db: context.db,
-              failOnUnavailable:
-                entry.operation.auth.mode === "session" && declaresAuthenticationUnavailable,
-            });
+          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
       } catch (error) {
         return sendOperationRestFailure(reply, entry.operation, error, true);
       }

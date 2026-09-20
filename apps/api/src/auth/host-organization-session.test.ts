@@ -276,7 +276,7 @@ describe("host organization binding through real bearer verification and resolve
 
   test("required audience rejects API keys before key configuration or database access", async () => {
     expect((await resolveSessionContext(new Headers({ authorization: `Bearer ${mintApiKey().token}` }), {
-      requiredAudience: RESOURCE, failOnUnavailable: true,
+      requiredAudience: RESOURCE,
     })).credential).toBe("none");
   });
 });

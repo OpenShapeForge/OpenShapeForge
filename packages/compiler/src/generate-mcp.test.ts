@@ -39,7 +39,7 @@ const field = (
 
 const contract = (
   overrides: {
-    authoringVersion?: 2 | 3;
+    authoringVersion?: 3;
     name?: string;
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
@@ -210,7 +210,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
-            authoringVersion: 2,
+            authoringVersion: 3,
             fields: [
               field({ key: "id", required: true, validation: { format: "uuid" } }),
               field({ key: "name" }),
@@ -344,7 +344,7 @@ describe("buildMcpCatalog", () => {
   });
 
   it("projects version, lease and confirmation controls into v2 mutation inputs", () => {
-    const secured = contract({ authoringVersion: 2 });
+    const secured = contract({ authoringVersion: 3 });
     secured.entityOperations.create = {
       ...secured.entityOperations.create!,
       interaction: { confirmation: { mode: "acknowledgement" } },
@@ -451,7 +451,7 @@ describe("buildMcpCatalog", () => {
   });
 
   it("leaves acknowledgement to the canonical runtime instead of MCP schema rejection", () => {
-    const acknowledged = contract({ authoringVersion: 2 });
+    const acknowledged = contract({ authoringVersion: 3 });
     for (const intent of ["create", "update", "delete"] as const) {
       acknowledged.entityOperations[intent] = {
         ...acknowledged.entityOperations[intent]!,
@@ -478,7 +478,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
-            authoringVersion: 2,
+            authoringVersion: 3,
             mcp: {
               toolPrefix: "widget",
               tools: "generic",
@@ -515,7 +515,7 @@ describe("buildMcpCatalog", () => {
 
   it("keeps plugin-backed CRUD schemas under the canonical generic tools", () => {
     const pluginBacked = contract({
-      authoringVersion: 2,
+      authoringVersion: 3,
       mcp: {
         toolPrefix: "widget",
         tools: "generic",
@@ -1209,6 +1209,16 @@ describe("buildMcpCatalog", () => {
     expect(listed).toBeGreaterThan(bare + DATA_ACQUISITION_TOOL_FOOTER.length);
     // The longer Dutch text is what the budget counts.
     expect(measured!.bytes).toBeGreaterThan(listed);
+    // A third language authored on the catalogue is measured too: a tool
+    // whose German copy is the longest weighs what the German listing weighs.
+    const german = advertisedToolSizes({
+      tools: [{ ...create, inputSchema: { ...create.inputSchema, properties: { ...(create.inputSchema.properties as Record<string, unknown>),
+        name: { type: "string", "x-osf-i18n": { title: { en: "Name", nl: "Naam", de: "Bezeichnung des Datensatzes, ausführlich".repeat(4) } } } } } }],
+      entities: catalog.entities,
+      operationTools: [],
+      projection: "dedicated",
+    }).find((entry) => entry.name === create.name)!;
+    expect(german.bytes).toBeGreaterThan(measured!.bytes);
     expect(JSON.stringify(advertisedEntityTool({
       name: create.name, operation: "create", title: "t", description: "d",
       inputSchema: {}, annotations: create.annotations, linksConfigurationApp: true,

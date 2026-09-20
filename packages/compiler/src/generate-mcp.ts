@@ -974,6 +974,40 @@ function sizeOf(name: string, tool: unknown): AdvertisedToolSize {
  * Session withholding only makes the listing smaller, so this is the
  * ceiling; the generic texts are measured in the longer of their languages.
  */
+/** The languages the static listing can be answered in, sorted, "en" first. */
+function listedLanguages(
+  input: StaticListingInput,
+  canonical: ReadonlyMap<string, { name?: unknown; description?: unknown }>,
+): string[] {
+  const languages = new Set<string>(["en"]);
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const entry of value) collect(entry);
+    } else if (value && typeof value === "object") {
+      for (const [key, entry] of Object.entries(value as JsonObject)) {
+        if (key === "x-osf-i18n" && entry && typeof entry === "object") {
+          for (const copy of Object.values(entry as JsonObject)) {
+            if (copy && typeof copy === "object") for (const language of Object.keys(copy as JsonObject)) languages.add(language);
+          }
+        } else {
+          collect(entry);
+        }
+      }
+    }
+  };
+  for (const entity of input.entities) for (const language of Object.keys(entity.labels ?? {})) languages.add(language);
+  for (const text of canonical.values()) {
+    for (const value of [text.name, text.description]) {
+      if (value && typeof value === "object") for (const language of Object.keys(value as JsonObject)) languages.add(language);
+    }
+  }
+  for (const tool of input.tools) {
+    collect(tool.inputSchema);
+    collect(tool.outputSchema);
+  }
+  return [...languages].sort((left, right) => (left === "en" ? -1 : right === "en" ? 1 : compareCodeUnits(left, right)));
+}
+
 export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSize[] {
   const generic = new Map<string, McpToolDefinition[]>();
   const genericEntities = genericEntityNames(input.entities);
@@ -984,7 +1018,10 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
   // the session's language, falling back to the compiled title.
   const titleIn = (entity: string, language: string) =>
     entities.get(entity)?.labels?.[language] ?? entities.get(entity)?.title ?? entity;
-  const languages = ["en", "nl"];
+  // Every language the catalogue is authored in, English always among them
+  // as the fallback a session gets: a language in any label, canonical text
+  // or x-osf-i18n copy of a listed tool is one a session may ask for.
+  const languages = listedLanguages(input, canonical);
   const largest = (shape: (language: string) => unknown) =>
     Math.max(...languages.map((language) => advertisedToolBytes(shape(language))));
   for (const tool of input.tools) {

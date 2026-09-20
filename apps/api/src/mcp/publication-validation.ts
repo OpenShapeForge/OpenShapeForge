@@ -25,7 +25,7 @@
  * interpretation of stored data, like declarative execution itself.
  */
 import { HttpError } from "../rest/http-error.js";
-import { requestHeaderMappings } from "./declarative-execution.js";
+import { orderedBindingRecords, requestHeaderMappings } from "./declarative-execution.js";
 import { deriveToolName, type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import {
   BindingOverflowError,
@@ -176,6 +176,21 @@ export async function validateVisibleDefinition(
   }
   if (bindings.length === 0 && !overflowed) {
     problems.push(`the ${collection} collection is empty; nothing would execute.`);
+  } else if (bindings.length > 0) {
+    // Discovery sorts with orderedBindingRecords and throws SERVICE_MISCONFIGURED
+    // on a colliding order. Publication must refuse that write here, as
+    // NOT_PUBLISHABLE, so the tenant never stores an unexecutable chain.
+    try {
+      bindings = orderedBindingRecords(bindings);
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "SERVICE_MISCONFIGURED") {
+        problems.push(
+          error.message.replace(/^Binding /, "binding ").replace(/\.$/, ""),
+        );
+      } else {
+        throw error;
+      }
+    }
   }
 
   // Provider rows collected across bindings so each connection is judged once.

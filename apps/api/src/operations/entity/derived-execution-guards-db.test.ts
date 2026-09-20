@@ -91,6 +91,7 @@ function fixture() {
     ...common,
     column("parent_id", "uuid", { sourceField: "parent", immutable: true }),
     column("parent_id_position", "integer"),
+    column("sort_order", "integer", { sourceField: "order" }),
     column("operation_id", "uuid", { sourceField: "operationId" }),
   ];
   parent.source!.graphql!.relationships = [{
@@ -150,9 +151,10 @@ function fixture() {
           title: { type: "string", minLength: 1 },
           parent: { type: "string", format: "uuid" },
           permissions: { type: "object" },
+          order: { type: "integer" },
           operationId: { type: "string", format: "uuid" },
         },
-        required: ["title", "parent", "operationId"],
+        required: ["title", "parent", "order", "operationId"],
         additionalProperties: false,
       },
     },
@@ -164,6 +166,7 @@ function fixture() {
         type: "object",
         properties: {
           title: { type: "string" },
+          order: { type: "integer" },
           operationId: { type: "string", format: "uuid" },
         },
         additionalProperties: false,
@@ -205,8 +208,8 @@ async function seed(bindings: number) {
   for (let index = 0; index < bindings; index++) {
     const childId = randomUUID();
     childIds.push(childId);
-    await sql`insert into erp.blocks(id, tenant_id, title, parent_id, parent_id_position, operation_id)
-      values (${childId}::uuid, ${tenant}::uuid, 'Binding', ${ownerId}::uuid, ${index}, ${operationId}::uuid)`
+    await sql`insert into erp.blocks(id, tenant_id, title, parent_id, parent_id_position, sort_order, operation_id)
+      values (${childId}::uuid, ${tenant}::uuid, 'Binding', ${ownerId}::uuid, ${index}, ${index + 1}, ${operationId}::uuid)`
       .execute(privileged!.db);
   }
   return { f, ownerId, operationId, providerId, childIds, expectedVersion: await version(ownerId) };
@@ -234,7 +237,8 @@ const fails = (promise: Promise<unknown>, code: string) =>
       create table erp.blocks(
         id uuid primary key, tenant_id uuid not null, title text not null,
         updated_at timestamptz not null default clock_timestamp(), permissions jsonb,
-        parent_id uuid not null, parent_id_position integer not null, operation_id uuid not null,
+        parent_id uuid not null, parent_id_position integer not null, sort_order integer not null,
+        operation_id uuid not null,
         unique(tenant_id,id), foreign key(tenant_id,parent_id) references erp.template_variants(tenant_id,id));
       create table public.svc_providers(
         id uuid primary key, tenant_id uuid not null, name text not null, auth jsonb not null, unique(tenant_id,id));
@@ -300,10 +304,29 @@ const fails = (promise: Promise<unknown>, code: string) =>
       seeded.f.execute(restricted!.db, session, insert, {
         id: seeded.ownerId,
         expectedVersion: seeded.expectedVersion,
-        values: { title: "Bad binding", operationId: randomUUID() },
+        values: { title: "Bad binding", order: 2, operationId: randomUUID() },
       }),
       "NOT_PUBLISHABLE",
     );
+  });
+
+  test("generic update giving a binding another binding's order is NOT_PUBLISHABLE", async () => {
+    const seeded = await seed(2);
+    await fails(
+      updateGeneratedEntityForTable(
+        restricted!.db,
+        session,
+        seeded.f.child,
+        seeded.childIds[0]!,
+        { order: 2 },
+        { tables: seeded.f.catalogTables, derivedTools: [ENTRY] },
+      ),
+      "NOT_PUBLISHABLE",
+    );
+    expect(
+      (await sql<{ order: number }>`select sort_order as order from erp.blocks where id = ${seeded.childIds[0]!}::uuid`
+        .execute(privileged!.db)).rows[0]!.order,
+    ).toBe(1);
   });
 
   test("generic update of a child that names a missing operation is NOT_PUBLISHABLE", async () => {

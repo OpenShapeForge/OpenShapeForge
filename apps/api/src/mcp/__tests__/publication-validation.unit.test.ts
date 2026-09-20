@@ -385,6 +385,49 @@ describe("validateVisibleDefinition", () => {
     expect(unusable).toContain("does not yield a usable tool name");
   });
 
+  it("refuses a colliding order as NOT_PUBLISHABLE, not SERVICE_MISCONFIGURED", async () => {
+    const input = {
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.operations": [OPERATION],
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": [
+          { ...BINDING, id: "bind-1", order: 1 },
+          { ...BINDING, id: "bind-2", order: 1, operationId: "op-1" },
+        ],
+      }),
+    };
+    try {
+      await validateVisibleDefinition(input);
+      throw new Error("expected validation to refuse");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "NOT_PUBLISHABLE" });
+      expect(String((error as Error).message)).toContain("unique integer order");
+      expect(String((error as Error).message)).toContain("cannot be made visible");
+    }
+  });
+
+  it("sorts bindings by order before naming problems", async () => {
+    const message = await failure({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": [
+          { ...BINDING, id: "bind-2", order: 2, operationId: "missing-later" },
+          { ...BINDING, id: "bind-1", order: 1, operationId: "missing-first" },
+        ],
+      }),
+    });
+    expect(message).toContain("binding 1 references Operation missing-first");
+    expect(message).toContain("binding 2 references Operation missing-later");
+  });
+
   it("refuses a relation collection that exceeds the per-owner maximum", async () => {
     const bindings = Array.from({ length: MAX_BINDINGS_PER_OWNER + 1 }, (_, index) => ({
       id: `b-${index}`,

@@ -10,7 +10,10 @@ import { SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { sessionInfoToolResult } from "./session-describe.js";
 import { parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
 import { invokeOperation } from "../operations/runtime.js";
-import { catalog } from "./catalog.js";
+import {
+  catalog,
+  isDerivedHelperToolName,
+} from "./catalog.js";
 import { operationMayInvoke } from "./entity-tool-invocation.js";
 import {
   callbackOrigin,
@@ -44,6 +47,7 @@ export async function staticToolCall(
     assertInterceptorActive,
     assertParentInvocationActive,
     canUploadArtifacts,
+    compatibilityCall,
     current,
     db,
     egressOwner,
@@ -230,9 +234,16 @@ export async function staticToolCall(
     );
     return runtimeOperationToolResult(result);
   }
-  const operationTool = catalog.operationTools.find(
-    (tool) => tool.name === name,
-  );
+  // A derived-tool helper's public name may also be a plugin Operation's
+  // MCP name: that Operation is implemented by the helper through the
+  // execution compatibility bridge, so the bridge's dispatch (compatibilityCall)
+  // and a direct call under the name both go to the helper section below —
+  // matching the Operation here would run the plugin handler, which bridges
+  // straight back to this dispatch.
+  const operationTool =
+    compatibilityCall || isDerivedHelperToolName(name)
+      ? undefined
+      : catalog.operationTools.find((tool) => tool.name === name);
   if (operationTool) {
     if (
       !operations.has(operationTool.key) ||

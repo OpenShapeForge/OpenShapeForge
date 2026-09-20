@@ -275,6 +275,22 @@ export const catalogDiscoveryTools: CatalogDiscoveryTool[] =
 export const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 export const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
+/**
+ * The public names of the derived-tool helpers (connect, dry run, set
+ * preferences). A plugin's own Operation of the same name is implemented BY
+ * the helper (the execution compatibility bridge), so a call under such a
+ * name — direct, or the bridge's own dispatch — goes to the helper, never to
+ * the Operation handler that would only bridge back here.
+ */
+export function isDerivedHelperToolName(name: string): boolean {
+  return catalogDerivedTools.some(
+    (entry) =>
+      entry.connect?.name === name ||
+      entry.dryRun?.name === name ||
+      entry.personalization?.set.name === name,
+  );
+}
+
 export const compatibilityOperations = catalog.executionCompatibility ?? [];
 export const compatibilityOperationByKey = new Map(
   compatibilityOperations.map((entry) => [entry.operation, entry]),

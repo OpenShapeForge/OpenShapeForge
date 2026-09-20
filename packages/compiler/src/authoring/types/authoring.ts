@@ -197,11 +197,12 @@ export interface AuthoredEntityIndex {
    */
   unique?: boolean;
   /**
-   * Partial index: only rows whose field equals the value take part, so a
-   * unique index enforces at most one such row per key
-   * (`{ field: isDefault, equals: true }`).
+   * Partial index: only rows whose field equals the value (`{ field:
+   * isDefault, equals: true }`) or holds one at all (`{ field: invoiceNumber,
+   * present: true }`) take part, so a unique index enforces at most one such
+   * row per key and leaves the rows without the value alone.
    */
-  where?: { field: string; equals: boolean | string | number };
+  where?: { field: string; equals: boolean | string | number } | { field: string; present: boolean };
 }
 
 export type CrudOperationKey = "list" | "get" | "create" | "update" | "delete";

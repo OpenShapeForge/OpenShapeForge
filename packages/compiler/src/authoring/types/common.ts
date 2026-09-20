@@ -20,6 +20,12 @@ export interface FieldValidation {
   max?: number | ValidationRule;
   pattern?: string | ValidationRule;
   format?: string;
+  /**
+   * Fields that must hold a value whenever this one does — an invoice number
+   * without the fiscal year that scopes it is no identity. Persisted as a
+   * database CHECK on the row, so no write path can leave the pair half set.
+   */
+  requires?: string[];
   custom?: {
     name: string;
     message?: LocalizedText;

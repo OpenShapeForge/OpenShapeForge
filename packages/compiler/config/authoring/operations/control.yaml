@@ -350,12 +350,14 @@ operations:
       en: Create tenant
       nl: Tenant aanmaken
     description:
-      en: Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization. Use
-        a stable kebab-case slug and a human display name. A replay returns the existing tenant and repairs an incomplete
-        Keycloak projection; it never deletes or replaces a tenant.
-      nl: Maakt ÉÉN tenant aan in het platformregister met zijn Keycloak-hoofdorganisatie, of herhaalt dat veilig.
-        Gebruik een stabiele kebab-case slug en een leesbare naam. Een herhaling geeft de bestaande tenant terug
-        en herstelt een onvolledige Keycloak-projectie; verwijdert of vervangt nooit.
+      en: Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization, then
+        installs the current runtime catalog. Use a stable kebab-case slug and a human display name. A replay returns
+        the existing tenant, repairs an incomplete Keycloak projection and installs missing catalog entries; it never
+        deletes or replaces a tenant.
+      nl: Maakt ÉÉN tenant aan in het platformregister met zijn Keycloak-hoofdorganisatie en installeert daarna de
+        actuele runtimecatalogus, of herhaalt dit veilig. Gebruik een stabiele kebab-case slug en een leesbare naam.
+        Een herhaling geeft de bestaande tenant terug, herstelt een onvolledige Keycloak-projectie en installeert
+        ontbrekende catalogusonderdelen; verwijdert of vervangt nooit.
     implementation:
       type: plugin
       plugin: osf-control

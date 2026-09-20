@@ -701,7 +701,8 @@ export interface CompiledTransitionField {
     /** Record permission the rule checks on an entity with record-level permissions. */
     recordPermission?: "edit";
     preconditions?: Array<{ field: string; present: boolean }>;
-    writes?: string[];
+    /** Input fields the rule may set; `agreesOn` names fields the referenced record must share with this one. */
+    writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
   }>;
 }

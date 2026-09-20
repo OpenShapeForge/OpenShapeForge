@@ -579,13 +579,17 @@ function compileEntityIndexes(
           `Entity "${candidate.contract.entity.name}" index "${index.name}" predicate references unknown field "${index.where.field}".`,
         );
       }
-      const expected = column.type === "boolean" ? "boolean" : ["integer", "bigint", "numeric"].includes(column.type) ? "number" : "string";
-      if (typeof index.where.equals !== expected) {
-        throw new Error(
-          `Entity "${candidate.contract.entity.name}" index "${index.name}" predicate value must be a ${expected} for field "${index.where.field}".`,
-        );
+      if ("present" in index.where) {
+        where = `"${column.name}" IS ${index.where.present ? "NOT NULL" : "NULL"}`;
+      } else {
+        const expected = column.type === "boolean" ? "boolean" : ["integer", "bigint", "numeric"].includes(column.type) ? "number" : "string";
+        if (typeof index.where.equals !== expected) {
+          throw new Error(
+            `Entity "${candidate.contract.entity.name}" index "${index.name}" predicate value must be a ${expected} for field "${index.where.field}".`,
+          );
+        }
+        where = `"${column.name}" = ${literal(index.where.equals)}`;
       }
-      where = `"${column.name}" = ${literal(index.where.equals)}`;
     }
     compiled.push({
       name: index.name,

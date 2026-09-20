@@ -1364,11 +1364,13 @@
         "where": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["field", "equals"],
-          "description": "Makes the index partial: only rows whose field equals the value take part, so a unique index enforces at most one such row per key (`{ field: isDefault, equals: true }`).",
+          "required": ["field"],
+          "oneOf": [{ "required": ["equals"] }, { "required": ["present"] }],
+          "description": "Makes the index partial: only rows whose field equals the value (`{ field: isDefault, equals: true }`) or holds one at all (`{ field: invoiceNumber, present: true }`) take part, so a unique index enforces at most one such row per key.",
           "properties": {
             "field": { "$ref": "#/$defs/fieldKey" },
-            "equals": { "type": ["boolean", "string", "number"] }
+            "equals": { "type": ["boolean", "string", "number"] },
+            "present": { "type": "boolean" }
           }
         }
       }

@@ -65,7 +65,7 @@ const expected = {
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],
     relationships: ["agreementId", "producedInvoiceId", "billingRunItems"],
-    operations: ["list", "get", "update", "delete"],
+    operations: ["list", "get", "create", "update", "delete"],
   },
 } as const;
 
@@ -110,7 +110,11 @@ describe("field-relational outcome entities", () => {
       update: ["Finance.All.ReadWrite", "Finance.Quotes.ReadWrite"],
       delete: ["Finance.All.ReadWrite", "Finance.Quotes.ReadWrite"],
     });
-    expect(compileOutcome("agreement-milestone").contract.crud.operations.create).toBe(false);
+    // The milestone create computes and freezes the amount, so it is the
+    // plugin Operation AgreementMilestone.create rather than the generic one.
+    const milestone = compileOutcome("agreement-milestone").contract;
+    expect(milestone.crud.operations.create).toBe(true);
+    expect(milestone.entityOperations.create?.implementation).toEqual({ type: "plugin", plugin: "osf-billing", handler: "createAgreementMilestone" });
   });
 
   test("projects complete read and write Web views without making computed fields editable", () => {

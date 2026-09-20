@@ -90,7 +90,7 @@ const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = Object.fromEntr
     [
       "control.create-tenant",
       "create_tenant",
-      /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+      /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}"|install current catalog tenant="[a-z][a-z0-9-]*")$/,
     ],
     [
       "control.update-tenant",

@@ -307,7 +307,7 @@ function fieldSchema(
   if (field.cardinality !== "collection") return schema;
   const { title: itemTitle, description, default: defaultValue, ...itemSchema } = schema;
   const item = field.item
-    ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)] }
+    ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)], "x-osf-type": field.item.osfType }
     : itemSchema;
   const collection = collectionBounds({ type: "array", items: item }, field);
   // The collection is a use of the same type as its items: a form resolves the property, not the row.

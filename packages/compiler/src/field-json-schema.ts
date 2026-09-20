@@ -575,6 +575,8 @@ export function compiledFieldSchemaWithoutDefinitions(
           outerItemSchema,
           compiledFieldSchemaWithoutDefinitions(field.item, referentiedata, options),
         ],
+        // The row node names the row's type whether the item is explicit or not.
+        ...(field.item.osfType ? { "x-osf-type": field.item.osfType } : {}),
       }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };

@@ -127,6 +127,8 @@ describe("compiled field JSON Schema projection", () => {
     expect((outer.items as Record<string, unknown>)["x-osf-type"]).toBe("tag");
     const explicit = compiledFieldSchema(field({ key: "codes", osfType: "string", cardinality: "collection", item: field({ key: "code", osfType: "code" }) }));
     expect(explicit["x-osf-type"]).toBe("string");
+    // The row node names the row's type whether the item is explicit or not, so a reader never has to look inside allOf.
+    expect((explicit.items as Record<string, unknown>)["x-osf-type"]).toBe("code");
     expect((explicit.items as { allOf: Record<string, unknown>[] }).allOf.map(branch => branch["x-osf-type"])).toEqual(["string", "code"]);
     const nested = compiledFieldSchema(field({ key: "address", osfType: "address", baseType: "object", children: [field({ key: "street", osfType: "street" })] }));
     expect(nested["x-osf-type"]).toBe("address");
@@ -263,6 +265,7 @@ describe("compiled field JSON Schema projection", () => {
         { type: "string", maxLength: 8, enum: ["primary", "backup"], "x-osf-type": "string" },
         { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string" },
       ],
+      "x-osf-type": "string",
     });
     expect(schema.description).toContain("Allowed values: primary (Primary), backup (Backup).");
   });

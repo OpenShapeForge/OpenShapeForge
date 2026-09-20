@@ -275,6 +275,8 @@ function fieldSchema(
         })
       : constrainedType(field);
   const title = localizedText(field.label);
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  schema["x-osf-type"] = field.osfType;
   if (field.relationship?.entity) {
     schema["x-osf-reference"] = { entity: field.relationship.entity };
   }
@@ -305,9 +307,11 @@ function fieldSchema(
   if (field.cardinality !== "collection") return schema;
   const { title: itemTitle, description, default: defaultValue, ...itemSchema } = schema;
   const item = field.item
-    ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)] }
+    ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)], "x-osf-type": field.item.osfType }
     : itemSchema;
   const collection = collectionBounds({ type: "array", items: item }, field);
+  // The collection is a use of the same type as its items: a form resolves the property, not the row.
+  collection["x-osf-type"] = field.osfType;
   if (itemTitle !== undefined) collection.title = itemTitle;
   if (description !== undefined) collection.description = description;
   if (defaultValue !== undefined) {

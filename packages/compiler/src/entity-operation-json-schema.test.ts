@@ -249,6 +249,21 @@ describe("canonical entity Operation JSON Schemas", () => {
     });
   });
 
+  test("names the OSF type on the node a form or reader gets, wrappers included", () => {
+    // #521: a form resolves a property's renderer from x-osf-type; a wrapper (nullable output, filter oneOf) is what it reads.
+    const create = entityOperationJsonSchemas(contract, entityOperations.create!, contracts, {});
+    const values = (create.inputSchema.properties as Record<string, any>).values.properties;
+    expect(values.title["x-osf-type"]).toBe("string");
+    expect(values.projectId).toMatchObject({ type: "string", format: "uuid", "x-osf-type": "Project" }); // a generated reference key names its target
+    const list = entityOperationJsonSchemas(contract, entityOperations.list!, contracts, {});
+    const output = (list.outputSchema as Record<string, any>).properties.items.items.properties.data.properties;
+    expect(output.title["x-osf-type"]).toBe("string");
+    expect(output.reviewedAt).toMatchObject({ anyOf: [{ type: "string", format: "date-time" }, { type: "null" }], "x-osf-type": "string" }); // the type sits on the nullable wrapper a reader gets
+    const filter = (list.inputSchema.properties as Record<string, any>).filter.properties;
+    expect(filter.title["x-osf-type"]).toBe("string");
+    expect(filter.projectId).toMatchObject({ "x-osf-type": "Project", oneOf: expect.any(Array) });
+  });
+
   test("keeps writable value eligibility aligned with generated MCP", () => {
     const catalog = buildMcpCatalog(
       [

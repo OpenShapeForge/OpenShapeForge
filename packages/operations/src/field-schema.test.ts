@@ -6,7 +6,7 @@ test("entity semantic types retain their inferred target in parameter schemas", 
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
     osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } } },
   });
-  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } } } });
+  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" }, "x-osf-type": "ExampleRecord" } } });
 });
 
 test("cardinality bounds with max one preserve a scalar value", () => {
@@ -24,7 +24,7 @@ test("cardinality bounds with max one preserve a scalar value", () => {
 test("explicit collection and larger or unbounded maxima preserve arrays", () => {
   for (const cardinality of ["collection", { min: 0, max: 2 }, { min: 0, max: "unbounded" }] as const) {
     const schema = operationFieldObjectSchema([{ key: "emails", osfType: "string", cardinality }], {});
-    expect(schema).toMatchObject({ properties: { emails: { type: "array", items: { type: "string" } } } });
+    expect(schema).toMatchObject({ properties: { emails: { type: "array", "x-osf-type": "string", items: { type: "string", "x-osf-type": "string" } } } });
   }
 });
 

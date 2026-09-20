@@ -24,13 +24,14 @@ describe("connector field schemas", () => {
       minLength: 1,
       maxLength: 100,
       pattern: "^[a-z/]+$",
+      "x-osf-type": "string",
     });
   });
 
   it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
     const osfTypes = { amount: { valueType: "number" as const, label: { en: "Amount" } } };
     const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
-    expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0 });
+    expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0, "x-osf-type": "amount" });
     // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.
     expect(() => connectorFieldSchema(field)).toThrow("Connector field total: unknown osfType amount.");
     expect(() => buildOperationSchemas([field], { cardinality: "one", fields: [] })).toThrow("unknown osfType amount");
@@ -47,7 +48,7 @@ describe("connector field schemas", () => {
     ];
     for (const [osfType, expected] of cases) {
       expect(connectorFieldSchema({ key: "f", osfType } as FieldDefinition)).toEqual(
-        expected,
+        { ...expected, "x-osf-type": osfType },
       );
     }
   });
@@ -84,9 +85,11 @@ describe("connector field schemas", () => {
       validation: { minItems: 1, maxLength: 50 },
     } as FieldDefinition;
 
+    // The collection is a use of the same type as its rows: both carry it.
     expect(connectorFieldSchema(field)).toEqual({
       type: "array",
-      items: { type: "string", maxLength: 50 },
+      items: { type: "string", maxLength: 50, "x-osf-type": "string" },
+      "x-osf-type": "string",
       description: "Object keys",
       minItems: 1,
     });
@@ -118,7 +121,7 @@ describe("connector field schemas", () => {
       ],
     });
 
-    expect(schema).toEqual({ type: "object" });
+    expect(schema).toEqual({ type: "object", "x-osf-type": "object" });
   });
 });
 
@@ -166,7 +169,7 @@ describe("operation schemas", () => {
       type: "array",
       items: {
         type: "object",
-        properties: { key: { type: "string" } },
+        properties: { key: { type: "string", "x-osf-type": "string" } },
         required: ["key"],
         additionalProperties: false,
       },

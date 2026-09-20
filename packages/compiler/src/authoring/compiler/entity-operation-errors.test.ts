@@ -36,7 +36,7 @@ describe("derived entity Operation errors", () => {
     const errors = codes(deriveEntityOperationErrors("Widget", "update", {
       confirmation: {
         mode: "challenge",
-        challenge: { kind: "type-current-field", field: "name", issuedBy: "server", bindTo: ["subject"], expiresAfter: "PT5M", singleUse: true },
+        challenge: { kind: "type-current-field", field: "name", issuedBy: "server", bindTo: ["subject", "tenant", "operation", "target.id", "target.version"], expiresAfter: "PT5M", singleUse: true },
       },
       recordPermissions: false,
     }));

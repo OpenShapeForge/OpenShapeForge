@@ -65,7 +65,6 @@
 import type { CanvasEdge, CanvasNode } from "../graph/canvas-graph";
 import { isEntryNodeType } from "../../runtime/definition-types";
 import { flattenFieldDefinitionSources } from "../../runtime/field-definitions";
-import { compiledFieldAsDefinition } from "./compiled-field-definition";
 
 /**
  * One entry in a field's variable picker.
@@ -426,7 +425,7 @@ function nodeOutputFields(
         ? config.mappingParameters
         : config.inputParameters
       : undefined,
-    asArray(resolveOutputFields?.(node.type)).map(compiledFieldAsDefinition),
+    asArray(resolveOutputFields?.(node.type)),
   ];
 
   for (const candidate of candidates) {
@@ -576,7 +575,7 @@ function flattenField(
       path,
       label,
       displayLabel,
-      valueType: collection ? "array" : valueTypeOf(field.valueType),
+      valueType: collection ? "array" : valueTypeOf(baseTypeOf(field)),
       ...(asString(field.osfType) ? { osfType: asString(field.osfType)! } : {}),
       ...(asString(item.osfType)
         ? { itemOsfType: asString(item.osfType)! }
@@ -592,7 +591,7 @@ function flattenField(
       path: elementPath,
       label: elementLabel,
       displayLabel: labelPrefix ? `${labelPrefix} > ${elementLabel}` : elementLabel,
-      valueType: valueTypeOf(element.valueType),
+      valueType: valueTypeOf(baseTypeOf(element)),
       ...(asString(element.osfType)
         ? { osfType: asString(element.osfType)! }
         : {}),
@@ -625,7 +624,22 @@ function isCollection(field: Record<string, unknown>): boolean {
   return typeof max === "number" && max > 1;
 }
 
-/** The authoring contract's value types, as the four a suggestion carries. */
+const BASE_TYPES: readonly string[] = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
+
+/**
+ * The base type behind a field: a compiled field carries it as `baseType`; a
+ * stored definition names one `osfType`, which is its own base when it is a
+ * base type. A catalog key a stored definition might name is text to a
+ * picker, which has no catalog to resolve it through.
+ */
+function baseTypeOf(field: Record<string, unknown>): string | undefined {
+  const baseType = asString(field.baseType);
+  if (baseType) return baseType;
+  const osfType = asString(field.osfType);
+  return osfType && BASE_TYPES.includes(osfType) ? osfType : undefined;
+}
+
+/** The authoring contract's base types, as the four a suggestion carries. */
 function valueTypeOf(value: unknown): WorkflowVariableSuggestion["valueType"] {
   switch (asString(value)) {
     case "integer":

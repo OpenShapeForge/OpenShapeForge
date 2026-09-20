@@ -35,7 +35,7 @@ function isFieldDefinitionLike(value: unknown): value is JsonRecord {
   const record = asRecord(value);
   return (
     typeof record.key === "string" ||
-    typeof record.valueType === "string" ||
+    typeof record.osfType === "string" ||
     record.label !== undefined
   );
 }
@@ -79,7 +79,6 @@ function fieldDefinitionFromProcessVariableSource(
     kind: _kind,
     source: _source,
     key: _key,
-    valueType: _valueType,
     label: _label,
     description: _description,
     osfType: _osfType,

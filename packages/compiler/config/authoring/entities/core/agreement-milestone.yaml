@@ -157,7 +157,11 @@ fields:
             en: Record that this milestone has been invoiced, naming the invoice; the milestone billing run does this for every milestone it invoices
             nl: Leg vast dat deze mijlpaal gefactureerd is, met de factuur erbij; de mijlpaalfacturatie doet dit voor elke mijlpaal die zij factureert
           auth: { roles: [Finance.All.ReadWrite] }
-          writes: [producedInvoiceId]
+          # The invoice is required, and it must be an invoice of this
+          # milestone's agreement: a milestone is never invoiced against
+          # nothing, nor against another agreement's invoice.
+          writes:
+            - { field: producedInvoiceId, required: true, agreesOn: [agreementId] }
   - key: expectedAt
     osfType: date
     required: false

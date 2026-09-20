@@ -357,8 +357,8 @@ operations:
           status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
           mode: { type: string, x-osf-i18n: { title: { en: Mode, nl: Modus } } }
           dryRun: { type: boolean, x-osf-i18n: { title: { en: Dry run, nl: Proefrun } } }
-          agreementsPlanned: { type: integer, x-osf-i18n: { title: { en: Milestones planned, nl: Geplande mijlpalen } } }
-          agreementsCompleted: { type: integer, x-osf-i18n: { title: { en: Milestones invoiced, nl: Gefactureerde mijlpalen } } }
+          agreementsPlanned: { type: integer, x-osf-i18n: { title: { en: Agreements planned, nl: Geplande overeenkomsten } } }
+          agreementsCompleted: { type: integer, x-osf-i18n: { title: { en: Agreements invoiced, nl: Gefactureerde overeenkomsten } } }
           invoicesProduced: { type: integer, x-osf-i18n: { title: { en: Invoices produced, nl: Geproduceerde facturen } } }
           totalAmount: { type: number, x-osf-i18n: { title: { en: Total amount, nl: Totaalbedrag } } }
           items:

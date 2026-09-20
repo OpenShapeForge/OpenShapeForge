@@ -130,6 +130,11 @@ export async function runMilestoneBilling(
     });
     const runId = String(run.id);
     const eligible = await lockEligibleMilestones(trx, input.agreementId);
+    // The run's agreement counts are agreements, as the fields say; the
+    // milestone count is what invoicesProduced and the items carry.
+    const agreementsPlanned = new Set(eligible.map((milestone) => milestone.agreement_id)).size;
+    const agreementsCompleted = dryRun ? 0 : agreementsPlanned;
+    const invoicesProduced = dryRun ? 0 : eligible.length;
     const results: BillingRunItemResult[] = [];
     let totalAmount = 0;
 
@@ -185,9 +190,9 @@ export async function runMilestoneBilling(
 
     const completed = await updateGeneratedEntityForTable(db, session, runs, runId, {
       status: "completed",
-      agreementsPlanned: eligible.length,
-      agreementsCompleted: dryRun ? 0 : eligible.length,
-      invoicesProduced: dryRun ? 0 : eligible.length,
+      agreementsPlanned,
+      agreementsCompleted,
+      invoicesProduced,
       totalAmount,
       completedAt: sql`now()`,
     });
@@ -199,9 +204,9 @@ export async function runMilestoneBilling(
       status: "completed",
       mode: MODE,
       dryRun,
-      agreementsPlanned: eligible.length,
-      agreementsCompleted: dryRun ? 0 : eligible.length,
-      invoicesProduced: dryRun ? 0 : eligible.length,
+      agreementsPlanned,
+      agreementsCompleted,
+      invoicesProduced,
       totalAmount,
       items: results,
     };

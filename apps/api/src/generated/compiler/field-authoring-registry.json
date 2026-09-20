@@ -6478,7 +6478,13 @@
                   ]
                 },
                 "writes": [
-                  "producedInvoiceId"
+                  {
+                    "field": "producedInvoiceId",
+                    "required": true,
+                    "agreesOn": [
+                      "agreementId"
+                    ]
+                  }
                 ]
               }
             ]

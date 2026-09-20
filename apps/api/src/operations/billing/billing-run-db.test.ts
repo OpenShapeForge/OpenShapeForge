@@ -111,16 +111,18 @@ describe("the milestone billing run against PostgreSQL", () => {
     const first = await agreement(tenantA), second = await agreement(tenantA), foreign = await agreement(tenantB);
     const triggered1 = await milestone(session, first.agreementId, 100);
     const triggered2 = await milestone(session, second.agreementId, 250.5);
+    const triggered3 = await milestone(session, second.agreementId, 50);
     const pending = await milestone(session, first.agreementId, 40, "pending");
     const cancelled = await milestone(session, first.agreementId, 60, "cancelled");
     const other = await milestone(sessionFor(tenantB), foreign.agreementId, 999);
 
     const result = await executeBillingRun({ idempotencyKey: "run-1" }, handlerContext(session));
     const run = (result as { value: BillingRunResult }).value;
-    expect(run).toMatchObject({ status: "completed", mode: "milestone", dryRun: false, agreementsPlanned: 2, agreementsCompleted: 2, invoicesProduced: 2, totalAmount: 350.5 });
-    expect(run.items.map((item) => [item.agreementMilestoneId, item.invoiceNumber, item.amount])).toEqual([[triggered1, 1, 100], [triggered2, 2, 250.5]]);
+    // Two agreements, three milestones: the agreement counts count agreements.
+    expect(run).toMatchObject({ status: "completed", mode: "milestone", dryRun: false, agreementsPlanned: 2, agreementsCompleted: 2, invoicesProduced: 3, totalAmount: 400.5 });
+    expect(run.items.map((item) => [item.agreementMilestoneId, item.invoiceNumber, item.amount])).toEqual([[triggered1, 1, 100], [triggered2, 2, 250.5], [triggered3, 3, 50]]);
 
-    for (const [id, item] of [[triggered1, run.items[0]!], [triggered2, run.items[1]!]] as const) {
+    for (const [id, item] of [[triggered1, run.items[0]!], [triggered2, run.items[1]!], [triggered3, run.items[2]!]] as const) {
       expect(await milestoneRow(id)).toEqual({ status: "invoiced", produced_invoice_id: item.invoiceId });
       const invoice = (await sql<Record<string, unknown>>`select to_jsonb(i.*) as row from erp.invoices i where id = ${item.invoiceId}::uuid`.execute(privileged.db)).rows[0]!.row as Record<string, unknown>;
       expect(invoice).toMatchObject({ tenant_id: tenantA, invoice_kind: "sales", invoice_status: "issued", invoice_number: item.invoiceNumber, agreement_id: item.agreementId });
@@ -134,10 +136,11 @@ describe("the milestone billing run against PostgreSQL", () => {
     expect(await milestoneRow(other)).toEqual({ status: "triggered", produced_invoice_id: null });
 
     const items = (await sql<{ status: string; agreement_milestone_id: string }>`select status, agreement_milestone_id::text as agreement_milestone_id from erp.billing_run_items where billing_run_id = ${run.id}::uuid order by created_at`.execute(privileged.db)).rows;
-    expect(items).toEqual([{ status: "completed", agreement_milestone_id: triggered1 }, { status: "completed", agreement_milestone_id: triggered2 }]);
-    const stored = (await sql<{ status: string; mode: string; agreements_planned: number; invoices_produced: number; total_amount: string; triggered_by: string }>`select status, mode, agreements_planned, invoices_produced, total_amount, triggered_by from erp.billing_runs where id = ${run.id}::uuid`.execute(privileged.db)).rows[0]!;
-    expect(stored).toMatchObject({ status: "completed", mode: "milestone", agreements_planned: 2, invoices_produced: 2, triggered_by: session.userId });
-    expect(Number(stored.total_amount)).toBe(350.5);
+    expect(items.map((item) => item.agreement_milestone_id)).toEqual([triggered1, triggered2, triggered3]);
+    expect(items.every((item) => item.status === "completed")).toBe(true);
+    const stored = (await sql<{ status: string; mode: string; agreements_planned: number; agreements_completed: number; invoices_produced: number; total_amount: string; triggered_by: string }>`select status, mode, agreements_planned, agreements_completed, invoices_produced, total_amount, triggered_by from erp.billing_runs where id = ${run.id}::uuid`.execute(privileged.db)).rows[0]!;
+    expect(stored).toMatchObject({ status: "completed", mode: "milestone", agreements_planned: 2, agreements_completed: 2, invoices_produced: 3, triggered_by: session.userId });
+    expect(Number(stored.total_amount)).toBe(400.5);
     // The transition journaled the milestone update like any other write.
     const events = (await sql<{ event_type: string }>`select event_type from platform.entity_events where aggregate_id = ${triggered1} order by sequence`.execute(privileged.db)).rows.map((event) => event.event_type);
     expect(events).toEqual(["created", "updated", "updated"]);
@@ -192,18 +195,32 @@ describe("the milestone billing run against PostgreSQL", () => {
     expect((await sql<{ count: string }>`select count(*)::text as count from erp.billing_runs where tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows[0]!.count).toBe("1");
   }, 60_000);
 
-  test("the invoice transition itself runs only from triggered and takes the invoice it names", async () => {
+  test("the invoice transition itself runs only from triggered and requires an invoice of the milestone's agreement", async () => {
     const tenantId = await tenant();
     const session = sessionFor(tenantId);
     const { agreementId } = await agreement(tenantId);
+    const elsewhere = await agreement(tenantId);
     const pending = await milestone(session, agreementId, 5, "pending");
     const invoice = transitionOperationHandler(catalogOperation("AgreementMilestone.invoice"));
     const context = handlerContext(session) as unknown as Parameters<typeof invoice>[1];
-    await fails(invoice({ id: pending }, context), "INVALID_STATE");
+    const draft = (extra: Record<string, unknown>) => createGeneratedEntityForTable(restricted.db, session, billingTable("Invoice"), { invoiceKind: "sales", invoiceStatus: "draft", invoiceNumber: 900, issueDate: "2026-01-01", currencyCode: "EUR", ...extra });
+    const own = await draft({ agreementId });
+    await fails(invoice({ id: pending, producedInvoiceId: String(own.id) }, context), "INVALID_STATE");
+
     const triggered = await milestone(session, agreementId, 5);
-    const produced = await createGeneratedEntityForTable(restricted.db, session, billingTable("Invoice"), { invoiceKind: "sales", invoiceStatus: "draft", invoiceNumber: 900, issueDate: "2026-01-01", currencyCode: "EUR" });
-    const result = await invoice({ id: triggered, producedInvoiceId: String(produced.id) }, context);
-    expect(result).toMatchObject({ value: { status: "invoiced", producedInvoiceId: produced.id } });
-    await fails(invoice({ id: triggered, producedInvoiceId: String(produced.id) }, context), "INVALID_STATE");
+    // No invoice, an unknown invoice, an invoice of another agreement, an invoice without one: all refused, the milestone stays triggered.
+    await expect(Promise.resolve(invoice({ id: triggered }, context))).rejects.toMatchObject({ operationError: { code: "VALIDATION", violations: [{ field: "producedInvoiceId" }] } });
+    await fails(invoice({ id: triggered, producedInvoiceId: randomUUID() }, context), "VALIDATION");
+    const foreign = await draft({ agreementId: elsewhere.agreementId });
+    await expect(Promise.resolve(invoice({ id: triggered, producedInvoiceId: String(foreign.id) }, context))).rejects.toMatchObject({
+      operationError: { code: "VALIDATION", message: "producedInvoiceId must name Invoice that agrees with this AgreementMilestone on agreementId." },
+    });
+    const orphan = await draft({});
+    await fails(invoice({ id: triggered, producedInvoiceId: String(orphan.id) }, context), "VALIDATION");
+    expect(await milestoneRow(triggered)).toEqual({ status: "triggered", produced_invoice_id: null });
+
+    const result = await invoice({ id: triggered, producedInvoiceId: String(own.id) }, context);
+    expect(result).toMatchObject({ value: { status: "invoiced", producedInvoiceId: own.id } });
+    await fails(invoice({ id: triggered, producedInvoiceId: String(own.id) }, context), "INVALID_STATE");
   }, 60_000);
 });

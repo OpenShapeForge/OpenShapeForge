@@ -340,7 +340,26 @@
                       "properties": { "field": { "type": "string", "minLength": 1 }, "present": { "type": "boolean" } }
                     }
                   },
-                  "writes": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "Persisted fields this transition, and only this transition, may set from its input; they become `writtenBy` it. A required field needs a defaultValue, or the entity could never be created." },
+                  "writes": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                      "oneOf": [
+                        { "type": "string", "minLength": 1 },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["field"],
+                          "properties": {
+                            "field": { "type": "string", "minLength": 1 },
+                            "required": { "type": "boolean", "description": "The rule refuses to run without this input." },
+                            "agreesOn": { "type": "array", "uniqueItems": true, "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "On a single entity reference: fields, present on both entities, on which the referenced record must equal this record. Checked inside the transaction; a mismatch is a VALIDATION refusal." }
+                          }
+                        }
+                      ]
+                    },
+                    "description": "Persisted fields this transition, and only this transition, may set from its input; they become `writtenBy` it. A bare key is optional input; the object form can make it required for the rule and constrain a reference. A required field needs a defaultValue, or the entity could never be created."
+                  },
                   "stamps": {
                     "type": "array",
                     "items": {

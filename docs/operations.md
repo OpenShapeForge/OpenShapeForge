@@ -114,7 +114,9 @@ fields:
           label: { en: Submit, nl: Indienen }
           auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
           preconditions: [ { field: reviewerId, present: true } ]
-          writes: [comment]                             # input fields only this rule may set
+          writes:                                       # input fields only this rule may set
+            - comment                                   # optional input
+            - { field: reviewerId, required: true, agreesOn: [teamId] }  # required, and the Relation it names must share this record's teamId
           stamps:                                       # server-derived, never input
             - { field: submittedAt, value: now }
             - { field: submittedBy, value: actor }      # linked Relation, or the user id for a string
@@ -134,7 +136,14 @@ What the compiler makes of it:
 - The status field and every `writes` and `stamps` field become `writtenBy`
   the rule's Operation: generic create admits no value (the column defaults to
   `initial`), generic update refuses them with a message naming the Operation
-  and its REST route, and the option set is a database `CHECK`. A `stamps`
+  and its REST route, and the option set is a database `CHECK`. A write in
+  its object form can be `required` (the rule refuses to run without it, and
+  the input schema says so) and, on a single entity reference, can carry
+  `agreesOn`: field keys on which the referenced record must equal this one.
+  The generic handler reads the referenced record under a share lock inside
+  the transition's transaction and refuses with `VALIDATION` when it is
+  absent from the tenant or disagrees — the constraint is declared once in
+  the YAML and enforced for every interface. A `stamps`
   field is filled by the server at execution — `now` is the transaction time
   on a datetime field, `actor` the session's linked Relation on a Relation
   reference or the user id on a string field — and is refused as input.
@@ -159,7 +168,10 @@ option values and `defaultValue` must equal `initial`; rule keys are unique
 and do not collide with the entity's other operations; a `writes` or `stamps`
 field must be a persisted single field that nothing else writes and, when
 required, must carry a `defaultValue` (it leaves the create input, so without
-one no record could ever be created); and neither the status field nor a
+one no record could ever be created); an `agreesOn` write must be a single
+entity reference and name persisted single fields of this entity (that the
+target entity carries them too is checked when the runtime binds the rule
+against the generated manifest, at boot); and neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
 present (not null) or absent (null); an empty string is a present value — and
@@ -168,9 +180,11 @@ richer checks belong in an authored plugin Operation.
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
 `pending` to `triggered` and stamps `triggeredAt` with the transaction time
 and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
-`cancelled`; `invoice` moves `triggered` to `invoiced` and writes
-`producedInvoiceId`, under the finance role. Nothing leaves `invoiced`, so a
-milestone is invoiced at most once by construction.
+`cancelled`; `invoice` moves `triggered` to `invoiced` under the finance role
+and requires `producedInvoiceId`, an Invoice that agrees with the milestone
+on `agreementId` — no milestone is invoiced against nothing or against
+another agreement's invoice. Nothing leaves `invoiced`, so a milestone is
+invoiced at most once by construction.
 
 ## Billing
 

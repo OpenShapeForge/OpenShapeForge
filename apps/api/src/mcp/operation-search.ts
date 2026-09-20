@@ -291,6 +291,9 @@ export function searchOperationDefinitions(input: {
     outputSchema: canonicalRuntimeOperationSchema(definition.output, definition.id, "output"),
     effects: structuredClone(definition.effects),
     reliability: structuredClone(definition.reliability),
+    // The declared failure catalogue: in searchable mode this result is the
+    // only description of the operation the model ever reads.
+    ...(definition.errors ? { errors: structuredClone(definition.errors) } : {}),
     ...(definition.concurrency
       ? { concurrency: structuredClone(definition.concurrency) }
       : {}),

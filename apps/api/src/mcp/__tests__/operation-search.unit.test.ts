@@ -77,6 +77,7 @@ describe("searchable MCP Operations", () => {
           version: { mode: "required", field: "updatedAt" },
           editLease: { mode: "required", expiresAfterInactivity: "PT7M" },
         },
+        errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
       }),
       definition("demo.bravo"),
       definition("secret.hidden"),
@@ -94,6 +95,7 @@ describe("searchable MCP Operations", () => {
       inputSchema: definitions[0]!.input.schema,
       outputSchema: definitions[0]!.output.schema,
       concurrency: definitions[0]!.concurrency,
+      errors: [{ status: 409, code: "CONFLICT", description: "Already running." }],
     }));
     expect(first.nextCursor).toBe("demo.alpha");
 

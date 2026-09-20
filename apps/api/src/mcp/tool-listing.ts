@@ -28,12 +28,7 @@ import type { McpToolCallSource } from "../modules/contract.js";
 import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules/mcp-hooks.js";
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { searchableOperationTools } from "./operation-search.js";
-import {
-  type ProjectedRuntimeOperationTool,
-  catalog,
-  catalogDerivedTools,
-  projectedDerivedTools,
-} from "./catalog.js";
+import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
 import {
   discoveryToolsForSession,
@@ -84,11 +79,17 @@ export function createToolListing(scope: ServerScope) {
    * callable under their public names for every derived entry — the ones a
    * plugin registers through execution compatibility too, whose Service
    * rows the Operation runtime projects but whose helpers only this listing
-   * can offer. In the dedicated projection a plugin's own Operation tool of
-   * the same name is listed instead and dispatches to the same handler.
+   * can offer. Whether THIS session gets one is derivedHelperAvailable, the
+   * rule the dispatch applies too. In the dedicated projection a plugin's
+   * own Operation tool of the same name is listed to the session instead
+   * (when it would be: handler loaded and roles held) and dispatches to the
+   * same handler, so the helper is skipped exactly then.
    */
-  const dedicatedOperationListed = (key: string | undefined) =>
-    operationToolProjection.mode === "dedicated" && key !== undefined && operations.has(key);
+  const dedicatedOperationListed = (key: string | undefined) => {
+    if (operationToolProjection.mode !== "dedicated" || key === undefined) return false;
+    const tool = catalog.operationTools.find((candidate) => candidate.key === key);
+    return tool !== undefined && operations.has(key) && operationMayInvoke(tool, session);
+  };
   const helperEntries = catalogDerivedTools.map((entry) => {
     if (!entry.compatibility) return entry;
     return {

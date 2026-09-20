@@ -3,6 +3,7 @@
 import type {
   CompiledAuthorization,
   CompiledEntityOperation,
+  CompiledRelationship,
   CrudSection,
   EntityOperationIntent,
 } from "../types.js";
@@ -26,6 +27,8 @@ type OperationSource = {
   coreEntity?: CoreEntity;
   crud: CrudSection;
   authorization: CompiledAuthorization;
+  /** The entity's compiled relationships; a collection field makes its generic writes refusable. */
+  relationships?: readonly Pick<CompiledRelationship, "kind">[];
 };
 
 function defaultEffects(intent: EntityOperationIntent) {
@@ -117,6 +120,7 @@ function compileOperation(
         confirmation: definition?.confirmation ?? { mode: "none" },
         recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
         secureInput: definition?.interaction !== undefined,
+        collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
       }),
       pluginImplementation ? definition?.errors : undefined,
     ),

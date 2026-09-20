@@ -20,7 +20,7 @@ import {
   type OperationConcurrency,
   type OperationConfirmation,
 } from "@openshapeforge/operations";
-import type { CompiledEntityOperation, EntityOperationIntent } from "../types.js";
+import type { CompiledEntityContract, CompiledEntityOperation, EntityOperationIntent } from "../types.js";
 
 export type EntityOperationError = NonNullable<CompiledEntityOperation["errors"]>[number];
 
@@ -31,6 +31,8 @@ export type EntityOperationErrorPolicy = {
   recordPermissions: boolean;
   /** The create collects a secure input through an interaction adapter. */
   secureInput?: boolean | undefined;
+  /** The entity has a collection field; membership of an owned collection is added by withOwnedChildErrors. */
+  collections?: boolean | undefined;
 };
 
 /**
@@ -51,6 +53,7 @@ export function deriveEntityOperationErrors(
   if (intent === "create" || intent === "update") situations.push("values");
   if (intent === "create" && policy.secureInput) situations.push("secureInput");
   if (intent === "delete") situations.push("delete");
+  if (!reads && policy.collections) situations.push("collection");
   if (policy.concurrency?.version) situations.push("version");
   if (policy.concurrency?.editLease) situations.push("editLease");
   if (policy.confirmation.mode !== "none") situations.push("confirmation");
@@ -104,4 +107,29 @@ export function withDeclaredEntityOperationErrors(
   return [...byKey.values()].sort(
     (left, right) => left.status - right.status || left.code.localeCompare(right.code),
   );
+}
+
+/**
+ * The member side of an owned collection is only known across entities: a
+ * child does not say who owns it. Once every contract is compiled, each
+ * write Operation of a child that some owner's owned collection targets
+ * gains the collection refusal its generic write meets.
+ */
+export function withOwnedChildErrors(
+  contracts: readonly Pick<CompiledEntityContract, "entity" | "model" | "entityOperations">[],
+): void {
+  const owned = new Set(
+    contracts.flatMap((contract) =>
+      contract.model.relationships
+        .filter((relationship) => relationship.kind === "hasMany" && relationship.ownership === "owned")
+        .map((relationship) => relationship.target),
+    ),
+  );
+  for (const contract of contracts) {
+    if (!owned.has(contract.entity.name)) continue;
+    for (const operation of Object.values(contract.entityOperations)) {
+      if (!operation || operation.intent === "list" || operation.intent === "get") continue;
+      operation.errors = withDeclaredEntityOperationErrors(operation.errors, ENTITY_RUNTIME_ERRORS.collection);
+    }
+  }
 }

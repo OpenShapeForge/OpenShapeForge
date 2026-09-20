@@ -9,6 +9,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { ENTITY_RUNTIME_ERROR_STATUS } from "@openshapeforge/operations";
 import { httpStatusForCode } from "../../connectors/provider-outcome.js";
+import { getGeneratedCrudTables } from "./catalog.js";
+import { collectionManagedFields, collectionMutationError } from "./collection-policy.js";
+import { getEntityOperationContracts, tableForEntityOperation } from "./runtime.js";
+import type { EntityOperationContract } from "./types.js";
 
 /** The modules of the generic entity path that answer a client, and the codes in them that are not refusals of a request. */
 const RUNTIME_MODULES = [
@@ -19,6 +23,7 @@ const RUNTIME_MODULES = [
   "input-validation.ts",
   "write-policy.ts",
   "catalog.ts",
+  "collection-policy.ts",
   "edit-leases.ts",
   "confirmation-challenges.ts",
   "../../db/database-refusals.ts",
@@ -68,6 +73,47 @@ describe("entity runtime error vocabulary", () => {
   test("every declared status is the one the transports answer", () => {
     for (const [code, status] of ENTITY_RUNTIME_ERROR_STATUS) {
       expect(`${code} ${httpStatusForCode(code)}`).toBe(`${code} ${status}`);
+    }
+  });
+});
+
+/**
+ * Per Operation: the codes the compiler derived from a policy flag are
+ * declared exactly where the runtime path that throws them is reachable.
+ */
+describe("declared errors per entity Operation", () => {
+  const tables = getGeneratedCrudTables();
+  const byName = new Map(tables.map((table) => [table.name, table]));
+  const codes = (operation: EntityOperationContract) => new Set(operation.errors.map((error) => error.code));
+
+  test("collection refusal: entities with collection fields and members of owned collections, writes only", () => {
+    for (const operation of getEntityOperationContracts()) {
+      const table = byName.get(tableForEntityOperation({ id: operation.id, intent: operation.intent }).name)!;
+      const write = operation.intent !== "list" && operation.intent !== "get";
+      // A write names a collection field (refused explicitly) or the entity
+      // is the member of an owned collection (its delete is refused).
+      const collections = collectionManagedFields(table, tables).size > 0;
+      const member = collectionMutationError(table, "delete", tables) !== undefined;
+      const reachable = write && (collections || member);
+      expect(`${operation.id} ${codes(operation).has("RELATION_COLLECTION_MUTATION_UNSUPPORTED")}`)
+        .toBe(`${operation.id} ${reachable}`);
+    }
+  });
+
+  test("control refusals follow the Operation's own concurrency and confirmation flags", () => {
+    for (const operation of getEntityOperationContracts()) {
+      const declared = codes(operation);
+      const expect_ = (code: string, reachable: boolean) =>
+        expect(`${operation.id} ${code} ${declared.has(code)}`).toBe(`${operation.id} ${code} ${reachable}`);
+      expect_("VERSION_CONFLICT", operation.concurrency?.version !== undefined);
+      expect_("LOCKED", operation.concurrency?.editLease !== undefined);
+      expect_("LEASE_INVALID", operation.concurrency?.editLease !== undefined);
+      expect_("CONFIRMATION_REQUIRED", operation.interaction.confirmation.mode !== "none");
+      expect_("CONFIRMATION_MISMATCH", operation.interaction.confirmation.mode === "challenge");
+      expect_("CONFIRMATION_STALE", operation.interaction.confirmation.mode === "challenge");
+      expect_("INTERACTION_REQUIRED", operation.intent === "create" && operation.interaction.secureInput !== undefined);
+      expect_("REFERENCE_IN_USE", operation.intent === "delete");
+      expect_("NOT_FOUND", operation.intent !== "list" && operation.intent !== "create");
     }
   });
 });

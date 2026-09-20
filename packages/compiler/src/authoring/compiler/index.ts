@@ -186,6 +186,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     coreEntity,
     crud,
     authorization,
+    relationships,
   });
   if (blueprint && (entityOperations.create?.implementation.type !== "entity" ||
       entityOperations.update?.implementation.type !== "entity")) {

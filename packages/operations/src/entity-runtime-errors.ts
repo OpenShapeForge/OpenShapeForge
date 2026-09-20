@@ -51,6 +51,14 @@ export const ENTITY_RUNTIME_ERRORS = {
   ],
   /** A delete. */
   delete: [row(409, "REFERENCE_IN_USE", "The record is still referenced by other records.")],
+  /**
+   * A write on an entity with a collection field, or on the member of an
+   * owned collection: a generic write does not change a collection, its own
+   * Operation does.
+   */
+  collection: [
+    row(409, "RELATION_COLLECTION_MUTATION_UNSUPPORTED", "The write would change a collection; use the collection's own Operation."),
+  ],
   /** concurrency.version. */
   version: [
     row(409, "VERSION_CONFLICT", "expectedVersion does not match the current record version."),

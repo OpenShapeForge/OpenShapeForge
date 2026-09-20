@@ -56,10 +56,9 @@ const target = table.columns.find(
 )!;
 const restBase = `${REST_MOUNT_PATH}/elicited-output-test`;
 
-// REST and GraphQL answer in the operation-result envelope. An injected MCP
-// fixture has no advertised output schema and therefore answers with a bare
-// payload, while a generated tool wraps it. Normalize the actual MCP payload
-// rather than inferring its projection from the tool definition.
+// REST, GraphQL and MCP all answer in the operation-result envelope. The MCP
+// helpers still read the actual payload rather than inferring its projection
+// from the tool definition.
 const restRecord = (response: { body: any }) => response.body.data;
 const restItems = (response: { body: any }): any[] =>
   response.body.data.items.map((item: any) => item.data);
@@ -113,6 +112,7 @@ function tool(
     table: table.name,
     description: `Test ${operation} projection.`,
     inputSchema,
+    outputSchema: { type: "object" },
     annotations: {
       readOnlyHint: operation === "list" || operation === "get",
       destructiveHint: false,
@@ -636,8 +636,7 @@ test.skipIf(remoteUrl)(
       ownerScope: "banana",
     });
     expect(refused.isError).toBe(true);
-    // The fixture tools advertise no outputSchema, so the answer takes the
-    // legacy body (code, message, detail); the detail still names the field.
+    // The refusal's detail names the field.
     expect(refused.payload.error).toMatchObject({
       code: "VALIDATION",
       detail: expect.stringContaining("ownerScope must be one of"),

@@ -367,6 +367,6 @@ export async function crudToolCall(
     }
     return outcome;
   } catch (error) {
-    return failed(error, match.outputSchema !== undefined);
+    return failed(error);
   }
 }

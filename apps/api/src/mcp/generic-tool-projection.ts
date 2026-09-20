@@ -70,18 +70,15 @@ export function describeGenericTool(
       .inputSchema as Record<string, unknown>,
   }));
   // The advertised shape is the package's, shared with the compiler's byte
-  // budget. A shared generic tool may still contain legacy v1 entities: no
-  // response contract on that surface, only an all-v2 group advertises the
-  // common canonical envelope. The MCP App is only linked where it can
-  // render (https origin — see publicOriginIsHttps).
+  // budget. Every entity answers the same canonical envelope, so the group
+  // advertises the first entry's output schema. The MCP App is only linked
+  // where it can render (https origin — see publicOriginIsHttps).
   return advertisedGenericTool({
     name: first.name,
     operation,
     branches,
     entityCatalogUri: ENTITY_CATALOG_URI,
-    outputSchema: entries.every(({ tool }) => tool.outputSchema !== undefined)
-      ? (first.outputSchema as Record<string, unknown>)
-      : undefined,
+    outputSchema: first.outputSchema,
     annotations: first.annotations,
     linksConfigurationApp:
       entries.some(({ entity }) => entity?.elicitOnCreate !== undefined) && publicOriginIsHttps(),
@@ -165,7 +162,7 @@ export function describeGenericEntries(
             tool: tool.name,
             description: described.description,
             inputSchema: described.inputSchema,
-            ...(described.outputSchema ? { outputSchema: described.outputSchema } : {}),
+            outputSchema: described.outputSchema,
             // The declared refusals, which the listing leaves out for its byte budget.
             errors: tool.errors.map(({ status, code, description }) => ({ status, code, description })),
           },
@@ -300,7 +297,7 @@ export function withoutEntitySelector(
 
 /**
  * The generated entity tool a native Service binding means, resolved first by
- * its exact canonical Operation id and then by its legacy MCP tool name. An
+ * its exact canonical Operation id and then by its dedicated MCP tool name. An
  * unknown key falls through to the deployment's plugin operations by key.
  *
  * A dedicated name identifies one entry. A generic `osf_*` name is emitted per

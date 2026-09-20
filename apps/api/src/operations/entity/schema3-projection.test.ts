@@ -23,7 +23,8 @@ test("MCP live tools do not advertise unsupported collection values", () => {
   table.source!.authoringVersion = 3;
   table.source!.graphql!.relationships = [{ name: "blocks", fieldKey: "blocks", type: "[Relation!]!", target: "Relation", resolve: "hasMany", via: "relation_blocks", mutationSupport: "unsupported" }];
   const projected = describeTool({
-    name: "create_relation", operation: "create", entity: "Relation", table: table.name, description: "Creates a fixture",
+    name: "create_relation", operationId: "Relation.create", operation: "create", entity: "Relation", table: table.name, description: "Creates a fixture",
+    outputSchema: { type: "object" },
     inputSchema: { type: "object", properties: { values: { type: "object", properties: { blocks: { type: "array" }, displayName: { type: "string" } }, required: ["blocks"] } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     errors: [],

@@ -2,13 +2,13 @@
 /**
  * Canonical-Operations awareness for the e2e suites.
  *
- * A current (`authoringVersion >= 2`) entity is driven through its authored
- * Operation contracts: an update or delete may demand a record version and an
- * edit lease, a delete may demand a typed confirmation challenge, and a create
- * may be plugin-backed with an input contract of its own. The suites derive
- * every one of those facts from the same contract catalog the runtime reads,
- * so an entity conversion that adds a lease or a challenge is covered the
- * moment it lands rather than when someone remembers to update a test.
+ * Every entity is driven through its authored Operation contracts: an update
+ * or delete may demand a record version and an edit lease, a delete may
+ * demand a typed confirmation challenge, and a create may be plugin-backed
+ * with an input contract of its own. The suites derive every one of those
+ * facts from the same contract catalog the runtime reads, so an entity that
+ * adds a lease or a challenge is covered the moment it lands rather than
+ * when someone remembers to update a test.
  *
  * Leases are acquired over REST (`/api/operation-leases`): the central lease
  * service has no GraphQL projection, so the GraphQL suites reach it the way a
@@ -39,21 +39,16 @@ export type MutationControls = {
   confirmationAnswer?: string;
 };
 
-/** Authored as canonical Operations (v2 and later). */
-export function isCanonical(table: GeneratedTable): boolean {
-  return (table.source?.authoringVersion ?? 1) >= 2;
-}
-
 /**
  * The authored Operation behind one CRUD intent, or undefined when the table
- * is v1 or does not expose the intent. Read from the runtime's own catalog so
- * the suite and the API can never disagree about what a mutation requires.
+ * does not expose the intent. Read from the runtime's own catalog so the
+ * suite and the API can never disagree about what a mutation requires.
  */
 export function operationContractFor(
   table: GeneratedTable,
   intent: Intent,
 ): EntityOperationContract | undefined {
-  if (!isCanonical(table) || !isGeneratedCrudOperationEnabled(table, intent)) return undefined;
+  if (!isGeneratedCrudOperationEnabled(table, intent)) return undefined;
   return entityOperationContract(entityOperationRef(table, intent).id);
 }
 
@@ -128,7 +123,7 @@ export function challengeAnswerFor(
  * Syntactically valid controls for a request that must be refused BEFORE the
  * controls are examined (authorization precedes lease and version checks in
  * the dispatcher). The canonical SDL marks them non-null, so a denial test
- * cannot simply omit them the way a v1 test omits nothing.
+ * cannot simply omit them.
  */
 export function placeholderControls(
   table: GeneratedTable,

@@ -624,57 +624,6 @@ describe("rich generated REST OpenAPI", () => {
       .toEqual({ $ref: "#/components/schemas/OperationFailure" });
   });
 
-  it("keeps schemaVersion 1 REST responses and operation metadata legacy", () => {
-    const legacyContract = {
-      ...contract,
-      authoringVersion: 1,
-    } as unknown as CompiledEntityContract;
-    const generated = JSON.parse(
-      renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: legacyContract }],
-      }),
-    );
-    const collection = generated.paths["/api/rest/v1/relations"];
-    const item = generated.paths["/api/rest/v1/relations/{id}"];
-
-    expect(collection.get).not.toHaveProperty("x-osf-operation-id");
-    expect(collection.post).not.toHaveProperty("x-osf-operation-id");
-    expect(item.get).not.toHaveProperty("x-osf-operation-id");
-    expect(item.patch).not.toHaveProperty("x-osf-operation-id");
-    expect(item.delete).not.toHaveProperty("x-osf-operation-id");
-    expect(
-      collection.get.responses["200"].content["application/json"].schema,
-    ).toEqual({ $ref: "#/components/schemas/RelationList" });
-    expect(
-      item.get.responses["200"].content["application/json"].schema,
-    ).toEqual({ $ref: "#/components/schemas/Relation" });
-    expect(item.delete.responses).toHaveProperty("204");
-    expect(item.delete.responses).not.toHaveProperty("200");
-    expect(collection.post.responses).not.toHaveProperty("428");
-    expect(
-      generated.components.schemas.RelationInput.properties.confirmed,
-    ).toBeUndefined();
-    expect(Object.keys(item.patch.responses)).toEqual([
-      "200",
-      "400",
-      "401",
-      "403",
-      "404",
-    ]);
-    expect(Object.keys(item.delete.responses)).toEqual([
-      "204",
-      "401",
-      "403",
-      "404",
-    ]);
-    expect(generated.components.schemas.RelationResult).toBeUndefined();
-    expect(generated.components.schemas.RelationListResult).toBeUndefined();
-    expect(generated.components.schemas.Error.properties.error.required).toEqual([
-      "code",
-      "message",
-    ]);
-  });
-
   it("keeps response properties storage-derived while retaining entity documentation", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {

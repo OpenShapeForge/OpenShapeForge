@@ -472,19 +472,12 @@ function listParameters(
   return parameters;
 }
 
-function errorResponse(
-  description: string,
-  canonical: boolean,
-): JsonObject {
+function errorResponse(description: string): JsonObject {
   return {
     description,
     content: {
       "application/json": {
-        schema: {
-          $ref: canonical
-            ? "#/components/schemas/OperationFailure"
-            : "#/components/schemas/Error",
-        },
+        schema: { $ref: "#/components/schemas/OperationFailure" },
       },
     },
   };
@@ -579,13 +572,10 @@ export function renderOpenApiSpec(
     .sort((a, b) =>
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
-  const hasCanonicalEntity = [...contractsByEntityName.values()].some(
-    (contract) => contract.authoringVersion >= 2,
-  );
   const restEditLeaseOperationIds = [...new Set(
     restTables.flatMap((table) => {
       const contract = contractsByEntityName.get(entitySchemaName(table));
-      if (!contract || contract.authoringVersion < 2) return [];
+      if (!contract) return [];
       return (["list", "get", "create", "update", "delete"] as const).flatMap(
         (intent) => {
           const operation = contract.entityOperations[intent];
@@ -614,8 +604,7 @@ export function renderOpenApiSpec(
         },
       },
     },
-    ...(hasCanonicalEntity
-      ? {
+    ...{
           OperationReference: {
             type: "object",
             additionalProperties: false,
@@ -859,8 +848,7 @@ export function renderOpenApiSpec(
                 },
               }
             : {}),
-        }
-      : {}),
+        },
   };
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
@@ -915,11 +903,11 @@ export function renderOpenApiSpec(
             },
           } } },
         },
-        "400": errorResponse("Invalid file request", true),
-        "401": errorResponse("Missing or invalid credentials", true),
-        "413": errorResponse("File exceeds the configured size limit", true),
-        "415": errorResponse("File type is not permitted", true),
-        "503": errorResponse("Storage is unavailable", true),
+        "400": errorResponse("Invalid file request"),
+        "401": errorResponse("Missing or invalid credentials"),
+        "413": errorResponse("File exceeds the configured size limit"),
+        "415": errorResponse("File type is not permitted"),
+        "503": errorResponse("Storage is unavailable"),
       },
     },
   };
@@ -938,11 +926,11 @@ export function renderOpenApiSpec(
         "200": { description: "Authorized file contents", headers: {
           "Content-Disposition": { schema: { type: "string" } },
         }, content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } },
-        "400": errorResponse("Invalid file or owner identity", true),
-        "401": errorResponse("Missing or invalid credentials", true),
-        "403": errorResponse("File access is not authorized", true),
-        "404": errorResponse("File is not available", true),
-        "503": errorResponse("Storage is unavailable", true),
+        "400": errorResponse("Invalid file or owner identity"),
+        "401": errorResponse("Missing or invalid credentials"),
+        "403": errorResponse("File access is not authorized"),
+        "404": errorResponse("File is not available"),
+        "503": errorResponse("Storage is unavailable"),
       },
     },
   };
@@ -967,11 +955,11 @@ export function renderOpenApiSpec(
         },
         responses: {
           "201": entityResponse("EditLeaseAcquireResult", "Edit lease acquired"),
-          "400": errorResponse("Invalid or unsupported operation", true),
-          "401": errorResponse("Missing or invalid credentials", true),
-          "403": errorResponse("Session lacks the operation role", true),
-          "404": errorResponse("Target not found", true),
-          "423": errorResponse("Target is already being edited", true),
+          "400": errorResponse("Invalid or unsupported operation"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks the operation role"),
+          "404": errorResponse("Target not found"),
+          "423": errorResponse("Target is already being edited"),
         },
       },
     };
@@ -990,9 +978,9 @@ export function renderOpenApiSpec(
         },
         responses: {
           "200": entityResponse("EditLeaseRenewResult", "Edit lease renewed"),
-          "400": errorResponse("Invalid request", true),
-          "401": errorResponse("Missing or invalid credentials", true),
-          "409": errorResponse("Lease expired or invalid", true),
+          "400": errorResponse("Invalid request"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "409": errorResponse("Lease expired or invalid"),
         },
       },
     };
@@ -1011,8 +999,8 @@ export function renderOpenApiSpec(
         },
         responses: {
           "200": entityResponse("EditLeaseReleaseResult", "Edit lease released"),
-          "400": errorResponse("Invalid request", true),
-          "401": errorResponse("Missing or invalid credentials", true),
+          "400": errorResponse("Invalid request"),
+          "401": errorResponse("Missing or invalid credentials"),
         },
       },
     };
@@ -1022,11 +1010,13 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
-    const canonical = !!contract && contract.authoringVersion >= 2;
+    if (!contract) {
+      throw new Error(`REST table "${table.name}" has no compiled entity contract.`);
+    }
     const canonicalOperationId = (
       intent: "list" | "get" | "create" | "update" | "delete",
     ): string => {
-      const operationId = contract?.entityOperations[intent]?.id;
+      const operationId = contract.entityOperations[intent]?.id;
       if (!operationId) {
         throw new Error(
           `REST operation "${name}.${intent}" has no canonical entity operation contract.`,
@@ -1071,22 +1061,15 @@ export function renderOpenApiSpec(
     );
     const updateSchemaName = `${name}UpdateInput`;
     const deleteSchemaName = `${name}DeleteInput`;
-    const createControls = canonical
-      ? operationControlSchema(contract?.entityOperations.create)
-      : { properties: {}, required: [] };
-    const updateControls = canonical
-      ? operationControlSchema(contract?.entityOperations.update)
-      : { properties: {}, required: [] };
-    const deleteControls = canonical
-      ? operationControlSchema(contract?.entityOperations.delete)
-      : { properties: {}, required: [] };
+    const createControls = operationControlSchema(contract.entityOperations.create);
+    const updateControls = operationControlSchema(contract.entityOperations.update);
+    const deleteControls = operationControlSchema(contract.entityOperations.delete);
     const hasDeleteControls = Object.keys(deleteControls.properties).length > 0;
-    const createOperation = contract?.entityOperations.create;
-    const updateOperation = contract?.entityOperations.update;
-    const deleteOperation = contract?.entityOperations.delete;
+    const createOperation = contract.entityOperations.create;
+    const updateOperation = contract.entityOperations.update;
+    const deleteOperation = contract.entityOperations.delete;
     const compiledContracts = [...contractsByEntityName.values()];
-    const createPluginSchemas = canonical && contract &&
-        createOperation?.implementation?.type === "plugin"
+    const createPluginSchemas = createOperation?.implementation?.type === "plugin"
       ? entityOperationJsonSchemas(
           contract,
           createOperation,
@@ -1094,8 +1077,7 @@ export function renderOpenApiSpec(
           referentiedata,
         )
       : undefined;
-    const updatePluginSchemas = canonical && contract &&
-        updateOperation?.implementation?.type === "plugin"
+    const updatePluginSchemas = updateOperation?.implementation?.type === "plugin"
       ? entityOperationJsonSchemas(
           contract,
           updateOperation,
@@ -1132,7 +1114,7 @@ export function renderOpenApiSpec(
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
-    if (canonical) {
+    {
       schemas[`${name}Result`] = {
         type: "object",
         additionalProperties: false,
@@ -1210,7 +1192,7 @@ export function renderOpenApiSpec(
             : "Required concurrency controls for this deletion.",
       };
     }
-    schemas[canonical ? `${name}ListData` : `${name}List`] = {
+    schemas[`${name}ListData`] = {
       type: "object",
       description: `A page of ${label} records.`,
       required: ["items", "totalCount", "nextCursor"],
@@ -1218,16 +1200,14 @@ export function renderOpenApiSpec(
         items: {
           type: "array",
           items: {
-            $ref: canonical
-              ? `#/components/schemas/${name}Result`
-              : `#/components/schemas/${name}`,
+            $ref: `#/components/schemas/${name}Result`,
           },
         },
         totalCount: { type: "integer" },
         nextCursor: { type: ["string", "null"] },
       },
     };
-    if (canonical) {
+    {
       schemas[`${name}ListResult`] = {
         type: "object",
         additionalProperties: false,
@@ -1246,24 +1226,22 @@ export function renderOpenApiSpec(
     if (rest.operations.list) {
       collectionPath.get = {
         operationId: `list${name}`,
-        ...(canonical
-          ? { "x-osf-operation-id": canonicalOperationId("list") }
-          : {}),
+        "x-osf-operation-id": canonicalOperationId("list"),
         summary: `List ${label} records`,
         tags: [name],
         description:
           (description ? `${description} ` : "") +
           "Pagination, sorting, and every supported scalar field filter are " +
           "documented below. Unknown filter fields are rejected.",
-        parameters: listParameters(table, fieldsByKey, contract?.entityOperations.list),
+        parameters: listParameters(table, fieldsByKey, contract.entityOperations.list),
         responses: {
           "200": entityResponse(
-            canonical ? `${name}ListResult` : `${name}List`,
-            canonical ? `${name} page and available operations` : `${name} page`,
+            `${name}ListResult`,
+            `${name} page and available operations`,
           ),
-          "400": errorResponse("Invalid filter, sort, or pagination input", canonical),
-          "401": errorResponse("Missing or invalid credentials", canonical),
-          "403": errorResponse("Session lacks a required entity role", canonical),
+          "400": errorResponse("Invalid filter, sort, or pagination input"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks a required entity role"),
         },
       };
     }
@@ -1274,9 +1252,7 @@ export function renderOpenApiSpec(
       const successStatus = projection ? projection.response?.status ?? 201 : 201;
       const createRoute: JsonObject = {
         operationId: `create${name}`,
-        ...(canonical
-          ? { "x-osf-operation-id": canonicalOperationId("create") }
-          : {}),
+        "x-osf-operation-id": canonicalOperationId("create"),
         summary: `Create ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -1292,18 +1268,15 @@ export function renderOpenApiSpec(
           [String(successStatus)]: entityResponse(
             createPluginSchemas
               ? `${name}CreateResult`
-              : canonical ? `${name}Result` : name,
-            canonical ? `Created ${label} and available operations` : `Created ${label}`,
+              : `${name}Result`,
+            `Created ${label} and available operations`,
           ),
-          "400": errorResponse("Invalid request body", canonical),
-          "401": errorResponse("Missing or invalid credentials", canonical),
-          "403": errorResponse("Session lacks a required entity role", canonical),
-          ...(canonical && createRequiresConfirmation
+          "400": errorResponse("Invalid request body"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks a required entity role"),
+          ...(createRequiresConfirmation
             ? {
-                "428": errorResponse(
-                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
-                  true,
-                ),
+                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
               }
             : {}),
         },
@@ -1350,20 +1323,18 @@ export function renderOpenApiSpec(
     if (rest.operations.get) {
       itemPath.get = {
         operationId: `get${name}`,
-        ...(canonical
-          ? { "x-osf-operation-id": canonicalOperationId("get") }
-          : {}),
+        "x-osf-operation-id": canonicalOperationId("get"),
         summary: `Fetch ${label} by id`,
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
           "200": entityResponse(
-            canonical ? `${name}Result` : name,
-            canonical ? `${label} record and available operations` : `${label} record`,
+            `${name}Result`,
+            `${label} record and available operations`,
           ),
-          "401": errorResponse("Missing or invalid credentials", canonical),
-          "403": errorResponse("Session lacks a required entity role", canonical),
-          "404": errorResponse("Not found", canonical),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks a required entity role"),
+          "404": errorResponse("Not found"),
         },
       };
     }
@@ -1374,9 +1345,7 @@ export function renderOpenApiSpec(
       const successStatus = projection ? projection.response?.status ?? 200 : 200;
       const updateRoute: JsonObject = {
         operationId: `update${name}`,
-        ...(canonical
-          ? { "x-osf-operation-id": canonicalOperationId("update") }
-          : {}),
+        "x-osf-operation-id": canonicalOperationId("update"),
         summary: `Partially update ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -1392,39 +1361,27 @@ export function renderOpenApiSpec(
           [String(successStatus)]: entityResponse(
             updatePluginSchemas
               ? `${name}UpdateResult`
-              : canonical ? `${name}Result` : name,
-            canonical ? `Updated ${label} and available operations` : `Updated ${label}`,
+              : `${name}Result`,
+            `Updated ${label} and available operations`,
           ),
-          "400": errorResponse("Invalid request body", canonical),
-          "401": errorResponse("Missing or invalid credentials", canonical),
-          "403": errorResponse("Session lacks a required entity role", canonical),
-          "404": errorResponse("Not found", canonical),
-          ...(canonical && updateOperation?.concurrency?.version
+          "400": errorResponse("Invalid request body"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks a required entity role"),
+          "404": errorResponse("Not found"),
+          ...(updateOperation?.concurrency?.version
             ? {
-                "409": errorResponse(
-                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
-                  true,
-                ),
-                "422": errorResponse(
-                  "VALIDATION — expectedVersion is not a semantically valid record version",
-                  true,
-                ),
+                "409": errorResponse("VERSION_CONFLICT — expectedVersion does not match the current record version"),
+                "422": errorResponse("VALIDATION — expectedVersion is not a semantically valid record version"),
               }
             : {}),
-          ...(canonical && updateOperation?.concurrency?.editLease
+          ...(updateOperation?.concurrency?.editLease
             ? {
-                "423": errorResponse(
-                  "LOCKED — another identity currently holds the record edit lease",
-                  true,
-                ),
+                "423": errorResponse("LOCKED — another identity currently holds the record edit lease"),
               }
             : {}),
-          ...(canonical && updateRequiresConfirmation
+          ...(updateRequiresConfirmation
             ? {
-                "428": errorResponse(
-                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
-                  true,
-                ),
+                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
               }
             : {}),
         },
@@ -1466,9 +1423,7 @@ export function renderOpenApiSpec(
     if (rest.operations.delete) {
       itemPath.delete = {
         operationId: `delete${name}`,
-        ...(canonical
-          ? { "x-osf-operation-id": canonicalOperationId("delete") }
-          : {}),
+        "x-osf-operation-id": canonicalOperationId("delete"),
         summary: `Delete ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -1485,46 +1440,25 @@ export function renderOpenApiSpec(
             }
           : {}),
         responses: {
-          ...(canonical
-            ? { "200": entityResponse("DeletionResult", `${label} deleted`) }
-            : { "204": { description: `${label} deleted` } }),
-          ...(canonical
+          "200": entityResponse("DeletionResult", `${label} deleted`),
+          "400": errorResponse("BAD_USER_INPUT — invalid request body or mutation controls"),
+          "401": errorResponse("Missing or invalid credentials"),
+          "403": errorResponse("Session lacks a required entity role"),
+          "404": errorResponse("Not found"),
+          ...(deleteOperation?.concurrency?.version
             ? {
-                "400": errorResponse(
-                  "BAD_USER_INPUT — invalid request body or mutation controls",
-                  true,
-                ),
+                "409": errorResponse("VERSION_CONFLICT — expectedVersion does not match the current record version"),
+                "422": errorResponse("VALIDATION — expectedVersion is not a semantically valid record version"),
               }
             : {}),
-          "401": errorResponse("Missing or invalid credentials", canonical),
-          "403": errorResponse("Session lacks a required entity role", canonical),
-          "404": errorResponse("Not found", canonical),
-          ...(canonical && deleteOperation?.concurrency?.version
+          ...(deleteOperation?.concurrency?.editLease
             ? {
-                "409": errorResponse(
-                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
-                  true,
-                ),
-                "422": errorResponse(
-                  "VALIDATION — expectedVersion is not a semantically valid record version",
-                  true,
-                ),
+                "423": errorResponse("LOCKED — another identity currently holds the record edit lease"),
               }
             : {}),
-          ...(canonical && deleteOperation?.concurrency?.editLease
+          ...(deleteRequiresConfirmation
             ? {
-                "423": errorResponse(
-                  "LOCKED — another identity currently holds the record edit lease",
-                  true,
-                ),
-              }
-            : {}),
-          ...(canonical && deleteRequiresConfirmation
-            ? {
-                "428": errorResponse(
-                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
-                  true,
-                ),
+                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
               }
             : {}),
         },

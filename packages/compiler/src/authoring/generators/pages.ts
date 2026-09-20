@@ -2206,17 +2206,11 @@ function collectListSelectionPaths(
 }
 
 function buildDetailQuery(contract: CompiledEntityContract, selection: string): string {
-  if (contract.authoringVersion >= 2) {
-    return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { data { ${selection} } error { code message retryable } } }`;
-  }
-  return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { ${selection} } }`;
+  return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { data { ${selection} } error { code message retryable } } }`;
 }
 
 function buildListQuery(contract: CompiledEntityContract, selection: string): string {
-  if (contract.authoringVersion >= 2) {
-    return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { data { items { data { ${selection} } } nextCursor totalCount } error { code message retryable } } }`;
-  }
-  return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { edges { node { ${selection} } cursor } pageInfo { hasNextPage endCursor } totalCount } }`;
+  return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { data { items { data { ${selection} } } nextCursor totalCount } error { code message retryable } } }`;
 }
 
 function getDefaultDetailGroupId(detail: NonNullable<CompiledViewContext["detail"]>): string {

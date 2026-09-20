@@ -427,17 +427,6 @@ ${renderDescription(documentation?.description, "    ")}
 ${[...columnFields, ...relationshipFields].join("\n")}
     }
 
-    type ${graphql.typeName}Edge {
-      node: ${graphql.typeName}
-      cursor: String
-    }
-
-    type ${graphql.typeName}Connection {
-      edges: [${graphql.typeName}Edge!]!
-      pageInfo: PageInfo!
-      totalCount: Int
-    }
-
     input ${graphql.typeName}Filter {
 ${queryableColumns
   .flatMap((column) => {
@@ -500,11 +489,6 @@ ${canonicalResultTypes}
 
 /** The result envelope, offer and error types every generated entity's SDL refers to. */
 export const entityOperationSharedTypeDefs = /* GraphQL */ `
-  type PageInfo {
-    hasNextPage: Boolean
-    endCursor: String
-  }
-
   type AggregateResult {
     count: Int!
   }

@@ -31,7 +31,6 @@ import {
   type Identity,
 } from "../../graphql/__tests__/e2e/harness.js";
 import {
-  createRow,
   eligibleTables,
   fieldName,
   foreignKeyTargets,
@@ -49,7 +48,6 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationContractFor,
@@ -74,15 +72,13 @@ const restCreateTables = eligibleTables.filter(
 
 type RestResponse = { status: number; body: any };
 
-function recordPayload(table: (typeof restTables)[number], response: RestResponse): any {
-  return isCanonical(table) ? response.body.data : response.body;
+function recordPayload(response: RestResponse): any {
+  return response.body.data;
 }
 
-function listPayload(table: (typeof restTables)[number], response: RestResponse): any {
-  const data = isCanonical(table) ? response.body.data : response.body;
-  return isCanonical(table)
-    ? { ...data, items: data.items.map((item: any) => item.data) }
-    : data;
+function listPayload(response: RestResponse): any {
+  const data = response.body.data;
+  return { ...data, items: data.items.map((item: any) => item.data) };
 }
 
 async function rest(
@@ -149,7 +145,7 @@ async function acquireLease(
     const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
     const current = await rest(identity, "GET", `${base}/${id}`);
     expect(current.status).toBe(200);
-    const expectedVersion = recordPayload(table, current)?.updatedAt;
+    const expectedVersion = recordPayload(current)?.updatedAt;
     expect(expectedVersion).toBeString();
     return { expectedVersion };
   }
@@ -180,7 +176,7 @@ async function restDelete(
   expect(first.body.error.code).toBe("CONFIRMATION_REQUIRED");
   expect(first.body.error.retryAt).toBeUndefined();
   expect(first.body.error.data.confirmation.expiresAt).toBeString();
-  const row = recordPayload(table, await rest(identity, "GET", `${base}/${id}`));
+  const row = recordPayload(await rest(identity, "GET", `${base}/${id}`));
   return rest(identity, "DELETE", `${base}/${id}`, {
     ...lease,
     confirmationToken: first.body.error.data.confirmation.challengeToken,
@@ -248,7 +244,7 @@ async function createForeignKeyTarget(
     await buildCreateBody(restTarget, identity, {}, depth + 1),
   );
   expect(response.status).toBe(201);
-  const id = recordPayload(restTarget, response).id as string;
+  const id = recordPayload(response).id as string;
   createdRows.push({ table: restTarget, id, identity });
   return id;
 }
@@ -263,7 +259,6 @@ async function createRestRow(
   overrides: Record<string, unknown> = {},
   depth = 0,
 ): Promise<string> {
-  if (!isCanonical(table)) return createRow(table, identity, overrides, depth);
   const response = await rest(
     identity,
     "POST",
@@ -271,7 +266,7 @@ async function createRestRow(
     await buildCreateBody(table, identity, overrides, depth),
   );
   expect(response.status).toBe(201);
-  const id = recordPayload(table, response).id as string;
+  const id = recordPayload(response).id as string;
   trackRestRow(table, id, identity);
   return id;
 }
@@ -333,14 +328,10 @@ describe("REST entity role enforcement", () => {
 
     const list = await rest(readOnly, "GET", `${base}?id=${id}`);
     expect(list.status).toBe(200);
-    expect(listPayload(table, list).totalCount).toBe(1);
-    if (isCanonical(table)) {
-      expect(list.body.operations.map((offer: any) => offer.operation.intent)).toEqual([
-        "list",
-      ]);
-    } else {
-      expect(list.body.operations).toBeUndefined();
-    }
+    expect(listPayload(list).totalCount).toBe(1);
+    expect(list.body.operations.map((offer: any) => offer.operation.intent)).toEqual([
+      "list",
+    ]);
 
     const single = await rest(readOnly, "GET", `${base}/${id}`);
     expect(single.status).toBe(200);
@@ -366,21 +357,17 @@ for (const table of restTables) {
       const body = await buildCreateBody(table, tenantA);
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const createdRecord = recordPayload(table, created);
+      const createdRecord = recordPayload(created);
       const id = createdRecord.id as string;
       expect(id).toBeTruthy();
       trackRestRow(table, id, tenantA);
       expect(createdRecord.createdAt).toBeTruthy();
       expect(Object.keys(createdRecord).some((key) => key.includes("_"))).toBe(false);
-      if (isCanonical(table)) {
-        expect(created.body.operations.every((offer: any) => offer.available)).toBe(true);
-      } else {
-        expect(created.body.operations).toBeUndefined();
-      }
+      expect(created.body.operations.every((offer: any) => offer.available)).toBe(true);
 
       const fetched = await rest(tenantA, "GET", `${base}/${id}`);
       expect(fetched.status).toBe(200);
-      expect(recordPayload(table, fetched).id).toBe(id);
+      expect(recordPayload(fetched).id).toBe(id);
     });
 
     if (isEntityBackedCreate(table)) {
@@ -396,14 +383,12 @@ for (const table of restTables) {
       const id = await createRestRow(table, tenantA);
       const eq = await rest(tenantA, "GET", `${base}?id=${id}`);
       expect(eq.status).toBe(200);
-      const eqData = listPayload(table, eq);
+      const eqData = listPayload(eq);
       expect(eqData.totalCount).toBe(1);
       expect(eqData.items[0].id).toBe(id);
-      if (isCanonical(table)) {
-        expect(
-          eq.body.data.items[0].operations.map((offer: any) => offer.operation.intent),
-        ).toContain("get");
-      }
+      expect(
+        eq.body.data.items[0].operations.map((offer: any) => offer.operation.intent),
+      ).toContain("get");
 
       const inFilter = await rest(
         tenantA,
@@ -411,14 +396,14 @@ for (const table of restTables) {
         `${base}?id=${id}&id=${randomUUID()}`,
       );
       expect(inFilter.status).toBe(200);
-      expect(listPayload(table, inFilter).totalCount).toBe(1);
+      expect(listPayload(inFilter).totalCount).toBe(1);
 
       // Explicit `<field>In` naming (the GraphQL filter convention) must
       // behave identically — single value included, which previously would
       // have been silently dropped by the CRUD layer's array check.
       const inSingle = await rest(tenantA, "GET", `${base}?idIn=${id}`);
       expect(inSingle.status).toBe(200);
-      expect(listPayload(table, inSingle).totalCount).toBe(1);
+      expect(listPayload(inSingle).totalCount).toBe(1);
 
       const inRepeated = await rest(
         tenantA,
@@ -426,7 +411,7 @@ for (const table of restTables) {
         `${base}?idIn=${id}&idIn=${randomUUID()}`,
       );
       expect(inRepeated.status).toBe(200);
-      expect(listPayload(table, inRepeated).totalCount).toBe(1);
+      expect(listPayload(inRepeated).totalCount).toBe(1);
     });
 
     test("GET list paginates with first/after without overlap", async () => {
@@ -438,7 +423,7 @@ for (const table of restTables) {
       const idParams = ids.map((id) => `id=${id}`).join("&");
       const page1 = await rest(tenantA, "GET", `${base}?${idParams}&first=2`);
       expect(page1.status).toBe(200);
-      const firstPage = listPayload(table, page1);
+      const firstPage = listPayload(page1);
       expect(firstPage.totalCount).toBe(3);
       expect(firstPage.items).toHaveLength(2);
       expect(firstPage.nextCursor).toBeTruthy();
@@ -449,7 +434,7 @@ for (const table of restTables) {
         `${base}?${idParams}&first=2&after=${encodeURIComponent(firstPage.nextCursor)}`,
       );
       expect(page2.status).toBe(200);
-      const secondPage = listPayload(table, page2);
+      const secondPage = listPayload(page2);
       expect(secondPage.items).toHaveLength(1);
       expect(secondPage.nextCursor).toBeNull();
 
@@ -508,7 +493,7 @@ for (const table of restTables) {
             `${base}?id=${low}&id=${high}&sortField=${field}&sortDirection=${direction}&first=2`,
           );
           expect(response.status).toBe(200);
-          expect(listPayload(table, response).items[0].id).toBe(expectedFirst);
+          expect(listPayload(response).items[0].id).toBe(expectedFirst);
         }
       });
 
@@ -521,7 +506,7 @@ for (const table of restTables) {
           ...controls,
         });
         expect(response.status).toBe(200);
-        expect(recordPayload(table, response)[field]).toBe(updated);
+        expect(recordPayload(response)[field]).toBe(updated);
       });
     }
 
@@ -541,20 +526,12 @@ for (const table of restTables) {
     });
 
     if (isEntityBackedCreate(table)) {
-      test("DELETE preserves v1 status and uses the v2 result envelope", async () => {
+      test("DELETE answers 200 with the result envelope", async () => {
         const id = await createRestRow(table, tenantA);
-        const deleted = isCanonical(table)
-          ? await restDelete(table, tenantA, id)
-          // Legacy DELETE ignored object bodies; v2 controls must not change that contract.
-          : await rest(tenantA, "DELETE", `${base}/${id}`, { legacyIgnored: true });
-        if (isCanonical(table)) {
-          expect(deleted.status).toBe(200);
-          expect(deleted.body.data).toEqual({ deleted: true });
-          expect(Array.isArray(deleted.body.operations)).toBe(true);
-        } else {
-          expect(deleted.status).toBe(204);
-          expect(deleted.body).toBeUndefined();
-        }
+        const deleted = await restDelete(table, tenantA, id);
+        expect(deleted.status).toBe(200);
+        expect(deleted.body.data).toEqual({ deleted: true });
+        expect(Array.isArray(deleted.body.operations)).toBe(true);
         untrackRow(id);
 
         const after = await rest(tenantA, "GET", `${base}/${id}`);
@@ -639,20 +616,18 @@ for (const table of restTables) {
       });
     }
 
-    if (isCanonical(table)) {
-      test("REST lease acquire refuses operations outside its lease projection", async () => {
-        // A read never carries a lease, whatever the entity's mutations do.
-        const refused = await rest(tenantA, "POST", "/api/operation-leases", {
-          operationId: operationIdFor(table, "get"),
-          targetId: randomUUID(),
-        });
-        expect(refused.status).toBe(404);
-        expect(refused.body.error).toMatchObject({
-          code: "NOT_FOUND",
-          retryable: false,
-        });
+    test("REST lease acquire refuses operations outside its lease projection", async () => {
+      // A read never carries a lease, whatever the entity's mutations do.
+      const refused = await rest(tenantA, "POST", "/api/operation-leases", {
+        operationId: operationIdFor(table, "get"),
+        targetId: randomUUID(),
       });
-    }
+      expect(refused.status).toBe(404);
+      expect(refused.body.error).toMatchObject({
+        code: "NOT_FOUND",
+        retryable: false,
+      });
+    });
 
     if (versionRequired(table, "update")) {
       test("invalid expectedVersion is a field validation error, not a server error", async () => {
@@ -679,31 +654,29 @@ for (const table of restTables) {
       });
     }
 
-    if (isCanonical(table)) {
-      test("invalid mutation control types are canonical validation errors", async () => {
-        const refused = await rest(
-          tenantA,
-          "DELETE",
-          `${base}/${randomUUID()}`,
+    test("invalid mutation control types are canonical validation errors", async () => {
+      const refused = await rest(
+        tenantA,
+        "DELETE",
+        `${base}/${randomUUID()}`,
+        {
+          expectedVersion: new Date().toISOString(),
+          leaseToken: "not-used-because-control-validation-runs-first",
+          confirmationToken: false,
+        },
+      );
+      expect(refused.status).toBe(422);
+      expect(refused.body.error).toMatchObject({
+        code: "VALIDATION",
+        retryable: false,
+        violations: [
           {
-            expectedVersion: new Date().toISOString(),
-            leaseToken: "not-used-because-control-validation-runs-first",
-            confirmationToken: false,
+            field: "confirmationToken",
+            code: "INVALID_TYPE",
           },
-        );
-        expect(refused.status).toBe(422);
-        expect(refused.body.error).toMatchObject({
-          code: "VALIDATION",
-          retryable: false,
-          violations: [
-            {
-              field: "confirmationToken",
-              code: "INVALID_TYPE",
-            },
-          ],
-        });
+        ],
       });
-    }
+    });
 
     const versionedColumn = textColumnFor(table);
     if (leaseRequired(table, "update") && versionedColumn) {
@@ -736,7 +709,7 @@ for (const table of restTables) {
       test("a server challenge canonicalizes a visible datetime and protects update atomically", async () => {
         const id = await createRestRow(table, tenantA);
         const current = await rest(tenantA, "GET", `${base}/${id}`);
-        const row = recordPayload(table, current);
+        const row = recordPayload(current);
         const lease = await acquireLease(table, tenantA, id, "update");
         // The entity's own update contract, re-authored with a challenge on a
         // datetime field: what is under test is the core's canonicalization of
@@ -831,27 +804,27 @@ for (const table of restTables) {
         // Control: unclassified, the column is served to a read-only caller.
         const control = await rest(readOnly, "GET", `${base}/${id}`);
         expect(control.status).toBe(200);
-        expect(recordPayload(table, control)[field]).toBe(value);
+        expect(recordPayload(control)[field]).toBe(value);
 
         await withClassifiedColumn(classified, "pii", async () => {
           const single = await rest(readOnly, "GET", `${base}/${id}`);
           expect(single.status).toBe(200);
-          expect(recordPayload(table, single)[field]).toBeNull();
+          expect(recordPayload(single)[field]).toBeNull();
           // Unclassified columns are untouched.
-          expect(recordPayload(table, single).id).toBe(id);
-          expect(recordPayload(table, single).createdAt).toBeTruthy();
+          expect(recordPayload(single).id).toBe(id);
+          expect(recordPayload(single).createdAt).toBeTruthy();
 
           const list = await rest(readOnly, "GET", `${base}?id=${id}`);
           expect(list.status).toBe(200);
-          expect(listPayload(table, list).totalCount).toBe(1);
-          expect(listPayload(table, list).items[0][field]).toBeNull();
+          expect(listPayload(list).totalCount).toBe(1);
+          expect(listPayload(list).items[0][field]).toBeNull();
 
           // A write grant reads the real value on both paths — redaction is
           // scoped to the grant, not a blanket null.
           const writerSingle = await rest(tenantA, "GET", `${base}/${id}`);
-          expect(recordPayload(table, writerSingle)[field]).toBe(value);
+          expect(recordPayload(writerSingle)[field]).toBe(value);
           const writerList = await rest(tenantA, "GET", `${base}?id=${id}`);
-          expect(listPayload(table, writerList).items[0][field]).toBe(value);
+          expect(listPayload(writerList).items[0][field]).toBe(value);
         });
       },
     );
@@ -875,9 +848,6 @@ for (const table of restTables) {
             expect(response.body.error.code).toBe("FORBIDDEN");
             // The refusal must not answer the question it refused.
             expect(response.body.data).toBeUndefined();
-            if (!isCanonical(table)) {
-              expect(response.body.error.retryable).toBeUndefined();
-            }
           }
 
           // The same query stays available to a write grant.
@@ -887,8 +857,8 @@ for (const table of restTables) {
             `${base}?${field}=${probe}&sortField=${field}`,
           );
           expect(allowed.status).toBe(200);
-          expect(listPayload(table, allowed).totalCount).toBe(1);
-          expect(listPayload(table, allowed).items[0].id).toBe(id);
+          expect(listPayload(allowed).totalCount).toBe(1);
+          expect(listPayload(allowed).items[0].id).toBe(id);
         });
       },
     );
@@ -930,9 +900,9 @@ for (const table of restTables) {
         : await buildCreateBody(table, tenantA);
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const id = recordPayload(table, created).id as string;
+      const id = recordPayload(created).id as string;
       trackRestRow(table, id, tenantA);
-      const value = recordPayload(table, await rest(tenantA, "GET", `${base}/${id}`))[field];
+      const value = recordPayload(await rest(tenantA, "GET", `${base}/${id}`))[field];
       if (offeredOnCreate) expect(value).toBe(body[field]);
 
       // Re-pointing the record at a different parent is the integrity gap.
@@ -944,7 +914,7 @@ for (const table of restTables) {
 
       const after = await rest(tenantA, "GET", `${base}/${id}`);
       expect(after.status).toBe(200);
-      expect(recordPayload(table, after)[field]).toBe(value);
+      expect(recordPayload(after)[field]).toBe(value);
     });
 
     test(`openapi.json advertises ${field} on ${offeredOnCreate ? "POST only" : "neither POST nor PATCH"}`, async () => {

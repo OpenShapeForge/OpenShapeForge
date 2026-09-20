@@ -189,7 +189,6 @@ describe("authoring description projections", () => {
     const graphqlMetadata = table!.source!.graphql!;
     const schema = buildSchema(`
       scalar JSON
-      type PageInfo { hasNextPage: Boolean, endCursor: String }
       type AggregateResult { count: Int! }
       type EntityOperationOffer { available: Boolean! }
       type EntityOperationError { code: String! }

@@ -36,7 +36,6 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
@@ -137,7 +136,7 @@ function toolEnvelope(body: any): any {
   return text ? JSON.parse(text) : undefined;
 }
 
-/** Normalize strict-v2 envelopes and legacy-v1 payloads for shared assertions. */
+/** Normalize wrapped tool envelopes and bare fixture payloads for shared assertions. */
 function toolPayload(body: any): any {
   const envelope = toolEnvelope(body);
   const canonical = envelope && Object.hasOwn(envelope, "data");
@@ -346,7 +345,7 @@ async function createMcpRow(
   // that intentionally has no MCP mutation projection of its own. Seed that
   // dependency through the shared database fixture instead of inventing a
   // tool the catalog does not advertise.
-  if (!table.source?.mcp || !isCanonical(table)) {
+  if (!table.source?.mcp) {
     return createRow(table, identity, overrides, depth);
   }
   const created = await callTool(
@@ -418,11 +417,6 @@ async function createForeignKeyTarget(
   identity: Identity,
   depth = 1,
 ): Promise<string> {
-  const fullCrudTarget = tablesByName.get(target);
-  if (fullCrudTarget?.source?.graphql && !isCanonical(fullCrudTarget)) {
-    return createRow(fullCrudTarget, identity);
-  }
-
   const mcpTarget = mcpCreateTables.find(
     (candidate) => candidate.name === target && candidate.source?.mcp?.operations.create,
   );

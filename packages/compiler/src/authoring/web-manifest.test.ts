@@ -125,7 +125,7 @@ function entity(
     path: `authoring/entities/${slug}.yaml`,
     origin: "core",
     contract: {
-      authoringVersion: 1,
+      authoringVersion: 3,
       contractVersion: 2,
       kind: "compiledEntityContract",
       entity: {
@@ -147,6 +147,7 @@ function entity(
         authorization,
       }),
       rest: { basePath: `${slug}s`, operations: { list: true, get: true, create: true, update: true, delete: true } },
+      interfaces: { web: { operations: { list: true, get: true, create: true, update: true, delete: true } } },
       graphql: {} as CompiledEntityContract["graphql"],
       authorization,
       views: { core: view },
@@ -784,9 +785,9 @@ describe("web manifest projection", () => {
     expect(Object.keys(archive.input.schema.properties)).toEqual(["id", "expectedVersion", "leaseToken", "confirmed"]);
   });
 
-  test("does not widen the legacy v1 WebManifest beyond REST exposure", () => {
+  test("projects only entities whose web interface exposes list", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
-    delete relation.contract.rest;
+    delete relation.contract.interfaces;
 
     expect(buildWebManifest([relation]).entities.Relation).toBeUndefined();
   });

@@ -581,16 +581,16 @@ function classifiedFieldKeys(fields: CompiledField[]): string[] {
 
 export type McpToolDefinition = {
   name: string;
-  /** Stable interface-neutral operation id, published only by strict v2 authoring. */
-  operationId?: string;
+  /** Stable interface-neutral operation id of the canonical entity Operation. */
+  operationId: string;
   operation: "list" | "get" | "create" | "update" | "delete";
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: JsonObject;
-  /** Canonical success/error envelope returned by strict v2 tools. */
-  outputSchema?: JsonObject;
+  /** Canonical success/error envelope returned by the tool. */
+  outputSchema: JsonObject;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -704,7 +704,6 @@ function buildToolsForEntity(
       canonicalOutput?.kind === "json-schema" ? canonicalOutput.schema : output,
     );
   };
-  const v2Contract = contract.authoringVersion >= 2;
   const listInput = contract.entityOperations.list?.input;
   const listPagination = listInput?.kind === "collection-query"
     ? listInput.pagination
@@ -748,30 +747,21 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => {
-    if (contract.authoringVersion >= 2) {
-      const canonical = contract.entityOperations[operation];
-      const parts = [
-        localizedText(canonical?.description) ?? fallback,
-        localizedText(canonical?.guidance?.assistant),
-        localizedText(mcp.operationInstructions?.[operation]),
-      ].filter((part): part is string => Boolean(part));
-      const description = parts.join(" ");
-      return operation === "create" || operation === "update"
-        ? `${description}${writerNote}`
-        : description;
-    }
-    const authored = mcp.toolOverrides?.[operation]?.description;
-    if (authored === undefined) return fallback;
+    const canonical = contract.entityOperations[operation];
+    const parts = [
+      localizedText(canonical?.description) ?? fallback,
+      localizedText(canonical?.guidance?.assistant),
+      localizedText(mcp.operationInstructions?.[operation]),
+    ].filter((part): part is string => Boolean(part));
+    const description = parts.join(" ");
     return operation === "create" || operation === "update"
-      ? `${authored}${writerNote}`
-      : authored;
+      ? `${description}${writerNote}`
+      : description;
   };
   const titled = (
     operation: McpToolDefinition["operation"],
     fallback: string,
-  ) => contract.authoringVersion >= 2
-    ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
-    : fallback;
+  ) => localizedText(contract.entityOperations[operation]?.name) ?? fallback;
   const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
     ...annotationsFor(operation),
     ...(contract.entityOperations[operation]?.reliability.idempotency.mode === "keyed"
@@ -804,7 +794,7 @@ function buildToolsForEntity(
     }
     tools.push({
       name: named("list"),
-      ...(v2Contract ? { operationId: operationId("list") } : {}),
+      operationId: operationId("list"),
       operation: "list",
       entity: contract.entity.name,
       table,
@@ -848,7 +838,7 @@ function buildToolsForEntity(
         },
         additionalProperties: false,
       },
-      ...(v2Contract ? { outputSchema: outputSchema("list") } : {}),
+      outputSchema: outputSchema("list"),
       annotations: entityAnnotations("list"),
     });
   }
@@ -856,7 +846,7 @@ function buildToolsForEntity(
   if (mcp.operations.get) {
     tools.push({
       name: named("get"),
-      ...(v2Contract ? { operationId: operationId("get") } : {}),
+      operationId: operationId("get"),
       operation: "get",
       entity: contract.entity.name,
       table,
@@ -866,7 +856,7 @@ function buildToolsForEntity(
         `${description} Fetches a single record by id.`,
       ),
       inputSchema: idSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("get") } : {}),
+      outputSchema: outputSchema("get"),
       annotations: entityAnnotations("get"),
     });
   }
@@ -885,12 +875,10 @@ function buildToolsForEntity(
           true,
         );
     const inputSchema = withBlueprintCreate(baseInputSchema, contract.blueprint);
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.create)
-      : { properties: {}, required: [] };
+    const controls = operationControlSchema(contract.entityOperations.create);
     tools.push({
       name: named("create"),
-      ...(v2Contract ? { operationId: operationId("create") } : {}),
+      operationId: operationId("create"),
       operation: "create",
       entity: contract.entity.name,
       table,
@@ -899,23 +887,21 @@ function buildToolsForEntity(
         "create",
         `${description} Creates a new record.${writerNote}`,
       ),
-      inputSchema: v2Contract
-        ? {
-            ...inputSchema,
-            properties: {
-              ...(inputSchema.properties as JsonObject),
-              ...controls.properties,
-            },
-            required: [
-              ...((inputSchema.required as string[] | undefined) ?? []),
-              ...controls.required,
-            ],
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-          }
-        : inputSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("create") } : {}),
+      inputSchema: {
+        ...inputSchema,
+        properties: {
+          ...(inputSchema.properties as JsonObject),
+          ...controls.properties,
+        },
+        required: [
+          ...((inputSchema.required as string[] | undefined) ?? []),
+          ...controls.required,
+        ],
+        ...(controls.dependentRequired
+          ? { dependentRequired: controls.dependentRequired }
+          : {}),
+      },
+      outputSchema: outputSchema("create"),
       annotations: entityAnnotations("create"),
     });
   }
@@ -935,12 +921,10 @@ function buildToolsForEntity(
         false,
       ),
     );
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.update)
-      : { properties: {}, required: [] };
+    const controls = operationControlSchema(contract.entityOperations.update);
     tools.push({
       name: named("update"),
-      ...(v2Contract ? { operationId: operationId("update") } : {}),
+      operationId: operationId("update"),
       operation: "update",
       entity: contract.entity.name,
       table,
@@ -990,18 +974,16 @@ function buildToolsForEntity(
               : {}),
             ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
           },
-      ...(v2Contract ? { outputSchema: outputSchema("update") } : {}),
+      outputSchema: outputSchema("update"),
       annotations: entityAnnotations("update"),
     });
   }
 
   if (mcp.operations.delete) {
-    const controls = v2Contract
-      ? operationControlSchema(contract.entityOperations.delete)
-      : { properties: {}, required: [] };
+    const controls = operationControlSchema(contract.entityOperations.delete);
     tools.push({
       name: named("delete"),
-      ...(v2Contract ? { operationId: operationId("delete") } : {}),
+      operationId: operationId("delete"),
       operation: "delete",
       entity: contract.entity.name,
       table,
@@ -1010,21 +992,19 @@ function buildToolsForEntity(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
-      inputSchema: v2Contract
-        ? {
-            type: "object",
-            properties: {
-              ...(idSchema.properties as JsonObject),
-              ...controls.properties,
-            },
-            required: ["id", ...controls.required],
-            additionalProperties: false,
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-          }
-        : idSchema,
-      ...(v2Contract ? { outputSchema: outputSchema("delete") } : {}),
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...(idSchema.properties as JsonObject),
+          ...controls.properties,
+        },
+        required: ["id", ...controls.required],
+        additionalProperties: false,
+        ...(controls.dependentRequired
+          ? { dependentRequired: controls.dependentRequired }
+          : {}),
+      },
+      outputSchema: outputSchema("delete"),
       annotations: entityAnnotations("delete"),
     });
   }

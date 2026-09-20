@@ -30,7 +30,7 @@ const field = (
 
 const contract = (
   overrides: {
-    authoringVersion?: 1 | 2;
+    authoringVersion?: 2 | 3;
     name?: string;
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
@@ -40,7 +40,7 @@ const contract = (
   } = {},
 ): CompiledEntityContract => {
   const compiled = {
-    authoringVersion: overrides.authoringVersion ?? 1,
+    authoringVersion: overrides.authoringVersion ?? 3,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -182,8 +182,8 @@ describe("buildMcpCatalog", () => {
     expect(catalog.tools[0]).toMatchObject({
       operation: "list",
     });
-    expect(catalog.tools[0]).not.toHaveProperty("operationId");
-    expect(catalog.tools[0]).not.toHaveProperty("outputSchema");
+    expect(catalog.tools[0]).toHaveProperty("operationId");
+    expect(catalog.tools[0]).toHaveProperty("outputSchema");
   });
 
   it("emits canonical output envelopes for every generated entity operation", () => {
@@ -959,7 +959,7 @@ describe("buildMcpCatalog", () => {
       expect(prop(metadata, "source").default).toBeUndefined();
     });
 
-    it("constrains list sorting to scalar fields and mentions the filter field", () => {
+    it("constrains list sorting to scalar fields", () => {
       const catalog = buildMcpCatalog(
         [
           input(
@@ -977,7 +977,6 @@ describe("buildMcpCatalog", () => {
       );
       const list = catalog.tools.find((tool) => tool.operation === "list")!;
       expect(prop(list.inputSchema, "sortField").enum).toEqual(["name"]);
-      expect(list.description).toContain('"name"');
     });
   });
 
@@ -1092,12 +1091,12 @@ describe("authored tool overrides", () => {
       delete: true,
     },
     toolOverrides: {
-      get: { name: "read_widget", description: "Read one Widget by id." },
+      get: { name: "read_widget" },
       update: { name: "edit_widget" },
     },
   };
 
-  it("uses override names and descriptions, composed defaults elsewhere", () => {
+  it("uses override names, composed defaults elsewhere", () => {
     const catalog = buildMcpCatalog(
       [input(contract({ mcp: mcpWithOverrides }))],
       "test",
@@ -1106,12 +1105,9 @@ describe("authored tool overrides", () => {
       catalog.tools.map((tool) => [tool.operation, tool]),
     );
     expect(byOperation.get("get")?.name).toBe("read_widget");
-    expect(byOperation.get("get")?.description).toBe("Read one Widget by id.");
+    expect(byOperation.get("get")?.description).toBe("get Widget");
     expect(byOperation.get("update")?.name).toBe("edit_widget");
-    // Description override was not authored for update: composed default stays.
-    expect(byOperation.get("update")?.description).toContain(
-      "Partially updates",
-    );
+    expect(byOperation.get("update")?.description).toContain("update Widget");
     expect(byOperation.get("create")?.name).toBe("widget_create");
     expect(byOperation.get("delete")?.name).toBe("widget_delete");
   });

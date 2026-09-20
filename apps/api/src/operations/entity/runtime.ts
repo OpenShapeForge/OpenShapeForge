@@ -481,8 +481,7 @@ export function restEditLeaseOperationIdsForSession(
         id: operation.id,
         intent: operation.intent,
       });
-      return (table.source?.authoringVersion ?? 1) >= 2 &&
-        table.source?.rest?.operations[operation.intent] === true;
+      return table.source?.rest?.operations[operation.intent] === true;
     })
     .map(({ id }) => id);
   return [

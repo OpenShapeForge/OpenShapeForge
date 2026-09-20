@@ -238,13 +238,11 @@ export interface McpSection {
   tools: McpToolStyle;
   operations: Record<McpOperationKey, boolean>;
   /**
-   * Authored per-operation tool name/description overrides (`dedicated`
-   * style only). generate-mcp.ts consumes these when it emits the catalog;
-   * an absent entry means the compiler-composed default applies.
+   * Authored per-operation tool name overrides (`dedicated` style only).
+   * generate-mcp.ts consumes these when it emits the catalog; an absent entry
+   * means the compiler-composed default name applies.
    */
-  toolOverrides?: Partial<
-    Record<McpOperationKey, { name?: string; description?: string }>
-  >;
+  toolOverrides?: Partial<Record<McpOperationKey, { name: string }>>;
   /** MCP-only guidance refining the canonical v2 operation description. */
   operationInstructions?: Partial<Record<McpOperationKey, string | LocalizedText>>;
   /**
@@ -709,7 +707,7 @@ export interface CompiledEntityContract {
   /** Status state machines declared on fields; absent when the entity has none. */
   transitions?: CompiledTransitionField[];
   workerAccess?: string;
-  authoringVersion: 1 | 2 | 3;
+  authoringVersion: 2 | 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {

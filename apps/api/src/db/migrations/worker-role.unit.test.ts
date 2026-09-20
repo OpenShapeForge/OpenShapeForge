@@ -21,7 +21,6 @@ describe("workerGrantedTablesFromManifest", () => {
       schema: "erp",
       table: "relations",
       generatedCrudEligible: true,
-      generatedCrudEligible: true,
     };
     expect(workerGrantedTablesFromManifest([
       { schema: "workflow", table: "control_commands", workerAccess: "workflow-worker" },

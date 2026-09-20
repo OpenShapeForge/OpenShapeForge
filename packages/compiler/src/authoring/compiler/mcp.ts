@@ -125,26 +125,24 @@ export function buildMcp(
       )
     : undefined;
 
-  const toolOverrides: Partial<
-    Record<McpOperationKey, { name?: string; description?: string }>
-  > = {};
+  const toolOverrides: Partial<Record<McpOperationKey, { name: string }>> = {};
   for (const key of MCP_OPERATION_KEYS) {
     const authoredOperation = config.operations?.[key];
     if (typeof authoredOperation !== "object") continue;
-    const { name, description } = authoredOperation as McpOperationConfig;
-    if (name === undefined && description === undefined) continue;
-    // Overrides only make sense on tools this entity owns. The shared osf_*
+    const { name } = authoredOperation as McpOperationConfig;
+    if (name === undefined) continue;
+    // A rename only makes sense on tools this entity owns. The shared osf_*
     // tools serve every generic-style entity at once, so a per-entity rename
-    // or description there would silently win for whichever entity compiled
-    // last — refuse instead.
+    // there would silently win for whichever entity compiled last — refuse
+    // instead.
     if (style === "generic") {
       throw new Error(
-        `mcp operation "${key}" on entity "${coreEntity.entity}" carries a name/description ` +
+        `mcp operation "${key}" on entity "${coreEntity.entity}" carries a name ` +
           `override, but the entity uses the generic tool style. Overrides apply only to ` +
           "dedicated tools; switch to `tools: dedicated` or drop the override.",
       );
     }
-    if (name !== undefined && !MCP_TOOL_PREFIX_PATTERN.test(name)) {
+    if (!MCP_TOOL_PREFIX_PATTERN.test(name)) {
       throw new Error(
         `Unsafe mcp tool name ${JSON.stringify(name)} for operation "${key}" on entity ` +
           `"${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}. The name is ` +
@@ -152,10 +150,7 @@ export function buildMcp(
           `runtime dispatches on.`,
       );
     }
-    toolOverrides[key] = {
-      ...(name !== undefined ? { name } : {}),
-      ...(description !== undefined ? { description } : {}),
-    };
+    toolOverrides[key] = { name };
   }
 
   let resource: McpResourceConfig | undefined;

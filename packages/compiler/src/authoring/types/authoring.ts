@@ -239,12 +239,6 @@ export interface McpOperationConfig {
    * fails closed on a duplicate across the catalog.
    */
   name?: string;
-  /**
-   * Override the generated tool description for this operation (`dedicated`
-   * style only). Use for short, operational, entity-specific guidance; the
-   * compiler-composed default is used when absent.
-   */
-  description?: string;
 }
 
 export interface McpResourceConfig {

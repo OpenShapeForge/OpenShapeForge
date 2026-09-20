@@ -5,10 +5,9 @@
  * password-grant token driving the CRUD path (skipped when Keycloak is
  * not reachable).
  *
- * The entities are chosen by the token's grants and by shape, never by
- * position: each bearer spec runs once per entity shape the token can drive,
- * so the JWT → roles → Operation path is proven for v1 and canonical entities
- * alike (through e2e/gql-shapes.ts, lease and confirmation included).
+ * The entities are chosen by the token's grants, never by position, so the
+ * JWT → roles → Operation path is proven through e2e/gql-shapes.ts, lease and
+ * confirmation included.
  */
 import { beforeAll, expect } from "bun:test";
 import {
@@ -40,7 +39,7 @@ import {
   listDoc,
   recordOf,
 } from "./e2e/gql-shapes.js";
-import { isCanonical, isEntityBackedCreate } from "./e2e/operations.js";
+import { isEntityBackedCreate } from "./e2e/operations.js";
 import { membershipRolesOf } from "./e2e/keycloak.js";
 import { realmFromIssuer } from "../../auth/identity.js";
 import { expandRoleComposites } from "../../auth/person-roles.js";
@@ -102,14 +101,9 @@ function trackBearerRow(table: GeneratedTable, id: string, token: string) {
   createdRows.push({ table, id, identity });
 }
 
-const SHAPES = [
-  { shape: "v1", matches: (table: GeneratedTable) => !isCanonical(table) },
-  { shape: "canonical", matches: isCanonical },
-] as const;
-
 /**
- * One table per shape that the token's roles may drive through every
- * operation in `grants`, and whose row the bearer can build on its own (no
+ * One table that the token's roles may drive through every operation in
+ * `grants`, and whose row the bearer can build on its own (no
  * required parent rows: a bearer session cannot borrow the harness
  * identities to create dependencies). tables[0] is whatever sorts first in
  * the manifest — since the complete catalog contains entities the focused
@@ -119,22 +113,19 @@ const SHAPES = [
 function tablesWritableWith(
   token: string | null,
   grants: readonly ("read" | "create" | "delete")[],
-): { shape: string; table: GeneratedTable }[] {
+): GeneratedTable[] {
   if (!token) return [];
   const roles = tokenRoles(token);
-  return SHAPES.flatMap(({ shape, matches }) => {
-    const table = tables.find((candidate) => {
-      const allow = candidate.source?.authorization?.roles;
-      const parents = foreignKeyTargets(candidate);
-      return (
-        matches(candidate) &&
-        isEntityBackedCreate(candidate) &&
-        candidate.columns.every((column) => !column.required || !parents.has(column.name)) &&
-        grants.every((grant) => (allow?.[grant] ?? []).some((role) => roles.has(role)))
-      );
-    });
-    return table ? [{ shape, table }] : [];
+  const table = tables.find((candidate) => {
+    const allow = candidate.source?.authorization?.roles;
+    const parents = foreignKeyTargets(candidate);
+    return (
+      isEntityBackedCreate(candidate) &&
+      candidate.columns.every((column) => !column.required || !parents.has(column.name)) &&
+      grants.every((grant) => (allow?.[grant] ?? []).some((role) => roles.has(role)))
+    );
   });
+  return table ? [table] : [];
 }
 
 /**
@@ -170,9 +161,9 @@ describe("transport and authentication", () => {
     expect(writable.length).toBeGreaterThan(0);
   });
 
-  for (const { shape, table } of writable) {
+  for (const table of writable) {
     const graphql = table.source!.graphql!;
-    test(`a real Keycloak bearer token drives the full CRUD path (${graphql.typeName}, ${shape})`, async () => {
+    test(`a real Keycloak bearer token drives the full CRUD path (${graphql.typeName})`, async () => {
       const bearer = keycloakToken!;
       const created = await gql(null, createDoc(table), { input: await bearerInput(table) }, { bearer });
       const id = recordOf(table, created, graphql.createMutationName)?.id as string;
@@ -198,12 +189,9 @@ describe("transport and authentication", () => {
   // The identity comes from Keycloak rather than a synthetic trusted-context
   // header on purpose: the code path under test is the one that maps roles out
   // of a JWT, which trusted-context headers bypass entirely.
-  for (const { shape, table } of rolelessToken ? SHAPES.flatMap(({ shape, matches }) => {
-    const candidate = tables.find((entry) => matches(entry) && isEntityBackedCreate(entry));
-    return candidate ? [{ shape, table: candidate }] : [];
-  }) : []) {
+  for (const table of rolelessToken ? tables.filter(isEntityBackedCreate).slice(0, 1) : []) {
     const graphql = table.source!.graphql!;
-    test(`a real Keycloak token with no realm roles is refused every operation (${graphql.typeName}, ${shape})`, async () => {
+    test(`a real Keycloak token with no realm roles is refused every operation (${graphql.typeName})`, async () => {
       const bearer = rolelessToken!;
 
       const read = await gql(
@@ -215,7 +203,7 @@ describe("transport and authentication", () => {
       expectOperationError(table, read, graphql.listQueryName, "FORBIDDEN");
 
       // Nothing may be written on a refused mutation: the reader checks the
-      // payload is empty at either shape.
+      // payload is empty.
       const created = await gql(null, createDoc(table), { input: await bearerInput(table) }, { bearer });
       expectOperationError(table, created, graphql.createMutationName, "FORBIDDEN");
     });
@@ -236,9 +224,9 @@ describe("transport and authentication", () => {
     expect(tenantWritable.length).toBeGreaterThan(0);
   });
 
-  for (const { shape, table } of tenantWritable) {
+  for (const table of tenantWritable) {
     const graphql = table.source!.graphql!;
-    test(`a token from another tenant cannot see this tenant's row (${graphql.typeName}, ${shape})`, async () => {
+    test(`a token from another tenant cannot see this tenant's row (${graphql.typeName})`, async () => {
       const created = await gql(
         null,
         createDoc(table),

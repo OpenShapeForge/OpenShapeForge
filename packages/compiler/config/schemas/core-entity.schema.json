@@ -1717,7 +1717,7 @@
       "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
     },
     "mcpOperation": {
-      "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name and/or description for that operation (dedicated style only).",
+      "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name for that operation (dedicated style only); the tool description is the canonical Operation's description plus its MCP instructions.",
       "oneOf": [
         { "type": "boolean" },
         {
@@ -1728,8 +1728,7 @@
             "name": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$"
-            },
-            "description": { "type": "string" }
+            }
           }
         }
       ]

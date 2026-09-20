@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compactGenericInputSchema,
   describeToolDefinition,
+  genericTextLanguage,
   genericToolText,
 } from "./mcp-generic-projection.js";
 
@@ -116,5 +117,60 @@ describe("genericToolText and the describe tool", () => {
       additionalProperties: false,
     });
     expect(tool.annotations.readOnlyHint).toBe(true);
+  });
+
+  test("names the OSF type on the selectors and keeps the presentation keywords on a stub", () => {
+    const annotated = [
+      {
+        entity: "A", title: "A",
+        inputSchema: { type: "object", properties: { values: { type: "object", "x-osf-type": "Address", "x-osf-i18n": { title: { en: "Values", nl: "Waarden" } }, properties: { a: {} } } } },
+      },
+      {
+        entity: "B", title: "B",
+        inputSchema: { type: "object", properties: { values: { type: "object", "x-osf-type": "Address", "x-osf-i18n": { title: { en: "Values", nl: "Waarden" } }, properties: { b: {} } } } },
+      },
+    ];
+    const schema = compactGenericInputSchema("update", annotated) as { properties: Record<string, Record<string, unknown>> };
+    expect(schema.properties.entity!["x-osf-type"]).toBe("string");
+    expect(schema.properties.values).toMatchObject({
+      type: "object",
+      "x-osf-type": "Address",
+      "x-osf-i18n": { title: { en: "Values", nl: "Waarden" } },
+    });
+    expect(schema.properties.values!.properties).toBeUndefined();
+    const describe = describeToolDefinition(["A"]) as { inputSchema: { properties: Record<string, Record<string, unknown>> } };
+    expect(describe.inputSchema.properties.entity!["x-osf-type"]).toBe("string");
+    expect(describe.inputSchema.properties.operation!["x-osf-type"]).toBe("string");
+  });
+});
+
+describe("the generic texts in the session's language", () => {
+  test("resolve Dutch, English, and fall back to English for any other language", () => {
+    expect(genericTextLanguage("nl-BE")).toBe("nl");
+    expect(genericTextLanguage("fr")).toBe("en");
+    expect(genericTextLanguage(undefined)).toBe("en");
+    const nl = genericToolText("create", branches, "osf://schema/entities", "nl");
+    const en = genericToolText("create", branches, "osf://schema/entities", "en");
+    const fr = genericToolText("create", branches, "osf://schema/entities", "fr");
+    expect(nl.title).toBe("Record aanmaken");
+    expect(nl.description).toStartWith("Maakt één record van één entiteit uit de gedeelde catalogus aan.");
+    expect(nl.description).toContain("Hier voor jou beschikbaar: Address, Quote (Offerte).");
+    expect(en.title).toBe("Create record");
+    expect(fr).toEqual(en);
+    expect(genericToolText("create", branches, "osf://schema/entities")).toEqual(en);
+  });
+
+  test("apply to the schema stubs and to osf_describe as well", () => {
+    const nl = compactGenericInputSchema("update", branches, "nl") as { properties: Record<string, Record<string, unknown>>; description: string };
+    expect(nl.properties.entity!.title).toBe("Entiteit");
+    expect(nl.properties.values!.description).toStartWith("Verschilt per entiteit.");
+    expect(nl.description).toStartWith("Eigenschappen die een entiteit");
+    const en = compactGenericInputSchema("update", branches, "de") as { properties: Record<string, Record<string, unknown>> };
+    expect(en.properties.values!.description).toStartWith("Differs per entity.");
+    expect(describeToolDefinition(["Address"], "nl").title).toBe("Argumenten van de gedeelde catalogus beschrijven");
+    expect(describeToolDefinition(["Address"], "nl").inputSchema).toMatchObject({
+      properties: { operation: { title: "Operatie" } },
+    });
+    expect(describeToolDefinition(["Address"], "pt").title).toBe("Describe shared-catalog arguments");
   });
 });

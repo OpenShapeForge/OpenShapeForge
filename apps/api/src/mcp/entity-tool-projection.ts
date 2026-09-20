@@ -180,7 +180,7 @@ export function describeGenericTool(
     inputSchema: describeTool(tool, entity, tables.get(tool.table), session, locale)
       .inputSchema as Record<string, unknown>,
   }));
-  const text = genericToolText(operation, branches, ENTITY_CATALOG_URI);
+  const text = genericToolText(operation, branches, ENTITY_CATALOG_URI, locale.tag);
   const elicits = entries.find(
     ({ entity }) => entity?.elicitOnCreate !== undefined,
   );
@@ -188,7 +188,7 @@ export function describeGenericTool(
     name: first.name,
     title: text.title,
     description: text.description,
-    inputSchema: compactGenericInputSchema(operation, branches) as Tool["inputSchema"],
+    inputSchema: compactGenericInputSchema(operation, branches, locale.tag) as Tool["inputSchema"],
     // A shared generic tool may still contain legacy v1 entities. Do not add a
     // response contract to that legacy surface; only an all-v2 group can
     // advertise the common field-agnostic canonical envelope.
@@ -276,6 +276,7 @@ export function describeGenericEntity(
 export function describeToolForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
+  locale: ResolvedLocale,
 ): Tool[] {
   const addressable = [
     ...new Set(
@@ -285,7 +286,7 @@ export function describeToolForSession(
     ),
   ];
   return addressable.length > 0
-    ? [describeToolDefinition(addressable) as Tool]
+    ? [describeToolDefinition(addressable, locale.tag) as Tool]
     : [];
 }
 
@@ -333,7 +334,7 @@ export function crudToolsForSession(
         ? describeGenericTool(generic.get(item.generic)!, tables, session, locale)
         : item,
     ),
-    ...describeToolForSession(session, tables),
+    ...describeToolForSession(session, tables, locale),
   ];
 }
 

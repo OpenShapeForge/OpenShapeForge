@@ -18,12 +18,17 @@
  *   2. `osf_describe { entity, operation }` returns the exact per-entity input
  *      schema the call is validated against.
  *
+ * Every text is authored per language and resolved for the session's
+ * language with English as the fallback, like the entity labels beside it.
  * The compiler measures the advertised listing with the same functions the
  * runtime projects it with, so the byte budget it enforces is the listing a
  * client receives.
  */
 
 export const GENERIC_DESCRIBE_TOOL_NAME = "osf_describe";
+
+/** The prefix the shared tools own; a dedicated tool may not take a name under it. */
+export const GENERIC_TOOL_NAME_PREFIX = "osf_";
 
 export type GenericToolOperation = "list" | "get" | "create" | "update" | "delete";
 
@@ -45,21 +50,135 @@ export type GenericToolBranch = {
 
 type JsonObject = Record<string, unknown>;
 
-const GENERIC_OPERATION_SUMMARY: Record<GenericToolOperation, string> = {
-  list: "Return a page of records of one shared-catalog entity.",
-  get: "Read one record of one shared-catalog entity by id.",
-  create: "Create one record of one shared-catalog entity.",
-  update: "Update one record of one shared-catalog entity by id.",
-  delete: "Delete one record of one shared-catalog entity by id.",
+/** A text per language; `en` is the fallback and is always authored. */
+type Authored = Readonly<{ en: string; nl?: string }>;
+
+/** Base language of a locale tag (`nl-BE` → `nl`); anything else falls back to English. */
+export function genericTextLanguage(locale: string | undefined): "en" | "nl" {
+  return locale?.toLowerCase().startsWith("nl") ? "nl" : "en";
+}
+
+function text(authored: Authored, locale: string | undefined): string {
+  return authored[genericTextLanguage(locale)] ?? authored.en;
+}
+
+const SUMMARY: Record<GenericToolOperation, Authored> = {
+  list: {
+    en: "Return a page of records of one shared-catalog entity.",
+    nl: "Geeft een pagina records van één entiteit uit de gedeelde catalogus terug.",
+  },
+  get: {
+    en: "Read one record of one shared-catalog entity by id.",
+    nl: "Leest één record van één entiteit uit de gedeelde catalogus op id.",
+  },
+  create: {
+    en: "Create one record of one shared-catalog entity.",
+    nl: "Maakt één record van één entiteit uit de gedeelde catalogus aan.",
+  },
+  update: {
+    en: "Update one record of one shared-catalog entity by id.",
+    nl: "Wijzigt één record van één entiteit uit de gedeelde catalogus op id.",
+  },
+  delete: {
+    en: "Delete one record of one shared-catalog entity by id.",
+    nl: "Verwijdert één record van één entiteit uit de gedeelde catalogus op id.",
+  },
 };
 
-const GENERIC_OPERATION_TITLE: Record<GenericToolOperation, string> = {
-  list: "List records",
-  get: "Read record",
-  create: "Create record",
-  update: "Update record",
-  delete: "Delete record",
+const TITLE: Record<GenericToolOperation, Authored> = {
+  list: { en: "List records", nl: "Records tonen" },
+  get: { en: "Read record", nl: "Record lezen" },
+  create: { en: "Create record", nl: "Record aanmaken" },
+  update: { en: "Update record", nl: "Record wijzigen" },
+  delete: { en: "Delete record", nl: "Record verwijderen" },
 };
+
+const ENTITY_SELECTOR: Authored = {
+  en:
+    "Which record type this call is about. Only the values listed here " +
+    "are addressable by this session; anything else is refused.",
+  nl:
+    "Over welk recordtype deze aanroep gaat. Alleen de hier genoemde waarden " +
+    "zijn in deze sessie bereikbaar; iets anders wordt geweigerd.",
+};
+
+const ENTITY_TITLE: Authored = { en: "Entity", nl: "Entiteit" };
+
+function differsPerEntity(key: string, operation: GenericToolOperation): Authored {
+  return {
+    en:
+      `Differs per entity. ${GENERIC_DESCRIBE_TOOL_NAME} { entity, operation: ` +
+      `"${operation}" } returns the exact schema of \`${key}\` for the entity you ` +
+      `mean; the call is validated against it.`,
+    nl:
+      `Verschilt per entiteit. ${GENERIC_DESCRIBE_TOOL_NAME} { entity, operation: ` +
+      `"${operation}" } geeft het exacte schema van \`${key}\` voor de bedoelde ` +
+      `entiteit; de aanroep wordt daartegen gevalideerd.`,
+  };
+}
+
+const ENTITY_OWN_PROPERTIES: Authored = {
+  en:
+    `Properties an entity has beyond the shared ones are accepted as well; ` +
+    `${GENERIC_DESCRIBE_TOOL_NAME} lists them per entity.`,
+  nl:
+    `Eigenschappen die een entiteit naast de gedeelde heeft worden ook aanvaard; ` +
+    `${GENERIC_DESCRIBE_TOOL_NAME} noemt ze per entiteit.`,
+};
+
+function guidance(operation: GenericToolOperation, entityCatalogUri: string): Authored {
+  return {
+    en:
+      ` Set \`entity\` to the record type you mean. The arguments listed here are ` +
+      `the ones every entity shares; the entity's own fields and a property marked ` +
+      `"differs per entity" are not listed here — call ${GENERIC_DESCRIBE_TOOL_NAME} ` +
+      `{ entity, operation: "${operation}" } once for the exact schema before the ` +
+      `first call, and the entity's ${entityCatalogUri} resource describes its fields.`,
+    nl:
+      ` Zet \`entity\` op het bedoelde recordtype. De argumenten hier zijn die elke ` +
+      `entiteit deelt; de eigen velden van een entiteit en een eigenschap gemarkeerd ` +
+      `"verschilt per entiteit" staan hier niet — roep ${GENERIC_DESCRIBE_TOOL_NAME} ` +
+      `{ entity, operation: "${operation}" } eenmaal aan voor het exacte schema vóór ` +
+      `de eerste aanroep; de ${entityCatalogUri}-resource van de entiteit beschrijft haar velden.`,
+  };
+}
+
+const AVAILABLE: Authored = { en: " Available to you here: ", nl: " Hier voor jou beschikbaar: " };
+
+const DESCRIBE_TITLE: Authored = {
+  en: "Describe shared-catalog arguments",
+  nl: "Argumenten van de gedeelde catalogus beschrijven",
+};
+
+const DESCRIBE_DESCRIPTION: Authored = {
+  en:
+    "Return the exact input schema of the osf_* tools for one entity: the " +
+    "per-entity arguments the generic tools only summarise. Call it once per " +
+    "entity and operation before the first osf_create, osf_update or " +
+    "osf_list call on it; the answer is what the call is validated against. " +
+    "Omit `operation` to get every operation this session may perform on the entity.",
+  nl:
+    "Geeft het exacte invoerschema van de osf_*-tools voor één entiteit: de " +
+    "argumenten per entiteit die de generieke tools alleen samenvatten. Roep het " +
+    "eenmaal per entiteit en operatie aan vóór de eerste osf_create-, osf_update- " +
+    "of osf_list-aanroep erop; het antwoord is waartegen de aanroep wordt gevalideerd. " +
+    "Laat `operation` weg voor elke operatie die deze sessie op de entiteit mag uitvoeren.",
+};
+
+const DESCRIBE_ENTITY: Authored = {
+  en: "The record type, as listed in the osf_* tools' `entity` enum.",
+  nl: "Het recordtype, zoals genoemd in de `entity`-enum van de osf_*-tools.",
+};
+
+const DESCRIBE_OPERATION: Authored = {
+  en: "One of the generic operations; omitted means all the session may perform.",
+  nl: "Eén van de generieke operaties; weggelaten betekent alle die de sessie mag uitvoeren.",
+};
+
+const OPERATION_TITLE: Authored = { en: "Operation", nl: "Operatie" };
+
+/** The annotations a reader takes from a property node; kept on a stub as on a wrapper (#521). */
+const PRESENTATION_KEYS = ["x-osf-type", "x-osf-reference", "x-osf-i18n"] as const;
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -85,33 +204,32 @@ function requiredOf(schema: JsonObject): string[] {
     : [];
 }
 
-function uniform<T>(values: T[]): T | undefined {
+/** The value every variant agrees on, by structural equality, or undefined. */
+function uniform(values: unknown[]): unknown {
   const [first, ...rest] = values;
-  return first !== undefined && rest.every((value) => value === first) ? first : undefined;
+  if (first === undefined) return undefined;
+  const shape = stableJson(first);
+  return rest.every((value) => stableJson(value) === shape) ? first : undefined;
 }
 
 /**
  * One property of the compact schema: verbatim when every entity that has it
  * describes it the same way, otherwise a stub that keeps what agrees (type,
- * title) and names the tool that has the rest.
+ * title, the presentation keywords) and names the tool that has the rest.
  */
 function compactProperty(
   key: string,
   variants: JsonObject[],
   operation: GenericToolOperation,
+  locale: string | undefined,
 ): JsonObject {
-  const shapes = new Set(variants.map(stableJson));
-  if (shapes.size === 1) return variants[0]!;
-  const type = uniform(variants.map((variant) => variant.type));
-  const title = uniform(variants.map((variant) => variant.title));
-  return {
-    ...(typeof type === "string" ? { type } : {}),
-    ...(typeof title === "string" ? { title } : {}),
-    description:
-      `Differs per entity. ${GENERIC_DESCRIBE_TOOL_NAME} { entity, operation: ` +
-      `"${operation}" } returns the exact schema of \`${key}\` for the entity you ` +
-      `mean; the call is validated against it.`,
-  };
+  if (new Set(variants.map(stableJson)).size === 1) return variants[0]!;
+  const kept: JsonObject = {};
+  for (const name of ["type", "title", ...PRESENTATION_KEYS]) {
+    const value = uniform(variants.map((variant) => variant[name]));
+    if (value !== undefined) kept[name] = value;
+  }
+  return { ...kept, description: text(differsPerEntity(key, operation), locale) };
 }
 
 /**
@@ -128,15 +246,15 @@ function compactProperty(
 export function compactGenericInputSchema(
   operation: GenericToolOperation,
   branches: readonly GenericToolBranch[],
+  locale?: string,
 ): JsonObject {
   const properties: Record<string, JsonObject> = {
     entity: {
       type: "string",
+      "x-osf-type": "string",
       enum: branches.map((branch) => branch.entity),
-      title: "Entity",
-      description:
-        "Which record type this call is about. Only the values listed here " +
-        "are addressable by this session; anything else is refused.",
+      title: text(ENTITY_TITLE, locale),
+      description: text(ENTITY_SELECTOR, locale),
     },
   };
   const variants = new Map<string, JsonObject[]>();
@@ -150,7 +268,7 @@ export function compactGenericInputSchema(
   }
   const shared = [...variants].filter(([, list]) => list.length === branches.length);
   for (const [key, list] of shared) {
-    properties[key] = compactProperty(key, list, operation);
+    properties[key] = compactProperty(key, list, operation, locale);
   }
   const required = [
     "entity",
@@ -164,11 +282,7 @@ export function compactGenericInputSchema(
     properties,
     required,
     ...(entityOwn
-      ? {
-          description:
-            `Properties an entity has beyond the shared ones are accepted as well; ` +
-            `${GENERIC_DESCRIBE_TOOL_NAME} lists them per entity.`,
-        }
+      ? { description: text(ENTITY_OWN_PROPERTIES, locale) }
       : { additionalProperties: false }),
   };
 }
@@ -183,20 +297,17 @@ export function genericToolText(
   operation: GenericToolOperation,
   branches: readonly GenericToolBranch[],
   entityCatalogUri: string,
+  locale?: string,
 ): { title: string; description: string } {
   const catalogue = branches
     .map((branch) => (branch.title === branch.entity ? branch.entity : `${branch.entity} (${branch.title})`))
     .join(", ");
   return {
-    title: GENERIC_OPERATION_TITLE[operation],
+    title: text(TITLE[operation], locale),
     description:
-      `${GENERIC_OPERATION_SUMMARY[operation]} Set \`entity\` to the record type ` +
-      `you mean. The arguments listed here are the ones every entity shares; ` +
-      `the entity's own fields and a property marked "differs per entity" are ` +
-      `not listed here — call ${GENERIC_DESCRIBE_TOOL_NAME} { entity, operation: ` +
-      `"${operation}" } once for the exact schema before the first call, and the ` +
-      `entity's ${entityCatalogUri} resource describes its fields. ` +
-      `Available to you here: ${catalogue}.`,
+      text(SUMMARY[operation], locale) +
+      text(guidance(operation, entityCatalogUri), locale) +
+      `${text(AVAILABLE, locale)}${catalogue}.`,
   };
 }
 
@@ -204,7 +315,7 @@ export function genericToolText(
  * The describe tool itself, advertised beside the generic tools whenever a
  * session can address at least one entity through them.
  */
-export function describeToolDefinition(entities: readonly string[]): {
+export function describeToolDefinition(entities: readonly string[], locale?: string): {
   name: string;
   title: string;
   description: string;
@@ -213,27 +324,24 @@ export function describeToolDefinition(entities: readonly string[]): {
 } {
   return {
     name: GENERIC_DESCRIBE_TOOL_NAME,
-    title: "Describe shared-catalog arguments",
-    description:
-      "Return the exact input schema of the osf_* tools for one entity: the " +
-      "per-entity arguments the generic tools only summarise. Call it once per " +
-      "entity and operation before the first osf_create, osf_update or " +
-      "osf_list call on it; the answer is what the call is validated against. " +
-      "Omit `operation` to get every operation this session may perform on the entity.",
+    title: text(DESCRIBE_TITLE, locale),
+    description: text(DESCRIBE_DESCRIPTION, locale),
     inputSchema: {
       type: "object",
       properties: {
         entity: {
           type: "string",
+          "x-osf-type": "string",
           enum: [...entities],
-          title: "Entity",
-          description: "The record type, as listed in the osf_* tools' `entity` enum.",
+          title: text(ENTITY_TITLE, locale),
+          description: text(DESCRIBE_ENTITY, locale),
         },
         operation: {
           type: "string",
+          "x-osf-type": "string",
           enum: [...GENERIC_TOOL_OPERATIONS],
-          title: "Operation",
-          description: "One of the generic operations; omitted means all the session may perform.",
+          title: text(OPERATION_TITLE, locale),
+          description: text(DESCRIBE_OPERATION, locale),
         },
       },
       required: ["entity"],

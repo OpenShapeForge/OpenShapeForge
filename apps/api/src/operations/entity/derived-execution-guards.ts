@@ -407,17 +407,29 @@ export async function assertPublishableRelatedMutationInTransaction(
         pages,
       );
     } else if (execution.connectionTable === table.name) {
-      const providerId = serialized[execution.connectionProviderRef];
-      if (typeof providerId === "string" && providerId.length > 0) {
-        ownerIds = await ownerIdsForProvider(
+      const providerIds = new Set<string>();
+      const takeProvider = (row: Record<string, unknown>) => {
+        const providerId = row[execution.connectionProviderRef];
+        if (typeof providerId === "string" && providerId.length > 0) {
+          providerIds.add(providerId);
+        }
+      };
+      takeProvider(serialized);
+      if (mutation.kind === "update") takeProvider(mutation.before);
+      const owners = new Set<string>();
+      for (const providerId of providerIds) {
+        for (const ownerId of await ownerIdsForProvider(
           execution,
           providerId,
           db,
           session,
           tables,
           pages,
-        );
+        )) {
+          owners.add(ownerId);
+        }
       }
+      ownerIds = [...owners];
     }
     for (const ownerId of ownerIds) {
       await revalidatePublishedOwner(db, session, tables, trx, entry, ownerId, {

@@ -194,13 +194,14 @@ async function seed(bindings: number) {
   const ownerId = randomUUID();
   const operationId = randomUUID();
   const providerId = randomUUID();
+  const connectionId = randomUUID();
   await sql`insert into public.svc_providers(id, tenant_id, name, auth)
     values (${providerId}::uuid, ${tenant}::uuid, 'Ticketing', '{"scheme":"bearer","tokenFrom":"token"}'::jsonb)`
     .execute(privileged!.db);
   await sql`insert into public.svc_operations(id, tenant_id, key, provider_id)
     values (${operationId}::uuid, ${tenant}::uuid, 'search', ${providerId}::uuid)`.execute(privileged!.db);
   await sql`insert into public.svc_connections(id, tenant_id, provider_id, owner_user_id, values)
-    values (${randomUUID()}::uuid, ${tenant}::uuid, ${providerId}::uuid, null, '{"token":"t"}'::jsonb)`
+    values (${connectionId}::uuid, ${tenant}::uuid, ${providerId}::uuid, null, '{"token":"t"}'::jsonb)`
     .execute(privileged!.db);
   await sql`insert into erp.template_variants(id, tenant_id, title, key, status)
     values (${ownerId}::uuid, ${tenant}::uuid, 'Owner', 'find-tickets', 'published')`.execute(privileged!.db);
@@ -212,7 +213,7 @@ async function seed(bindings: number) {
       values (${childId}::uuid, ${tenant}::uuid, 'Binding', ${ownerId}::uuid, ${index}, ${index + 1}, ${operationId}::uuid)`
       .execute(privileged!.db);
   }
-  return { f, ownerId, operationId, providerId, childIds, expectedVersion: await version(ownerId) };
+  return { f, ownerId, operationId, providerId, connectionId, childIds, expectedVersion: await version(ownerId) };
 }
 
 const fails = (promise: Promise<unknown>, code: string) =>
@@ -342,6 +343,29 @@ const fails = (promise: Promise<unknown>, code: string) =>
       ),
       "NOT_PUBLISHABLE",
     );
+  });
+
+  test("retargeting a connection off a published owner's provider is NOT_PUBLISHABLE", async () => {
+    const seeded = await seed(1);
+    const otherProvider = randomUUID();
+    await sql`insert into public.svc_providers(id, tenant_id, name, auth)
+      values (${otherProvider}::uuid, ${tenant}::uuid, 'Other', '{"scheme":"bearer","tokenFrom":"token"}'::jsonb)`
+      .execute(privileged!.db);
+    await fails(
+      updateGeneratedEntityForTable(
+        restricted!.db,
+        session,
+        seeded.f.connection,
+        seeded.connectionId,
+        { providerId: otherProvider },
+        { tables: seeded.f.catalogTables, derivedTools: [ENTRY] },
+      ),
+      "NOT_PUBLISHABLE",
+    );
+    expect(
+      (await sql<{ provider: string }>`select provider_id::text as provider from public.svc_connections where id = ${seeded.connectionId}::uuid`
+        .execute(privileged!.db)).rows[0]!.provider,
+    ).toBe(seeded.providerId);
   });
 
   test("two sessions deleting the last two bindings do not both succeed", async () => {

@@ -34,6 +34,7 @@ describe("status transition binding", () => {
     const base = transitionBinding(trigger);
     const binding: TransitionBinding = {
       ...base,
+      referenced: [],
       rule: { ...base.rule, preconditions: [{ field: "expectedAt", present: true }, { field: "producedInvoiceId", present: false }] },
     };
     expect(transitionRefusal(binding, { status: "invoiced", expected_at: "2026-01-01" })).toMatchObject({
@@ -52,5 +53,33 @@ describe("status transition binding", () => {
       message: "trigger requires producedInvoiceId to be empty.",
     });
     expect(table.columns.find((column) => column.name === "status")?.writtenBy?.[0]?.operation).toBe(trigger.key);
+  });
+
+  test("refuses a referenced precondition that fails present, in, or names no record in this tenant", () => {
+    const base = transitionBinding(trigger);
+    expect(base.referenced).toEqual([expect.objectContaining({ via: "agreementId", field: "code", present: true })]);
+    const remote = (row?: Record<string, unknown>) => new Map<string, Record<string, unknown> | undefined>([["agreementId", row]]);
+    expect(transitionRefusal(base, { status: "pending" }, remote(undefined))).toMatchObject({
+      code: "INVALID_STATE",
+      message: "trigger requires agreementId.code on a Agreement in this tenant.",
+    });
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: null }))).toMatchObject({
+      message: "trigger requires agreementId.code to be set.",
+    });
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: "" }))).toBeUndefined();
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: "AGR-1" }))).toBeUndefined();
+
+    const { present: _present, ...via } = base.referenced[0]!;
+    const allowed = { ...base, referenced: [{ ...via, in: ["approved", "signed"] }] };
+    expect(transitionRefusal(allowed, { status: "pending" }, remote({ code: "draft" }))).toMatchObject({
+      message: "trigger requires agreementId.code to be one of approved, signed.",
+    });
+    expect(transitionRefusal(allowed, { status: "pending" }, remote({ code: "approved" }))).toBeUndefined();
+
+    const empty = { ...base, referenced: [{ ...via, present: false }] };
+    expect(transitionRefusal(empty, { status: "pending" }, remote({ code: "x" }))).toMatchObject({
+      message: "trigger requires agreementId.code to be empty.",
+    });
+    expect(transitionRefusal(empty, { status: "pending" }, remote({ code: null }))).toBeUndefined();
   });
 });

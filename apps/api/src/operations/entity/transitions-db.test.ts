@@ -72,8 +72,18 @@ function protectedBinding(): TransitionBinding {
   };
   return { ...base, table, statusColumn: table.columns.find((column) => column.name === "status")!, rule: { ...base.rule, recordPermission: "edit" } };
 }
-async function milestone(status = "pending", tenantId = tenant) {
-  const record = await createGeneratedEntityForTable(privileged!.db, { ...session, tenantId }, table, { agreementId: randomUUID(), description: "Go-live", amount: 100 });
+async function agreement(tenantId = tenant, code: string | null = "AGR-1"): Promise<string> {
+  const id = randomUUID();
+  await sql`insert into erp.agreements (id, tenant_id, code) values (${id}::uuid, ${tenantId}::uuid, ${code})`.execute(privileged!.db);
+  return id;
+}
+async function milestone(status = "pending", tenantId = tenant, agreementId?: string) {
+  const record = await createGeneratedEntityForTable(
+    privileged!.db,
+    { ...session, tenantId },
+    table,
+    { agreementId: agreementId ?? await agreement(tenantId), description: "Go-live", amount: 100 },
+  );
   const id = String(record.id);
   if (status !== "pending") await sql`update erp.agreement_milestones set status = ${status} where id = ${id}::uuid`.execute(privileged!.db);
   return id;
@@ -95,6 +105,7 @@ describe("status transitions against PostgreSQL", () => {
     privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 1 });
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
+      create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, unique(tenant_id,id));
       create table erp.agreement_milestones(${columnDdl()}, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
@@ -102,6 +113,8 @@ describe("status transitions against PostgreSQL", () => {
         target_id text not null, operation_id text not null, owner_user_id uuid not null, owner_display_name text, token_hash text not null,
         acquired_version text not null, inactivity_timeout_seconds integer not null, acquired_at timestamptz not null default now(),
         last_activity_at timestamptz not null default now(), expires_at timestamptz not null);
+      alter table erp.agreements enable row level security; alter table erp.agreements force row level security;
+      create policy tenant on erp.agreements using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       alter table erp.agreement_milestones enable row level security; alter table erp.agreement_milestones force row level security;
       create policy tenant on erp.agreement_milestones using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       grant usage on schema app,erp,platform to openshapeforge_app;
@@ -112,7 +125,7 @@ describe("status transitions against PostgreSQL", () => {
     registerEntityOperationAvailability(restricted.db, bindOperationHandlers([]));
   }, 30_000);
   beforeEach(async () => {
-    await sql`truncate erp.agreement_milestones, platform.entity_events`.execute(privileged!.db);
+    await sql`truncate erp.agreement_milestones, erp.agreements, platform.entity_events`.execute(privileged!.db);
   });
   afterAll(async () => {
     await restricted?.close(); await privileged?.close();
@@ -209,5 +222,45 @@ describe("status transitions against PostgreSQL", () => {
     };
     expect(await offers(pending)).toMatchObject({ available: true, binding: { input: { id: pending } } });
     expect(await offers(triggered)).toMatchObject({ available: false, error: { code: "INVALID_STATE" } });
+  });
+
+  test("a referenced precondition reads the named record in this tenant and refuses a miss, a cross-tenant row, present and in", async () => {
+    const passing = await milestone();
+    expect(await transitionOperationHandler(operation)({ id: passing }, context())).toMatchObject({ value: { status: "triggered" } });
+
+    const missing = await milestone("pending", tenant, randomUUID());
+    await expect(transitionOperationHandler(operation)({ id: missing }, context())).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on a Agreement in this tenant." },
+    });
+    expect((await row(missing))!.status).toBe("pending");
+
+    const foreignAgreement = await agreement(otherTenant);
+    const crossTenant = await milestone("pending", tenant, foreignAgreement);
+    await expect(transitionOperationHandler(operation)({ id: crossTenant }, context())).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on a Agreement in this tenant." },
+    });
+
+    const emptyCode = await agreement(tenant, null);
+    const empty = await milestone("pending", tenant, emptyCode);
+    const emptyBinding: TransitionBinding = {
+      ...transitionBinding(operation),
+      referenced: [{ ...transitionBinding(operation).referenced[0]!, present: false }],
+    };
+    expect(await executeTransition(restricted!.db, session, emptyBinding, { id: empty })).toMatchObject({ status: "triggered" });
+    const stillSet = await milestone();
+    await expect(executeTransition(restricted!.db, session, emptyBinding, { id: stillSet })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be empty." },
+    });
+
+    const listed = await agreement(tenant, "approved");
+    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
+    const inBinding: TransitionBinding = {
+      ...transitionBinding(operation),
+      referenced: [{ ...via, in: ["approved"] }],
+    };
+    expect(await executeTransition(restricted!.db, session, inBinding, { id: await milestone("pending", tenant, listed) })).toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, inBinding, { id: await milestone() })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
+    });
   });
 });

@@ -6457,6 +6457,29 @@
                   "en": "Withdraw this milestone so no billing run will invoice it",
                   "nl": "Trek deze mijlpaal in zodat geen facturatierun hem factureert"
                 }
+              },
+              {
+                "key": "invoice",
+                "from": [
+                  "triggered"
+                ],
+                "to": "invoiced",
+                "label": {
+                  "en": "Invoice",
+                  "nl": "Factureren"
+                },
+                "description": {
+                  "en": "Record that this milestone has been invoiced, naming the invoice; the milestone billing run does this for every milestone it invoices",
+                  "nl": "Leg vast dat deze mijlpaal gefactureerd is, met de factuur erbij; de mijlpaalfacturatie doet dit voor elke mijlpaal die zij factureert"
+                },
+                "auth": {
+                  "roles": [
+                    "Finance.All.ReadWrite"
+                  ]
+                },
+                "writes": [
+                  "producedInvoiceId"
+                ]
               }
             ]
           }

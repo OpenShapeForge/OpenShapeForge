@@ -16,6 +16,17 @@ pluralLabels:
   nl: Factuurreeksen
 domains:
   - finance
+# One counter per (tenant, kind, fiscal year): the unique index is what lets
+# the billing run allocate a number with a single `insert ... on conflict`
+# increment, so two concurrent first-of-year runs serialise on the row
+# instead of both seeding it at 1.
+indexes:
+  - name: invoice_sequences_tenant_kind_fiscal_year_uidx
+    fields:
+      - tenantId
+      - kind
+      - fiscalYearCode
+    unique: true
 fields:
   - key: kind
     required: true

@@ -3,8 +3,9 @@ kind: coreEntity
 module: core
 entity: BillingRun
 title: Billing Run
-description: Durable run-level ledger for one execution of the prolongation engine. Holds request-level idempotency,
-  summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem.
+description: Durable run-level ledger for one execution of the billing engine. Holds request-level idempotency,
+  summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem. The
+  milestone mode is executable here as the Operation BillingRun.execute, implemented by the core osf-billing module.
 language: en
 displayTemplate: "{{mode}} @ {{billUpToDate}}"
 filterField: idempotencyKey
@@ -307,9 +308,90 @@ operations:
         mode: natural
     confirmation:
       mode: none
+  # The milestone billing run as a described Operation. One call invoices
+  # every triggered AgreementMilestone of the tenant (or of one agreement):
+  # per milestone one Invoice with one InvoiceLine, numbered from the
+  # tenant's sales InvoiceSequence, one BillingRunItem recording the
+  # decision, and the milestone moved to invoiced through its `invoice`
+  # transition. The whole run is one transaction under the caller's
+  # idempotency key: a replay with the same key returns the first result
+  # through the core receipt, and never invoices twice.
+  execute:
+    name: { en: Run milestone billing, nl: Mijlpaalfacturatie draaien }
+    description:
+      en: Invoices every triggered agreement milestone, optionally of one agreement, in one billing run. Requires an idempotency key; a replay returns the first result.
+      nl: Factureert elke getriggerde overeenkomstmijlpaal, desgewenst van één overeenkomst, in één facturatierun. Vereist een idempotentiesleutel; een herhaling geeft het eerste resultaat terug.
+    implementation: { type: plugin, plugin: osf-billing, handler: executeBillingRun }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [idempotencyKey]
+        properties:
+          idempotencyKey:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n: { title: { en: Idempotency key, nl: Idempotentiesleutel } }
+          agreementId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Agreement }
+            x-osf-i18n:
+              title: { en: Agreement, nl: Overeenkomst }
+              description: { en: Invoice only the triggered milestones of this agreement., nl: Factureer alleen de getriggerde mijlpalen van deze overeenkomst. }
+          dryRun:
+            type: boolean
+            default: false
+            x-osf-i18n:
+              title: { en: Dry run, nl: Proefrun }
+              description: { en: Plan and count the milestones without producing invoices., nl: Plan en tel de mijlpalen zonder facturen te maken. }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, status, mode, dryRun, agreementsPlanned, agreementsCompleted, invoicesProduced, totalAmount, items]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Billing run, nl: Facturatierun } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          mode: { type: string, x-osf-i18n: { title: { en: Mode, nl: Modus } } }
+          dryRun: { type: boolean, x-osf-i18n: { title: { en: Dry run, nl: Proefrun } } }
+          agreementsPlanned: { type: integer, x-osf-i18n: { title: { en: Milestones planned, nl: Geplande mijlpalen } } }
+          agreementsCompleted: { type: integer, x-osf-i18n: { title: { en: Milestones invoiced, nl: Gefactureerde mijlpalen } } }
+          invoicesProduced: { type: integer, x-osf-i18n: { title: { en: Invoices produced, nl: Geproduceerde facturen } } }
+          totalAmount: { type: number, x-osf-i18n: { title: { en: Total amount, nl: Totaalbedrag } } }
+          items:
+            type: array
+            x-osf-i18n: { title: { en: Items, nl: Regels } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [agreementMilestoneId, agreementId, invoiceId, invoiceNumber, amount]
+              properties:
+                agreementMilestoneId: { type: string, format: uuid, x-osf-i18n: { title: { en: Milestone, nl: Mijlpaal } } }
+                agreementId: { type: string, format: uuid, x-osf-i18n: { title: { en: Agreement, nl: Overeenkomst } } }
+                invoiceId: { type: [string, "null"], format: uuid, x-osf-i18n: { title: { en: Invoice, nl: Factuur } } }
+                invoiceNumber: { type: [integer, "null"], x-osf-i18n: { title: { en: Invoice number, nl: Factuurnummer } } }
+                amount: { type: number, x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
+    auth: { mode: session, roles: [Finance.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The run input is invalid. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: The caller may not run billing. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
+      - { status: 409, code: ALREADY_EXISTS, description: Another caller already ran billing under this idempotency key. }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      execute: { method: POST, path: /api/rest/v1/billing-runs/execute }
   graphql: {}
+  mcp:
+    tools: generic
   workflow:
     nodes:
       actions:

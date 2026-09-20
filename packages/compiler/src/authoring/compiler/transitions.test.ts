@@ -67,10 +67,11 @@ describe("status transitions", () => {
   });
 
   test("status is writtenBy every rule's Operation, a stamped field by its rule only", () => {
-    expect(contract.model.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]);
+    expect(contract.model.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel", "AgreementMilestone.invoice"]);
     for (const key of ["triggeredAt", "triggeredBy"]) {
       expect(contract.model.fields.find((field) => field.key === key)!.writtenBy).toEqual(["AgreementMilestone.trigger"]);
     }
+    expect(contract.model.fields.find((field) => field.key === "producedInvoiceId")!.writtenBy).toEqual(["AgreementMilestone.invoice"]);
     expect(contract.model.fields.find((field) => field.key === "description")!.writtenBy).toBeUndefined();
   });
 
@@ -83,13 +84,25 @@ describe("status transitions", () => {
           stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
         },
         { key: "cancel", operation: "AgreementMilestone.cancel", from: ["pending", "triggered"], to: "cancelled", label: { en: "Cancel", nl: "Annuleren" } },
+        { key: "invoice", operation: "AgreementMilestone.invoice", from: ["triggered"], to: "invoiced", label: { en: "Invoice", nl: "Factureren" }, writes: ["producedInvoiceId"] },
       ],
     }]);
     expect(contract.interfaces?.web?.operations).toBeDefined();
     const web = buildWebManifest([{ slug: "agreement-milestone", contract }]);
     const entity = web.entities.AgreementMilestone!;
     expect(entity.transitions).toEqual(contract.transitions as typeof entity.transitions);
-    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toEqual(expect.arrayContaining(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]));
+    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toEqual(expect.arrayContaining(["AgreementMilestone.trigger", "AgreementMilestone.cancel", "AgreementMilestone.invoice"]));
+  });
+
+  test("the invoice rule takes the invoice it names as input, under the finance role, and is the only other writer of that field", () => {
+    const invoice = contract.pluginOperations!.find((candidate) => candidate.key === "invoice")!;
+    expect(invoice.id).toBe("AgreementMilestone.invoice");
+    expect(invoice.definition.auth).toEqual({ mode: "session", roles: ["Finance.All.ReadWrite"] });
+    const schema = invoice.definition.input!.schema as { required: string[]; properties: Record<string, unknown> };
+    expect(Object.keys(schema.properties)).toEqual(["id", "producedInvoiceId"]);
+    expect(schema.required).toEqual(["id"]);
+    expect((invoice.definition.description as { en: string }).en).toContain("status: triggered -> invoiced");
+    expect(invoice.interfaces.rest).toEqual({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/invoice" });
   });
 
   test("the lowered Operation passes the plugin Operation gates with a REST, MCP and GraphQL projection", () => {

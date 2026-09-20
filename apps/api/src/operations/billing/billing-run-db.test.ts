@@ -84,7 +84,7 @@ function keyed(session: TrustedSessionContext, input: BillingRunInput): Promise<
   });
 }
 
-const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejects.toMatchObject({ operationError: { code } });
+const fails = (promise: unknown, code: string) => expect(Promise.resolve(promise)).rejects.toMatchObject({ operationError: { code } });
 
 describe("the milestone billing run against PostgreSQL", () => {
   beforeAll(async () => {

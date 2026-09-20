@@ -52,8 +52,10 @@ describe("billing Operations", () => {
     expect(create.implementation).toEqual({ type: "plugin", plugin: "osf-billing", handler: "createAgreementMilestone" });
     expect(create.authorization).toEqual({ action: "create", roles: ["Agreements.All.ReadWrite"] });
     expect(create.input).toMatchObject({ kind: "json-schema" });
-    const schema = (create.input as { schema: { required: string[]; properties: Record<string, unknown> } }).schema;
+    const schema = (create.input as unknown as { schema: { required: string[]; properties: Record<string, unknown>; anyOf: Array<{ required: string[] }> } }).schema;
     expect(schema.required).toEqual(["agreementId", "description"]);
+    // Either a fixed amount or a basis with a percentage: the contract says so.
+    expect(schema.anyOf.map((branch) => branch.required)).toEqual([["amount"], ["basisAmount", "percentOfBasis"]]);
     expect(Object.keys(schema.properties)).toEqual(["agreementId", "description", "basisAmount", "percentOfBasis", "amount", "expectedAt"]);
     // The status and the invoice reference are written by the transitions, never by a create.
     for (const key of ["status", "producedInvoiceId", "triggeredAt"]) {

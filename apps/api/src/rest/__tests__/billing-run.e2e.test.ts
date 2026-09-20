@@ -74,7 +74,7 @@ describe("the milestone billing run on REST", () => {
     expect(percent.body.data).toMatchObject({ agreementId, status: "pending", basisAmount: 10000, percentOfBasis: 25, amount: 2500 });
     const invalid = await call(contracts, "POST", milestones, { agreementId, description: "Nothing" });
     expect(invalid.status).toBe(422);
-    expect(invalid.body.error).toMatchObject({ code: "VALIDATION", violations: [{ field: "amount" }] });
+    expect(invalid.body.error).toMatchObject({ code: "VALIDATION", violations: expect.arrayContaining([expect.objectContaining({ field: "amount" })]) });
     // The status is not part of the create's closed input: it is written by the transitions only.
     const forged = await call(contracts, "POST", milestones, { agreementId, description: "Forged", amount: 1, status: "triggered" });
     expect(forged.status).toBe(422);

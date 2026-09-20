@@ -251,6 +251,13 @@ operations:
         type: object
         additionalProperties: false
         required: [agreementId, description]
+        # Either a fixed amount, or a percentage of a basis: the schema says
+        # so, and every interface refuses an input that gives neither. The
+        # branches restate the property names because strict JSON Schema
+        # wants a required name defined where it is required.
+        anyOf:
+          - { required: [amount], properties: { amount: true } }
+          - { required: [basisAmount, percentOfBasis], properties: { basisAmount: true, percentOfBasis: true } }
         properties:
           agreementId:
             type: string

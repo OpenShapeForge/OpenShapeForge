@@ -747,16 +747,14 @@ export type McpElicitOnCreateDefinition = {
 };
 
 export type McpDerivedExecutionDefinition = {
-  /** JSON collection on the owner row. Absent when `bindingsRelation` is set. */
-  bindingsField?: string;
-  /** Owned hasMany collection on the owner. Absent when `bindingsField` is set. */
-  bindingsRelation?: string;
+  /** Owned hasMany collection on the owner. */
+  bindingsRelation: string;
   /** Target entity of `bindingsRelation`. */
-  bindingsEntity?: string;
+  bindingsEntity: string;
   /** Physical table of the binding entity, resolved at catalog build. */
-  bindingsTable?: string;
-  /** FK on the binding entity back to the owner. */
-  parentRef?: string;
+  bindingsTable: string;
+  /** Field on the binding entity that belongsTo the owner. */
+  parentRef: string;
   operationRef: string;
   operationEntity: string;
   /** Physical table of the operation entity, resolved at catalog build. */

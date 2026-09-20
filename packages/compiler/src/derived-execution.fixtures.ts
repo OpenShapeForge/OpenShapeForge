@@ -90,18 +90,16 @@ export const catalogInput = (
   table,
 });
 
-const JSON_BINDING_ITEM_FIELDS = [
-  field({ key: "order", baseType: "integer", required: true }),
-  field({ key: "optional", baseType: "boolean" }),
-  field({ key: "when", baseType: "object" }),
-  field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
-  field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
-  field({ key: "forEach", baseType: "object" }),
-  field({ key: "capabilityId", required: true }),
-];
-
 export const BINDING_FIELDS = [
-  field({ key: "serviceId" }),
+  field({
+    key: "serviceId",
+    osfType: "Service",
+    relationship: {
+      kind: "belongsTo",
+      target: "Service",
+      foreignKey: "service_id",
+    },
+  }),
   field({
     key: "capabilityId",
     osfType: "Capability",
@@ -119,6 +117,14 @@ export const BINDING_FIELDS = [
   field({ key: "forEach", baseType: "object" }),
 ];
 
+const parentRelationship: CompiledRelationship = {
+  key: "serviceId",
+  kind: "belongsTo",
+  target: "Service",
+  ownership: "reference",
+  foreignKey: "service_id",
+};
+
 const operationRelationship: CompiledRelationship = {
   key: "capabilityId",
   kind: "belongsTo",
@@ -130,7 +136,7 @@ const operationRelationship: CompiledRelationship = {
 export const related = (name: string, table: string, fields?: CompiledField[]) =>
   catalogInput(contract({ name, fields: fields ?? [field({ key: "name" })] }), table);
 
-export const executionBase: AuthoredDerivedExecution = {
+export const executionBase = {
   operationRef: "capabilityId",
   operationEntity: "Capability",
   providerRef: "adapterId",
@@ -150,7 +156,9 @@ export const ownedBindings: CompiledRelationship = {
 };
 
 export function ownerInput(
-  execution: AuthoredDerivedExecution,
+  execution: Omit<AuthoredDerivedExecution, "bindingsRelation"> & {
+    bindingsRelation?: string;
+  },
   relationships: CompiledRelationship[] = [ownedBindings],
   extraFields: CompiledField[] = [],
 ): McpCatalogInput {
@@ -162,12 +170,6 @@ export function ownerInput(
         field({ key: "name" }),
         field({ key: "description" }),
         field({ key: "inputFields", baseType: "object", cardinality: "collection" }),
-        field({
-          key: "steps",
-          baseType: "object",
-          cardinality: "collection",
-          children: JSON_BINDING_ITEM_FIELDS,
-        }),
         field({ key: "version", baseType: "integer" }),
         ...extraFields,
       ],
@@ -188,7 +190,7 @@ export function ownerInput(
           descriptionField: "description",
           inputFieldsField: "inputFields",
           versionField: "version",
-          execution,
+          execution: execution as AuthoredDerivedExecution,
         },
       },
     }),
@@ -203,7 +205,7 @@ export function catalogInputs(owner: McpCatalogInput, bindingFields = BINDING_FI
       contract({
         name: "ServiceCapabilityBinding",
         fields: bindingFields,
-        relationships: [operationRelationship],
+        relationships: [parentRelationship, operationRelationship],
       }),
       "integration.service_capability_bindings",
     ),

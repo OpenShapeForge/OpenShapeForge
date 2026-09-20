@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import { resolveDerivedExecution } from "./derived-execution.js";
+import { resolveDerivedExecution, type AuthoredDerivedExecution } from "./derived-execution.js";
 import {
   BINDING_FIELDS,
   catalogInput,
@@ -13,41 +13,19 @@ import {
   related,
 } from "./derived-execution.fixtures.js";
 
-describe("resolveDerivedExecution", () => {
-  it("projects JSON bindingsField unchanged besides resolved tables", () => {
-    const owner = ownerInput(
-      { ...executionBase, bindingsField: "steps" },
-      [],
-    );
-    expect(
-      resolveDerivedExecution(
-        catalogInputs(owner),
-        owner,
-        { ...executionBase, bindingsField: "steps" },
-        "derivedTools.execution",
-      ),
-    ).toEqual({
-      bindingsField: "steps",
-      operationRef: "capabilityId",
-      operationEntity: "Capability",
-      operationTable: "integration.capabilities",
-      providerRef: "adapterId",
-      providerEntity: "Adapter",
-      providerTable: "integration.adapters",
-      connectionEntity: "Connection",
-      connectionTable: "integration.connections",
-      connectionProviderRef: "adapterId",
-      connectionValuesField: "values",
-    });
-  });
+const relationExecution = {
+  ...executionBase,
+  bindingsRelation: "capabilityBindings",
+};
 
+describe("resolveDerivedExecution", () => {
   it("resolves bindingsRelation to the owned collection's target, table and parent FK", () => {
-    const owner = ownerInput({ ...executionBase, bindingsRelation: "capabilityBindings" });
+    const owner = ownerInput(relationExecution);
     expect(
       resolveDerivedExecution(
         catalogInputs(owner),
         owner,
-        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        relationExecution,
         "derivedTools.execution",
       ),
     ).toEqual({
@@ -68,53 +46,48 @@ describe("resolveDerivedExecution", () => {
     });
   });
 
-  it("refuses both bindingsField and bindingsRelation, naming the entity", () => {
+  it("refuses leftover bindingsField, naming the entity", () => {
     const owner = ownerInput({
-      ...executionBase,
+      ...relationExecution,
       bindingsField: "steps",
-      bindingsRelation: "capabilityBindings",
-    });
+    } as typeof relationExecution);
     expect(() =>
       resolveDerivedExecution(
         catalogInputs(owner),
         owner,
         {
-          ...executionBase,
+          ...relationExecution,
           bindingsField: "steps",
-          bindingsRelation: "capabilityBindings",
-        },
+        } as typeof relationExecution,
         "derivedTools.execution",
       ),
     ).toThrow(
-      /derivedTools.execution on entity "Service" needs exactly one of bindingsRelation \(owned collection\) or bindingsField/,
+      /derivedTools.execution on entity "Service" no longer accepts bindingsField/,
     );
   });
 
-  it("refuses neither bindingsField nor bindingsRelation, naming the entity", () => {
-    const owner = ownerInput(executionBase);
+  it("refuses a missing bindingsRelation, naming the entity", () => {
+    const owner = ownerInput(executionBase as AuthoredDerivedExecution);
     expect(() =>
       resolveDerivedExecution(
         catalogInputs(owner),
         owner,
-        executionBase,
+        executionBase as AuthoredDerivedExecution,
         "derivedTools.execution",
       ),
     ).toThrow(
-      /derivedTools.execution on entity "Service" needs exactly one of bindingsRelation \(owned collection\) or bindingsField/,
+      /derivedTools.execution on entity "Service" needs bindingsRelation \(owned collection\)/,
     );
   });
 
   it("refuses a bindingsRelation whose target is missing a required field", () => {
-    const owner = ownerInput({
-      ...executionBase,
-      bindingsRelation: "capabilityBindings",
-    });
+    const owner = ownerInput(relationExecution);
     const withoutWhen = BINDING_FIELDS.filter((entry) => entry.key !== "when");
     expect(() =>
       resolveDerivedExecution(
         catalogInputs(owner, withoutWhen),
         owner,
-        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        relationExecution,
         "derivedTools.execution",
       ),
     ).toThrow(
@@ -123,15 +96,14 @@ describe("resolveDerivedExecution", () => {
   });
 
   it("refuses a bindingsRelation that is not an owned hasMany collection", () => {
-    const owner = ownerInput(
-      { ...executionBase, bindingsRelation: "capabilityBindings" },
-      [{ ...ownedBindings, ownership: "reference" }],
-    );
+    const owner = ownerInput(relationExecution, [
+      { ...ownedBindings, ownership: "reference" },
+    ]);
     expect(() =>
       resolveDerivedExecution(
         catalogInputs(owner),
         owner,
-        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        relationExecution,
         "derivedTools.execution",
       ),
     ).toThrow(
@@ -139,28 +111,8 @@ describe("resolveDerivedExecution", () => {
     );
   });
 
-  it("refuses a scalar bindingsField", () => {
-    const owner = ownerInput(
-      { ...executionBase, bindingsField: "key" },
-      [],
-    );
-    expect(() =>
-      resolveDerivedExecution(
-        catalogInputs(owner),
-        owner,
-        { ...executionBase, bindingsField: "key" },
-        "derivedTools.execution",
-      ),
-    ).toThrow(
-      /bindingsField "key" on entity "Service" does not name an object collection/,
-    );
-  });
-
   it("refuses a binding order that is not a required integer", () => {
-    const owner = ownerInput({
-      ...executionBase,
-      bindingsRelation: "capabilityBindings",
-    });
+    const owner = ownerInput(relationExecution);
     const fields = BINDING_FIELDS.map((entry) =>
       entry.key === "order" ? field({ key: "order" }) : entry,
     );
@@ -168,17 +120,14 @@ describe("resolveDerivedExecution", () => {
       resolveDerivedExecution(
         catalogInputs(owner, fields),
         owner,
-        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        relationExecution,
         "derivedTools.execution",
       ),
     ).toThrow(/binding field "order" must be integer/);
   });
 
   it("refuses an operationRef that is not a belongsTo relationship with a foreign key", () => {
-    const owner = ownerInput({
-      ...executionBase,
-      bindingsRelation: "capabilityBindings",
-    });
+    const owner = ownerInput(relationExecution);
     const fields = BINDING_FIELDS.map((entry) =>
       entry.key === "capabilityId" ? field({ key: "capabilityId" }) : entry,
     );
@@ -205,11 +154,47 @@ describe("resolveDerivedExecution", () => {
           ]),
         ],
         owner,
-        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        relationExecution,
         "derivedTools.execution",
       ),
     ).toThrow(
       /binding field "capabilityId" must be a belongsTo relationship to "Capability"/,
+    );
+  });
+
+  it("refuses a parentRef that is not a belongsTo to the owner with a foreign key", () => {
+    const owner = ownerInput(relationExecution);
+    const fields = BINDING_FIELDS.map((entry) =>
+      entry.key === "serviceId" ? field({ key: "serviceId" }) : entry,
+    );
+    expect(() =>
+      resolveDerivedExecution(
+        [
+          owner,
+          catalogInput(
+            contract({
+              name: "ServiceCapabilityBinding",
+              fields,
+              relationships: [],
+            }),
+            "integration.service_capability_bindings",
+          ),
+          related("Capability", "integration.capabilities", [
+            field({ key: "name" }),
+            field({ key: "adapterId" }),
+          ]),
+          related("Adapter", "integration.adapters"),
+          related("Connection", "integration.connections", [
+            field({ key: "adapterId" }),
+            field({ key: "values" }),
+          ]),
+        ],
+        owner,
+        relationExecution,
+        "derivedTools.execution",
+      ),
+    ).toThrow(
+      /binding field "serviceId" must be a belongsTo relationship to "Service"/,
     );
   });
 });

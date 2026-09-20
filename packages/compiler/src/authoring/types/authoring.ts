@@ -344,13 +344,11 @@ export interface McpDeclarativeRequestMapping {
 }
 
 /**
- * Where a derived tool's ordered binding rows live. Exactly one of
- * `bindingsField` (JSON on the owner) or `bindingsRelation` (owned hasMany
- * collection whose target carries the binding vocabulary) must be given.
+ * Where a derived tool's ordered binding rows live: an owned hasMany
+ * collection whose target carries the binding vocabulary.
  */
 export interface McpDerivedExecutionConfig {
-  bindingsField?: string;
-  bindingsRelation?: string;
+  bindingsRelation: string;
   operationRef: string;
   operationEntity: string;
   providerRef: string;

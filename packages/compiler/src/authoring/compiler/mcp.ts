@@ -53,7 +53,6 @@ const MCP_RESOURCE_URI_PATTERN =
   /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9][A-Za-z0-9\/_-]*[A-Za-z0-9]$/;
 
 const MCP_DERIVED_EXECUTION_KEYS = new Set([
-  "bindingsField",
   "bindingsRelation",
   "operationRef",
   "operationEntity",

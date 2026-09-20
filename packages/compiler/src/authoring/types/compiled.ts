@@ -288,8 +288,7 @@ export interface McpSection {
     outputFieldsField?: string;
     versionField?: string;
     execution?: {
-      bindingsField?: string;
-      bindingsRelation?: string;
+      bindingsRelation: string;
       operationRef: string;
       operationEntity: string;
       providerRef: string;

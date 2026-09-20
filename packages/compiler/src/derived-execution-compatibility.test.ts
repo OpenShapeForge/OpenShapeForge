@@ -69,10 +69,9 @@ describe("buildMcpCatalog execution compatibility", () => {
       connectionProviderRef: "adapterId",
       connectionValuesField: "values",
     });
-    expect(catalog.derivedTools[0]?.execution?.bindingsField).toBeUndefined();
   });
 
-  it("refuses execution compatibility that names both sources", () => {
+  it("refuses leftover bindingsField on execution compatibility", () => {
     const owner = ownerInput({
       ...executionBase,
       bindingsRelation: "capabilityBindings",
@@ -100,11 +99,11 @@ describe("buildMcpCatalog execution compatibility", () => {
             ...executionBase,
             bindingsField: "key",
             bindingsRelation: "capabilityBindings",
-          }),
+          } as AuthoredDerivedExecution),
         }],
       ),
     ).toThrow(
-      /Plugin "demo" execution compatibility on entity "Service" needs exactly one of bindingsRelation \(owned collection\) or bindingsField/,
+      /Plugin "demo" execution compatibility on entity "Service" no longer accepts bindingsField/,
     );
   });
 });

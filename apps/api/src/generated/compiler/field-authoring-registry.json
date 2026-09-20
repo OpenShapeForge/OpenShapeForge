@@ -833,2959 +833,6 @@
         "input": "JsonFieldEditor"
       }
     },
-    "accountId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Account ID",
-        "nl": "Account ID"
-      },
-      "pluralLabel": {
-        "en": "Account IDs",
-        "nl": "Account IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "account",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=account",
-      "displayTemplate": "{{username}}",
-      "filterField": "username"
-    },
-    "addressAssignmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Address Assignment ID",
-        "nl": "Adrestoewijzing ID"
-      },
-      "pluralLabel": {
-        "en": "Address Assignment IDs",
-        "nl": "Adrestoewijzing IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "address-assignment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=address-assignment",
-      "displayTemplate": "{{role}}",
-      "filterField": "role"
-    },
-    "addressId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Address ID",
-        "nl": "Adres ID"
-      },
-      "pluralLabel": {
-        "en": "Address IDs",
-        "nl": "Adres IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "address",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=address",
-      "displayTemplate": "{{street}} {{houseNumber}}",
-      "filterField": "street"
-    },
-    "agreementId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement ID",
-        "nl": "Overeenkomst ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement IDs",
-        "nl": "Overeenkomst IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement",
-      "displayTemplate": "{{code}}",
-      "filterField": "code"
-    },
-    "appointmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Appointment ID",
-        "nl": "Afspraak ID"
-      },
-      "pluralLabel": {
-        "en": "Appointment IDs",
-        "nl": "Afspraak IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "appointment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=appointment",
-      "displayTemplate": "{{subject}}",
-      "filterField": "subject"
-    },
-    "assignmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Assignment ID",
-        "nl": "Toewijzing ID"
-      },
-      "pluralLabel": {
-        "en": "Assignment IDs",
-        "nl": "Toewijzing IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "assignment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=assignment",
-      "displayTemplate": "{{reason}}",
-      "filterField": "reason"
-    },
-    "attachmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Attachment ID",
-        "nl": "Bijlage ID"
-      },
-      "pluralLabel": {
-        "en": "Attachment IDs",
-        "nl": "Bijlage IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "attachment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=attachment",
-      "displayTemplate": "{{fileName}}",
-      "filterField": "fileName"
-    },
-    "caseObjectLinkId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Object Link ID",
-        "nl": "Zaakobjectkoppeling ID"
-      },
-      "pluralLabel": {
-        "en": "Case Object Link IDs",
-        "nl": "Zaakobjectkoppeling IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-object-link",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-object-link",
-      "displayTemplate": "{{objectLabel}}",
-      "filterField": "objectLabel"
-    },
-    "casePartyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Party ID",
-        "nl": "Zaakbetrokkene ID"
-      },
-      "pluralLabel": {
-        "en": "Case Party IDs",
-        "nl": "Zaakbetrokkene IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-party",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-party",
-      "displayTemplate": "{{displayName}}",
-      "filterField": "displayName"
-    },
-    "caseStatusEventId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Status Event ID",
-        "nl": "Zaakstatusgebeurtenis ID"
-      },
-      "pluralLabel": {
-        "en": "Case Status Event IDs",
-        "nl": "Zaakstatusgebeurtenis IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-status-event",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-status-event",
-      "displayTemplate": "{{actorType}}",
-      "filterField": "actorId"
-    },
-    "caseTypeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Type ID",
-        "nl": "Zaaktype ID"
-      },
-      "pluralLabel": {
-        "en": "Case Type IDs",
-        "nl": "Zaaktype IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-type",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-type",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "caseId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case ID",
-        "nl": "Zaak ID"
-      },
-      "pluralLabel": {
-        "en": "Case IDs",
-        "nl": "Zaak IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "commentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Comment ID",
-        "nl": "Opmerking ID"
-      },
-      "pluralLabel": {
-        "en": "Comment IDs",
-        "nl": "Opmerking IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "comment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=comment",
-      "displayTemplate": "{{body}}",
-      "filterField": "body"
-    },
-    "communicationPreferenceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Communication Preference ID",
-        "nl": "Communicatievoorkeur ID"
-      },
-      "pluralLabel": {
-        "en": "Communication Preference IDs",
-        "nl": "Communicatievoorkeur IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "communication-preference",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=communication-preference",
-      "displayTemplate": "{{type}}",
-      "filterField": "type"
-    },
-    "contactDetailId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Contact Detail ID",
-        "nl": "Contactgegeven ID"
-      },
-      "pluralLabel": {
-        "en": "Contact Detail IDs",
-        "nl": "Contactgegeven IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "contact-detail",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=contact-detail",
-      "displayTemplate": "{{value}}",
-      "filterField": "value"
-    },
-    "contactMomentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Contact Moment ID",
-        "nl": "Contactmoment ID"
-      },
-      "pluralLabel": {
-        "en": "Contact Moment IDs",
-        "nl": "Contactmoment IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "contact-moment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=contact-moment",
-      "displayTemplate": "{{subject}}",
-      "filterField": "subject"
-    },
-    "documentTypeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Document Type ID",
-        "nl": "Documenttype ID"
-      },
-      "pluralLabel": {
-        "en": "Document Type IDs",
-        "nl": "Documenttype IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "document-type",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=document-type",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "documentVersionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Document Version ID",
-        "nl": "Documentversie ID"
-      },
-      "pluralLabel": {
-        "en": "Document Version IDs",
-        "nl": "Documentversie IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "document-version",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=document-version",
-      "displayTemplate": "{{versionLabel}}",
-      "filterField": "versionLabel"
-    },
-    "documentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Document ID",
-        "nl": "Document ID"
-      },
-      "pluralLabel": {
-        "en": "Document IDs",
-        "nl": "Document IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "document",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=document",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "caseFileTypeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case file type ID",
-        "nl": "Dossiertype ID"
-      },
-      "pluralLabel": {
-        "en": "Case file type IDs",
-        "nl": "Dossiertype IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-file-type",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-file-type",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "caseFileId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case file ID",
-        "nl": "Dossier ID"
-      },
-      "pluralLabel": {
-        "en": "Case file IDs",
-        "nl": "Dossier IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-file",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-file",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "labelRuleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Label Rule ID",
-        "nl": "Labelregel ID"
-      },
-      "pluralLabel": {
-        "en": "Label Rule IDs",
-        "nl": "Labelregel IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "label-rule",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=label-rule",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "legalEntityId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Legal Entity ID",
-        "nl": "Rechtspersoon ID"
-      },
-      "pluralLabel": {
-        "en": "Legal Entity IDs",
-        "nl": "Rechtspersoon IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "legal-entity",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=legal-entity",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "milestoneId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Milestone ID",
-        "nl": "Mijlpaal ID"
-      },
-      "pluralLabel": {
-        "en": "Milestone IDs",
-        "nl": "Mijlpaal IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "milestone",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=milestone",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "naturalPersonId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Natural Person ID",
-        "nl": "Natuurlijk Persoon ID"
-      },
-      "pluralLabel": {
-        "en": "Natural Person IDs",
-        "nl": "Natuurlijk Persoon IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "natural-person",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=natural-person",
-      "displayTemplate": "{{firstName}} {{lastName}}",
-      "filterField": "lastName"
-    },
-    "paymentDetailId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Payment Detail ID",
-        "nl": "Betaalgegevens ID"
-      },
-      "pluralLabel": {
-        "en": "Payment Detail IDs",
-        "nl": "Betaalgegevens IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "payment-detail",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=payment-detail",
-      "displayTemplate": "{{iban}}",
-      "filterField": "iban"
-    },
-    "preferenceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Preference ID",
-        "nl": "Voorkeur ID"
-      },
-      "pluralLabel": {
-        "en": "Preference IDs",
-        "nl": "Voorkeur IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "preference",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=preference",
-      "displayTemplate": "{{key}}",
-      "filterField": "key"
-    },
-    "processStepId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Process Step ID",
-        "nl": "Processtap ID"
-      },
-      "pluralLabel": {
-        "en": "Process Step IDs",
-        "nl": "Processtap IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "process-step",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=process-step",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "caseStepId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Step ID",
-        "nl": "Zaakstap ID"
-      },
-      "pluralLabel": {
-        "en": "Case Step IDs",
-        "nl": "Zaakstap IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "process-step",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=process-step",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "caseStepTemplateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Step Template ID",
-        "nl": "Zaakstapsjabloon ID"
-      },
-      "pluralLabel": {
-        "en": "Case Step Template IDs",
-        "nl": "Zaakstapsjabloon IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-step-template",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-step-template",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "caseTemplateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Case Template ID",
-        "nl": "Zaaksjabloon ID"
-      },
-      "pluralLabel": {
-        "en": "Case Template IDs",
-        "nl": "Zaaksjabloon IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-template",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-template",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "processTemplateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Process Template ID",
-        "nl": "Processjabloon ID"
-      },
-      "pluralLabel": {
-        "en": "Process Template IDs",
-        "nl": "Processjabloon IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-template",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-template",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "processTemplateStepId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Process Template Step ID",
-        "nl": "Processjabloonstap ID"
-      },
-      "pluralLabel": {
-        "en": "Process Template Step IDs",
-        "nl": "Processjabloonstap IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "case-step-template",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=case-step-template",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "processId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Process ID",
-        "nl": "Proces ID"
-      },
-      "pluralLabel": {
-        "en": "Process IDs",
-        "nl": "Proces IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "process",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=process",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "qualityMeasurementRequestId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Quality Measurement Request ID",
-        "nl": "Kwaliteitsmetingsverzoek ID"
-      },
-      "pluralLabel": {
-        "en": "Quality Measurement Request IDs",
-        "nl": "Kwaliteitsmetingsverzoek IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "quality-measurement-request",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=quality-measurement-request",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "qualityMeasurementResultId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Quality Measurement Result ID",
-        "nl": "Kwaliteitsmetingsresultaat ID"
-      },
-      "pluralLabel": {
-        "en": "Quality Measurement Result IDs",
-        "nl": "Kwaliteitsmetingsresultaat IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "quality-measurement-result",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=quality-measurement-result",
-      "displayTemplate": "{{code}}",
-      "filterField": "code"
-    },
-    "relationAssociationId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Relation Association ID",
-        "nl": "Relatiekoppeling ID"
-      },
-      "pluralLabel": {
-        "en": "Relation Association IDs",
-        "nl": "Relatiekoppeling IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "relation-association",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=relation-association",
-      "displayTemplate": "{{associationKind}}",
-      "filterField": "associationKind"
-    },
-    "relationGroupId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Relation Group ID",
-        "nl": "Relatiegroep ID"
-      },
-      "pluralLabel": {
-        "en": "Relation Group IDs",
-        "nl": "Relatiegroep IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "relation-group",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=relation-group",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "relationRoleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Relation Role ID",
-        "nl": "Relatierol ID"
-      },
-      "pluralLabel": {
-        "en": "Relation Role IDs",
-        "nl": "Relatierol IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "relation-role",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=relation-role",
-      "displayTemplate": "{{type}}",
-      "filterField": "type"
-    },
-    "relationId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Relation ID",
-        "nl": "Relatie ID"
-      },
-      "pluralLabel": {
-        "en": "Relation IDs",
-        "nl": "Relatie IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "relation",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=relation",
-      "displayTemplate": "{{displayName}}",
-      "filterField": "displayName"
-    },
-    "researchAssignmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Research Assignment ID",
-        "nl": "Onderzoeksopdracht ID"
-      },
-      "pluralLabel": {
-        "en": "Research Assignment IDs",
-        "nl": "Onderzoeksopdracht IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "research-assignment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=research-assignment",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "researchResultId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Research Result ID",
-        "nl": "Onderzoeksresultaat ID"
-      },
-      "pluralLabel": {
-        "en": "Research Result IDs",
-        "nl": "Onderzoeksresultaat IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "research-result",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=research-result",
-      "displayTemplate": "{{code}}",
-      "filterField": "code"
-    },
-    "slaPolicyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "SLA Policy ID",
-        "nl": "SLA-beleid ID"
-      },
-      "pluralLabel": {
-        "en": "SLA Policy IDs",
-        "nl": "SLA-beleid IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "sla-policy",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=sla-policy",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "supportIssueId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Support issue ID",
-        "nl": "Supportverzoek ID"
-      },
-      "pluralLabel": {
-        "en": "Support issue IDs",
-        "nl": "Supportverzoek IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "support-issue",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=support-issue",
-      "displayTemplate": "{{subject}}",
-      "filterField": "subject"
-    },
-    "surveyAnswerId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Survey Answer ID",
-        "nl": "Vragenlijstantwoord ID"
-      },
-      "pluralLabel": {
-        "en": "Survey Answer IDs",
-        "nl": "Vragenlijstantwoord IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "survey-answer",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=survey-answer",
-      "displayTemplate": "{{answer}}",
-      "filterField": "answer"
-    },
-    "surveyQuestionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Survey Question ID",
-        "nl": "Vragenlijstregel ID"
-      },
-      "pluralLabel": {
-        "en": "Survey Question IDs",
-        "nl": "Vragenlijstregel IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "survey-question",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=survey-question",
-      "displayTemplate": "{{description}}",
-      "filterField": "description"
-    },
-    "surveyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Survey ID",
-        "nl": "Vragenlijst ID"
-      },
-      "pluralLabel": {
-        "en": "Survey IDs",
-        "nl": "Vragenlijst IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "survey",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=survey",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "taskId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Task ID",
-        "nl": "Taak ID"
-      },
-      "pluralLabel": {
-        "en": "Task IDs",
-        "nl": "Taak IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "task",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=task",
-      "displayTemplate": "{{title}}",
-      "filterField": "title"
-    },
-    "templateVariantId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Template Variant ID",
-        "nl": "Templatevariant ID"
-      },
-      "pluralLabel": {
-        "en": "Template Variant IDs",
-        "nl": "Templatevariant IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "template-variant",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=template-variant",
-      "displayTemplate": "{{channel}}",
-      "filterField": "channel"
-    },
-    "templateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Template ID",
-        "nl": "Template ID"
-      },
-      "pluralLabel": {
-        "en": "Template IDs",
-        "nl": "Template IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "template",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=template",
-      "displayTemplate": "{{slug}}",
-      "filterField": "slug"
-    },
-    "tenantSettingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Tenant Setting ID",
-        "nl": "Tenantinstelling ID"
-      },
-      "pluralLabel": {
-        "en": "Tenant Setting IDs",
-        "nl": "Tenantinstelling IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "tenant-setting",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=tenant-setting",
-      "displayTemplate": "{{key}}",
-      "filterField": "key"
-    },
-    "tenantId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Tenant ID",
-        "nl": "Tenant ID"
-      },
-      "pluralLabel": {
-        "en": "Tenant IDs",
-        "nl": "Tenant IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "tenant",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=tenant",
-      "displayTemplate": "{{slug}}",
-      "filterField": "slug"
-    },
-    "workQueueId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Work Queue ID",
-        "nl": "Werkqueue ID"
-      },
-      "pluralLabel": {
-        "en": "Work Queue IDs",
-        "nl": "Werkqueue IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "work-queue",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=work-queue",
-      "displayTemplate": "{{name}}",
-      "filterField": "name"
-    },
-    "costDimensionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Cost Dimension ID",
-        "nl": "Cost dimension ID"
-      },
-      "pluralLabel": {
-        "en": "Cost Dimension IDs",
-        "nl": "Cost dimension IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "cost-dimension",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=cost-dimension",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "vacancyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Vacancy ID",
-        "nl": "Vacancy ID"
-      },
-      "pluralLabel": {
-        "en": "Vacancy IDs",
-        "nl": "Vacancy IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "vacancy",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=vacancy",
-      "displayTemplate": "{{code}} {{title}}"
-    },
-    "projectTaskId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Task ID",
-        "nl": "Project task ID"
-      },
-      "pluralLabel": {
-        "en": "Project Task IDs",
-        "nl": "Project task IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-task",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-task",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "buildingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Building ID",
-        "nl": "Building ID"
-      },
-      "pluralLabel": {
-        "en": "Building IDs",
-        "nl": "Building IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "building",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=building",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "directDebitMandateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Direct Debit Mandate ID",
-        "nl": "Direct debit mandate ID"
-      },
-      "pluralLabel": {
-        "en": "Direct Debit Mandate IDs",
-        "nl": "Direct debit mandate IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "direct-debit-mandate",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=direct-debit-mandate",
-      "displayTemplate": "{{mandateReference}}"
-    },
-    "invoiceSequenceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice Sequence ID",
-        "nl": "Invoice sequence ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice Sequence IDs",
-        "nl": "Invoice sequence IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice-sequence",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice-sequence",
-      "displayTemplate": "{{kind}} {{fiscalYearCode}}: {{lastNumber}}"
-    },
-    "projectId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project ID",
-        "nl": "Project ID"
-      },
-      "pluralLabel": {
-        "en": "Project IDs",
-        "nl": "Project IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "bankReconciliationId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Bank Reconciliation ID",
-        "nl": "Bank reconciliation ID"
-      },
-      "pluralLabel": {
-        "en": "Bank Reconciliation IDs",
-        "nl": "Bank reconciliation IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "bank-reconciliation",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=bank-reconciliation",
-      "displayTemplate": "{{matchedAt}}"
-    },
-    "employeeBudgetId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Employee Budget ID",
-        "nl": "Employee budget ID"
-      },
-      "pluralLabel": {
-        "en": "Employee Budget IDs",
-        "nl": "Employee budget IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "employee-budget",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=employee-budget",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "projectPhaseDecisionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Phase Decision ID",
-        "nl": "Project phase decision ID"
-      },
-      "pluralLabel": {
-        "en": "Project Phase Decision IDs",
-        "nl": "Project phase decision IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-phase-decision",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-phase-decision",
-      "displayTemplate": "{{outcome}}"
-    },
-    "paymentMethodId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Payment Method ID",
-        "nl": "Payment method ID"
-      },
-      "pluralLabel": {
-        "en": "Payment Method IDs",
-        "nl": "Payment method IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "payment-method",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=payment-method",
-      "displayTemplate": "{{code}}"
-    },
-    "employeeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Employee ID",
-        "nl": "Employee ID"
-      },
-      "pluralLabel": {
-        "en": "Employee IDs",
-        "nl": "Employee IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "employee",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=employee",
-      "displayTemplate": "{{employeeNumber}}"
-    },
-    "buildingPartId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Building Part ID",
-        "nl": "Building part ID"
-      },
-      "pluralLabel": {
-        "en": "Building Part IDs",
-        "nl": "Building part IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "building-part",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=building-part",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "assetGroupId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Asset Group ID",
-        "nl": "Asset group ID"
-      },
-      "pluralLabel": {
-        "en": "Asset Group IDs",
-        "nl": "Asset group IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "asset-group",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=asset-group",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "spaceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Space ID",
-        "nl": "Space ID"
-      },
-      "pluralLabel": {
-        "en": "Space IDs",
-        "nl": "Space IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "space",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=space",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "orgUnitId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Organizational Unit ID",
-        "nl": "Org unit ID"
-      },
-      "pluralLabel": {
-        "en": "Organizational Unit IDs",
-        "nl": "Org unit IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "org-unit",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=org-unit",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "standardPriceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Standard Price ID",
-        "nl": "Standard price ID"
-      },
-      "pluralLabel": {
-        "en": "Standard Price IDs",
-        "nl": "Standard price IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "standard-price",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=standard-price",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "paymentPlanInstalmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Payment Plan Instalment ID",
-        "nl": "Payment plan instalment ID"
-      },
-      "pluralLabel": {
-        "en": "Payment Plan Instalment IDs",
-        "nl": "Payment plan instalment IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "payment-plan-instalment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=payment-plan-instalment",
-      "displayTemplate": "#{{instalmentNumber}}: {{amount}}"
-    },
-    "ledgerPostingLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Ledger Posting Line ID",
-        "nl": "Ledger posting line ID"
-      },
-      "pluralLabel": {
-        "en": "Ledger Posting Line IDs",
-        "nl": "Ledger posting line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "ledger-posting-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=ledger-posting-line",
-      "displayTemplate": "{{lineNumber}}: {{amount}}"
-    },
-    "periodBalanceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Period Balance ID",
-        "nl": "Period balance ID"
-      },
-      "pluralLabel": {
-        "en": "Period Balance IDs",
-        "nl": "Period balance IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "period-balance",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=period-balance",
-      "displayTemplate": "{{ledgerAccount.code}}"
-    },
-    "alertId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Alert ID",
-        "nl": "Alert ID"
-      },
-      "pluralLabel": {
-        "en": "Alert IDs",
-        "nl": "Alert IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "alert",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=alert",
-      "displayTemplate": "{{code}} {{title}}"
-    },
-    "areaId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Area ID",
-        "nl": "Area ID"
-      },
-      "pluralLabel": {
-        "en": "Area IDs",
-        "nl": "Area IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "area",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=area",
-      "displayTemplate": "{{value}} {{unitId}}"
-    },
-    "invoiceVatBucketId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice VAT Bucket ID",
-        "nl": "Invoice VAT bucket ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice VAT Bucket IDs",
-        "nl": "Invoice VAT bucket IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice-vat-bucket",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice-vat-bucket",
-      "displayTemplate": "{{vatRate.code}}"
-    },
-    "creditorId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Creditor ID",
-        "nl": "Creditor ID"
-      },
-      "pluralLabel": {
-        "en": "Creditor IDs",
-        "nl": "Creditor IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "creditor",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=creditor",
-      "displayTemplate": "{{creditorNumber}}"
-    },
-    "budgetLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Budget Line ID",
-        "nl": "Budget line ID"
-      },
-      "pluralLabel": {
-        "en": "Budget Line IDs",
-        "nl": "Budget line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "budget-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=budget-line",
-      "displayTemplate": "{{description}}"
-    },
-    "processRoleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Process Role ID",
-        "nl": "Process role ID"
-      },
-      "pluralLabel": {
-        "en": "Process Role IDs",
-        "nl": "Process role IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "process-role",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=process-role",
-      "displayTemplate": "{{roleType}}"
-    },
-    "positionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Position ID",
-        "nl": "Position ID"
-      },
-      "pluralLabel": {
-        "en": "Position IDs",
-        "nl": "Position IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "position",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=position",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "projectSpendingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Spending ID",
-        "nl": "Project spending ID"
-      },
-      "pluralLabel": {
-        "en": "Project Spending IDs",
-        "nl": "Project spending IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-spending",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-spending",
-      "displayTemplate": "{{description}}: {{amount}}"
-    },
-    "energyPerformanceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Energy Performance ID",
-        "nl": "Energy performance ID"
-      },
-      "pluralLabel": {
-        "en": "Energy Performance IDs",
-        "nl": "Energy performance IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "energy-performance",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=energy-performance",
-      "displayTemplate": "{{code}}"
-    },
-    "bankStatementId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Bank Statement ID",
-        "nl": "Bank statement ID"
-      },
-      "pluralLabel": {
-        "en": "Bank Statement IDs",
-        "nl": "Bank statement IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "bank-statement",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=bank-statement",
-      "displayTemplate": "{{accountIban}} #{{statementNumber}}"
-    },
-    "appointmentRequestId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Appointment Request ID",
-        "nl": "Appointment request ID"
-      },
-      "pluralLabel": {
-        "en": "Appointment Request IDs",
-        "nl": "Appointment request IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "appointment-request",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=appointment-request",
-      "displayTemplate": "{{code}} {{title}}"
-    },
-    "agreementLinkId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Link ID",
-        "nl": "Agreement link ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Link IDs",
-        "nl": "Agreement link IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-link",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-link",
-      "displayTemplate": "{{linkType}}"
-    },
-    "supplierRoleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Supplier Role ID",
-        "nl": "Supplier ID"
-      },
-      "pluralLabel": {
-        "en": "Supplier Role IDs",
-        "nl": "Supplier IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "supplier-role",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=supplier-role",
-      "displayTemplate": "{{supplierNumber}}"
-    },
-    "monitorLogId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Monitor Log ID",
-        "nl": "Monitor log ID"
-      },
-      "pluralLabel": {
-        "en": "Monitor Log IDs",
-        "nl": "Monitor log IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "monitor-log",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=monitor-log",
-      "displayTemplate": "{{code}}"
-    },
-    "employeeRoleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Employee Role ID",
-        "nl": "Employee role ID"
-      },
-      "pluralLabel": {
-        "en": "Employee Role IDs",
-        "nl": "Employee role IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "employee-role",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=employee-role",
-      "displayTemplate": "{{roleKind}}"
-    },
-    "agreementMilestoneId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Milestone ID",
-        "nl": "Overeenkomstmijlpaal ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Milestone IDs",
-        "nl": "Overeenkomstmijlpaal IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-milestone",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-milestone",
-      "displayTemplate": "{{description}}"
-    },
-    "billingScheduleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Billing Schedule ID",
-        "nl": "Facturatieschema ID"
-      },
-      "pluralLabel": {
-        "en": "Billing Schedule IDs",
-        "nl": "Facturatieschema IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "billing-schedule",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=billing-schedule",
-      "displayTemplate": "{{period}}"
-    },
-    "billingRunId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Billing Run ID",
-        "nl": "Facturatie-run ID"
-      },
-      "pluralLabel": {
-        "en": "Billing Run IDs",
-        "nl": "Facturatie-run IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "billing-run",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=billing-run",
-      "displayTemplate": "{{mode}} @ {{billUpToDate}}"
-    },
-    "billingRunItemId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Billing Run Item ID",
-        "nl": "Facturatie-run-item ID"
-      },
-      "pluralLabel": {
-        "en": "Billing Run Item IDs",
-        "nl": "Facturatie-run-item IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "billing-run-item",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=billing-run-item",
-      "displayTemplate": "{{periodStart}} → {{periodEnd}}"
-    },
-    "invoiceCollectionItemId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice Collection Item ID",
-        "nl": "Invoice collection item ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice Collection Item IDs",
-        "nl": "Invoice collection item IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice-collection-item",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice-collection-item",
-      "displayTemplate": "{{amount}}"
-    },
-    "bankStatementLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Bank Statement Line ID",
-        "nl": "Bank statement line ID"
-      },
-      "pluralLabel": {
-        "en": "Bank Statement Line IDs",
-        "nl": "Bank statement line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "bank-statement-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=bank-statement-line",
-      "displayTemplate": "{{counterpartyName}}: {{amount}}"
-    },
-    "projectRoleId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Role ID",
-        "nl": "Project role ID"
-      },
-      "pluralLabel": {
-        "en": "Project Role IDs",
-        "nl": "Project role IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-role",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-role",
-      "displayTemplate": "{{roleType}}"
-    },
-    "agreementComponentCumulativeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Component Cumulative ID",
-        "nl": "Component cumulative ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Component Cumulative IDs",
-        "nl": "Component cumulative IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-component-cumulative",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-component-cumulative",
-      "displayTemplate": "{{postedAt}}"
-    },
-    "projectBudgetLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Budget Line ID",
-        "nl": "Project budget line ID"
-      },
-      "pluralLabel": {
-        "en": "Project Budget Line IDs",
-        "nl": "Project budget line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-budget-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-budget-line",
-      "displayTemplate": "{{description}}: {{amount}}"
-    },
-    "paymentOrderId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Payment Order ID",
-        "nl": "Payment order ID"
-      },
-      "pluralLabel": {
-        "en": "Payment Order IDs",
-        "nl": "Payment order IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "payment-order",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=payment-order",
-      "displayTemplate": "{{referenceNumber}}"
-    },
-    "quoteLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Quote Line ID",
-        "nl": "Quote line ID"
-      },
-      "pluralLabel": {
-        "en": "Quote Line IDs",
-        "nl": "Quote line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "quote-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=quote-line",
-      "displayTemplate": "{{description}}"
-    },
-    "energyPerformanceMeasurementId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Energy Performance Measurement ID",
-        "nl": "Energy performance measurement ID"
-      },
-      "pluralLabel": {
-        "en": "Energy Performance Measurement IDs",
-        "nl": "Energy performance measurement IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "energy-performance-measurement",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=energy-performance-measurement",
-      "displayTemplate": "{{measuredAt}}: {{value}}"
-    },
-    "monitorIntervalId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Monitor Interval ID",
-        "nl": "Monitor interval ID"
-      },
-      "pluralLabel": {
-        "en": "Monitor Interval IDs",
-        "nl": "Monitor interval IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "monitor-interval",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=monitor-interval",
-      "displayTemplate": "{{code}}"
-    },
-    "appointmentOptionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Appointment Option ID",
-        "nl": "Appointment option ID"
-      },
-      "pluralLabel": {
-        "en": "Appointment Option IDs",
-        "nl": "Appointment option IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "appointment-option",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=appointment-option",
-      "displayTemplate": "#{{optionNumber}} {{startsAt}}"
-    },
-    "debtorId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Debtor ID",
-        "nl": "Debtor ID"
-      },
-      "pluralLabel": {
-        "en": "Debtor IDs",
-        "nl": "Debtor IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "debtor",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=debtor",
-      "displayTemplate": "{{debtorNumber}}"
-    },
-    "projectObjectiveId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Objective ID",
-        "nl": "Project objective ID"
-      },
-      "pluralLabel": {
-        "en": "Project Objective IDs",
-        "nl": "Project objective IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-objective",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-objective",
-      "displayTemplate": "{{code}} {{description}}"
-    },
-    "agreementPartyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Party ID",
-        "nl": "Agreement party ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Party IDs",
-        "nl": "Agreement party IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-party",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-party",
-      "displayTemplate": "{{partyRole}}"
-    },
-    "monitorReadingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Monitor Reading ID",
-        "nl": "Monitor reading ID"
-      },
-      "pluralLabel": {
-        "en": "Monitor Reading IDs",
-        "nl": "Monitor reading IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "monitor-reading",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=monitor-reading",
-      "displayTemplate": "{{readAt}}: {{value}}"
-    },
-    "adminRegionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Administrative Region ID",
-        "nl": "Administrative region ID"
-      },
-      "pluralLabel": {
-        "en": "Administrative Region IDs",
-        "nl": "Administrative region IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "admin-region",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=admin-region",
-      "displayTemplate": "{{regionLevel}}: {{code}}"
-    },
-    "pointId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Point ID",
-        "nl": "Point ID"
-      },
-      "pluralLabel": {
-        "en": "Point IDs",
-        "nl": "Point IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "point",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=point",
-      "displayTemplate": "{{latitude}}, {{longitude}}"
-    },
-    "maintenanceRequestSettlementId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Request Settlement ID",
-        "nl": "Maintenance request settlement ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Request Settlement IDs",
-        "nl": "Maintenance request settlement IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-request-settlement",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-request-settlement",
-      "displayTemplate": "{{description}}: {{amount}}"
-    },
-    "directDebitOrderId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Direct Debit Order ID",
-        "nl": "Direct debit order ID"
-      },
-      "pluralLabel": {
-        "en": "Direct Debit Order IDs",
-        "nl": "Direct debit order IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "direct-debit-order",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=direct-debit-order",
-      "displayTemplate": "{{endToEndId}}"
-    },
-    "purchaseOrderId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Purchase Order ID",
-        "nl": "Purchase order ID"
-      },
-      "pluralLabel": {
-        "en": "Purchase Order IDs",
-        "nl": "Purchase order IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "purchase-order",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=purchase-order",
-      "displayTemplate": "{{purchaseOrderNumber}}"
-    },
-    "fiscalPeriodId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Fiscal Period ID",
-        "nl": "Fiscal period ID"
-      },
-      "pluralLabel": {
-        "en": "Fiscal Period IDs",
-        "nl": "Fiscal period IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "fiscal-period",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=fiscal-period",
-      "displayTemplate": "{{code}}"
-    },
-    "fiscalYearId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Fiscal Year ID",
-        "nl": "Fiscal year ID"
-      },
-      "pluralLabel": {
-        "en": "Fiscal Year IDs",
-        "nl": "Fiscal year IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "fiscal-year",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=fiscal-year",
-      "displayTemplate": "{{code}}"
-    },
-    "conditionAssessmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Condition Assessment ID",
-        "nl": "Condition assessment ID"
-      },
-      "pluralLabel": {
-        "en": "Condition Assessment IDs",
-        "nl": "Condition assessment IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "condition-assessment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=condition-assessment",
-      "displayTemplate": "{{assessedAt}}"
-    },
-    "invoicePaymentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice Payment ID",
-        "nl": "Invoice payment ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice Payment IDs",
-        "nl": "Invoice payment IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice-payment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice-payment",
-      "displayTemplate": "{{amount}} @ {{paidAt}}"
-    },
-    "valuationId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Valuation ID",
-        "nl": "Valuation ID"
-      },
-      "pluralLabel": {
-        "en": "Valuation IDs",
-        "nl": "Valuation IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "valuation",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=valuation",
-      "displayTemplate": "{{valuationKind}}: {{amount}} @ {{valuedAt}}"
-    },
-    "ledgerPostingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Ledger Posting ID",
-        "nl": "Ledger posting ID"
-      },
-      "pluralLabel": {
-        "en": "Ledger Posting IDs",
-        "nl": "Ledger posting IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "ledger-posting",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=ledger-posting",
-      "displayTemplate": "{{description}}"
-    },
-    "budgetId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Budget ID",
-        "nl": "Budget ID"
-      },
-      "pluralLabel": {
-        "en": "Budget IDs",
-        "nl": "Budget IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "budget",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=budget",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "vatReturnId": {
-      "kind": "entityId",
-      "label": {
-        "en": "VAT Return ID",
-        "nl": "VAT return ID"
-      },
-      "pluralLabel": {
-        "en": "VAT Return IDs",
-        "nl": "VAT return IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "vat-return",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=vat-return",
-      "displayTemplate": "{{referenceNumber}}"
-    },
-    "maintenanceOrderPartyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Order Party ID",
-        "nl": "Maintenance order party ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Order Party IDs",
-        "nl": "Maintenance order party IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-order-party",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-order-party",
-      "displayTemplate": "{{roleType}}"
-    },
-    "maintenanceTaskId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Task ID",
-        "nl": "Maintenance task ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Task IDs",
-        "nl": "Maintenance task IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-task",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-task",
-      "displayTemplate": "{{description}}"
-    },
-    "assetConditionId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Asset Condition ID",
-        "nl": "Asset condition ID"
-      },
-      "pluralLabel": {
-        "en": "Asset Condition IDs",
-        "nl": "Asset condition IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "asset-condition",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=asset-condition",
-      "displayTemplate": "{{assessedAt}}"
-    },
-    "quoteId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Quote ID",
-        "nl": "Quote ID"
-      },
-      "pluralLabel": {
-        "en": "Quote IDs",
-        "nl": "Quote IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "quote",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=quote",
-      "displayTemplate": "{{quoteNumber}}"
-    },
-    "timeEntryId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Time Entry ID",
-        "nl": "Time entry ID"
-      },
-      "pluralLabel": {
-        "en": "Time Entry IDs",
-        "nl": "Time entry IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "time-entry",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=time-entry",
-      "displayTemplate": "{{workedAt}}: {{hours}}h"
-    },
-    "paymentPlanId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Payment Plan ID",
-        "nl": "Payment plan ID"
-      },
-      "pluralLabel": {
-        "en": "Payment Plan IDs",
-        "nl": "Payment plan IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "payment-plan",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=payment-plan",
-      "displayTemplate": "{{code}}"
-    },
-    "assetId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Asset ID",
-        "nl": "Asset ID"
-      },
-      "pluralLabel": {
-        "en": "Asset IDs",
-        "nl": "Asset IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "asset",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=asset",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "vatRateId": {
-      "kind": "entityId",
-      "label": {
-        "en": "VAT Rate ID",
-        "nl": "VAT rate ID"
-      },
-      "pluralLabel": {
-        "en": "VAT Rate IDs",
-        "nl": "VAT rate IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "vat-rate",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=vat-rate",
-      "displayTemplate": "{{code}}"
-    },
-    "priceAdjustmentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Price Adjustment ID",
-        "nl": "Price adjustment ID"
-      },
-      "pluralLabel": {
-        "en": "Price Adjustment IDs",
-        "nl": "Price adjustment IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "price-adjustment",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=price-adjustment",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "maintenanceOrderId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Order ID",
-        "nl": "Maintenance order ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Order IDs",
-        "nl": "Maintenance order IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-order",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-order",
-      "displayTemplate": "{{code}} {{title}}"
-    },
-    "maintenanceSpendingId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Spending ID",
-        "nl": "Maintenance spending ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Spending IDs",
-        "nl": "Maintenance spending IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-spending",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-spending",
-      "displayTemplate": "{{description}}: {{amount}}"
-    },
-    "agreementComponentTypeId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Component Type ID",
-        "nl": "Agreement component type ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Component Type IDs",
-        "nl": "Agreement component type IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-component-type",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-component-type",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "invoiceLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice Line ID",
-        "nl": "Invoice line ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice Line IDs",
-        "nl": "Invoice line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice-line",
-      "displayTemplate": "{{description}}"
-    },
-    "purchaseOrderLineId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Purchase Order Line ID",
-        "nl": "Purchase order line ID"
-      },
-      "pluralLabel": {
-        "en": "Purchase Order Line IDs",
-        "nl": "Purchase order line IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "purchase-order-line",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=purchase-order-line",
-      "displayTemplate": "{{description}}"
-    },
-    "maintenanceTaskCalculationId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Task Calculation ID",
-        "nl": "Maintenance task calculation ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Task Calculation IDs",
-        "nl": "Maintenance task calculation IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-task-calculation",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-task-calculation",
-      "displayTemplate": "{{description}}"
-    },
-    "monitorMeasurementId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Monitor Measurement ID",
-        "nl": "Monitor measurement ID"
-      },
-      "pluralLabel": {
-        "en": "Monitor Measurement IDs",
-        "nl": "Monitor measurement IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "monitor-measurement",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=monitor-measurement",
-      "displayTemplate": "{{measuredAt}}"
-    },
-    "ledgerAccountId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Ledger Account ID",
-        "nl": "Ledger account ID"
-      },
-      "pluralLabel": {
-        "en": "Ledger Account IDs",
-        "nl": "Ledger account IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "ledger-account",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=ledger-account",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "inspectionReportId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Inspection Report ID",
-        "nl": "Inspection report ID"
-      },
-      "pluralLabel": {
-        "en": "Inspection Report IDs",
-        "nl": "Inspection report IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "inspection-report",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=inspection-report",
-      "displayTemplate": "{{code}}"
-    },
-    "projectPhaseId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Phase ID",
-        "nl": "Project phase ID"
-      },
-      "pluralLabel": {
-        "en": "Project Phase IDs",
-        "nl": "Project phase IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-phase",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-phase",
-      "displayTemplate": "{{code}} {{name}}"
-    },
-    "invoiceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Invoice ID",
-        "nl": "Invoice ID"
-      },
-      "pluralLabel": {
-        "en": "Invoice IDs",
-        "nl": "Invoice IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "invoice",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=invoice",
-      "displayTemplate": "{{invoiceKind}} {{invoiceNumber}}"
-    },
-    "agreementComponentId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Agreement Component ID",
-        "nl": "Agreement component ID"
-      },
-      "pluralLabel": {
-        "en": "Agreement Component IDs",
-        "nl": "Agreement component IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "agreement-component",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=agreement-component",
-      "displayTemplate": "{{description}}"
-    },
-    "encumbranceId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Encumbrance ID",
-        "nl": "Encumbrance ID"
-      },
-      "pluralLabel": {
-        "en": "Encumbrance IDs",
-        "nl": "Encumbrance IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "encumbrance",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=encumbrance",
-      "displayTemplate": "{{code}}"
-    },
-    "monitorLogEntryId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Monitor Log Entry ID",
-        "nl": "Monitor log entry ID"
-      },
-      "pluralLabel": {
-        "en": "Monitor Log Entry IDs",
-        "nl": "Monitor log entry IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "monitor-log-entry",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=monitor-log-entry",
-      "displayTemplate": "{{loggedAt}}: {{message}}"
-    },
-    "projectOrderId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Project Order ID",
-        "nl": "Project order ID"
-      },
-      "pluralLabel": {
-        "en": "Project Order IDs",
-        "nl": "Project order IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "project-order",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=project-order",
-      "displayTemplate": "{{code}}"
-    },
-    "warrantyId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Warranty ID",
-        "nl": "Warranty ID"
-      },
-      "pluralLabel": {
-        "en": "Warranty IDs",
-        "nl": "Warranty IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "warranty",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=warranty",
-      "displayTemplate": "{{code}}"
-    },
-    "maintenanceRequestId": {
-      "kind": "entityId",
-      "label": {
-        "en": "Maintenance Request ID",
-        "nl": "Maintenance request ID"
-      },
-      "pluralLabel": {
-        "en": "Maintenance Request IDs",
-        "nl": "Maintenance request IDs"
-      },
-      "valueType": "string",
-      "icon": "Database",
-      "classification": {
-        "sensitivity": "internal",
-        "category": "workflow"
-      },
-      "entity": "maintenance-request",
-      "listUrl": "/api/workflow/designer/core-entity-options?entity=maintenance-request",
-      "displayTemplate": "{{code}} {{title}}"
-    },
     "Account": {
       "kind": "entity",
       "entity": "Account",
@@ -4057,6 +1104,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "accountId": {
+      "kind": "entityId",
+      "entity": "Account",
+      "valueType": "string",
+      "label": {
+        "en": "Account",
+        "nl": "Account"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/accounts",
+      "displayTemplate": "{{username}}",
+      "filterField": "username",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -4349,6 +1416,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "addressId": {
+      "kind": "entityId",
+      "entity": "Address",
+      "valueType": "string",
+      "label": {
+        "en": "Address",
+        "nl": "Adres"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/addresses",
+      "displayTemplate": "{{street}} {{houseNumber}}",
+      "filterField": "street",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AddressAssignment": {
       "kind": "entity",
       "entity": "AddressAssignment",
@@ -4517,6 +1604,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "addressAssignmentId": {
+      "kind": "entityId",
+      "entity": "AddressAssignment",
+      "valueType": "string",
+      "label": {
+        "en": "Address Assignment",
+        "nl": "Adrestoewijzing"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/address-assignments",
+      "displayTemplate": "{{role}}",
+      "filterField": "role",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -4692,6 +1799,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "adminRegionId": {
+      "kind": "entityId",
+      "entity": "AdminRegion",
+      "valueType": "string",
+      "label": {
+        "en": "Administrative region",
+        "nl": "Bestuurlijk gebied"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/admin-regions",
+      "displayTemplate": "{{regionLevel}}: {{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -5304,6 +2431,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "agreementId": {
+      "kind": "entityId",
+      "entity": "Agreement",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement",
+        "nl": "Overeenkomst"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreements",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AgreementComponent": {
       "kind": "entity",
       "entity": "AgreementComponent",
@@ -5638,6 +2785,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "agreementComponentId": {
+      "kind": "entityId",
+      "entity": "AgreementComponent",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement component",
+        "nl": "Overeenkomstcomponent"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-components",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AgreementComponentCumulative": {
       "kind": "entity",
       "entity": "AgreementComponentCumulative",
@@ -5938,6 +3105,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "agreementComponentCumulativeId": {
+      "kind": "entityId",
+      "entity": "AgreementComponentCumulative",
+      "valueType": "string",
+      "label": {
+        "en": "Component cumulative",
+        "nl": "Component cumulatief"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-component-cumulatives",
+      "displayTemplate": "{{postedAt}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AgreementComponentType": {
       "kind": "entity",
       "entity": "AgreementComponentType",
@@ -6157,6 +3344,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "agreementComponentTypeId": {
+      "kind": "entityId",
+      "entity": "AgreementComponentType",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement component type",
+        "nl": "Overeenkomstcomponenttype"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-component-types",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AgreementLink": {
       "kind": "entity",
       "entity": "AgreementLink",
@@ -6262,6 +3469,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "agreementLinkId": {
+      "kind": "entityId",
+      "entity": "AgreementLink",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement link",
+        "nl": "Overeenkomstkoppeling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-links",
+      "displayTemplate": "{{linkType}}",
+      "filterField": "linkType",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -6564,6 +3791,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "agreementMilestoneId": {
+      "kind": "entityId",
+      "entity": "AgreementMilestone",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement milestone",
+        "nl": "Overeenkomstmijlpaal"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-milestones",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -6924,6 +4171,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "agreementPartyId": {
+      "kind": "entityId",
+      "entity": "AgreementParty",
+      "valueType": "string",
+      "label": {
+        "en": "Agreement party",
+        "nl": "Overeenkomstpartij"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/agreement-parties",
+      "displayTemplate": "{{partyRole}}",
+      "filterField": "partyRole",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Alert": {
       "kind": "entity",
       "entity": "Alert",
@@ -7194,6 +4461,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "alertId": {
+      "kind": "entityId",
+      "entity": "Alert",
+      "valueType": "string",
+      "label": {
+        "en": "Alert",
+        "nl": "Melding"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/alerts",
+      "displayTemplate": "{{code}} {{title}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Appointment": {
       "kind": "entity",
       "entity": "Appointment",
@@ -7393,6 +4680,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "appointmentId": {
+      "kind": "entityId",
+      "entity": "Appointment",
+      "valueType": "string",
+      "label": {
+        "en": "Appointment",
+        "nl": "Afspraak"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/appointments",
+      "displayTemplate": "{{subject}}",
+      "filterField": "subject",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AppointmentOption": {
       "kind": "entity",
       "entity": "AppointmentOption",
@@ -7545,6 +4852,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "appointmentOptionId": {
+      "kind": "entityId",
+      "entity": "AppointmentOption",
+      "valueType": "string",
+      "label": {
+        "en": "Appointment option",
+        "nl": "Afspraakoptie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/appointment-options",
+      "displayTemplate": "#{{optionNumber}} {{startsAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -7794,6 +5121,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "appointmentRequestId": {
+      "kind": "entityId",
+      "entity": "AppointmentRequest",
+      "valueType": "string",
+      "label": {
+        "en": "Appointment request",
+        "nl": "Afspraakverzoek"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/appointment-requests",
+      "displayTemplate": "{{code}} {{title}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Area": {
       "kind": "entity",
       "entity": "Area",
@@ -7953,6 +5300,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "areaId": {
+      "kind": "entityId",
+      "entity": "Area",
+      "valueType": "string",
+      "label": {
+        "en": "Area",
+        "nl": "Oppervlakte"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/areas",
+      "displayTemplate": "{{value}} {{unitId}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -8354,6 +5721,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "assetId": {
+      "kind": "entityId",
+      "entity": "Asset",
+      "valueType": "string",
+      "label": {
+        "en": "Asset",
+        "nl": "Object"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/assets",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "AssetCondition": {
       "kind": "entity",
       "entity": "AssetCondition",
@@ -8497,6 +5884,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "assetConditionId": {
+      "kind": "entityId",
+      "entity": "AssetCondition",
+      "valueType": "string",
+      "label": {
+        "en": "Asset condition",
+        "nl": "Conditie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/asset-conditions",
+      "displayTemplate": "{{assessedAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -8650,6 +6057,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "assetGroupId": {
+      "kind": "entityId",
+      "entity": "AssetGroup",
+      "valueType": "string",
+      "label": {
+        "en": "Asset group",
+        "nl": "Objectgroep"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/asset-groups",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -8844,6 +6271,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "assignmentId": {
+      "kind": "entityId",
+      "entity": "Assignment",
+      "valueType": "string",
+      "label": {
+        "en": "Assignment",
+        "nl": "Toewijzing"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/assignments",
+      "displayTemplate": "{{reason}}",
+      "filterField": "reason",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Attachment": {
       "kind": "entity",
       "entity": "Attachment",
@@ -8983,6 +6430,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "attachmentId": {
+      "kind": "entityId",
+      "entity": "Attachment",
+      "valueType": "string",
+      "label": {
+        "en": "Attachment",
+        "nl": "Bijlage"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/attachments",
+      "displayTemplate": "{{fileName}}",
+      "filterField": "fileName",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BankReconciliation": {
       "kind": "entity",
       "entity": "BankReconciliation",
@@ -9083,6 +6550,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "bankReconciliationId": {
+      "kind": "entityId",
+      "entity": "BankReconciliation",
+      "valueType": "string",
+      "label": {
+        "en": "Bank reconciliation",
+        "nl": "Aflettering"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/bank-reconciliations",
+      "displayTemplate": "{{matchedAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -9249,6 +6736,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "bankStatementId": {
+      "kind": "entityId",
+      "entity": "BankStatement",
+      "valueType": "string",
+      "label": {
+        "en": "Bank statement",
+        "nl": "Bankafschrift"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/bank-statements",
+      "displayTemplate": "{{accountIban}} #{{statementNumber}}",
+      "filterField": "statementNumber",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -9469,6 +6976,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "bankStatementLineId": {
+      "kind": "entityId",
+      "entity": "BankStatementLine",
+      "valueType": "string",
+      "label": {
+        "en": "Bank statement line",
+        "nl": "Bankafschriftregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/bank-statement-lines",
+      "displayTemplate": "{{counterpartyName}}: {{amount}}",
+      "filterField": "counterpartyName",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -9784,6 +7311,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "billingRunId": {
+      "kind": "entityId",
+      "entity": "BillingRun",
+      "valueType": "string",
+      "label": {
+        "en": "Billing run",
+        "nl": "Facturatie-run"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/billing-runs",
+      "displayTemplate": "{{mode}} @ {{billUpToDate}}",
+      "filterField": "idempotencyKey",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BillingRunItem": {
       "kind": "entity",
       "entity": "BillingRunItem",
@@ -10090,6 +7637,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "billingRunItemId": {
+      "kind": "entityId",
+      "entity": "BillingRunItem",
+      "valueType": "string",
+      "label": {
+        "en": "Billing run item",
+        "nl": "Facturatie-run-item"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/billing-run-items",
+      "displayTemplate": "{{periodStart}} → {{periodEnd}}",
+      "filterField": "idempotencyKey",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BillingSchedule": {
       "kind": "entity",
       "entity": "BillingSchedule",
@@ -10293,6 +7860,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "billingScheduleId": {
+      "kind": "entityId",
+      "entity": "BillingSchedule",
+      "valueType": "string",
+      "label": {
+        "en": "Billing schedule",
+        "nl": "Facturatieschema"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/billing-schedules",
+      "displayTemplate": "{{period}}",
+      "filterField": "period",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -10528,7 +8115,7 @@
     },
     "blockId": {
       "kind": "entityId",
-      "entity": "block",
+      "entity": "Block",
       "valueType": "string",
       "label": {
         "en": "Block",
@@ -10700,6 +8287,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "budgetId": {
+      "kind": "entityId",
+      "entity": "Budget",
+      "valueType": "string",
+      "label": {
+        "en": "Budget",
+        "nl": "Begroting"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/budgets",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BudgetLine": {
       "kind": "entity",
       "entity": "BudgetLine",
@@ -10835,6 +8442,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "budgetLineId": {
+      "kind": "entityId",
+      "entity": "BudgetLine",
+      "valueType": "string",
+      "label": {
+        "en": "Budget line",
+        "nl": "Begrotingsregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/budget-lines",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -11046,6 +8673,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "buildingId": {
+      "kind": "entityId",
+      "entity": "Building",
+      "valueType": "string",
+      "label": {
+        "en": "Building",
+        "nl": "Pand"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/buildings",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BuildingPart": {
       "kind": "entity",
       "entity": "BuildingPart",
@@ -11192,6 +8839,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "buildingPartId": {
+      "kind": "entityId",
+      "entity": "BuildingPart",
+      "valueType": "string",
+      "label": {
+        "en": "Building part",
+        "nl": "Bouwdeel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/building-parts",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -12036,6 +9703,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "caseId": {
+      "kind": "entityId",
+      "entity": "Case",
+      "valueType": "string",
+      "label": {
+        "en": "Case",
+        "nl": "Zaak"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/cases",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "CaseFile": {
       "kind": "entity",
       "entity": "CaseFile",
@@ -12351,6 +10038,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "caseFileId": {
+      "kind": "entityId",
+      "entity": "CaseFile",
+      "valueType": "string",
+      "label": {
+        "en": "Case file",
+        "nl": "Dossier"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-files",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "CaseFileType": {
       "kind": "entity",
       "entity": "CaseFileType",
@@ -12465,6 +10172,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "caseFileTypeId": {
+      "kind": "entityId",
+      "entity": "CaseFileType",
+      "valueType": "string",
+      "label": {
+        "en": "Case file type",
+        "nl": "Dossiertype"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-file-types",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -12589,6 +10316,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "caseObjectLinkId": {
+      "kind": "entityId",
+      "entity": "CaseObjectLink",
+      "valueType": "string",
+      "label": {
+        "en": "Case Object Link",
+        "nl": "Zaakobjectkoppeling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-object-links",
+      "displayTemplate": "{{objectLabel}}",
+      "filterField": "objectLabel",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -12753,6 +10500,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "casePartyId": {
+      "kind": "entityId",
+      "entity": "CaseParty",
+      "valueType": "string",
+      "label": {
+        "en": "Case Party",
+        "nl": "Zaakbetrokkene"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-parties",
+      "displayTemplate": "{{displayName}}",
+      "filterField": "displayName",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -12938,6 +10705,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "caseStatusEventId": {
+      "kind": "entityId",
+      "entity": "CaseStatusEvent",
+      "valueType": "string",
+      "label": {
+        "en": "Case Status Event",
+        "nl": "Zaakstatusgebeurtenis"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-status-events",
+      "displayTemplate": "{{actorType}}",
+      "filterField": "actorId",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -13254,7 +11041,7 @@
     },
     "caseStepActionId": {
       "kind": "entityId",
-      "entity": "case-step-action",
+      "entity": "CaseStepAction",
       "valueType": "string",
       "label": {
         "en": "Case Step Action",
@@ -13857,6 +11644,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "caseStepTemplateId": {
+      "kind": "entityId",
+      "entity": "CaseStepTemplate",
+      "valueType": "string",
+      "label": {
+        "en": "Case Step Template",
+        "nl": "Zaakstapsjabloon"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-step-templates",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "CaseTemplate": {
       "kind": "entity",
       "entity": "CaseTemplate",
@@ -14143,6 +11950,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "caseTemplateId": {
+      "kind": "entityId",
+      "entity": "CaseTemplate",
+      "valueType": "string",
+      "label": {
+        "en": "Case Template",
+        "nl": "Zaaksjabloon"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-templates",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "CaseType": {
       "kind": "entity",
       "entity": "CaseType",
@@ -14309,6 +12136,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "caseTypeId": {
+      "kind": "entityId",
+      "entity": "CaseType",
+      "valueType": "string",
+      "label": {
+        "en": "Case Type",
+        "nl": "Zaaktype"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/case-types",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Chip": {
       "kind": "entity",
       "entity": "Chip",
@@ -14456,7 +12303,7 @@
     },
     "chipId": {
       "kind": "entityId",
-      "entity": "chip",
+      "entity": "Chip",
       "valueType": "string",
       "label": {
         "en": "Chip",
@@ -14570,6 +12417,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "commentId": {
+      "kind": "entityId",
+      "entity": "Comment",
+      "valueType": "string",
+      "label": {
+        "en": "Comment",
+        "nl": "Opmerking"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/comments",
+      "displayTemplate": "{{body}}",
+      "filterField": "body",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -14819,6 +12686,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "communicationPreferenceId": {
+      "kind": "entityId",
+      "entity": "CommunicationPreference",
+      "valueType": "string",
+      "label": {
+        "en": "Communication Preference",
+        "nl": "Communicatievoorkeur"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/communication-preferences",
+      "displayTemplate": "{{type}}",
+      "filterField": "type",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ConditionAssessment": {
       "kind": "entity",
       "entity": "ConditionAssessment",
@@ -14977,6 +12864,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "conditionAssessmentId": {
+      "kind": "entityId",
+      "entity": "ConditionAssessment",
+      "valueType": "string",
+      "label": {
+        "en": "Condition assessment",
+        "nl": "Conditiemeting"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/condition-assessments",
+      "displayTemplate": "{{assessedAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -15292,6 +13199,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "contactDetailId": {
+      "kind": "entityId",
+      "entity": "ContactDetail",
+      "valueType": "string",
+      "label": {
+        "en": "Contact Detail",
+        "nl": "Contactgegeven"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/contact-details",
+      "displayTemplate": "{{value}}",
+      "filterField": "value",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ContactMoment": {
       "kind": "entity",
       "entity": "ContactMoment",
@@ -15532,6 +13459,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "contactMomentId": {
+      "kind": "entityId",
+      "entity": "ContactMoment",
+      "valueType": "string",
+      "label": {
+        "en": "Contact Moment",
+        "nl": "Contactmoment"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/contact-moments",
+      "displayTemplate": "{{subject}}",
+      "filterField": "subject",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "CostDimension": {
       "kind": "entity",
       "entity": "CostDimension",
@@ -15738,6 +13685,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "costDimensionId": {
+      "kind": "entityId",
+      "entity": "CostDimension",
+      "valueType": "string",
+      "label": {
+        "en": "Cost dimension",
+        "nl": "Kostendimensie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/cost-dimensions",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -16062,6 +14029,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "creditorId": {
+      "kind": "entityId",
+      "entity": "Creditor",
+      "valueType": "string",
+      "label": {
+        "en": "Creditor",
+        "nl": "Crediteur"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/creditors",
+      "displayTemplate": "{{creditorNumber}}",
+      "filterField": "creditorNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Debtor": {
       "kind": "entity",
       "entity": "Debtor",
@@ -16377,6 +14364,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "debtorId": {
+      "kind": "entityId",
+      "entity": "Debtor",
+      "valueType": "string",
+      "label": {
+        "en": "Debtor",
+        "nl": "Debiteur"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/debtors",
+      "displayTemplate": "{{debtorNumber}}",
+      "filterField": "debtorNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "DirectDebitMandate": {
       "kind": "entity",
       "entity": "DirectDebitMandate",
@@ -16620,6 +14627,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "directDebitMandateId": {
+      "kind": "entityId",
+      "entity": "DirectDebitMandate",
+      "valueType": "string",
+      "label": {
+        "en": "Direct debit mandate",
+        "nl": "Incassomachtiging"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/direct-debit-mandates",
+      "displayTemplate": "{{mandateReference}}",
+      "filterField": "mandateReference",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "DirectDebitOrder": {
       "kind": "entity",
       "entity": "DirectDebitOrder",
@@ -16804,6 +14831,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "directDebitOrderId": {
+      "kind": "entityId",
+      "entity": "DirectDebitOrder",
+      "valueType": "string",
+      "label": {
+        "en": "Direct debit order",
+        "nl": "Incasso-opdracht"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/direct-debit-orders",
+      "displayTemplate": "{{endToEndId}}",
+      "filterField": "endToEndId",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -17308,6 +15355,26 @@
       },
       "versioned": true
     },
+    "documentId": {
+      "kind": "entityId",
+      "entity": "Document",
+      "valueType": "string",
+      "label": {
+        "en": "Document",
+        "nl": "Document"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/documents",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "DocumentType": {
       "kind": "entity",
       "entity": "DocumentType",
@@ -17421,6 +15488,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "documentTypeId": {
+      "kind": "entityId",
+      "entity": "DocumentType",
+      "valueType": "string",
+      "label": {
+        "en": "Document Type",
+        "nl": "Documenttype"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/document-types",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -17550,7 +15637,7 @@
     },
     "documentVariantId": {
       "kind": "entityId",
-      "entity": "document-variant",
+      "entity": "DocumentVariant",
       "valueType": "string",
       "label": {
         "en": "Document variant",
@@ -17964,6 +16051,26 @@
       },
       "versionEntityOf": "Document"
     },
+    "documentVersionId": {
+      "kind": "entityId",
+      "entity": "DocumentVersion",
+      "valueType": "string",
+      "label": {
+        "en": "Document Version",
+        "nl": "Documentversie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/document-versions",
+      "displayTemplate": "{{versionLabel}}",
+      "filterField": "versionLabel",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Employee": {
       "kind": "entity",
       "entity": "Employee",
@@ -18190,6 +16297,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "employeeId": {
+      "kind": "entityId",
+      "entity": "Employee",
+      "valueType": "string",
+      "label": {
+        "en": "Employee",
+        "nl": "Medewerker"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/employees",
+      "displayTemplate": "{{employeeNumber}}",
+      "filterField": "employeeNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "EmployeeBudget": {
       "kind": "entity",
       "entity": "EmployeeBudget",
@@ -18376,6 +16503,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "employeeBudgetId": {
+      "kind": "entityId",
+      "entity": "EmployeeBudget",
+      "valueType": "string",
+      "label": {
+        "en": "Employee budget",
+        "nl": "Medewerkerbudget"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/employee-budgets",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -18641,6 +16788,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "employeeRoleId": {
+      "kind": "entityId",
+      "entity": "EmployeeRole",
+      "valueType": "string",
+      "label": {
+        "en": "Employee role",
+        "nl": "Medewerkerrol"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/employee-roles",
+      "displayTemplate": "{{roleKind}}",
+      "filterField": "roleKind",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Encumbrance": {
       "kind": "entity",
       "entity": "Encumbrance",
@@ -18849,6 +17016,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "encumbranceId": {
+      "kind": "entityId",
+      "entity": "Encumbrance",
+      "valueType": "string",
+      "label": {
+        "en": "Encumbrance",
+        "nl": "Zekerheid"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/encumbrances",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "EnergyPerformance": {
       "kind": "entity",
       "entity": "EnergyPerformance",
@@ -19012,6 +17199,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "energyPerformanceId": {
+      "kind": "entityId",
+      "entity": "EnergyPerformance",
+      "valueType": "string",
+      "label": {
+        "en": "Energy performance",
+        "nl": "Energieprestatie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/energy-performances",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "EnergyPerformanceMeasurement": {
       "kind": "entity",
       "entity": "EnergyPerformanceMeasurement",
@@ -19119,6 +17326,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "energyPerformanceMeasurementId": {
+      "kind": "entityId",
+      "entity": "EnergyPerformanceMeasurement",
+      "valueType": "string",
+      "label": {
+        "en": "Energy performance measurement",
+        "nl": "Energieprestatiemeting"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/energy-performance-measurements",
+      "displayTemplate": "{{measuredAt}}: {{value}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -19370,6 +17597,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "fiscalPeriodId": {
+      "kind": "entityId",
+      "entity": "FiscalPeriod",
+      "valueType": "string",
+      "label": {
+        "en": "Fiscal period",
+        "nl": "Boekjaarperiode"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/fiscal-periods",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "FiscalYear": {
       "kind": "entity",
       "entity": "FiscalYear",
@@ -19515,6 +17762,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "fiscalYearId": {
+      "kind": "entityId",
+      "entity": "FiscalYear",
+      "valueType": "string",
+      "label": {
+        "en": "Fiscal year",
+        "nl": "Boekjaar"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/fiscal-years",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "InspectionReport": {
       "kind": "entity",
       "entity": "InspectionReport",
@@ -19654,6 +17921,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "inspectionReportId": {
+      "kind": "entityId",
+      "entity": "InspectionReport",
+      "valueType": "string",
+      "label": {
+        "en": "Inspection report",
+        "nl": "Inspectierapport"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/inspection-reports",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -20203,6 +18490,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "invoiceId": {
+      "kind": "entityId",
+      "entity": "Invoice",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice",
+        "nl": "Factuur"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoices",
+      "displayTemplate": "{{invoiceKind}} {{invoiceNumber}}",
+      "filterField": "invoiceNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "InvoiceCollectionItem": {
       "kind": "entity",
       "entity": "InvoiceCollectionItem",
@@ -20339,6 +18646,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "invoiceCollectionItemId": {
+      "kind": "entityId",
+      "entity": "InvoiceCollectionItem",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice collection item",
+        "nl": "Factuurincasso-regel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoice-collection-items",
+      "displayTemplate": "{{amount}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -20637,6 +18964,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "invoiceLineId": {
+      "kind": "entityId",
+      "entity": "InvoiceLine",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice line",
+        "nl": "Factuurregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoice-lines",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "InvoicePayment": {
       "kind": "entity",
       "entity": "InvoicePayment",
@@ -20761,6 +19108,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "invoicePaymentId": {
+      "kind": "entityId",
+      "entity": "InvoicePayment",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice payment",
+        "nl": "Factuurbetaling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoice-payments",
+      "displayTemplate": "{{amount}} @ {{paidAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -20930,6 +19297,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "invoiceSequenceId": {
+      "kind": "entityId",
+      "entity": "InvoiceSequence",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice sequence",
+        "nl": "Factuurreeks"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoice-sequences",
+      "displayTemplate": "{{kind}} {{fiscalYearCode}}: {{lastNumber}}",
+      "filterField": "kind",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "InvoiceVatBucket": {
       "kind": "entity",
       "entity": "InvoiceVatBucket",
@@ -21012,6 +19399,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "invoiceVatBucketId": {
+      "kind": "entityId",
+      "entity": "InvoiceVatBucket",
+      "valueType": "string",
+      "label": {
+        "en": "Invoice VAT bucket",
+        "nl": "BTW-totaal"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/invoice-vat-buckets",
+      "displayTemplate": "{{vatRate.code}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -21332,6 +19739,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "labelRuleId": {
+      "kind": "entityId",
+      "entity": "LabelRule",
+      "valueType": "string",
+      "label": {
+        "en": "Label Rule",
+        "nl": "Labelregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/label-rules",
+      "displayTemplate": "{{name}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -21719,6 +20146,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "ledgerAccountId": {
+      "kind": "entityId",
+      "entity": "LedgerAccount",
+      "valueType": "string",
+      "label": {
+        "en": "Ledger account",
+        "nl": "Grootboekrekening"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/ledger-accounts",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "LedgerPosting": {
       "kind": "entity",
       "entity": "LedgerPosting",
@@ -21912,6 +20359,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "ledgerPostingId": {
+      "kind": "entityId",
+      "entity": "LedgerPosting",
+      "valueType": "string",
+      "label": {
+        "en": "Ledger posting",
+        "nl": "Boeking"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/ledger-postings",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -22139,6 +20606,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "ledgerPostingLineId": {
+      "kind": "entityId",
+      "entity": "LedgerPostingLine",
+      "valueType": "string",
+      "label": {
+        "en": "Ledger posting line",
+        "nl": "Boekingsregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/ledger-posting-lines",
+      "displayTemplate": "{{lineNumber}}: {{amount}}",
+      "filterField": "description",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "LegalEntity": {
       "kind": "entity",
       "entity": "LegalEntity",
@@ -22304,6 +20791,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "legalEntityId": {
+      "kind": "entityId",
+      "entity": "LegalEntity",
+      "valueType": "string",
+      "label": {
+        "en": "Legal Entity",
+        "nl": "Rechtspersoon"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/legal-entities",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -22660,6 +21167,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "maintenanceOrderId": {
+      "kind": "entityId",
+      "entity": "MaintenanceOrder",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance order",
+        "nl": "Onderhoudsorder"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-orders",
+      "displayTemplate": "{{code}} {{title}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MaintenanceOrderParty": {
       "kind": "entity",
       "entity": "MaintenanceOrderParty",
@@ -22917,6 +21444,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "maintenanceOrderPartyId": {
+      "kind": "entityId",
+      "entity": "MaintenanceOrderParty",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance order party",
+        "nl": "Partij op onderhoudsorder"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-order-parties",
+      "displayTemplate": "{{roleType}}",
+      "filterField": "roleType",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MaintenanceRequest": {
       "kind": "entity",
       "entity": "MaintenanceRequest",
@@ -23138,6 +21685,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "maintenanceRequestId": {
+      "kind": "entityId",
+      "entity": "MaintenanceRequest",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance request",
+        "nl": "Onderhoudsverzoek"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-requests",
+      "displayTemplate": "{{code}} {{title}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MaintenanceRequestSettlement": {
       "kind": "entity",
       "entity": "MaintenanceRequestSettlement",
@@ -23255,6 +21822,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "maintenanceRequestSettlementId": {
+      "kind": "entityId",
+      "entity": "MaintenanceRequestSettlement",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance request settlement",
+        "nl": "Onderhoudsverzoek-verrekening"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-request-settlements",
+      "displayTemplate": "{{description}}: {{amount}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -23397,6 +21984,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "maintenanceSpendingId": {
+      "kind": "entityId",
+      "entity": "MaintenanceSpending",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance spending",
+        "nl": "Onderhoudsbesteding"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-spendings",
+      "displayTemplate": "{{description}}: {{amount}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -23586,6 +22193,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "maintenanceTaskId": {
+      "kind": "entityId",
+      "entity": "MaintenanceTask",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance task",
+        "nl": "Onderhoudstaak"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-tasks",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MaintenanceTaskCalculation": {
       "kind": "entity",
       "entity": "MaintenanceTaskCalculation",
@@ -23725,6 +22352,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "maintenanceTaskCalculationId": {
+      "kind": "entityId",
+      "entity": "MaintenanceTaskCalculation",
+      "valueType": "string",
+      "label": {
+        "en": "Maintenance task calculation",
+        "nl": "Onderhoudstaak voorcalculatie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/maintenance-task-calculations",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -23946,6 +22593,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "milestoneId": {
+      "kind": "entityId",
+      "entity": "Milestone",
+      "valueType": "string",
+      "label": {
+        "en": "Milestone",
+        "nl": "Mijlpaal"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/milestones",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MonitorInterval": {
       "kind": "entity",
       "entity": "MonitorInterval",
@@ -24038,6 +22705,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "monitorIntervalId": {
+      "kind": "entityId",
+      "entity": "MonitorInterval",
+      "valueType": "string",
+      "label": {
+        "en": "Monitor interval",
+        "nl": "Monitorinterval"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/monitor-intervals",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -24203,6 +22890,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "monitorLogId": {
+      "kind": "entityId",
+      "entity": "MonitorLog",
+      "valueType": "string",
+      "label": {
+        "en": "Monitor log",
+        "nl": "Monitorlog"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/monitor-logs",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MonitorLogEntry": {
       "kind": "entity",
       "entity": "MonitorLogEntry",
@@ -24294,6 +23001,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "monitorLogEntryId": {
+      "kind": "entityId",
+      "entity": "MonitorLogEntry",
+      "valueType": "string",
+      "label": {
+        "en": "Monitor log entry",
+        "nl": "Monitorlogregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/monitor-log-entries",
+      "displayTemplate": "{{loggedAt}}: {{message}}",
+      "filterField": "message",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -24419,6 +23146,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "monitorMeasurementId": {
+      "kind": "entityId",
+      "entity": "MonitorMeasurement",
+      "valueType": "string",
+      "label": {
+        "en": "Monitor measurement",
+        "nl": "Monitormeting"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/monitor-measurements",
+      "displayTemplate": "{{measuredAt}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "MonitorReading": {
       "kind": "entity",
       "entity": "MonitorReading",
@@ -24506,6 +23253,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "monitorReadingId": {
+      "kind": "entityId",
+      "entity": "MonitorReading",
+      "valueType": "string",
+      "label": {
+        "en": "Monitor reading",
+        "nl": "Monitorwaarde"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/monitor-readings",
+      "displayTemplate": "{{readAt}}: {{value}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -24849,6 +23616,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "naturalPersonId": {
+      "kind": "entityId",
+      "entity": "NaturalPerson",
+      "valueType": "string",
+      "label": {
+        "en": "Natural Person",
+        "nl": "Natuurlijk Persoon"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/natural-persons",
+      "displayTemplate": "{{firstName}} {{lastName}}",
+      "filterField": "lastName",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Notebook": {
       "kind": "entity",
       "entity": "Notebook",
@@ -24916,7 +23703,7 @@
     },
     "notebookId": {
       "kind": "entityId",
-      "entity": "notebook",
+      "entity": "Notebook",
       "valueType": "string",
       "label": {
         "en": "Notebook",
@@ -25078,7 +23865,7 @@
     },
     "notebookVersionId": {
       "kind": "entityId",
-      "entity": "notebook-version",
+      "entity": "NotebookVersion",
       "valueType": "string",
       "label": {
         "en": "Notebook version",
@@ -25324,6 +24111,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "orgUnitId": {
+      "kind": "entityId",
+      "entity": "OrgUnit",
+      "valueType": "string",
+      "label": {
+        "en": "Org unit",
+        "nl": "Organisatorische eenheid"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/org-units",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "OrganizationPermission": {
       "kind": "entity",
       "entity": "OrganizationPermission",
@@ -25483,7 +24290,7 @@
     },
     "organizationPermissionId": {
       "kind": "entityId",
-      "entity": "organization-permission",
+      "entity": "OrganizationPermission",
       "valueType": "string",
       "label": {
         "en": "Organization permission",
@@ -25736,6 +24543,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "paymentDetailId": {
+      "kind": "entityId",
+      "entity": "PaymentDetail",
+      "valueType": "string",
+      "label": {
+        "en": "Payment Detail",
+        "nl": "Betaalgegevens"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/payment-details",
+      "displayTemplate": "{{iban}}",
+      "filterField": "iban",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "PaymentMethod": {
       "kind": "entity",
       "entity": "PaymentMethod",
@@ -25963,6 +24790,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "paymentMethodId": {
+      "kind": "entityId",
+      "entity": "PaymentMethod",
+      "valueType": "string",
+      "label": {
+        "en": "Payment method",
+        "nl": "Betaalwijze"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/payment-methods",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "PaymentOrder": {
       "kind": "entity",
       "entity": "PaymentOrder",
@@ -26121,6 +24968,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "paymentOrderId": {
+      "kind": "entityId",
+      "entity": "PaymentOrder",
+      "valueType": "string",
+      "label": {
+        "en": "Payment order",
+        "nl": "Betaalopdracht"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/payment-orders",
+      "displayTemplate": "{{referenceNumber}}",
+      "filterField": "referenceNumber",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -26310,6 +25177,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "paymentPlanId": {
+      "kind": "entityId",
+      "entity": "PaymentPlan",
+      "valueType": "string",
+      "label": {
+        "en": "Payment plan",
+        "nl": "Betalingsregeling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/payment-plans",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "PaymentPlanInstalment": {
       "kind": "entity",
       "entity": "PaymentPlanInstalment",
@@ -26430,6 +25317,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "paymentPlanInstalmentId": {
+      "kind": "entityId",
+      "entity": "PaymentPlanInstalment",
+      "valueType": "string",
+      "label": {
+        "en": "Payment plan instalment",
+        "nl": "Termijn"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/payment-plan-instalments",
+      "displayTemplate": "#{{instalmentNumber}}: {{amount}}",
+      "filterField": "instalmentNumber",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -26559,6 +25466,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "periodBalanceId": {
+      "kind": "entityId",
+      "entity": "PeriodBalance",
+      "valueType": "string",
+      "label": {
+        "en": "Period balance",
+        "nl": "Periodesaldo"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/period-balances",
+      "displayTemplate": "{{ledgerAccount.code}}",
+      "filterField": "dimensionsHash",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "PersonalPreference": {
       "kind": "entity",
       "entity": "PersonalPreference",
@@ -26654,7 +25581,7 @@
     },
     "personalPreferenceId": {
       "kind": "entityId",
-      "entity": "personal-preference",
+      "entity": "PersonalPreference",
       "valueType": "string",
       "label": {
         "en": "Personal preference",
@@ -26799,6 +25726,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "pointId": {
+      "kind": "entityId",
+      "entity": "Point",
+      "valueType": "string",
+      "label": {
+        "en": "Point",
+        "nl": "Punt"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/points",
+      "displayTemplate": "{{latitude}}, {{longitude}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -27004,6 +25951,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "positionId": {
+      "kind": "entityId",
+      "entity": "Position",
+      "valueType": "string",
+      "label": {
+        "en": "Position",
+        "nl": "Functie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/positions",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Preference": {
       "kind": "entity",
       "entity": "Preference",
@@ -27153,6 +26120,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "preferenceId": {
+      "kind": "entityId",
+      "entity": "Preference",
+      "valueType": "string",
+      "label": {
+        "en": "Preference",
+        "nl": "Voorkeur"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/preferences",
+      "displayTemplate": "{{key}}",
+      "filterField": "key",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -27313,6 +26300,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "priceAdjustmentId": {
+      "kind": "entityId",
+      "entity": "PriceAdjustment",
+      "valueType": "string",
+      "label": {
+        "en": "Price adjustment",
+        "nl": "Prijsaanpassing"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/price-adjustments",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -27780,6 +26787,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "processId": {
+      "kind": "entityId",
+      "entity": "Process",
+      "valueType": "string",
+      "label": {
+        "en": "Case Step Container",
+        "nl": "Zaakstapcontainer"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/processes",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ProcessRole": {
       "kind": "entity",
       "entity": "ProcessRole",
@@ -27964,6 +26991,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "processRoleId": {
+      "kind": "entityId",
+      "entity": "ProcessRole",
+      "valueType": "string",
+      "label": {
+        "en": "Process role",
+        "nl": "Procesrol"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/process-roles",
+      "displayTemplate": "{{roleType}}",
+      "filterField": "roleType",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -28508,6 +27555,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "processStepId": {
+      "kind": "entityId",
+      "entity": "ProcessStep",
+      "valueType": "string",
+      "label": {
+        "en": "Process Step",
+        "nl": "Processtap"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/process-steps",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Project": {
       "kind": "entity",
       "entity": "Project",
@@ -28841,6 +27908,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "projectId": {
+      "kind": "entityId",
+      "entity": "Project",
+      "valueType": "string",
+      "label": {
+        "en": "Project",
+        "nl": "Project"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/projects",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ProjectBudgetLine": {
       "kind": "entity",
       "entity": "ProjectBudgetLine",
@@ -28976,6 +28063,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectBudgetLineId": {
+      "kind": "entityId",
+      "entity": "ProjectBudgetLine",
+      "valueType": "string",
+      "label": {
+        "en": "Project budget line",
+        "nl": "Projectbudgetregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-budget-lines",
+      "displayTemplate": "{{description}}: {{amount}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -29130,6 +28237,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectObjectiveId": {
+      "kind": "entityId",
+      "entity": "ProjectObjective",
+      "valueType": "string",
+      "label": {
+        "en": "Project objective",
+        "nl": "Projectdoelstelling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-objectives",
+      "displayTemplate": "{{code}} {{description}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -29314,6 +28441,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectOrderId": {
+      "kind": "entityId",
+      "entity": "ProjectOrder",
+      "valueType": "string",
+      "label": {
+        "en": "Project order",
+        "nl": "Projectopdracht"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-orders",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -29520,6 +28667,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "projectPhaseId": {
+      "kind": "entityId",
+      "entity": "ProjectPhase",
+      "valueType": "string",
+      "label": {
+        "en": "Project phase",
+        "nl": "Projectfase"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-phases",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ProjectPhaseDecision": {
       "kind": "entity",
       "entity": "ProjectPhaseDecision",
@@ -29647,6 +28814,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectPhaseDecisionId": {
+      "kind": "entityId",
+      "entity": "ProjectPhaseDecision",
+      "valueType": "string",
+      "label": {
+        "en": "Project phase decision",
+        "nl": "Projectfasebesluit"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-phase-decisions",
+      "displayTemplate": "{{outcome}}",
+      "filterField": "outcome",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -29879,6 +29066,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "projectRoleId": {
+      "kind": "entityId",
+      "entity": "ProjectRole",
+      "valueType": "string",
+      "label": {
+        "en": "Project role",
+        "nl": "Projectrol"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-roles",
+      "displayTemplate": "{{roleType}}",
+      "filterField": "roleType",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ProjectSpending": {
       "kind": "entity",
       "entity": "ProjectSpending",
@@ -30011,6 +29218,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectSpendingId": {
+      "kind": "entityId",
+      "entity": "ProjectSpending",
+      "valueType": "string",
+      "label": {
+        "en": "Project spending",
+        "nl": "Projectbesteding"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-spendings",
+      "displayTemplate": "{{description}}: {{amount}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -30264,6 +29491,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "projectTaskId": {
+      "kind": "entityId",
+      "entity": "ProjectTask",
+      "valueType": "string",
+      "label": {
+        "en": "Project task",
+        "nl": "Projecttaak"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/project-tasks",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -30532,6 +29779,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "purchaseOrderId": {
+      "kind": "entityId",
+      "entity": "PurchaseOrder",
+      "valueType": "string",
+      "label": {
+        "en": "Purchase order",
+        "nl": "Inkoopopdracht"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/purchase-orders",
+      "displayTemplate": "{{purchaseOrderNumber}}",
+      "filterField": "purchaseOrderNumber",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -30830,6 +30097,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "purchaseOrderLineId": {
+      "kind": "entityId",
+      "entity": "PurchaseOrderLine",
+      "valueType": "string",
+      "label": {
+        "en": "Purchase order line",
+        "nl": "Inkoopopdrachtregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/purchase-order-lines",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "QualityMeasurementRequest": {
       "kind": "entity",
       "entity": "QualityMeasurementRequest",
@@ -31089,6 +30376,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "qualityMeasurementRequestId": {
+      "kind": "entityId",
+      "entity": "QualityMeasurementRequest",
+      "valueType": "string",
+      "label": {
+        "en": "Quality Measurement Request",
+        "nl": "Kwaliteitsmetingsverzoek"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/quality-measurement-requests",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "QualityMeasurementResult": {
       "kind": "entity",
       "entity": "QualityMeasurementResult",
@@ -31309,6 +30616,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "qualityMeasurementResultId": {
+      "kind": "entityId",
+      "entity": "QualityMeasurementResult",
+      "valueType": "string",
+      "label": {
+        "en": "Quality Measurement Result",
+        "nl": "Kwaliteitsmetingsresultaat"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/quality-measurement-results",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -31583,6 +30910,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "quoteId": {
+      "kind": "entityId",
+      "entity": "Quote",
+      "valueType": "string",
+      "label": {
+        "en": "Quote",
+        "nl": "Offerte"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/quotes",
+      "displayTemplate": "{{quoteNumber}}",
+      "filterField": "quoteNumber",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -31876,6 +31223,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "quoteLineId": {
+      "kind": "entityId",
+      "entity": "QuoteLine",
+      "valueType": "string",
+      "label": {
+        "en": "Quote line",
+        "nl": "Offerteregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/quote-lines",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -32861,6 +32228,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "relationId": {
+      "kind": "entityId",
+      "entity": "Relation",
+      "valueType": "string",
+      "label": {
+        "en": "Relation",
+        "nl": "Relatie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/relations",
+      "displayTemplate": "{{displayName}}",
+      "filterField": "displayName",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "RelationAssociation": {
       "kind": "entity",
       "entity": "RelationAssociation",
@@ -33057,6 +32444,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "relationAssociationId": {
+      "kind": "entityId",
+      "entity": "RelationAssociation",
+      "valueType": "string",
+      "label": {
+        "en": "Relation Association",
+        "nl": "Relatiekoppeling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/relation-associations",
+      "displayTemplate": "{{associationKind}}",
+      "filterField": "associationKind",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -33284,6 +32691,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "relationGroupId": {
+      "kind": "entityId",
+      "entity": "RelationGroup",
+      "valueType": "string",
+      "label": {
+        "en": "Relation Group",
+        "nl": "Relatiegroep"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/relation-groups",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "RelationGroupMembership": {
       "kind": "entity",
       "entity": "RelationGroupMembership",
@@ -33493,7 +32920,7 @@
     },
     "relationGroupMembershipId": {
       "kind": "entityId",
-      "entity": "relation-group-membership",
+      "entity": "RelationGroupMembership",
       "valueType": "string",
       "label": {
         "en": "Relation Group Membership",
@@ -33758,6 +33185,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "relationRoleId": {
+      "kind": "entityId",
+      "entity": "RelationRole",
+      "valueType": "string",
+      "label": {
+        "en": "Relation Role",
+        "nl": "Relatierol"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/relation-roles",
+      "displayTemplate": "{{type}}",
+      "filterField": "type",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -34032,6 +33479,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "researchAssignmentId": {
+      "kind": "entityId",
+      "entity": "ResearchAssignment",
+      "valueType": "string",
+      "label": {
+        "en": "Research Assignment",
+        "nl": "Onderzoeksopdracht"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/research-assignments",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "ResearchResult": {
       "kind": "entity",
       "entity": "ResearchResult",
@@ -34148,6 +33615,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "researchResultId": {
+      "kind": "entityId",
+      "entity": "ResearchResult",
+      "valueType": "string",
+      "label": {
+        "en": "Research Result",
+        "nl": "Onderzoeksresultaat"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/research-results",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -34411,6 +33898,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "slaPolicyId": {
+      "kind": "entityId",
+      "entity": "SlaPolicy",
+      "valueType": "string",
+      "label": {
+        "en": "SLA Policy",
+        "nl": "SLA-beleid"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/sla-policies",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Space": {
       "kind": "entity",
       "entity": "Space",
@@ -34609,6 +34116,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "spaceId": {
+      "kind": "entityId",
+      "entity": "Space",
+      "valueType": "string",
+      "label": {
+        "en": "Space",
+        "nl": "Ruimte"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/spaces",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "StandardPrice": {
       "kind": "entity",
       "entity": "StandardPrice",
@@ -34793,6 +34320,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "standardPriceId": {
+      "kind": "entityId",
+      "entity": "StandardPrice",
+      "valueType": "string",
+      "label": {
+        "en": "Standard price",
+        "nl": "Standaardprijs"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/standard-prices",
+      "displayTemplate": "{{code}} {{name}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -35136,6 +34683,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "supplierRoleId": {
+      "kind": "entityId",
+      "entity": "SupplierRole",
+      "valueType": "string",
+      "label": {
+        "en": "Supplier",
+        "nl": "Leverancier"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/supplier-roles",
+      "displayTemplate": "{{supplierNumber}}",
+      "filterField": "supplierNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "SupportIssue": {
       "kind": "entity",
       "entity": "SupportIssue",
@@ -35473,6 +35040,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "supportIssueId": {
+      "kind": "entityId",
+      "entity": "SupportIssue",
+      "valueType": "string",
+      "label": {
+        "en": "Support issue",
+        "nl": "Supportverzoek"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/support-issues",
+      "displayTemplate": "{{subject}}",
+      "filterField": "subject",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Survey": {
       "kind": "entity",
       "entity": "Survey",
@@ -35641,6 +35228,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "surveyId": {
+      "kind": "entityId",
+      "entity": "Survey",
+      "valueType": "string",
+      "label": {
+        "en": "Survey",
+        "nl": "Vragenlijst"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/surveys",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -35820,6 +35427,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "surveyAnswerId": {
+      "kind": "entityId",
+      "entity": "SurveyAnswer",
+      "valueType": "string",
+      "label": {
+        "en": "Survey Answer",
+        "nl": "Vragenlijstantwoord"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/survey-answers",
+      "displayTemplate": "{{answer}}",
+      "filterField": "answer",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -36077,6 +35704,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "surveyQuestionId": {
+      "kind": "entityId",
+      "entity": "SurveyQuestion",
+      "valueType": "string",
+      "label": {
+        "en": "Survey Question",
+        "nl": "Vragenlijstregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/survey-questions",
+      "displayTemplate": "{{description}}",
+      "filterField": "description",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -37073,6 +36720,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "taskId": {
+      "kind": "entityId",
+      "entity": "Task",
+      "valueType": "string",
+      "label": {
+        "en": "Task",
+        "nl": "Taak"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/tasks",
+      "displayTemplate": "{{title}}",
+      "filterField": "title",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Template": {
       "kind": "entity",
       "entity": "Template",
@@ -37185,6 +36852,26 @@
         "display": "EntityReferenceDisplay"
       },
       "versioned": true
+    },
+    "templateId": {
+      "kind": "entityId",
+      "entity": "Template",
+      "valueType": "string",
+      "label": {
+        "en": "Template",
+        "nl": "Template"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/templates",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
     },
     "TemplateBlock": {
       "kind": "entity",
@@ -37359,6 +37046,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "templateVariantId": {
+      "kind": "entityId",
+      "entity": "TemplateVariant",
+      "valueType": "string",
+      "label": {
+        "en": "Template variant",
+        "nl": "Template variant"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/template-variants",
+      "displayTemplate": "{{channel}} · {{locale}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "TemplateVersion": {
       "kind": "entity",
       "entity": "TemplateVersion",
@@ -37516,7 +37223,7 @@
     },
     "templateVersionId": {
       "kind": "entityId",
-      "entity": "template-version",
+      "entity": "TemplateVersion",
       "valueType": "string",
       "label": {
         "en": "Template version",
@@ -37747,6 +37454,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "tenantId": {
+      "kind": "entityId",
+      "entity": "Tenant",
+      "valueType": "string",
+      "label": {
+        "en": "Tenant",
+        "nl": "Tenant"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/tenants",
+      "displayTemplate": "{{slug}}",
+      "filterField": "slug",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "TenantSetting": {
       "kind": "entity",
       "entity": "TenantSetting",
@@ -37948,6 +37675,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "tenantSettingId": {
+      "kind": "entityId",
+      "entity": "TenantSetting",
+      "valueType": "string",
+      "label": {
+        "en": "Tenant Setting",
+        "nl": "Tenantinstelling"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/tenant-settings",
+      "displayTemplate": "{{key}}",
+      "filterField": "key",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "TextBlock": {
       "kind": "entity",
       "entity": "TextBlock",
@@ -38128,6 +37875,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "timeEntryId": {
+      "kind": "entityId",
+      "entity": "TimeEntry",
+      "valueType": "string",
+      "label": {
+        "en": "Time entry",
+        "nl": "Tijdsbesteding"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/time-entries",
+      "displayTemplate": "{{workedAt}}: {{hours}}h",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -38314,7 +38081,7 @@
     },
     "userOrganizationPermissionId": {
       "kind": "entityId",
-      "entity": "user-organization-permission",
+      "entity": "UserOrganizationPermission",
       "valueType": "string",
       "label": {
         "en": "User organization permission",
@@ -38522,6 +38289,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "vacancyId": {
+      "kind": "entityId",
+      "entity": "Vacancy",
+      "valueType": "string",
+      "label": {
+        "en": "Vacancy",
+        "nl": "Vacature"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/vacancies",
+      "displayTemplate": "{{code}} {{title}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Valuation": {
       "kind": "entity",
       "entity": "Valuation",
@@ -38687,6 +38474,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "valuationId": {
+      "kind": "entityId",
+      "entity": "Valuation",
+      "valueType": "string",
+      "label": {
+        "en": "Valuation",
+        "nl": "Waardering"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/valuations",
+      "displayTemplate": "{{valuationKind}}: {{amount}} @ {{valuedAt}}",
+      "filterField": "id",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -38960,6 +38767,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "vatRateId": {
+      "kind": "entityId",
+      "entity": "VatRate",
+      "valueType": "string",
+      "label": {
+        "en": "VAT rate",
+        "nl": "BTW-tarief"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/vat-rates",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "VatReturn": {
       "kind": "entity",
       "entity": "VatReturn",
@@ -39110,6 +38937,26 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "vatReturnId": {
+      "kind": "entityId",
+      "entity": "VatReturn",
+      "valueType": "string",
+      "label": {
+        "en": "VAT return",
+        "nl": "BTW-aangifte"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/vat-returns",
+      "displayTemplate": "{{referenceNumber}}",
+      "filterField": "referenceNumber",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Warranty": {
       "kind": "entity",
       "entity": "Warranty",
@@ -39253,6 +39100,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "warrantyId": {
+      "kind": "entityId",
+      "entity": "Warranty",
+      "valueType": "string",
+      "label": {
+        "en": "Warranty",
+        "nl": "Garantie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/warranties",
+      "displayTemplate": "{{code}}",
+      "filterField": "code",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -39682,6 +39549,26 @@
           }
         }
       ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "workQueueId": {
+      "kind": "entityId",
+      "entity": "WorkQueue",
+      "valueType": "string",
+      "label": {
+        "en": "Work Queue",
+        "nl": "Werkqueue"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "listUrl": "/work-queues",
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"

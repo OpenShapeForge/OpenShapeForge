@@ -87,11 +87,11 @@ export interface OsfTypeDefinition {
   /** Derived: this entity is the immutable version entity of the named versioned entity, so a reference to it may be `version: pinned`. */
   versionEntityOf?: string;
   /**
-   * Discriminator for entity-ID semantic types. When set to `"entityId"`,
-   * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,
-   * `filterField`, `icon`, and `render.{display,input}` (see the catalog
-   * JSON schema and `checks.ts` for enforcement). Absent on value-shape
-   * semantic types.
+   * `scalar` and `object` are authored. `entity` (a loaded entity, the
+   * relationship target), `entityId` (its identity alias, `<entity>Id`) and
+   * `provider` (an Operation-catalog entity) are derived from the corpus by
+   * `deriveEntityOsfTypes` / `deriveProviderOsfTypes`; an authored entry
+   * under a derived key is a compile error.
    */
   kind?: "scalar" | "entityId" | "entity" | "object" | "provider";
   label: LocalizedText;
@@ -138,16 +138,15 @@ export interface OsfTypeDefinition {
    */
   icon?: string;
   /**
-   * For entity-ID semantic types (`kind: "entityId"`): the kebab-case slug
-   * of the entity this type identifies. Lets downstream consumers
-   * (variable pickers, workflow inspector, the core-entity-options route)
-   * resolve from an `osfType` string back to the entity it represents.
+   * For derived entity, entity-ID and provider types: the name of the entity
+   * this type identifies or references, spelled as the entity's own osfType
+   * (PascalCase), so a consumer can resolve from an `osfType` string back
+   * to the entity without a second spelling.
    */
   entity?: string;
   /**
-   * For entity-ID semantic types: the canonical workflow-designer options
-   * URL, always shaped as
-   * `/api/workflow/designer/core-entity-options?entity=<entity-slug>`.
+   * For entity-ID types: the route that lists the entity's records (its
+   * collection view route, or `/<table-name-with-dashes>`).
    */
   listUrl?: string;
   /**

@@ -18,7 +18,11 @@
         "type": "object",
         "required": ["label", "valueType"],
         "properties": {
-          "kind": { "type": "string", "enum": ["scalar", "entityId", "object"] },
+          "kind": {
+            "type": "string",
+            "enum": ["scalar", "object"],
+            "description": "Entity types (kind: entity) and their identity aliases (kind: entityId) are derived from the entity corpus, never authored."
+          },
           "label": { "type": "object" },
           "pluralLabel": { "type": "object" },
           "valueType": { "type": "string" },
@@ -87,30 +91,7 @@
           "listUrl": { "type": "string" },
           "displayTemplate": { "type": "string" },
           "filterField": { "type": "string" }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": { "kind": { "const": "entityId" } },
-              "required": ["kind"]
-            },
-            "then": {
-              "required": ["entity", "listUrl", "icon"],
-              "properties": {
-                "entity": {
-                  "type": "string",
-                  "description": "Kebab-case slug of the entity this type identifies. Must match the entity slug used by the workflow designer's core-entity-options route.",
-                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-                },
-                "listUrl": {
-                  "type": "string",
-                  "description": "Canonical workflow-designer options URL.",
-                  "pattern": "^/api/workflow/designer/core-entity-options\\?entity=[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-                }
-              }
-            }
-          }
-        ]
+        }
       }
     }
   }

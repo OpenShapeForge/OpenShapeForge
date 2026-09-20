@@ -22,6 +22,7 @@ import {
   getWorkflowCoreEntityGraphqlRegistry,
 } from "./workflow-entity-nodes.js";
 import { generateWorkflowNodeConfigArtifacts } from "./workflow-node-config.js";
+import { loadOsfTypes } from "../../../../packages/compiler/src/authoring/loader.js";
 
 // The canonical kernel and authoring type sources stay in the compiler core —
 // they are part of every compiled entity contract. This plugin only *copies*
@@ -301,18 +302,21 @@ function loadCategorizedOsfTypes(
     definition: unknown,
     bucket: "core" | "context",
   ) => {
-    const def = definition as { kind?: string; entity?: string } | undefined;
-    if (def?.kind === "entityId") {
-      if (def.entity && !readableEntitySlugs.has(toKebabCase(def.entity))) {
-        return;
-      }
-      entityIds[key] = enrichEntityIdOsfType(definition);
-    } else if (bucket === "core") {
+    if (bucket === "core") {
       core[key] = definition;
     } else {
       context[key] = definition;
     }
   };
+
+  // Identity aliases (`<entity>Id`, kind: entityId) are derived from the entity
+  // corpus by the compiler, never authored, so they come from the resolved
+  // catalog rather than from the YAML files.
+  for (const [key, definition] of Object.entries(loadOsfTypes(authoringDir))) {
+    if (definition.kind !== "entityId") continue;
+    if (definition.entity && !readableEntitySlugs.has(toKebabCase(definition.entity))) continue;
+    entityIds[key] = enrichEntityIdOsfType(definition);
+  }
 
   const corePath = join(authoringDir, "catalogs", "osf-types.yaml");
   if (existsSync(corePath)) {
@@ -371,7 +375,7 @@ function loadFieldAuthoringProfiles(authoringDir: string) {
 const SEMANTIC_PARTIALS = [
   { suffix: "core", constName: "COMPILER_OSF_TYPES_CORE", source: "catalogs/osf-types.yaml" },
   { suffix: "context", constName: "COMPILER_OSF_TYPES_CONTEXT", source: "contexts/*/osf-types.yaml" },
-  { suffix: "entity-ids", constName: "COMPILER_OSF_TYPES_ENTITY_IDS", source: "catalogs/osf-types.yaml + contexts/*/osf-types.yaml (entries with kind: entityId)" },
+  { suffix: "entity-ids", constName: "COMPILER_OSF_TYPES_ENTITY_IDS", source: "entities/**/*.yaml (identity aliases derived per entity, kind: entityId)" },
 ] as const;
 
 function buildOsfTypesPartialSource(

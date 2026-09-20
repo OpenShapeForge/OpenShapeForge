@@ -94,11 +94,15 @@ export function deriveEntityOsfTypes(
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
     if (result[entity.entity]!.entityIdentity === false) continue;
+    if (Object.hasOwn(catalog, identityKey)) {
+      throw new Error(`Osf type ${identityKey} is the identity alias of entity ${entity.entity}; it is derived, not authored.`);
+    }
+    if (result[identityKey]) throw new Error(`Osf type ${identityKey} duplicates the identity alias of entity ${entity.entity}.`);
     const route = entity.interfaces?.web?.views?.collection?.route;
     // The identity alias is distinct from a relationship to that entity: an
     // entity's own primary key must never acquire a self-referencing FK.
-    result[identityKey] ??= {
-      kind: "entityId", entity: slug(entity.entity), valueType: "string",
+    result[identityKey] = {
+      kind: "entityId", entity: entity.entity, valueType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       validation: { format: "uuid" },
       listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,

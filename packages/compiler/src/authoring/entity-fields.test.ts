@@ -22,6 +22,16 @@ describe("one relational field contract", () => {
     expect(catalog().Page).toMatchObject({ shape: [{ key: "blocks", osfType: "Block", cardinality: "collection", sortable: true, relationship: { inverse: "page", ownership: "owned" } }] });
     expect(() => deriveEntityOsfTypes([block], { Block: catalog().Block! })).toThrow("PascalCase names are entities");
   });
+  test("derives the identity alias of every entity with one spelling, and refuses an authored copy", () => {
+    expect(catalog().pageId).toMatchObject({
+      kind: "entityId", entity: "Page", valueType: "string", validation: { format: "uuid" }, listUrl: "/pages",
+      render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
+    });
+    expect(catalog().Page!.entity).toBe(catalog().pageId!.entity);
+    expect(() => deriveEntityOsfTypes([page], {
+      pageId: { kind: "scalar", label: { en: "Page ID" }, valueType: "string" },
+    })).toThrow("Osf type pageId is the identity alias of entity Page; it is derived, not authored.");
+  });
   test("infers scalar types without duplicate authoring", () => {
     expect(normalizeEntityFields(entity("Article", [{ key: "heading", osfType: "title" }]), catalog()).fields[0]?.baseType).toBe("string");
   });

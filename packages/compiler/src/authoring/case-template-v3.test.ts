@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";
 import { loadEntity } from "./loader.js";
 import { createAuthoringValidator } from "./schema-validation.js";
@@ -28,12 +29,15 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   expect(parent.model.relationships.find(relation => relation.fieldKey === "steps")).toMatchObject({ kind: "hasMany", target: "CaseStepTemplate", inverse: "templateId", foreignKey: "case_template_id" });
   const task = actions.item!.children!.find(field => field.key === "taskTemplate")!;
   const queue = task.children!.find(field => field.key === "defaultWorkQueueId")!;
-  expect(queue).toMatchObject({ osfType: "workQueueId", baseType: "string", options: { type: "remote", remoteUrl: "/api/workflow/designer/core-entity-options?entity=work-queue" } });
+  // An inline identifier value carries the identity alias's uuid format, the
+  // way the alias is derived for every entity; it is not a relationship.
+  expect(queue).toMatchObject({ osfType: "workQueueId", baseType: "string", validation: { format: "uuid" }, options: { type: "remote", remoteUrl: "/api/workflow/designer/core-entity-options?entity=work-queue" } });
   expect(queue.relationship).toBeUndefined();
   expect(step.model.relationships.some(relation => relation.fieldKey === "actions")).toBe(false);
   expect(step.storage.columns.filter(column => /work_queue/.test(column.column))).toHaveLength(1);
 
   const ajv = new Ajv2020({ strict: true });
+  addFormats.default(ajv);
   ajv.addKeyword(operationI18nKeyword);
   const validate = ajv.compile(compiledObjectSchema([actions], {}, { requireRequired: true }));
   const value = { actions: [

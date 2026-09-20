@@ -208,16 +208,16 @@ export type PendingRoleAssignment = {
 };
 
 /**
- * An identity this organization has recorded but not linked: a person whose
- * web session made the row before any bearer login named their e-mail, or an
- * integration's service account, which has no e-mail at all. Named by its
- * identity id, which is what `link_identity` takes for it.
+ * An identity this organization has recorded but not linked and not waiting
+ * on anyone's confirmation: an integration's service account (no e-mail at
+ * all), or a token without one. Named by its identity id, which is what
+ * `link_identity` takes for it. A pending row with a candidate is the
+ * person's own to confirm (`confirm_my_link`) and is not listed here.
  */
 export type UnlinkedIdentity = {
   identityId: string;
   displayName: string | null;
   email: string | null;
-  candidateRelationId: string | null;
 };
 
 export async function listUnlinkedIdentities(
@@ -232,19 +232,20 @@ export async function listUnlinkedIdentities(
     );
   }
   return withDbSession(db, session, async (trx) => {
-    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null; candidate_relation_id: string | null }>`
-      select ir.identity_id, i.display_name, i.email, ir.candidate_relation_id
+    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null }>`
+      select ir.identity_id, i.display_name, i.email
         from platform.identity_relations ir
         join platform.identities i on i.id = ir.identity_id
        where ir.tenant_id = ${session.tenantId}
          and ir.status = 'pending_confirmation'
+         and ir.relation_id is null
+         and ir.candidate_relation_id is null
        order by i.created_at asc
     `.execute(trx);
     return result.rows.map((row) => ({
       identityId: row.identity_id,
       displayName: row.display_name,
       email: row.email,
-      candidateRelationId: row.candidate_relation_id,
     }));
   });
 }

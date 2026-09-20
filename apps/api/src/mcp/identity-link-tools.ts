@@ -76,7 +76,9 @@ const LINK_IDENTITY: Tool = {
         type: "string",
         format: "uuid",
         description:
-          "Identity id instead of the e-mail, when several logins share an e-mail address.",
+          "Identity id instead of the e-mail: for a login without one (an integration's API key, " +
+          "a web-only login) as list_pending_members shows it under `unlinked`, or when several " +
+          "logins share an e-mail address.",
       },
       relationId: {
         type: "string",

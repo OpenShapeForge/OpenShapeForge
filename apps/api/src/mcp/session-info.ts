@@ -262,9 +262,17 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
   const idleDays = input.sessionIdleDays ?? sessionIdleDaysFromEnv();
   const idle = plural(idleDays, "day");
 
+  // A name comes from the Relation the session is linked to; without one, say
+  // what signed in rather than guess: a trusted-context session that could not
+  // be linked (no uuid identity) is the development identity, a linkable one
+  // is an unlinked login, an API key is an integration.
   const who =
     identity.name ??
-    (identity.credential === "trusted-context" ? "the development identity" : "an unnamed user");
+    (identity.credential === "api-key"
+      ? "an unlinked integration"
+      : identity.credential === "trusted-context" && !input.relation
+        ? "the development identity"
+        : "an unlinked login");
   const of = organizationName ?? "an unknown organization";
   const rolePhrase = composite
     ? `${composite.phrase.en} of ${of}`

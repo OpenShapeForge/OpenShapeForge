@@ -81,17 +81,29 @@ describe("buildPlatformSessionInfo", () => {
     expect(silent.summary).not.toContain("Connected through");
   });
 
-  it("names the admin gateway as the Hubble control plane and copes with an unreadable registry", () => {
-    const info = buildPlatformSessionInfo({
-      administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
-      roles: ["platform_admin"],
-      tenants: null,
-      access: { tools: 9, resources: 1 },
-      nowMs: NOW,
-    });
-    expect(info.signedInVia).toBe("Hubble control plane");
-    expect(info.accessTokenExpiresAt).toBeUndefined();
-    expect(info.summary).toContain("could not be counted");
+  it("names the admin gateway after the product name and copes with an unreadable registry", () => {
+    const build = () =>
+      buildPlatformSessionInfo({
+        administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },
+        roles: ["platform_admin"],
+        tenants: null,
+        access: { tools: 9, resources: 1 },
+        nowMs: NOW,
+      });
+    // The default product name, then the configured one; the variable is restored.
+    const previous = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    try {
+      const info = build();
+      expect(info.signedInVia).toBe("OpenShapeForge control plane");
+      expect(info.accessTokenExpiresAt).toBeUndefined();
+      expect(info.summary).toContain("could not be counted");
+      process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+      expect(build().signedInVia).toBe("Atlas control plane");
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+      else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previous;
+    }
   });
 
   it("distinguishes operator-only and combined control sessions", () => {

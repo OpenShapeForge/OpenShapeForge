@@ -5,7 +5,7 @@
  * leave `buildSessionInfo` — so every case also asserts the absence of ids,
  * slugs and raw claims.
  */
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { IdentityLinkState } from "../../auth/identity-link.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import {
@@ -25,8 +25,16 @@ import {
 } from "../session-info.js";
 import { resolveLocale } from "../locale.js";
 
-// The product's own gateway is named after the deployment's product name.
-process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+// The product's own gateway is named after the deployment's product name;
+// set for this file and restored so no other file inherits it.
+const previousProductName = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+beforeAll(() => {
+  process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+});
+afterAll(() => {
+  if (previousProductName === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+  else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previousProductName;
+});
 
 const TENANT_ID = "33333333-3333-4333-8333-333333333333";
 const USER_ID = "22222222-2222-4222-8222-222222222222";

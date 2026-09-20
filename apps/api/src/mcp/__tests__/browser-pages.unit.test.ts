@@ -5,7 +5,7 @@
  * external asset, and copy that says what happened and what to do next
  * without leaking internals.
  */
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
   escapeHtml,
   hostDisplayName,
@@ -22,7 +22,15 @@ import type { PendingConfiguration } from "../configuration-handoff.js";
 
 const HOST = "Kern";
 const PRODUCT = "Atlas";
-process.env.OPENSHAPEFORGE_PRODUCT_NAME = PRODUCT;
+// Set for this file and restored so no other file inherits it.
+const previousProductName = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+beforeAll(() => {
+  process.env.OPENSHAPEFORGE_PRODUCT_NAME = PRODUCT;
+});
+afterAll(() => {
+  if (previousProductName === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+  else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previousProductName;
+});
 
 function expectBrandedDocument(html: string): void {
   expect(html.startsWith("<!doctype html><html lang=\"en\">")).toBe(true);

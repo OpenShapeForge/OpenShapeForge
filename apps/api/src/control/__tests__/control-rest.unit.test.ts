@@ -132,7 +132,8 @@ describe("one round trip per page group", () => {
     const who = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
     expect(who.status).toBe(200);
     expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 24, resources: 1 } });
-    expect(who.body.signedInVia).toBe("Hubble control plane");
+    // The default product name; a deployment sets OPENSHAPEFORGE_PRODUCT_NAME.
+    expect(who.body.signedInVia).toBe("OpenShapeForge control plane");
     const operator = await call("GET", "/api/control/v1/whoami", token([PLATFORM_OPERATOR_ROLE]));
     expect(operator.body.role).toBe("Platform operator");
   });

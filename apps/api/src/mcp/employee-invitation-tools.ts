@@ -14,7 +14,7 @@
  * All three are shown only to a session holding `Organization.All.ReadWrite`
  * — the same role `link_identity` requires, and for the same reason: both are
  * ways to shape who acts as whom in this organization. Wired into
- * generated-mcp-server.ts by delimited hunks next to the identity-link ones,
+ * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by delimited hunks next to the identity-link ones,
  * following the exact shape of mcp/identity-link-tools.ts.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";

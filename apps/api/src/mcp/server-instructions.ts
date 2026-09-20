@@ -70,7 +70,7 @@ export const DATA_ACQUISITION_GUIDANCE =
 
 /**
  * The short reminder every generated `create`/`update` tool carries in its
- * own description (see describeTool in generated-mcp-server.ts) — the full
+ * own description (see describeTool in entity-tool-projection.ts) — the full
  * order above lives once in the server's `instructions` rather than being
  * repeated on every tool.
  */

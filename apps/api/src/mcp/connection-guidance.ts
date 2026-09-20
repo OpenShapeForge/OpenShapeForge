@@ -37,7 +37,7 @@ export type ConnectionNeeds = {
 };
 
 /**
- * Mirrors connectionScopeOf in generated-mcp-server.ts: explicit
+ * Mirrors connectionScopeOf in mcp/catalog.ts: explicit
  * auth.connectionScope wins; absent, a sign-in profile implies "user".
  */
 export function connectionScopeOfAuth(auth: unknown): "user" | "tenant" | "both" {

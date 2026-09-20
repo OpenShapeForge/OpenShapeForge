@@ -28,7 +28,7 @@
  *
  * The module is written against a small environment interface so the
  * checklist and the tools are unit-tested without a database or a server;
- * `onboardingEnvironment()` binds the real one for generated-mcp-server.ts,
+ * `onboardingEnvironment()` binds the real one for the MCP server (session-surface.ts),
  * which wires this in with a few delimited hunks.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -842,7 +842,7 @@ export function onboardingEnvironment(input: {
 
 /**
  * Whether a provider's connections are per-employee. Mirrors
- * connectionScopeOf in generated-mcp-server.ts: explicit auth.connectionScope
+ * connectionScopeOf in mcp/catalog.ts: explicit auth.connectionScope
  * wins; absent, personal sign-in (oauth2AuthorizationCode) implies "user".
  */
 export function providerNeedsPersonalSignIn(auth: unknown): boolean {

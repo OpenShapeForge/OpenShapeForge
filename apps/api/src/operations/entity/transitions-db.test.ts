@@ -19,7 +19,7 @@ import { registerEntityOperationAvailability } from "./availability.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createGeneratedEntityForTable, updateGeneratedEntity } from "./mutations.js";
 import { currentRecordOffers, offerTarget } from "./runtime.js";
-import { executeTransition, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
+import { executeTransition, transitionAvailabilityFor, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
 import { recordPermissionsAllowRow } from "./record-permissions.js";
 import type { GeneratedCrudTable } from "./types.js";
 import { assertNoOperationWrittenValues } from "./write-policy.js";
@@ -310,6 +310,33 @@ describe("status transitions against PostgreSQL", () => {
       .toMatchObject({ status: "triggered" });
     await expect(executeTransition(restricted!.db, session, numeric, { id: await seed({ amount: "1.51" }) })).rejects.toMatchObject({
       operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.amount to be one of 1.5." },
+    });
+  });
+
+  test("two in preconditions on the same target field with different sets do not overwrite each other", async () => {
+    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
+    const binding: TransitionBinding = {
+      ...transitionBinding(operation),
+      referenced: [
+        { ...via, in: ["approved"] },
+        { ...via, via: "parentAgreementId", in: ["signed"] },
+      ],
+    };
+    const signed = await milestone("pending", tenant, await agreement(tenant, "signed"));
+    const approved = await milestone("pending", tenant, await agreement(tenant, "approved"));
+    const decisions = await withDbSession(restricted!.db, session, async (trx) =>
+      transitionAvailabilityFor(binding)([signed, approved], { db: trx, session: session as never }));
+    // Keying by field name would let the later set win: signed would look available.
+    expect(decisions[signed]).toMatchObject({
+      available: false,
+      error: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
+    });
+    expect(decisions[approved]).toMatchObject({
+      available: false,
+      error: { code: "INVALID_STATE", message: "trigger requires parentAgreementId.code to be one of signed." },
+    });
+    await expect(executeTransition(restricted!.db, session, binding, { id: signed })).rejects.toMatchObject({
+      operationError: { message: "trigger requires agreementId.code to be one of approved." },
     });
   });
 });

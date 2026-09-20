@@ -140,7 +140,20 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
 
-/** The record a `via` names, plus SQL-evaluated `in` membership per field. */
+/**
+ * Identity of one referenced `in` check. Two vias can read the same field of
+ * one target with different sets; keying the SQL result by field name alone
+ * would let the later set overwrite the earlier.
+ */
+export function referencedInHoldsKey(precondition: {
+  via: string;
+  field: string;
+  in?: readonly (string | number | boolean)[];
+}): string {
+  return `${precondition.via}\0${precondition.field}\0${JSON.stringify(precondition.in ?? [])}`;
+}
+
+/** The record a `via` names, plus SQL-evaluated `in` membership per precondition. */
 export type TransitionReferencedRow = {
   row: GeneratedEntityRow;
   inHolds: ReadonlyMap<string, boolean>;
@@ -208,7 +221,7 @@ export function transitionRefusal(
     if (precondition.present !== undefined && present(value) !== precondition.present) {
       return invalidState(`${binding.rule.key} requires ${named} to be ${precondition.present ? "set" : "empty"}.`);
     }
-    if (precondition.in && remote.inHolds.get(precondition.field) !== true) {
+    if (precondition.in && remote.inHolds.get(referencedInHoldsKey(precondition)) !== true) {
       return invalidState(`${binding.rule.key} requires ${named} to be one of ${precondition.in.join(", ")}.`);
     }
   }
@@ -262,7 +275,7 @@ async function fetchReferenced(
   return new Map(result.rows.map((entry) => {
     const inHolds = new Map<string, boolean>();
     inChecks.forEach((precondition, index) => {
-      inHolds.set(precondition.field, entry[`in_${index}`] === true);
+      inHolds.set(referencedInHoldsKey(precondition), entry[`in_${index}`] === true);
     });
     return [entry.id, { row: entry.row, inHolds }];
   }));
@@ -338,10 +351,7 @@ async function referencedRecordsByRow(
 }
 
 /** Offer policy: a rule is offered only while the row's status is in `from` and its preconditions hold. */
-export function transitionAvailabilityHandler(
-  operation: { key: string; target?: { entityName: string } },
-): ModuleOperationAvailabilityHandler {
-  const binding = transitionBinding(operation);
+export function transitionAvailabilityFor(binding: TransitionBinding): ModuleOperationAvailabilityHandler {
   return async (targetIds, context) => {
     const rows = await lockedRows(context.db, context.session, binding.table, targetIds, false);
     const referencedById = await referencedRecordsByRow(context.db, context.session, binding, rows);
@@ -357,6 +367,12 @@ export function transitionAvailabilityHandler(
     }
     return Object.fromEntries(decisions);
   };
+}
+
+export function transitionAvailabilityHandler(
+  operation: { key: string; target?: { entityName: string } },
+): ModuleOperationAvailabilityHandler {
+  return transitionAvailabilityFor(transitionBinding(operation));
 }
 
 /**

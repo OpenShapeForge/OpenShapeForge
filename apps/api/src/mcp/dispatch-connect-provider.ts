@@ -39,7 +39,8 @@ export type ConnectProviderScope = DirectCallScope & {
 /**
  * One provider of a connect call: answers connected (undefined, the former
  * `continue`) when a usable sign-in with the required scopes exists, else
- * mints the consent handoff for it and answers the URL the person opens.
+ * mints the consent handoff for it and answers the URL the person opens —
+ * every path ends in one of the two.
  */
 export async function connectProviderStep(
   scope: ConnectProviderScope,
@@ -273,5 +274,4 @@ export async function connectProviderStep(
       "landed after about three minutes, ask the person to tell you when they are " +
       "done.",
   });
-  return undefined;
 }

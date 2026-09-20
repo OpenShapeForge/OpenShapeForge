@@ -87,10 +87,10 @@ export const EMPTY_PROCESS_VARIABLE_SET: ProcessVariableSet = Object.freeze({
  * Constrained because the declaration doubles as a field definition: when a
  * node config binds `{{process.<key>}}` through a `kind: "variable"` source,
  * `runtime/field-definitions.ts` merges this record into the field the renderer
- * draws. A `valueType` outside the contract produces a field nothing can
- * render.
+ * draws. A stored `osfType` outside the contract's base types produces a field
+ * nothing can render; a process variable declares no catalog type.
  */
-export const PROCESS_VARIABLE_VALUE_TYPES = [
+export const PROCESS_VARIABLE_TYPES = [
   "string",
   "integer",
   "number",
@@ -100,14 +100,15 @@ export const PROCESS_VARIABLE_VALUE_TYPES = [
   "object",
 ] as const;
 
-export type ProcessVariableValueType = (typeof PROCESS_VARIABLE_VALUE_TYPES)[number];
+export type ProcessVariableType = (typeof PROCESS_VARIABLE_TYPES)[number];
 
 /** One declared variable, as a screen shows it. Never what gets stored. */
 export type ProcessVariableView = {
   key: string;
   /** The label for the requested locale, falling back to the key. */
   label: string;
-  valueType: ProcessVariableValueType;
+  /** The base type behind the stored `osfType`; a view model, never stored. */
+  baseType: ProcessVariableType;
   description: string | null;
   /**
    * The initializer's value when it is text, so an input can hold it. Empty
@@ -235,7 +236,7 @@ export function describeProcessVariables(
     views.push({
       key,
       label: localized(record.label, options.locale ?? "en") ?? key,
-      valueType: asValueType(record.valueType),
+      baseType: asType(record.osfType),
       description: localized(record.description, options.locale ?? "en"),
       startValue: hasText ? (initializer as string) : "",
       startValueIsOpaque: initializer !== undefined && !hasText,
@@ -251,7 +252,7 @@ export function describeProcessVariables(
 
 export type AddProcessVariableInput = {
   key: string;
-  valueType?: ProcessVariableValueType;
+  osfType?: ProcessVariableType;
   /** What to show it as. Written as a locale map, which is what a field is. */
   label?: string;
   locale?: string;
@@ -263,7 +264,7 @@ export type AddProcessVariableInput = {
  * Appended rather than inserted, because order is seeding order and a new
  * variable can read every earlier one but nothing can read it yet.
  *
- * The record written is minimal — `key`, `valueType`, and a `label` only when
+ * The record written is minimal — `key`, `osfType`, and a `label` only when
  * one was given. A blank label is left absent rather than written as `""`: the
  * difference is visible to every reader that falls back to the key, and to a
  * document diff.
@@ -282,7 +283,7 @@ export function addProcessVariable(
   const label = input.label?.trim();
   const declared: Record<string, unknown> = {
     key: checked.key,
-    valueType: input.valueType ?? "string",
+    osfType: input.osfType ?? "string",
     ...(label ? { label: { [locale]: label } } : {}),
   };
 
@@ -296,7 +297,7 @@ export function addProcessVariable(
  * Change one property of one declaration.
  *
  * The stored entry is SPREAD, so every key this editor does not model —
- * `osfType`, `hints`, `authoring`, `validation`, whatever a future
+ * `hints`, `authoring`, `validation`, whatever a future
  * authoring pass adds — comes back untouched. Only the named property is
  * assigned, and assigning the value it already holds returns the set that was
  * given so the edit costs no undo entry and no save.
@@ -311,7 +312,7 @@ export function setProcessVariableField(
   set: ProcessVariableSet,
   input: {
     key: string;
-    property: "label" | "description" | "valueType";
+    property: "label" | "description" | "osfType";
     value: string;
     locale?: string;
   },
@@ -322,8 +323,8 @@ export function setProcessVariableField(
     if (asString(record.key) !== input.key.trim()) return entry;
 
     const next =
-      input.property === "valueType"
-        ? assignValueType(record, input.value)
+      input.property === "osfType"
+        ? assignType(record, input.value)
         : assignLocalized(record, input.property, input.value, input.locale ?? "en");
     if (next === null) return entry;
     changed = true;
@@ -470,12 +471,12 @@ function initializersByKey(set: ProcessVariableSet): Map<string, unknown> {
 }
 
 /** The updated record, or null when the value it already holds is the one asked for. */
-function assignValueType(
+function assignType(
   record: Record<string, unknown>,
   value: string,
 ): Record<string, unknown> | null {
-  const next = asValueType(value);
-  return record.valueType === next ? null : { ...record, valueType: next };
+  const next = asType(value);
+  return record.osfType === next ? null : { ...record, osfType: next };
 }
 
 /** The updated record, or null when nothing would change. See the caller's note. */
@@ -510,10 +511,10 @@ function omit(
   return rest;
 }
 
-/** A stored `valueType` when the contract names it, and `string` otherwise. */
-function asValueType(value: unknown): ProcessVariableValueType {
-  return (PROCESS_VARIABLE_VALUE_TYPES as readonly string[]).includes(value as string)
-    ? (value as ProcessVariableValueType)
+/** A stored `osfType` when it is one of the contract's base types, and `string` otherwise. */
+function asType(value: unknown): ProcessVariableType {
+  return (PROCESS_VARIABLE_TYPES as readonly string[]).includes(value as string)
+    ? (value as ProcessVariableType)
     : "string";
 }
 

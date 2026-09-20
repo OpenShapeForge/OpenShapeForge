@@ -2,12 +2,13 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";
 import { loadEntity } from "./loader.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { compiledObjectSchema } from "../field-json-schema.js";
-import { operationI18nKeyword, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
@@ -28,13 +29,18 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   expect(parent.model.relationships.find(relation => relation.fieldKey === "steps")).toMatchObject({ kind: "hasMany", target: "CaseStepTemplate", inverse: "templateId", foreignKey: "case_template_id" });
   const task = actions.item!.children!.find(field => field.key === "taskTemplate")!;
   const queue = task.children!.find(field => field.key === "defaultWorkQueueId")!;
-  expect(queue).toMatchObject({ osfType: "workQueueId", baseType: "string", options: { type: "remote", remoteUrl: "/api/workflow/designer/core-entity-options?entity=work-queue" } });
+  // An inline identifier value carries the identity alias's uuid format, the
+  // way the alias is derived for every entity; it is not a relationship.
+  // An inline identifier value picks from the entity's records through the alias's optionSource; it authors no remote.
+  expect(queue).toMatchObject({ osfType: "workQueueId", baseType: "string", validation: { format: "uuid" }, options: { type: "entity", source: "WorkQueue", valueField: "id" } });
   expect(queue.relationship).toBeUndefined();
   expect(step.model.relationships.some(relation => relation.fieldKey === "actions")).toBe(false);
   expect(step.storage.columns.filter(column => /work_queue/.test(column.column))).toHaveLength(1);
 
   const ajv = new Ajv2020({ strict: true });
+  addFormats.default(ajv);
   ajv.addKeyword(operationI18nKeyword);
+  ajv.addKeyword(operationReferenceKeyword);
   ajv.addKeyword(operationTypeKeyword);
   const validate = ajv.compile(compiledObjectSchema([actions], {}, { requireRequired: true }));
   const value = { actions: [
@@ -60,6 +66,6 @@ test("a Web projection preserves nested identifier metadata without inventing a 
   const web = buildWebManifest([{ slug: "case-step-template", contract }]);
   const actions = web.entities.CaseStepTemplate!.fields.actions!;
   const queue = actions.item!.children!.find(field => field.key === "taskTemplate")!.children!.find(field => field.key === "defaultWorkQueueId")!;
-  expect(queue).toMatchObject({ osfType: "workQueueId", optionSource: { type: "remote", source: "/api/workflow/designer/core-entity-options?entity=work-queue" }, presentation: { component: "OptionVariablePicker", props: { valueMode: "selectId", clearable: true } } });
+  expect(queue).toMatchObject({ osfType: "workQueueId", optionSource: { type: "entity", source: "WorkQueue", valueField: "id" }, presentation: { component: "OptionVariablePicker", props: { valueMode: "selectId", clearable: true } } });
   expect(queue.relationship).toBeUndefined();
 });

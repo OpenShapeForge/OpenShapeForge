@@ -28,7 +28,7 @@
  *
  * The module is written against a small environment interface so the
  * checklist and the tools are unit-tested without a database or a server;
- * `onboardingEnvironment()` binds the real one for generated-mcp-server.ts,
+ * `onboardingEnvironment()` binds the real one for the MCP server (session-surface.ts),
  * which wires this in with a few delimited hunks.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -543,8 +543,8 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     "   choices): each tool with onboarding asks at its first call - its result carries the",
     "   questions and set_my_preferences {tool, assistanceLevel, choices} stores the answers;",
     "   get_my_preferences shows what is stored for which tool.",
-    "5. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
-    "   follow it from then on.",
+    "5. guide — read every role guide the step names (its howTo names the tool) and follow",
+    "   it from then on.",
     "",
     "Never ask for secrets, tokens, passwords or keys in chat: sign-ins go through the URL",
     "connect_service returns, organization credentials through the secure form or the",
@@ -842,7 +842,7 @@ export function onboardingEnvironment(input: {
 
 /**
  * Whether a provider's connections are per-employee. Mirrors
- * connectionScopeOf in generated-mcp-server.ts: explicit auth.connectionScope
+ * connectionScopeOf in mcp/catalog.ts: explicit auth.connectionScope
  * wins; absent, personal sign-in (oauth2AuthorizationCode) implies "user".
  */
 export function providerNeedsPersonalSignIn(auth: unknown): boolean {

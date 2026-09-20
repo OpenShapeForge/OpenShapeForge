@@ -73,6 +73,7 @@ const PATCH_BODY_KEYS = new Set([
   "clientRoleComposites",
   "groups",
   "users",
+  "roleLabels",
 ]);
 
 function isPlainObject(value: JsonValue | undefined): value is JsonObject {

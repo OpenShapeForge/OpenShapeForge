@@ -1,7 +1,7 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity, Field } from "../../../../../packages/compiler/src/authoring/types.js";
-import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
+import { buildCrud } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import type { WorkflowActionConfig, WorkflowActionEntry } from "./types.js";
 import { ACTION_ORDER } from "./types.js";
 import { cloneWorkflowField, filterWorkflowHiddenFields } from "./utils.js";
@@ -51,7 +51,7 @@ export function getEntityActionConfigs(entity: CoreEntity) {
     return [];
   }
 
-  const crudOperations = resolveCrudOperations(entity.crud);
+  const crudOperations = buildCrud(entity).operations;
   const actionCrudOperation = {
     create: "create",
     getOne: "get",

@@ -793,6 +793,7 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
 | `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` / `OPENSHAPEFORGE_MCP_CLIENTS` | the audiences and clients of the per-organization `mcp-resource:<alias>` scope the control plane provisions with every Organization; the public origin is required for the control plane, the other two optional — see [mcp.md](mcp.md#per-organization-resources) |
+| `OPENSHAPEFORGE_PRODUCT_NAME` | the name the deployment calls itself where a person or a model reads it: MCP browser handoff pages, the upload tool, the gateway client's name in `whoami` (default `OpenShapeForge`); `OSF_INTEGRATION_HOST_NAME` narrows the handoff pages' host name beside it |
 | `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` | comma-separated `azp` allow-list of the platform administrator MCP (`/api/control/mcp`); default: the operator client |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |

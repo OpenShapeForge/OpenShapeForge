@@ -45,9 +45,6 @@ configFields:
           en: Search ERP relation or choose variable
         validation:
           required: true
-        options:
-          type: remote
-          remoteUrl: /api/workflow/designer/core-entity-options?entity=relation
         render:
           component: OptionVariablePicker
           props:

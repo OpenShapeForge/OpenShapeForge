@@ -71,12 +71,12 @@ export {
   setProcessVariableField,
   setProcessVariableStartValue,
   EMPTY_PROCESS_VARIABLE_SET,
-  PROCESS_VARIABLE_VALUE_TYPES,
+  PROCESS_VARIABLE_TYPES,
   type AddProcessVariableInput,
   type ProcessVariableKeyCheck,
   type ProcessVariableKeyRefusal,
   type ProcessVariableSet,
-  type ProcessVariableValueType,
+  type ProcessVariableType,
   type ProcessVariableView,
 } from "./process-variables";
 export {

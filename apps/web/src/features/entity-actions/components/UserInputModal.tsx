@@ -15,7 +15,8 @@ import { Renderer } from "@/features/renderer/components/renderer";
 import type { RendererFormDefinition } from "@/features/renderer/form-definition";
 import type { Field } from "@/generated/compiler/field-contract";
 import { triggerEntityAction } from "../lib/trigger-entity-action";
-import type { ActiveAction, ActionFormField, LocalizedLabel } from "../types";
+import type { ActiveAction, LocalizedLabel } from "../types";
+import { fieldValueType } from "@/lib/field-contract/field-v2";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,52 +29,22 @@ function resolveLabel(label: LocalizedLabel | undefined | null, fallback: string
 }
 
 /**
- * Map the simplified ActionFormField to the canonical compiler Field type
- * that the Renderer understands.
+ * An action form field is an authored FieldDefinition; the renderer's Field
+ * additionally needs the base type resolved, a cardinality and a component.
  */
-function mapToRendererField(formField: ActionFormField): Field {
-  const valueType = normalizeFieldValueType(formField.valueType);
-  // The action form field keeps the workflow service's valueType/osfType
-  // pair; the renderer's Field names one osfType with the base resolved.
-  const { valueType: _valueType, osfType, ...rest } = formField;
+function mapToRendererField(formField: Field): Field {
+  const baseType = fieldValueType(formField);
   return {
-    ...rest,
-    key: formField.key,
-    osfType: osfType ?? valueType,
-    baseType: valueType,
+    ...formField,
+    baseType,
     cardinality: formField.cardinality ?? "single",
     required: formField.required ?? false,
-    label: formField.label as { nl?: string; en?: string },
-    description: formField.description as { nl?: string; en?: string } | undefined,
-    render: formField.render ?? getDefaultRender(valueType),
+    render: formField.render ?? getDefaultRender(baseType),
   };
 }
 
-function normalizeFieldValueType(
-  valueType: unknown,
-): NonNullable<Field["baseType"]> {
-  switch (valueType) {
-    case "string":
-      return "string";
-    case "number":
-      return "number";
-    case "integer":
-      return "integer";
-    case "boolean":
-      return "boolean";
-    case "date":
-      return "date";
-    case "datetime":
-      return "datetime";
-    case "object":
-      return "object";
-    default:
-      return "string";
-  }
-}
-
-function getDefaultRender(valueType: NonNullable<Field["baseType"]>): { component: string } | undefined {
-  switch (valueType) {
+function getDefaultRender(baseType: NonNullable<Field["baseType"]>): { component: string } | undefined {
+  switch (baseType) {
     case "string":
       return { component: "Input" };
     case "number":
@@ -95,7 +66,7 @@ function getDefaultRender(valueType: NonNullable<Field["baseType"]>): { componen
  */
 function buildFormDefinition(
   action: ActiveAction,
-  formFields: ActionFormField[],
+  formFields: Field[],
 ): RendererFormDefinition {
   const fields: Field[] = formFields.map(mapToRendererField);
 

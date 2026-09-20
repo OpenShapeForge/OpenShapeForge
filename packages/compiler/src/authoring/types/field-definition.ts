@@ -338,10 +338,11 @@ export interface FieldDefinitionOsfType {
   kind?: FieldDefinitionOsfTypeKind;
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType: FieldDefinitionValueType;
+  baseType: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   validation?: FieldDefinitionValidation;
   options?: FieldOptions;
+  schema?: { $ref: string };
   render?: {
     display?: string;
     input?: string;
@@ -354,7 +355,7 @@ export interface FieldDefinitionOsfType {
   audit?: boolean;
   hints?: ContextHints;
   entity?: string;
-  listUrl?: string;
+  optionSource?: FieldOptions;
   displayTemplate?: string;
   filterField?: string;
   shape?: FieldDefinition[];

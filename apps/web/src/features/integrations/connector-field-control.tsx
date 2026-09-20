@@ -44,7 +44,8 @@ import { SECRET_SENTINEL, type ConnectorConfigField, type LocalizedText } from "
 /** The page is a client component, so it carries the resolved language down. */
 export function localized(text: LocalizedText | undefined | null, lang: string): string {
   if (!text || typeof text !== "object") return "";
-  return text[lang] ?? text.en ?? Object.values(text)[0] ?? "";
+  const map = text as Partial<Record<string, string>>;
+  return map[lang] ?? map.en ?? Object.values(map).find((value) => typeof value === "string") ?? "";
 }
 
 export type ConnectorFieldControlProps = {

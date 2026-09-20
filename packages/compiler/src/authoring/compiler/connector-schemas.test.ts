@@ -3,9 +3,16 @@ import { describe, expect, it } from "bun:test";
 import {
   buildOperationSchemas,
   connectorFieldSchema,
+  connectorObjectSchema,
 } from "./connector-schemas.js";
-import { constraintsForField } from "../../field-json-schema.js";
+import { constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition } from "../types/field-definition.js";
+import type { OsfTypeDefinition } from "../types/authoring.js";
+
+/** A catalog type that declares its own value schema, the way `fieldDefinition` does. */
+const catalog: Record<string, OsfTypeDefinition> = {
+  fieldDefinition: { baseType: "object", label: { en: "Field definition" }, schema: { $ref: "#/$defs/fieldDefinition" } },
+};
 
 describe("connector field schemas", () => {
   it("maps authored validation bounds into the schema", () => {
@@ -29,7 +36,7 @@ describe("connector field schemas", () => {
   });
 
   it("resolves a catalog osf type through the catalog and refuses one it cannot resolve", () => {
-    const osfTypes = { amount: { valueType: "number" as const, label: { en: "Amount" } } };
+    const osfTypes = { amount: { baseType: "number" as const, label: { en: "Amount" } } };
     const field = { key: "total", osfType: "amount", validation: { min: 0 } } as FieldDefinition;
     expect(connectorFieldSchema(field, osfTypes)).toEqual({ type: "number", minimum: 0, "x-osf-type": "amount" });
     // Without the catalog the base is unknown; a silent string would misdescribe the wire contract.
@@ -95,12 +102,27 @@ describe("connector field schemas", () => {
     });
   });
 
-  it("reuses the canonical recursive schema for field-definition values", () => {
+  it("honours object cardinality: exact bounds make a bounded array and a lower bound of one makes the field required", () => {
+    expect(connectorFieldSchema({ key: "tags", osfType: "string", cardinality: { min: 1, max: 5 } } as FieldDefinition)).toEqual({
+      type: "array", items: { type: "string", "x-osf-type": "string" }, "x-osf-type": "string", minItems: 1, maxItems: 5,
+    });
+    expect(connectorFieldSchema({ key: "note", osfType: "string", cardinality: { min: 0, max: 1 } } as FieldDefinition)).toEqual({ type: "string", "x-osf-type": "string" });
+    const input = connectorObjectSchema([
+      { key: "tags", osfType: "string", cardinality: { min: 1, max: "unbounded" } },
+      { key: "note", osfType: "string", cardinality: { min: 1, max: 1 } },
+      { key: "extra", osfType: "string", cardinality: { max: 3 } },
+    ] as FieldDefinition[]);
+    expect(input.required).toEqual(["tags", "note"]);
+    expect(() => connectorFieldSchema({ key: "bad", osfType: "string", cardinality: { min: 2, max: 1 } } as FieldDefinition))
+      .toThrow("Connector field bad: invalid cardinality bounds.");
+  });
+
+  it("projects a catalog type that declares its schema through that schema, bundled at the root", () => {
     const schema = connectorFieldSchema({
       key: "definitions",
       cardinality: "collection",
       osfType: "fieldDefinition",
-    });
+    }, catalog);
 
     expect(schema).toMatchObject({
       type: "array",
@@ -119,7 +141,7 @@ describe("connector field schemas", () => {
           osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
 
     expect(schema).toEqual({ type: "object", "x-osf-type": "object" });
   });
@@ -185,7 +207,7 @@ describe("operation schemas", () => {
           osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
     const row = output.items as Record<string, unknown>;
     const definition = (row.properties as Record<string, Record<string, unknown>>).definition;
 
@@ -206,10 +228,10 @@ describe("operation schemas", () => {
   });
 });
 
-// The reason field-json-schema.ts exists: if the two surfaces mapped
-// constraints differently, a value could be advertised as acceptable on one and
-// rejected on the other. This asserts they share the mapping rather than
-// happening to agree today.
+// If the connector surface and the MCP catalog mapped constraints differently,
+// a value could be advertised as acceptable on one and rejected on the other.
+// This asserts they share the mapping in @openshapeforge/operations rather
+// than happening to agree today.
 describe("shared constraint mapping", () => {
   it("derives connector constraints from the same core the MCP catalog uses", () => {
     const field = {
@@ -218,7 +240,7 @@ describe("shared constraint mapping", () => {
       validation: { min: 1, max: 10, format: "int64" },
     } as FieldDefinition;
 
-    const shared = constraintsForField(field);
+    const shared = constrainedType({ baseType: "integer", validation: field.validation! });
     const connectorSchema = connectorFieldSchema(field);
 
     for (const [key, value] of Object.entries(shared)) {

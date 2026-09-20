@@ -231,54 +231,6 @@ describe("resolveAuthoringLayers", () => {
     ]);
   });
 
-  test("entity patches may narrow generated CRUD operations", () => {
-    const root = makeRepo();
-    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
-    writeYaml(root, "overlay/entities/core/widget.yaml", {
-      kind: "entityPatch",
-      crud: { operations: { create: false, update: false, delete: false } },
-    });
-    configureLayers(root, ["base", "overlay"]);
-
-    const resolved = resolveAuthoringLayers(root);
-    const merged = YAML.parse(
-      readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"),
-    );
-    expect(merged.crud.operations).toEqual({ create: false, update: false, delete: false });
-  });
-
-  test("later entity patches cannot widen an earlier CRUD restriction", () => {
-    const root = makeRepo();
-    writeYaml(root, "base/entities/core/widget.yaml", {
-      ...baseEntity,
-      crud: { operations: { update: false, delete: false } },
-    });
-    writeYaml(root, "overlay/entities/core/widget.yaml", {
-      kind: "entityPatch",
-      crud: { operations: { update: true } },
-    });
-    configureLayers(root, ["base", "overlay"]);
-
-    expect(() => resolveAuthoringLayers(root)).toThrow(
-      /widens crud\.operations \(update\).*may only narrow/,
-    );
-  });
-
-  test("removing a CRUD restriction from a later layer is rejected", () => {
-    const root = makeRepo();
-    writeYaml(root, "base/entities/core/widget.yaml", {
-      ...baseEntity,
-      crud: false,
-    });
-    writeYaml(root, "overlay/entities/core/widget.yaml", {
-      kind: "entityPatch",
-      crud: null,
-    });
-    configureLayers(root, ["base", "overlay"]);
-
-    expect(() => resolveAuthoringLayers(root)).toThrow(/widens crud\.operations/);
-  });
-
   test("entity patches may narrow OR roles and add AND requirements", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
@@ -459,6 +411,31 @@ describe("resolveAuthoringLayers", () => {
     expect(YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8")).entity).toBe(
       "Widget",
     );
+  });
+
+  test("an overlay may add osf types but never redefine one", () => {
+    const catalog = (types: Record<string, unknown>) => ({ schemaVersion: 1, kind: "osfTypeCatalog", types });
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    writeYaml(root, "base/catalogs/osf-types.yaml", catalog({
+      currencyCode: { label: { en: "Currency" }, baseType: "string", validation: { pattern: "^[A-Z]{3}$" } },
+    }));
+    writeYaml(root, "overlay/catalogs/osf-types.yaml", catalog({
+      colourCode: { label: { en: "Colour" }, baseType: "string" },
+    }));
+    configureLayers(root, ["base", "overlay"]);
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "catalogs/osf-types.yaml"), "utf8"));
+    expect(Object.keys(merged.types).sort()).toEqual(["colourCode", "currencyCode"]);
+
+    for (const redefinition of [
+      { baseType: "integer" },
+      { validation: { pattern: ".*" } },
+      { render: { input: "Input", display: "TextDisplay" } },
+      { label: { en: "Currency", nl: "Valuta" } },
+    ]) {
+      writeYaml(root, "overlay/catalogs/osf-types.yaml", catalog({ currencyCode: redefinition }));
+      expect(() => resolveAuthoringLayers(root)).toThrow(/redefines osf type currencyCode declared by .*base. Osf-type catalogs are add-only/);
+    }
   });
 
   test("catalog files merge across layers (groups extend, items merge by value)", () => {
@@ -648,19 +625,7 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
     };
   }
 
-  test("normalizes a legacy appShell.yaml and retains an older-host read alias", () => {
-    const root = makeRepo();
-    writeYaml(root, "base/appShell.yaml", baseShell);
-    configureLayers(root, ["base"]);
-
-    const resolved = resolveAuthoringLayers(root);
-
-    expect(readShell(resolved).navigation.sidebarItems[0]!.key).toBe("data");
-    expect(readFileSync(join(resolved, "appShell.yaml"), "utf8"))
-      .toBe(readFileSync(join(resolved, "menu.yaml"), "utf8"));
-  });
-
-  test("applies a current app shell patch to a legacy appShell.yaml base", () => {
+  test("a file named appShell.yaml is just a file: the app shell is menu.yaml", () => {
     const root = makeRepo();
     writeYaml(root, "base/appShell.yaml", baseShell);
     writeYaml(root, "plugin/menu.yaml", {
@@ -669,8 +634,7 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
     });
     configureLayers(root, ["base", "plugin"]);
 
-    expect(readShell(resolveAuthoringLayers(root)).navigation.sidebarItems.map((item) => item.key))
-      .toEqual(["data", "workflow"]);
+    expect(() => resolveAuthoringLayers(root)).toThrow(/appShellPatch/);
   });
 
   test("a patch appends a nav entry and leaves the base entries intact", () => {

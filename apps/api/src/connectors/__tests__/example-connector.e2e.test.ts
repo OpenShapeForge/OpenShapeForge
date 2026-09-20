@@ -13,13 +13,13 @@
  *
  * Needs no database: nothing here touches tenant state.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, test } from "bun:test";
 import { listConnectorContracts } from "../catalog.js";
 import { loadConnectorPackages } from "../loader.js";
 import {
   ConnectorExecutionError,
   invokeOperation,
-  type FetchLike,
 } from "../executor.js";
 
 const SLUG = "example-object-store";

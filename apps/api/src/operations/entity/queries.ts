@@ -98,7 +98,11 @@ function buildFilterConditions(
         "BAD_USER_INPUT",
       );
     }
-    return sql`${sql.id("row_source", condition.column)} = ${condition.value}`;
+    // A fixed condition is a runtime-owned predicate, so `null` means the SQL
+    // absence (`is null`), unlike a caller filter where it means "no filter".
+    return condition.value === null
+      ? sql`${sql.id("row_source", condition.column)} is null`
+      : sql`${sql.id("row_source", condition.column)} = ${condition.value}`;
   });
 
   for (const [key, value] of Object.entries(filter ?? {})) {
@@ -374,3 +378,5 @@ export async function fetchGeneratedEntityRow(
     return result.rows[0]?.row ?? null;
   });
 }
+
+export const __buildFilterConditionsForTests = buildFilterConditions;

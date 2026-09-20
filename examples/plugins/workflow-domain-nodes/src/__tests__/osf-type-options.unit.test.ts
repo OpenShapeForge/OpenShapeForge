@@ -32,8 +32,9 @@ import { enrichFieldsWithEntityIdOptions } from "../osf-type-options.js";
 import { enrichFieldsWithEntityIdRemoteOptions } from "../../../workflow/src/workflow-entity-nodes/catalog.js";
 
 /**
- * One entity-ID type with a list URL, one without, and one that is not an
- * entity ID at all — the three branches the enricher distinguishes.
+ * One entity-ID type whose entity can be enumerated, one without a source,
+ * and one that is not an entity ID at all — the three branches the enricher
+ * distinguishes.
  */
 const osfTypeEntries: [string, OsfTypeDefinition][] = [
   [
@@ -41,20 +42,20 @@ const osfTypeEntries: [string, OsfTypeDefinition][] = [
     {
       kind: "entityId",
       label: { en: "Relation", nl: "Relatie" },
-      valueType: "string",
-      listUrl: "/api/options/relations",
+      baseType: "string",
+      optionSource: { type: "entity", source: "Relation", valueField: "id" },
     },
   ],
-  // An entity ID with nowhere to fetch from: `kind` alone must not be enough
-  // to attach a remote source.
+  // An entity ID whose entity has no list Operation: `kind` alone must not
+  // be enough to attach a source.
   [
     "orphanId",
-    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, valueType: "string" },
+    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string" },
   ],
   // Not an entity reference at all — the enricher must leave it untouched.
   [
     "plainText",
-    { kind: "scalar", label: { en: "Plain", nl: "Tekst" }, valueType: "string" },
+    { kind: "scalar", label: { en: "Plain", nl: "Tekst" }, baseType: "string" },
   ],
 ];
 
@@ -62,7 +63,7 @@ const osfTypes = new Map<string, OsfTypeDefinition>(osfTypeEntries);
 
 /**
  * Deliberately exercises every path: a bare entity ID, one that already
- * authored its own `options`, one whose semantic type has no `listUrl`, a
+ * authored its own `options`, one whose semantic type has no `optionSource`, a
  * non-entity field, nested `children`, and an array `item`.
  */
 const fields = [
@@ -112,7 +113,7 @@ describe("entity-ID enrichment", () => {
       enrichFieldsWithEntityIdOptions(fields, osfTypes) as any[];
 
     // The picker, sourced from the semantic type rather than the node YAML.
-    expect(relation.options).toEqual({ type: "remote", remoteUrl: "/api/options/relations" });
+    expect(relation.options).toEqual({ type: "entity", source: "Relation", valueField: "id" });
     expect(relation.render.component).toBe("OptionVariablePicker");
 
     // An authored source wins; the render still becomes the picker, because an
@@ -120,7 +121,7 @@ describe("entity-ID enrichment", () => {
     expect(preAuthored.options).toEqual({ type: "static", items: [{ value: "a" }] });
     expect(preAuthored.render.component).toBe("OptionVariablePicker");
 
-    // An entity ID with nowhere to fetch from gets neither.
+    // An entity ID with nothing to enumerate gets neither.
     expect(orphan.options).toBeUndefined();
     expect(orphan.render).toBeUndefined();
 
@@ -145,5 +146,22 @@ describe("entity-ID enrichment", () => {
     // The parsed YAML is shared with the caller's entry list; enrichment
     // reaching back into it would corrupt the entry that was already emitted.
     expect(JSON.stringify(fields)).toBe(before);
+  });
+});
+
+describe("referentiedata on workflow-node fields", () => {
+  test("a select's render prop names the group in options, through the shared resolver", () => {
+    // billing.runProlongation.mode authors only `render.props.referentieGroep`;
+    // the picker and the runtime validate against `options`, so it must arrive there.
+    const [mode, agreeing] = enrichFieldsWithEntityIdOptions([
+      { key: "mode", osfType: "plainText", render: { component: "ReferenceSelect", props: { referentieGroep: "BILLINGRUNMODE", clearable: false } } },
+      { key: "kind", osfType: "plainText", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "KIND" } } },
+    ] as unknown as Field[], osfTypes) as any[];
+    expect(mode.options).toEqual({ type: "referentiedata", referentieGroep: "BILLINGRUNMODE" });
+    expect(mode.render.props).toEqual({ referentieGroep: "BILLINGRUNMODE", clearable: false });
+    expect(agreeing.options).toEqual({ type: "referentiedata", referentieGroep: "KIND" });
+    expect(() => enrichFieldsWithEntityIdOptions([
+      { key: "kind", osfType: "plainText", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "OTHER" } } },
+    ] as unknown as Field[], osfTypes)).toThrow("kind: render.props.referentieGroep OTHER contradicts options.referentieGroep KIND.");
   });
 });

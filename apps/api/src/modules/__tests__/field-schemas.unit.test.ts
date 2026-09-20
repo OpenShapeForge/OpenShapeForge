@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { createRuntimeFieldSchemaCompiler, runtimeJsonSchemas } from "../field-schemas.js";
+import { createRuntimeFieldSchemaCompiler, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
 import generatedCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 
 const compiler = createRuntimeFieldSchemaCompiler({
@@ -18,11 +18,11 @@ const compiler = createRuntimeFieldSchemaCompiler({
   },
   osfTypes: {
     code: {
-      valueType: "string",
+      baseType: "string",
       label: { en: "Code" },
       validation: { minLength: 2, maxLength: 12 },
     },
-    fieldDefinition: { valueType: "object", label: { en: "Field" } },
+    fieldDefinition: { baseType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } },
   },
   fieldDefinitionDefinitions: {
     fieldDefinition: {
@@ -150,4 +150,12 @@ test("the host validates stored fields before using its active schema registry",
     { key: "code", osfType: "string" },
     { key: "code", osfType: "string" },
   ])).toThrow(/key "code" is duplicated/);
+});
+
+test("a stored definition resolves its base type through the generated registry; an unknown osfType is refused", () => {
+  expect(storedFieldBaseType({ key: "count", osfType: "integer" })).toBe("integer");
+  expect(storedFieldBaseType({ key: "definition", osfType: "fieldDefinition" })).toBe("object");
+  expect(storedFieldBaseType({ key: "email", osfType: "email" })).toBe("string");
+  expect(() => storedFieldBaseType({ key: "account", osfType: "Acount" })).toThrow("account: unknown osfType Acount.");
+  expect(() => storedFieldBaseType({})).toThrow("unknown osfType");
 });

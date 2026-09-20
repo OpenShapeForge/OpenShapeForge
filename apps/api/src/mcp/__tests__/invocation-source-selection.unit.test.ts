@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   capturePersonalOAuthConnections,
   normalizeConnectionValueRows,
+  selectOAuthConnectionRow,
 } from "../generated-mcp-server.js";
 
 describe("personal OAuth invocation source capture", () => {
@@ -33,6 +34,24 @@ describe("personal OAuth invocation source capture", () => {
         /Invocation source is unavailable/,
       );
     }
+  });
+});
+
+describe("the one connection-row selector", () => {
+  it("picks the caller's own row for user scope, the organization's for tenant scope, lowest id first", () => {
+    const rows = [
+      { id: "b", ownerUserId: "u1" },
+      { id: "z", ownerUserId: null },
+      { id: "a", ownerUserId: "u1" },
+      { id: "c", ownerUserId: "u2" },
+      { id: "Y", ownerUserId: undefined },
+    ];
+    expect(selectOAuthConnectionRow(rows, "user", "u1")).toEqual({ id: "a", ownerUserId: "u1" });
+    // Code units: "Y" sorts before "z", whatever the collation would say.
+    expect(selectOAuthConnectionRow(rows, "tenant", "u1")).toEqual({ id: "Y", ownerUserId: undefined });
+    expect(selectOAuthConnectionRow(rows, "user", "u3")).toBeUndefined();
+    // The same answer whatever order the rows came in.
+    expect(selectOAuthConnectionRow([...rows].reverse(), "user", "u1")).toEqual({ id: "a", ownerUserId: "u1" });
   });
 });
 

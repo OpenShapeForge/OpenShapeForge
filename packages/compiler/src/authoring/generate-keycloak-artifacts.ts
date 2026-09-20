@@ -13,9 +13,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import {
-  discoverContextEntities,
   listEntityFiles,
-  loadContextEntity,
   loadEntity,
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
@@ -48,7 +46,7 @@ const AUTHORIZATION_FILENAME_RE = /^authorization(\.[^.]+)*\.yaml$/;
  * order the filesystem happens to enumerate in — `check:generated` hashes two
  * consecutive generations and fails on any difference.
  */
-function loadAuthorizationConfigs(authoringDir: string): AuthorizationConfigFile[] {
+export function loadAuthorizationConfigs(authoringDir: string): AuthorizationConfigFile[] {
   if (!existsSync(authoringDir)) {
     return [];
   }
@@ -83,14 +81,6 @@ function compileAllEntities(authoringDir: string): CompiledEntityContract[] {
   // output ordering stays deterministic.
   for (const { slug } of listEntityFiles(authoringDir)) {
     const loaded = loadEntity(authoringDir, slug);
-    compiled.push(compile(loaded) as CompiledEntityContract);
-  }
-
-  const contextEntities = discoverContextEntities(authoringDir).sort((a, b) =>
-    `${a.context}/${a.name}`.localeCompare(`${b.context}/${b.name}`),
-  );
-  for (const ce of contextEntities) {
-    const loaded = loadContextEntity(authoringDir, ce.context, ce.name);
     compiled.push(compile(loaded) as CompiledEntityContract);
   }
 

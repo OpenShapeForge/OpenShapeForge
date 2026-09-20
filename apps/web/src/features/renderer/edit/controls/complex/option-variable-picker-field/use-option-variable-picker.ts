@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRemoteOptionSourceData } from "@/features/renderer/hooks/use-remote-options";
+import { resolveEntityOptionSource } from "@/features/renderer/runtime/entity-option-source";
 import { groupVariableSuggestionsBySourceNode } from "@/features/renderer/runtime/variable-suggestion-tree";
 import {
   findSuggestionForStoredValue,
@@ -62,7 +63,11 @@ export function useOptionVariablePicker({
   const [wasAutoSelected, setWasAutoSelected] = useState(false);
   const autoSelectAttemptedRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const remoteSearchParam = readStringRenderProp(field, "remoteSearchParam");
+  // An entity source searches server-side by definition (its records are a
+  // list query, not a page to filter locally); a remote endpoint searches only
+  // when its `remoteSearchParam` render prop names the query parameter.
+  const entitySource = resolveEntityOptionSource(field);
+  const remoteSearchParam = entitySource ? "search" : readStringRenderProp(field, "remoteSearchParam");
   const { data: remoteData, loading } = useRemoteOptionSourceData<unknown>(field, {
     params: remoteSearchParam
       ? {
@@ -118,9 +123,20 @@ export function useOptionVariablePicker({
   }, [fieldOsfType, suggestions, stringValue, valueMode, onChange]);
 
   const options = providedOptions ?? normalizeRemoteOptions(remoteData);
+  // A stored selection may lie outside the current search page: an entity
+  // source names it through the action's id path, so the picker shows the
+  // record's name rather than its raw id.
+  const selectedIsInPage = options.some((option) => option.value === normalizedValue);
+  const { data: selectedData } = useRemoteOptionSourceData<unknown>(
+    entitySource && normalizedValue && !selectedIsInPage ? field : null,
+    { params: { id: normalizedValue } },
+  );
   const selectedRemoteOption = useMemo(
-    () => options.find((option) => option.value === normalizedValue) ?? null,
-    [normalizedValue, options],
+    () =>
+      options.find((option) => option.value === normalizedValue) ??
+      normalizeRemoteOptions(selectedData).find((option) => option.value === normalizedValue) ??
+      null,
+    [normalizedValue, options, selectedData],
   );
   const selectedSuggestion = useMemo(
     () => findSuggestionForStoredValue(suggestions, stringValue),

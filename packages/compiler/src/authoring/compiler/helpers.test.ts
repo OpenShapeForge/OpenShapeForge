@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { constraintsForField } from "../../field-json-schema.js";
+import { constrainedType } from "@openshapeforge/operations";
 import type { Field } from "../types.js";
 import { fieldGraphqlBaseType, fieldSqlType } from "./helpers.js";
 
@@ -38,7 +38,7 @@ describe("bounded integer storage and GraphQL projection", () => {
     });
     expect(fieldSqlType(field)).toBe("bigint");
     expect(fieldGraphqlBaseType(field)).toBe("Float");
-    expect(constraintsForField({ key: "byteSize", ...field })).toEqual({
+    expect(constrainedType({ ...field, baseType: "integer" })).toEqual({
       type: "integer",
       minimum: -2_147_483_649,
       maximum: Number.MAX_SAFE_INTEGER,

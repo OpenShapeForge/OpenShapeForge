@@ -4,9 +4,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
 import {
-  discoverContextEntities,
   listEntityFiles,
-  loadContextEntity,
   loadEntity,
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
@@ -390,17 +388,6 @@ export async function generateAuthoringUiArtifacts(
         loaded.coreEntity.ui?.routes,
         contract.views.core?.routes,
       ),
-    });
-  }
-
-  for (const contextEntity of discoverContextEntities(authoringDir).sort((a, b) =>
-    `${a.context}/${a.name}`.localeCompare(`${b.context}/${b.name}`),
-  )) {
-    const loaded = loadContextEntity(authoringDir, contextEntity.context, contextEntity.name);
-    compiled.push({
-      name: contextEntity.name,
-      contract: compile(loaded),
-      appShell: loaded.appShell,
     });
   }
 

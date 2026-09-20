@@ -13,7 +13,6 @@
     "crud",
     "graphql",
     "views",
-    "canonical",
     "profiles"
   ],
   "properties": {
@@ -307,12 +306,6 @@
         }
       }
     },
-    "hooks": {
-      "$ref": "core-entity.schema.json#/properties/hooks"
-    },
-    "permissions": {
-      "$ref": "core-entity.schema.json#/properties/permissions"
-    },
     "authorization": {
       "type": "object",
       "description": "Compiled RBAC authorization metadata."
@@ -321,19 +314,6 @@
       "type": "object",
       "additionalProperties": {
         "$ref": "#/$defs/compiledViewContext"
-      }
-    },
-    "canonical": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["contexts"],
-      "properties": {
-        "contexts": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/canonicalCompilerContext"
-          }
-        }
       }
     },
     "profiles": {
@@ -411,25 +391,6 @@
         }
       }
     },
-    "formFieldDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["key", "valueType", "label"],
-      "properties": {
-        "key": { "type": "string" },
-        "valueType": { "type": "string" },
-        "cardinality": { "type": "string", "enum": ["single", "collection"] },
-        "osfType": { "type": "string" },
-        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "required": { "type": "boolean" },
-        "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "options": { "type": "object" },
-        "render": { "type": "object" },
-        "validation": { "type": "object" },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
-        "item": { "$ref": "#/$defs/formFieldDefinition" }
-      }
-    },
     "compiledViewAction": {
       "type": "object",
       "additionalProperties": false,
@@ -443,7 +404,7 @@
         "visibleWhen": { "type": "object" },
         "disabledWhen": { "type": "object" },
         "disabledMessage": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "formFields": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
+        "formFields": { "type": "array", "items": { "$ref": "core-entity.schema.json#/$defs/field" } },
         "actionRef": { "type": "string" },
         "route": { "type": "string" },
         "mutation": { "type": "string" },
@@ -740,28 +701,6 @@
         "groups": {
           "type": "array",
           "items": { "$ref": "#/$defs/compiledViewGroup" }
-        }
-      }
-    },
-    "canonicalCompilerContext": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["fields", "presentations"],
-      "properties": {
-        "fields": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "$ref": "core-entity.schema.json#/$defs/field"
-            }
-          }
-        },
-        "presentations": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "core-entity.schema.json#/$defs/presentations"
-          }
         }
       }
     },

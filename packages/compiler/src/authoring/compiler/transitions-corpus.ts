@@ -50,8 +50,8 @@ function isDateTime(value: string): boolean {
 
 type FieldConstraints = {
   format?: string;
-  min?: number | { value: number };
-  max?: number | { value: number };
+  min?: unknown;
+  max?: unknown;
 };
 
 /**

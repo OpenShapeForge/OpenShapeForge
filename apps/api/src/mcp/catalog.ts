@@ -40,6 +40,12 @@ export type CatalogTool = {
     destructiveHint: boolean;
     idempotentHint: boolean;
   };
+  /**
+   * The failures the canonical Operation declares. Not part of the listed
+   * tool — the listing is budgeted by the byte — but answered by osf_describe,
+   * where a model asks for one entity's exact contract.
+   */
+  errors: readonly { status: number; code: string; description: string }[];
 };
 
 export type CatalogEntity = {

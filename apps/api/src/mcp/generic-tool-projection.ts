@@ -166,6 +166,8 @@ export function describeGenericEntries(
             description: described.description,
             inputSchema: described.inputSchema,
             ...(described.outputSchema ? { outputSchema: described.outputSchema } : {}),
+            // The declared refusals, which the listing leaves out for its byte budget.
+            errors: tool.errors.map(({ status, code, description }) => ({ status, code, description })),
           },
         ];
       }),

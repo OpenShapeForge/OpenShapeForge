@@ -26,6 +26,7 @@ test("MCP live tools do not advertise unsupported collection values", () => {
     name: "create_relation", operation: "create", entity: "Relation", table: table.name, description: "Creates a fixture",
     inputSchema: { type: "object", properties: { values: { type: "object", properties: { blocks: { type: "array" }, displayName: { type: "string" } }, required: ["blocks"] } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    errors: [],
   }, undefined, table, { roles: [] });
   expect(projected.inputSchema).toMatchObject({ properties: { values: { properties: { displayName: { type: "string" } }, required: [] } } });
   expect(JSON.stringify(projected.inputSchema)).not.toContain('"blocks"');

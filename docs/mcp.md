@@ -259,7 +259,9 @@ description; an entity's own fields are not listed and the schema stays open
 to them. The exact per-entity schema — the one the call is validated against —
 comes from **`osf_describe { entity, operation? }`**, listed beside the generic
 tools whenever the session can address a generic entity, described with the
-same withholding and collection policy the dedicated tools get. The
+same withholding and collection policy the dedicated tools get, plus the
+refusals the Operation declares (`errors: [{ status, code, description }]`),
+which the listing leaves out for its byte budget. The
 `osf://schema/entities/{slug}` resource keeps describing the readable field
 model; `osf_describe` is the write contract.
 

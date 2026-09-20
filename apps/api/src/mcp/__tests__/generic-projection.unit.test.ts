@@ -16,7 +16,13 @@ import {
 } from "../generated-mcp-server.js";
 
 const catalog = rawCatalog as unknown as {
-  tools: { name: string; entity: string; operation: string; inputSchema: Record<string, unknown> }[];
+  tools: {
+    name: string;
+    entity: string;
+    operation: string;
+    inputSchema: Record<string, unknown>;
+    errors: { status: number; code: string; description: string }[];
+  }[];
   entities: { entity: string; tools?: string; labels?: Record<string, string> }[];
 };
 
@@ -35,6 +41,8 @@ const session = (...roles: string[]) =>
 
 // A role that reaches the generic Address entity and nothing else generic.
 const RELATIONS = "Relations.All.ReadWrite";
+const compiledErrors = (name: string) =>
+  catalog.tools.find((tool) => tool.name === name && tool.entity === "Address")!.errors;
 
 describe("the generic osf_* listing", () => {
   const generic = catalog.entities.filter((entity) => entity.tools === "generic");
@@ -75,6 +83,13 @@ describe("the generic osf_* listing", () => {
     }
     const one = describeGenericEntity("Address", "list", session(RELATIONS), tables as never, english) as any;
     expect(Object.keys(one.operations)).toEqual(["list"]);
+    // The declared refusals travel with the exact contract, not with the listing.
+    expect(one.operations.list.errors).toEqual(
+      compiledErrors("osf_list").map(({ status, code, description }) => ({ status, code, description })),
+    );
+    expect(one.operations.list.errors.map((error: any) => error.code)).toContain("FORBIDDEN");
+    const listed = crudToolsForSession(session(RELATIONS), tables as never, english).find((tool) => tool.name === "osf_list")!;
+    expect(listed).not.toHaveProperty("errors");
   });
 
   it.skipIf(generic.length === 0)("refuses an entity the session cannot address, naming only what it can", () => {

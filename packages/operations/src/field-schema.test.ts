@@ -24,7 +24,7 @@ test("cardinality bounds with max one preserve a scalar value", () => {
 test("explicit collection and larger or unbounded maxima preserve arrays", () => {
   for (const cardinality of ["collection", { min: 0, max: 2 }, { min: 0, max: "unbounded" }] as const) {
     const schema = operationFieldObjectSchema([{ key: "emails", osfType: "string", cardinality }], {});
-    expect(schema).toMatchObject({ properties: { emails: { type: "array", items: { type: "string" } } } });
+    expect(schema).toMatchObject({ properties: { emails: { type: "array", "x-osf-type": "string", items: { type: "string", "x-osf-type": "string" } } } });
   }
 });
 

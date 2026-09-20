@@ -118,7 +118,19 @@ describe("compiled field JSON Schema projection", () => {
     const ajv = new Ajv2020.default({ strict: false });
     ajv.addKeyword(operationTypeKeyword);
     expect(() => ajv.compile({ type: "object", properties: { amount: compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" })) } })).not.toThrow();
-    expect(() => ajv.compile({ type: "number", "x-osf-type": "not a type" })).toThrow(/x-osf-type/);
+    for (const invalid of ["not a type", "field.definition", "field-definition", "field_definition", "9lives"]) {
+      expect(() => ajv.compile({ type: "number", "x-osf-type": invalid })).toThrow(/x-osf-type/);
+    }
+    // A collection is a use of the same type as its rows: the property carries it, and so does the row shape, explicit or not.
+    const outer = compiledFieldSchema(field({ key: "tags", osfType: "tag", cardinality: "collection" }));
+    expect(outer["x-osf-type"]).toBe("tag");
+    expect((outer.items as Record<string, unknown>)["x-osf-type"]).toBe("tag");
+    const explicit = compiledFieldSchema(field({ key: "codes", osfType: "string", cardinality: "collection", item: field({ key: "code", osfType: "code" }) }));
+    expect(explicit["x-osf-type"]).toBe("string");
+    expect((explicit.items as { allOf: Record<string, unknown>[] }).allOf.map(branch => branch["x-osf-type"])).toEqual(["string", "code"]);
+    const nested = compiledFieldSchema(field({ key: "address", osfType: "address", baseType: "object", children: [field({ key: "street", osfType: "street" })] }));
+    expect(nested["x-osf-type"]).toBe("address");
+    expect((nested.properties as Record<string, Record<string, unknown>>).street!["x-osf-type"]).toBe("street");
   });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {

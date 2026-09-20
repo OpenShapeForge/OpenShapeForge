@@ -305,6 +305,7 @@ export function applyCollectionShape(
 ): JsonObject {
   const { description, ...items } = scalar;
   const array: JsonObject = { type: "array", items };
+  if (items["x-osf-type"] !== undefined) array["x-osf-type"] = items["x-osf-type"];
   if (description !== undefined) array.description = description;
   return applyCollectionBounds(array, field);
 }
@@ -577,6 +578,8 @@ export function compiledFieldSchemaWithoutDefinitions(
       }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
+  // The collection is a use of the same type as its items: a form resolves the property, not the row.
+  if (field.osfType) array["x-osf-type"] = field.osfType;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;

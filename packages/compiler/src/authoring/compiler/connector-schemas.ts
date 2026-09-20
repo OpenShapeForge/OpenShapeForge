@@ -67,6 +67,8 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes
       ? fieldDefinitionValueSchema()
       : constraintsForField(withBaseType(field, osfTypes));
 
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  scalar["x-osf-type"] = field.osfType;
   const values = staticEnum(field);
   if (values) scalar.enum = values;
 

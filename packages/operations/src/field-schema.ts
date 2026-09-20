@@ -310,6 +310,8 @@ function fieldSchema(
     ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)] }
     : itemSchema;
   const collection = collectionBounds({ type: "array", items: item }, field);
+  // The collection is a use of the same type as its items: a form resolves the property, not the row.
+  collection["x-osf-type"] = field.osfType;
   if (itemTitle !== undefined) collection.title = itemTitle;
   if (description !== undefined) collection.description = description;
   if (defaultValue !== undefined) {

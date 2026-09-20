@@ -95,5 +95,6 @@ export const operationTypeKeyword = {
   keyword: "x-osf-type",
   schemaType: "string" as const,
   valid: true,
-  metaSchema: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_.-]*$" },
+  // A camelCase catalog or base key, or a PascalCase entity name; never a path or a dashed name.
+  metaSchema: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]*$" },
 };

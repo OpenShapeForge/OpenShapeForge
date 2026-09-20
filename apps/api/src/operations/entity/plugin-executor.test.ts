@@ -75,6 +75,7 @@ function entityOperation(intent: "create" | "update" | "delete"): EntityOperatio
       },
     },
     output: { kind: "json-schema", schema: {} },
+    errors: [],
     inputSchema: {
       type: "object",
       required: [...(inputField ? [inputField] : []), "displayName"],

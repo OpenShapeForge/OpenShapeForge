@@ -201,7 +201,8 @@ export type EntityOperationContract = EntityOperationRef & {
   target?:
     | { entityId: string; entityName: string; scope: "collection" }
     | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  errors?: import("../runtime.js").OperationContract["errors"];
+  /** Every failure the Operation declares; derived by the compiler for every entity Operation. */
+  errors: import("../runtime.js").OperationContract["errors"];
   interfaces?: {
     rest?: false | {
       method?: string;

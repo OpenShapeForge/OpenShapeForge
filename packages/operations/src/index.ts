@@ -64,3 +64,46 @@ export {
   typedEnumValues,
 } from "./field-schema.js";
 export { renderTemplate, templatePaths, templateSelection } from "./display-template.js";
+export { compareCodeUnits } from "./ordering.js";
+export {
+  GENERIC_DESCRIBE_TOOL_NAME,
+  GENERIC_TOOL_NAME_PREFIX,
+  GENERIC_TOOL_OPERATIONS,
+  advertisedGenericTool,
+  compactGenericInputSchema,
+  describeToolDefinition,
+  genericTextLanguage,
+  genericToolText,
+} from "./mcp-generic-projection.js";
+export type { McpToolShape } from "./mcp-tool-shape.js";
+export { ARTIFACT_UPLOAD_TOOL_NAME, uploadToolDefinition } from "./mcp-upload-tool.js";
+export { EDIT_LEASE_TOOL_NAMES, editLeaseToolDefinitions } from "./mcp-edit-lease-tools.js";
+export {
+  DEFAULT_OPERATION_SEARCH_RESULTS,
+  MAX_OPERATION_SEARCH_RESULTS,
+  searchableOperationToolDefinitions,
+} from "./mcp-search-tools.js";
+export type { SearchableOperationToolNames } from "./mcp-search-tools.js";
+export { connectHelperTool, dryRunHelperTool, personalizationHelperTool } from "./mcp-derived-helper-tools.js";
+export { discoveryToolDefinition, guideToolDefinition, testToolDefinition } from "./mcp-entity-static-tools.js";
+export { connectorMcpTools, connectorToolAnnotations } from "./mcp-connector-tools.js";
+export type {
+  ConnectorMcpContractShape,
+  ConnectorMcpOperationShape,
+  ConnectorMcpTool,
+} from "./mcp-connector-tools.js";
+export {
+  DYNAMIC_TOOL_BYTES_ALLOWANCE,
+  MAX_ADVERTISED_TOOL_BYTES,
+  MAX_STATIC_TOOL_BYTES,
+  PLATFORM_TOOL_BYTES_ALLOWANCE,
+  advertisedToolBytes,
+} from "./mcp-tool-budget.js";
+export type { GenericToolAdvertisement, GenericToolBranch, GenericToolOperation } from "./mcp-generic-projection.js";
+export {
+  DATA_ACQUISITION_TOOL_FOOTER,
+  ENTITY_CONFIGURATION_APP_URI,
+  advertisedEntityTool,
+  localizedEntityToolText,
+} from "./mcp-entity-tool-shape.js";
+export type { EntityToolAdvertisement } from "./mcp-entity-tool-shape.js";

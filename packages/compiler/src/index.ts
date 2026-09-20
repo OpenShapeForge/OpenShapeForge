@@ -9,12 +9,16 @@ import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
 } from "./authoring/generate-ui-artifacts.js";
-import { generateAuthoringKeycloakArtifacts } from "./authoring/generate-keycloak-artifacts.js";
+import {
+  generateAuthoringKeycloakArtifacts,
+  loadAuthorizationConfigs,
+} from "./authoring/generate-keycloak-artifacts.js";
 import {
   buildRoleComposites,
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
 } from "./authoring/role-composites.js";
+import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
 import {
   activeManifestSource,
   loadActivePlatformCompile,
@@ -28,6 +32,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { connectorMcpTools } from "@openshapeforge/operations";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
 import {
   collectPluginMigrationRegistry,
@@ -165,6 +170,12 @@ export {
   type RoleCompositeMember,
   type RoleCompositesByRealm,
 } from "./authoring/role-composites.js";
+export {
+  buildRoleLabels,
+  renderRoleLabels,
+  ROLE_LABELS_PATH,
+  type RoleLabelTable,
+} from "./authoring/role-labels.js";
 export type {
   AuthoringConfig,
   AuthoringSettingValue,
@@ -455,6 +466,8 @@ export async function collectAllArtifacts(
           operations,
           executionCompatibility,
           operationToolProjection,
+          // The connector tools share the listing, so they share its byte budget.
+          connectorMcpTools(connectors),
         ),
       },
     ],
@@ -523,6 +536,12 @@ export async function collectAllArtifacts(
       {
         path: ROLE_COMPOSITES_PATH,
         contents: renderRoleComposites(buildRoleComposites(keycloakArtifacts)),
+      },
+      // What each role means to its holder, authored on the role, so the MCP
+      // session describes a person's roles in the deployment's own words.
+      {
+        path: ROLE_LABELS_PATH,
+        contents: renderRoleLabels(buildRoleLabels(loadAuthorizationConfigs(authoringDir))),
       },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),

@@ -150,7 +150,7 @@ export type SessionInfo = {
    * Deliberately not repeated in `summary`: that line is read out to a person
    * on every `whoami`, and "your language is Dutch" is not news to someone
    * reading Dutch. The assistant is told the language AND its source in the
-   * server's own instructions (generated-mcp-server.ts), which is where it can
+   * server's own instructions (server-scope.ts), which is where it can
    * act on it — by answering in that language, and by mentioning the identity
    * provider only when the person asks why they are being addressed this way.
    */

@@ -414,6 +414,11 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     ...(entry.operation.prerequisites
       ? { prerequisites: entry.operation.prerequisites }
       : {}),
+    errors: entry.operation.errors.map((error) => ({
+      status: error.status,
+      code: error.code,
+      description: error.description,
+    })),
     ...(entry.operation.concurrency
       ? { concurrency: entry.operation.concurrency }
       : {}),

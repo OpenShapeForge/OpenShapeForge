@@ -24,7 +24,7 @@
  * set_member_role only for administrators, confirm_my_link only while there is
  * a candidate to confirm. Calling a tool the session was not shown answers the
  * same NOT_FOUND an unknown tool gets. All four are wired into
- * generated-mcp-server.ts by the same two delimited hunks; everything else
+ * the MCP server (session-surface.ts, dispatch-platform-tools.ts) by the same two delimited hunks; everything else
  * lives here.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";

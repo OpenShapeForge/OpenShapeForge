@@ -46,7 +46,7 @@ const AUTHORIZATION_FILENAME_RE = /^authorization(\.[^.]+)*\.yaml$/;
  * order the filesystem happens to enumerate in — `check:generated` hashes two
  * consecutive generations and fails on any difference.
  */
-function loadAuthorizationConfigs(authoringDir: string): AuthorizationConfigFile[] {
+export function loadAuthorizationConfigs(authoringDir: string): AuthorizationConfigFile[] {
   if (!existsSync(authoringDir)) {
     return [];
   }

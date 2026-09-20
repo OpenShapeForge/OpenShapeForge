@@ -49,6 +49,7 @@ const CONTRACT_DECLARATIONS: readonly ContractDeclaration[] = [
   { kind: "interface", name: "FieldDefinitionRelationship" },
   { kind: "interface", name: "FieldDefinitionProvider" },
   { kind: "interface", name: "FieldDefinitionTransitionWrite" },
+  { kind: "type", name: "FieldDefinitionTransitionPrecondition" },
   { kind: "interface", name: "FieldDefinitionTransitionRule" },
   { kind: "interface", name: "FieldDefinitionTransitions" },
   { kind: "interface", name: "FieldDefinitionDeriveOnCreate" },

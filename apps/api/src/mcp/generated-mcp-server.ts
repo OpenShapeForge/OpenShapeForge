@@ -928,6 +928,28 @@ function withholdClassifiedOutput(
   return copy;
 }
 
+/**
+ * Whether the generic CRUD path can ever succeed for this entry, regardless of
+ * who asks. The collection policy refuses a generic create that must also
+ * write an owned collection and a generic delete of an owned child outright
+ * (collection-policy.ts); advertising either would disclose an action that
+ * always fails. Update is not affected: the collection fields are removed
+ * from its schema instead (withoutCollectionInputs in describeTool).
+ */
+function crudToolCanSucceed(
+  tool: CatalogTool,
+  tables: Map<string, GeneratedTable>,
+): boolean {
+  if (tool.operation !== "create" && tool.operation !== "delete") return true;
+  const table = tables.get(tool.table);
+  if (!table) return false;
+  const operation = getEntityOperationContracts().find(
+    (entry) => entry.entityName === tool.entity && entry.intent === tool.operation,
+  );
+  if (operation?.implementation?.type === "plugin") return true;
+  return !collectionMutationError(table, tool.operation, [...tables.values()]);
+}
+
 function toolsForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
@@ -939,12 +961,7 @@ function toolsForSession(
     .filter((tool) =>
       sessionMayInvoke(tables.get(tool.table), tool.operation, session),
     )
-    .filter((tool) => {
-      if (tool.operation !== "create") return true;
-      const table = tables.get(tool.table)!;
-      const operation = getEntityOperationContracts().find((entry) => entry.entityName === tool.entity && entry.intent === "create");
-      return operation?.implementation?.type === "plugin" || !collectionMutationError(table, "create", [...tables.values()]);
-    })
+    .filter((tool) => crudToolCanSucceed(tool, tables))
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 
@@ -2258,6 +2275,7 @@ export const __assertWritableValuesForTests = assertWritableValues;
 export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
 export const __resourcesForSessionForTests = resourcesForSession;
+export const __crudToolCanSucceedForTests = crudToolCanSucceed;
 
 type ToolResult = {
   content: CallToolResult["content"];

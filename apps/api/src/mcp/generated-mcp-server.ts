@@ -35,6 +35,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import {
   OperationFailure,
+  compareCodeUnits,
   operationErrorOf,
   type OperationError,
 } from "@openshapeforge/operations";
@@ -587,7 +588,7 @@ function stableSnapshotJson(value: unknown): string {
   }
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareCodeUnits(left, right))
       .map(([key, nested]) => `${JSON.stringify(key)}:${stableSnapshotJson(nested)}`)
       .join(",")}}`;
   }

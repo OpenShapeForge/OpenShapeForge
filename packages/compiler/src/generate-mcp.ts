@@ -18,6 +18,7 @@
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
  */
+import { compareCodeUnits } from "@openshapeforge/operations";
 import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
@@ -1354,7 +1355,7 @@ export function buildMcpCatalog(
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
     .sort((a, b) =>
-      a.contract.mcp!.toolPrefix.localeCompare(b.contract.mcp!.toolPrefix),
+      compareCodeUnits(a.contract.mcp!.toolPrefix, b.contract.mcp!.toolPrefix),
     );
 
   const entities: McpEntityCatalogEntry[] = [];

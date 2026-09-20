@@ -39,3 +39,4 @@ export {
   operationFieldObjectSchema,
   operationFieldSchema,
 } from "./field-schema.js";
+export { compareCodeUnits } from "./ordering.js";

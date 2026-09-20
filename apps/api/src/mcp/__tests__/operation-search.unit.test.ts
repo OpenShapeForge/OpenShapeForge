@@ -129,4 +129,66 @@ describe("searchable MCP Operations", () => {
       tenantId: "tenant-b",
     })).toThrow(/unknown property/i);
   });
+
+  /**
+   * A catalogue the shape of a real deployment: entity-prefixed ids that start
+   * with a capital (`CpqQuoteDocument.approve`, `TemplateVersion.renderSnapshot`),
+   * dotted namespaces in lower case (`core.Deal.relationId.create-constrained-reference`,
+   * `cpq-catalog.deal.win`), and kebab-case ids (`work-items.list`). ICU
+   * collation interleaves the capitalised ids between `core.*` and `cpq.*`;
+   * a cursor advanced with `>` over that order looped and reached 70 of 160.
+   */
+  function deploymentLikeIds(): string[] {
+    const ids = [
+      "CpqQuoteDocument.approve", "CpqQuoteDocument.publish", "CpqQuoteDocument.revise",
+      "CpqQuoteDocument.submit", "DocumentVariant.insertBlock", "DocumentVariant.moveBlock",
+      "QuotePricing.materialize", "QuoteScope.materialize", "Template.insertVariant",
+      "Template.publish", "TemplateBlock.materialize", "TemplateVersion.createDocument",
+      "TemplateVersion.materialize", "TemplateVersion.renderSnapshot", "TextBlock.materialize",
+      "core.Deal.relationId.create-constrained-reference", "cpq-catalog.deal.win",
+      "cpq-catalog.deal.compose-offer", "cpq-catalog.pricing.maintain",
+      "cpq.approval-policy-versions.get", "documents.create", "document-versions.send",
+      "work-items.get", "work-items.list", "workflow.definition.archive",
+      "workflow.definition.publish", "workflow.instance.start", "entityTypes.list",
+      "notifications.markRead", "notifications.summary",
+    ];
+    for (let index = 0; ids.length < 160; index += 1) {
+      const entity = ["Assessment", "Finding", "Relation", "Deal", "Quote"][index % 5]!;
+      const namespace = ["core", "cpq-catalog", "documents", "workflow", "approval-requests"][index % 5]!;
+      ids.push(index % 2 === 0
+        ? `${entity}.operation${index}`
+        : `${namespace}.operation-${index}`);
+    }
+    return ids;
+  }
+
+  test("a full walk terminates and reaches every operation at every page size", () => {
+    const ids = deploymentLikeIds();
+    expect(ids).toHaveLength(160);
+    expect(new Set(ids).size).toBe(160);
+    const definitions = ids.map((id) => definition(id));
+    const allowedIds = new Set(ids);
+    for (const limit of [undefined, 1, 7, 10, 20]) {
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      let pages = 0;
+      do {
+        const page = searchOperationDefinitions({
+          definitions,
+          allowedIds,
+          arguments: { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+          locale,
+        });
+        pages += 1;
+        expect(pages).toBeLessThanOrEqual(Math.ceil(160 / (limit ?? 10)) + 1);
+        seen.push(...page.operations.map((entry) => (entry.operation as { id: string }).id));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(seen).toHaveLength(160);
+      expect(new Set(seen).size).toBe(160);
+      expect(new Set(seen)).toEqual(new Set(ids));
+      // Every page ordered by the same total order the cursor compares with.
+      expect(seen).toEqual([...seen].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0)));
+    }
+  });
 });

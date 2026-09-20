@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { compareCodeUnits } from "@openshapeforge/operations";
 import { HttpError } from "../rest/http-error.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
 
@@ -268,9 +269,13 @@ export function searchOperationDefinitions(input: {
         .filter((candidate): candidate is string => typeof candidate === "string")
         .some((candidate) => candidate.toLocaleLowerCase(input.locale.tag).includes(query));
     })
-    .sort((left, right) => left.definition.id.localeCompare(right.definition.id));
+    // The sort and the cursor comparison below must be the same total order:
+    // the cursor is the last id of the previous page and the next page starts
+    // at the first id greater than it, so a collation-sorted list would loop
+    // and skip (compareCodeUnits).
+    .sort((left, right) => compareCodeUnits(left.definition.id, right.definition.id));
   const start = args.cursor
-    ? definitions.findIndex(({ definition }) => definition.id > args.cursor!)
+    ? definitions.findIndex(({ definition }) => compareCodeUnits(definition.id, args.cursor!) > 0)
     : 0;
   const page = start < 0 ? [] : definitions.slice(start, start + args.limit);
   const end = start < 0 ? definitions.length : start + page.length;

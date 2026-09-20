@@ -6,7 +6,7 @@ test("entity semantic types retain their inferred target in parameter schemas", 
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
     osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", baseType: "string", validation: { format: "uuid" } } },
   });
-  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } } } });
+  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" }, "x-osf-type": "ExampleRecord" } } });
 });
 
 test("cardinality bounds with max one preserve a scalar value", () => {
@@ -24,7 +24,7 @@ test("cardinality bounds with max one preserve a scalar value", () => {
 test("explicit collection and larger or unbounded maxima preserve arrays", () => {
   for (const cardinality of ["collection", { min: 0, max: 2 }, { min: 0, max: "unbounded" }] as const) {
     const schema = operationFieldObjectSchema([{ key: "emails", osfType: "string", cardinality }], {});
-    expect(schema).toMatchObject({ properties: { emails: { type: "array", items: { type: "string" } } } });
+    expect(schema).toMatchObject({ properties: { emails: { type: "array", "x-osf-type": "string", items: { type: "string", "x-osf-type": "string" } } } });
   }
 });
 
@@ -185,6 +185,7 @@ test("stored definitions carry authored copy in x-osf-i18n and merge catalog val
     maxLength: 80,
     "x-osf-i18n": { title: { en: "Reason", nl: "Reden" }, description: { en: "Why", nl: "Waarom" } },
     title: "Reason",
+    "x-osf-type": "shortReason",
     description: "Reason Why",
   });
 });
@@ -214,8 +215,8 @@ test("a catalog type that declares its schema projects through it, bundled once 
     { key: "definition", osfType: "fieldDefinition" },
   ], { osfTypes: { fieldDefinition: { baseType: "object", schema: { $ref: "#/$defs/fieldDefinition" } } }, fieldDefinitionDefinitions: definitions });
   const properties = schema.properties as Record<string, Record<string, unknown>>;
-  expect(properties.definition).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-i18n": { title: { en: "definition", nl: "definition" } }, title: "definition", description: "definition" });
-  expect((properties.form!.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
+  expect(properties.definition).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-i18n": { title: { en: "definition", nl: "definition" } }, title: "definition", "x-osf-type": "fieldDefinition", description: "definition" });
+  expect((properties.form!.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
   expect(properties.form!.$defs).toBeUndefined();
   expect(schema.$defs).toEqual(definitions);
 });

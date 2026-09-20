@@ -8,7 +8,7 @@ import { loadEntity } from "./loader.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { compiledObjectSchema } from "../field-json-schema.js";
-import { operationI18nKeyword } from "@openshapeforge/operations";
+import { operationI18nKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 
@@ -39,6 +39,7 @@ test("real v3 case templates retain inline action values and ordinary top-level 
   const ajv = new Ajv2020({ strict: true });
   addFormats.default(ajv);
   ajv.addKeyword(operationI18nKeyword);
+  ajv.addKeyword(operationTypeKeyword);
   const validate = ajv.compile(compiledObjectSchema([actions], {}, { requireRequired: true }));
   const value = { actions: [
     { key: "later", sequenceNumber: 20, kind: "task", required: true, startMode: "manual", taskTemplate: { title: "First in array", defaultWorkQueueId: "00000000-0000-4000-8000-000000000001" } },

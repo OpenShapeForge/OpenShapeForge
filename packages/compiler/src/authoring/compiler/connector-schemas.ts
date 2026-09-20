@@ -81,6 +81,8 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes
   const resolved = withBaseType(field, osfTypes);
   const scalar: JsonObject = resolved.schema ? structuredClone(resolved.schema) : constrainedType(resolved);
 
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  scalar["x-osf-type"] = field.osfType;
   const values = staticEnum(field);
   if (values) scalar.enum = values;
 

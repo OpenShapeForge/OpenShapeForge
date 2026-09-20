@@ -11,8 +11,9 @@
  *
  * Key order is part of the contract: generated artifacts are compared byte
  * for byte, so a schema is assembled in one fixed order — structural
- * constraints, `x-osf-i18n`, `title`, `enum`, `x-osf-reference`,
+ * constraints, `x-osf-i18n`, `title`, `x-osf-type`, `enum`, `x-osf-reference`,
  * `description`, `default`, then the collection wrapper and its bounds.
+ * `x-osf-type` is stamped here and nowhere else.
  */
 
 import type {
@@ -293,6 +294,7 @@ export function collectionShape(
 ): OperationJsonSchema {
   const { description, ...items } = scalar;
   const array: OperationJsonSchema = { type: "array", items };
+  if (items["x-osf-type"] !== undefined) array["x-osf-type"] = items["x-osf-type"];
   if (description !== undefined) array.description = description;
   return collectionBounds(array, field);
 }
@@ -389,6 +391,8 @@ function withFieldMetadata(
   if (help && typeof help === "object") copy.description = help;
   if (Object.keys(copy).length) schema["x-osf-i18n"] = copy;
   if (title) schema.title = title;
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  schema["x-osf-type"] = field.osfType;
   if (enumeration) schema.enum = typedEnumValues(enumeration.values, field.baseType);
   if (field.options?.type === "entity") {
     if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
@@ -426,9 +430,15 @@ export function fieldSchema(
   if (field.cardinality !== "collection") return schema;
   const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, ...outerItemSchema } = schema;
   let items: OperationJsonSchema = field.item
-    ? { allOf: [outerItemSchema, fieldSchema(field.item, registry, options)] }
+    ? {
+        allOf: [outerItemSchema, fieldSchema(field.item, registry, options)],
+        // The row node names the row's type whether the item is explicit or not.
+        "x-osf-type": field.item.osfType,
+      }
     : outerItemSchema;
   const array: OperationJsonSchema = { type: "array", items };
+  // The collection is a use of the same type as its items: a form resolves the property, not the row.
+  array["x-osf-type"] = field.osfType;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;

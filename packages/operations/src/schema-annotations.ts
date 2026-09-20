@@ -89,3 +89,17 @@ export const operationChoiceKeyword = {
   },
 };
 
+
+/**
+ * The OSF type behind a generated property (`currency`, `Relation`,
+ * `fieldDefinition`, a plugin's own type). A form renders the property through
+ * the renderer registered for that type; the JSON type beside it stays the
+ * only thing validated.
+ */
+export const operationTypeKeyword = {
+  keyword: "x-osf-type",
+  schemaType: "string" as const,
+  valid: true,
+  // A camelCase catalog or base key, or a PascalCase entity name; never a path or a dashed name.
+  metaSchema: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9]*$" },
+};

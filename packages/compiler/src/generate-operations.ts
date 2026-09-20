@@ -24,6 +24,7 @@ import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
+import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
 
 const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
 const verifiedNativeOperations = new WeakMap<CompiledPluginOperation, string>();
@@ -785,6 +786,7 @@ export function collectAuthoredEntityPluginOperations(
   referentiedata: CoreReferentiedataSnapshot = {},
 ): CompiledPluginOperation[] {
   materializeCollectionOperations(entities, referentiedata);
+  assertTransitionAgreements(entities.map(({ contract }) => contract));
   const byPlugin = new Map<string, PluginOperationContract[]>();
   for (const { contract } of entities) {
     for (const authored of contract.pluginOperations ?? []) {

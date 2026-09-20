@@ -146,13 +146,15 @@ function assertRule(
   seen.set(rule.key, rule.key);
 }
 
+/** Base types a database can compare exactly; an object has no equality worth a refusal. */
+const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
+
 /**
  * `agreesOn` names fields the referenced record must share with this one:
  * the written field must be a single entity reference, and every named field
- * must be a persisted field here. Whether the target entity carries the same
- * field is a corpus-wide fact this per-entity pass cannot see; the runtime
- * binds it against the generated manifest and refuses at boot when it is
- * absent.
+ * must be a persisted single scalar here. That the target entity carries the
+ * same field with the same base type is checked across the corpus by
+ * `assertTransitionAgreements`, and bound to typed columns by the runtime.
  */
 function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target: Field, agreesOn: string[], fields: Map<string, Field>): void {
   if (!target.relationship || fieldCardinality(target) !== "single") {
@@ -160,8 +162,52 @@ function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target:
   }
   for (const key of agreesOn) {
     const local = fields.get(key);
-    if (!local?.persisted || fieldCardinality(local) !== "single") {
-      fail(entity, field, `${where} agreesOn "${key}", which is not a persisted single field of ${entity.entity}.`);
+    if (!local?.persisted || fieldCardinality(local) !== "single" || !COMPARABLE_BASE_TYPES.has(local.baseType ?? "")) {
+      fail(entity, field, `${where} agreesOn "${key}", which is not a persisted single comparable field of ${entity.entity}.`);
+    }
+  }
+}
+
+/**
+ * The corpus-wide half of `agreesOn`: the referenced entity must carry every
+ * named field as a persisted single field of the same base type, so the
+ * comparison the runtime issues in SQL is between columns of one type.
+ */
+type AgreementContract = {
+  transitions?: CompiledTransitionField[];
+  model: { fields: ReadonlyArray<{ key: string; osfType: string; baseType: string; cardinality: string }> };
+  storage: { columns: ReadonlyArray<{ field: string; type: string }> };
+  entity: { name: string };
+};
+
+export function assertTransitionAgreements(entities: ReadonlyArray<AgreementContract>): void {
+  // Test fixtures hand this collector bare operation lists; a contract with
+  // no entity identity has no transitions to check either.
+  const byName = new Map(entities.filter((contract) => contract?.entity?.name).map((contract) => [contract.entity.name, contract]));
+  const describe = (contract: AgreementContract, key: string) => {
+    const field = contract.model.fields.find((candidate) => candidate.key === key);
+    const column = contract.storage.columns.find((candidate) => candidate.field === key);
+    return field && column && field.cardinality === "single" ? `${field.baseType} ${column.type}` : undefined;
+  };
+  for (const contract of byName.values()) {
+    for (const status of contract.transitions ?? []) {
+      for (const rule of status.rules) {
+        for (const write of rule.writes ?? []) {
+          if (!write.agreesOn?.length) continue;
+          const reference = contract.model.fields.find((candidate) => candidate.key === write.field);
+          const target = reference && byName.get(reference.osfType);
+          if (!target) throw new Error(`[${contract.entity.name}] ${rule.operation} constrains "${write.field}" with agreesOn, but it references no compiled entity.`);
+          for (const key of write.agreesOn) {
+            const local = describe(contract, key);
+            const remote = describe(target, key);
+            if (!local || !remote || local !== remote) {
+              throw new Error(
+                `[${contract.entity.name}] ${rule.operation} agreesOn "${key}", but ${target.entity.name}.${key} (${remote ?? "absent"}) is not a persisted single field of the same type as ${contract.entity.name}.${key} (${local ?? "absent"}).`,
+              );
+            }
+          }
+        }
+      }
     }
   }
 }

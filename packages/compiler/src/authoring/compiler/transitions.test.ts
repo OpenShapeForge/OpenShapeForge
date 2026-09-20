@@ -7,6 +7,7 @@ import { compile } from "./index.js";
 import { withStatusTransitions } from "./transitions.js";
 import { buildWebManifest } from "../web-manifest.js";
 import { collectAuthoredEntityPluginOperations } from "../../generate-operations.js";
+import { assertTransitionAgreements } from "./transitions.js";
 
 const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");
@@ -107,7 +108,7 @@ describe("status transitions", () => {
 
   test("the lowered Operation passes the plugin Operation gates with a REST, MCP and GraphQL projection", () => {
     const compiled = collectAuthoredEntityPluginOperations(
-      [{ contract }],
+      [{ contract }, { contract: compile(loadEntity(authoringDir, "invoice")) }],
       { repoRoot: authoringDir, authoringDir, webPresent: false },
     ).find((candidate) => candidate.key === "AgreementMilestone.trigger");
     expect(compiled!.transports.rest).toMatchObject({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/trigger" });
@@ -119,9 +120,19 @@ describe("status transitions", () => {
   test("a constrained write must be a single reference and agree on persisted fields of this entity", () => {
     const rules = (writes: unknown[]) => withStatus({ transitions: { initial: "pending", rules: [{ key: "invoice", from: ["triggered"], to: "invoiced", writes }] } }, formless);
     expect(() => withStatusTransitions(rules([{ field: "expectedAt", agreesOn: ["agreementId"] }]), catalogs)).toThrow('constrains "expectedAt" with agreesOn, but it is not a single entity reference');
-    expect(() => withStatusTransitions(rules([{ field: "producedInvoiceId", agreesOn: ["nothing"] }]), catalogs)).toThrow('agreesOn "nothing", which is not a persisted single field');
+    expect(() => withStatusTransitions(rules([{ field: "producedInvoiceId", agreesOn: ["nothing"] }]), catalogs)).toThrow('agreesOn "nothing", which is not a persisted single comparable field');
     const { entity } = withStatusTransitions(rules(["producedInvoiceId"]), catalogs);
     expect((entity.operations!.invoice!.input!.schema as { required: string[] }).required).toEqual(["id"]);
+  });
+
+  test("across the corpus, the referenced entity must carry the agreed field as the same base type", () => {
+    const invoice = compile(loadEntity(authoringDir, "invoice"));
+    expect(() => assertTransitionAgreements([contract, invoice])).not.toThrow();
+    expect(() => assertTransitionAgreements([contract])).toThrow('references no compiled entity');
+    const retyped = { ...invoice, storage: { ...invoice.storage, columns: invoice.storage.columns.map((column) => (column.field === "agreementId" ? { ...column, type: "text" } : column)) } };
+    expect(() => assertTransitionAgreements([contract, retyped])).toThrow('Invoice.agreementId (string text) is not a persisted single field of the same type as AgreementMilestone.agreementId (string uuid)');
+    const missing = { ...invoice, model: { ...invoice.model, fields: invoice.model.fields.filter((field) => field.key !== "agreementId") } };
+    expect(() => assertTransitionAgreements([contract, missing])).toThrow('Invoice.agreementId (absent) is not a persisted single field');
   });
 
   test("an entity without transitions is returned untouched", () => {

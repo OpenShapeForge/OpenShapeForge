@@ -63,9 +63,16 @@ function agreementBindings(table: GeneratedCrudTable, rule: TransitionRule): Tra
     const target = relationship && tables.find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
     if (!target) throw new Error(`Transition ${rule.operation} constrains "${write.field}" with agreesOn, but it is not a reference to a generated entity.`);
     const pairs = write.agreesOn!.map((field) => {
+      const local = columnForField(table, field);
       const remote = target.columns.find((candidate) => fieldNameForColumn(candidate) === field);
       if (!remote) throw new Error(`Transition ${rule.operation} agreesOn "${field}", which ${target.source?.authoringEntityName ?? target.name} does not have.`);
-      return { field, local: columnForField(table, field), remote };
+      // The comparison is issued in SQL between the two columns, so they must
+      // be of one type: a text against a uuid, or a numeric against an
+      // integer, is a build defect, not a runtime coercion.
+      if (local.type !== remote.type) {
+        throw new Error(`Transition ${rule.operation} agreesOn "${field}", but ${table.name}.${local.name} is ${local.type} and ${target.name}.${remote.name} is ${remote.type}.`);
+      }
+      return { field, local, remote };
     });
     return { field: write.field, column: columnForField(table, write.field), target, pairs };
   });
@@ -187,14 +194,16 @@ function validation(field: string, message: string): never {
 /**
  * The caller's writes: a required one must be present, and a constrained
  * reference must name a record of this tenant that agrees with the current
- * row on every paired field — read under a share lock so it cannot change
- * under the transition.
+ * row on every paired field. The comparison is the database's, column
+ * against column with IS NOT DISTINCT FROM in the query that share-locks the
+ * referenced record — typed, exact, and null-aware (a null on either side
+ * disagrees with everything but null) — never a JavaScript coercion.
  */
 async function writtenValues(
   trx: Transaction<DB>,
   session: DbSessionInput,
   binding: TransitionBinding,
-  current: Readonly<GeneratedEntityRow>,
+  id: string,
   input: Readonly<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
   const values: Record<string, unknown> = {};
@@ -207,22 +216,23 @@ async function writtenValues(
     values[write.field] = value;
   }
   for (const agreement of binding.agreements) {
-    const id = values[agreement.field];
-    if (id === undefined) continue;
+    const referenced = values[agreement.field];
+    if (referenced === undefined) continue;
     const entity = agreement.target.source?.authoringEntityName ?? agreement.target.name;
-    const tenantWhere = agreement.target.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}::uuid` : sql``;
-    const result = await sql<{ row: GeneratedEntityRow }>`
-      select to_jsonb(${sql.id(agreement.target.table)}.*) as row
-      from ${sql.id(agreement.target.schema, agreement.target.table)}
-      where ${sql.id(agreement.target.primaryKey!)}::text = ${String(id)} ${tenantWhere}
-      for share
+    const tenantWhere = agreement.target.tenantScoped ? sql`and ${sql.id("remote", "tenant_id")} = ${session.tenantId}::uuid` : sql``;
+    const result = await sql<{ disagrees: string | null }>`
+      select coalesce(${sql.join(agreement.pairs.map((pair) =>
+        sql`case when ${sql.id("remote", pair.remote.name)} is distinct from ${sql.id("local", pair.local.name)} then ${pair.field}::text end`))}) as disagrees
+      from ${sql.id(agreement.target.schema, agreement.target.table)} as remote,
+           ${sql.id(binding.table.schema, binding.table.table)} as local
+      where ${sql.id("remote", agreement.target.primaryKey!)}::text = ${String(referenced)} ${tenantWhere}
+        and ${sql.id("local", binding.table.primaryKey!)}::text = ${id}
+      for share of remote
     `.execute(trx);
-    const remote = result.rows[0]?.row;
-    if (!remote) validation(agreement.field, `${agreement.field} names no ${entity} in this tenant.`);
-    for (const pair of agreement.pairs) {
-      if (String(remote[pair.remote.name] ?? "") !== String(current[pair.local.name] ?? "")) {
-        validation(agreement.field, `${agreement.field} must name ${entity} that agrees with this ${binding.table.source?.authoringEntityName ?? binding.table.name} on ${pair.field}.`);
-      }
+    if (result.rows.length === 0) validation(agreement.field, `${agreement.field} names no ${entity} in this tenant.`);
+    const disagrees = result.rows[0]!.disagrees;
+    if (disagrees !== null) {
+      validation(agreement.field, `${agreement.field} must name ${entity} that agrees with this ${binding.table.source?.authoringEntityName ?? binding.table.name} on ${disagrees}.`);
     }
   }
   return values;
@@ -250,7 +260,7 @@ export async function executeTransition(
     if (refusal) throw operationFailure(refusal);
     const values: Record<string, unknown> = {
       [binding.status.field]: binding.rule.to,
-      ...(await writtenValues(trx, session, binding, current, input)),
+      ...(await writtenValues(trx, session, binding, id, input)),
       ...stampValues(binding, session),
     };
     const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);

@@ -8,6 +8,7 @@
 import {
   assertDeclaredProperties,
   assertOperationWrittenFields,
+  assertPublishableRelatedMutation,
   assertPublishableWrite,
   assertWritableValues,
   requireArguments,
@@ -165,6 +166,10 @@ export async function invokeTool(
           : {}),
       });
       await assertPublishableWrite(db, session, tables, table, values);
+      await assertPublishableRelatedMutation(db, session, tables, table, {
+        kind: "create",
+        values,
+      });
       if (elicitationCompleted && elicitField) {
         const row = await createGeneratedEntityAfterElicitation(db, session, {
               table: table.name,
@@ -239,6 +244,11 @@ export async function invokeTool(
       assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
+      await assertPublishableRelatedMutation(db, session, tables, table, {
+        kind: "update",
+        id,
+        values,
+      });
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("update"),
         offerIntents,
@@ -259,11 +269,16 @@ export async function invokeTool(
     }
 
     case "delete": {
+      const id = requireId(args);
+      await assertPublishableRelatedMutation(db, session, tables, table, {
+        kind: "delete",
+        id,
+      });
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("delete"),
         offerIntents,
         input: {
-          id: requireId(args),
+          id,
           ...entityMutationControls(args),
         },
       });

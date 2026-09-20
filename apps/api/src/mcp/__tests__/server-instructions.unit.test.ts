@@ -9,6 +9,7 @@ import { resolveLocale } from "../locale.js";
 import { ONBOARDING_INSTRUCTION } from "../onboarding.js";
 import {
   audienceAndPresentationInstruction,
+  vocabularySentence,
   buildServerInstructions,
   INSTRUCTIONS,
   languageInstruction,
@@ -107,6 +108,27 @@ describe("audienceAndPresentationInstruction", () => {
       `${without} The client in front of you introduced itself as Claude Desktop 1.2.3.`,
     );
     expect(without).toContain("Use whatever the client in front of you can render");
+  });
+
+  it("names no entity of its own: the vocabulary comes from the catalogue the session sees", () => {
+    const without = audienceAndPresentationInstruction(null);
+    expect(without).not.toMatch(/Assessment|TestTarget|Finding|pentest/i);
+    expect(vocabularySentence([])).toBe("");
+    const sentence = vocabularySentence([
+      { entity: "Relation", label: "Relatie", description: "The party a record describes. Clients, suppliers and colleagues alike." },
+      { entity: "Widget", label: "Widget" },
+      { entity: "TestTarget", label: "Testdoel" },
+      { entity: "Note", label: "Note", description: "x".repeat(200) },
+    ]);
+    expect(sentence).toBe(
+      ' The records here, by the word their colleagues use: Relation is "Relatie" — The party a record describes.; ' +
+        'TestTarget is "Testdoel"; ' +
+        `Note — ${"x".repeat(139)}….`,
+    );
+    expect(audienceAndPresentationInstruction(client, [{ entity: "TestTarget", label: "Testdoel" }])).toBe(
+      `${without} The records here, by the word their colleagues use: TestTarget is "Testdoel". ` +
+        "The client in front of you introduced itself as Claude Desktop 1.2.3.",
+    );
   });
 });
 

@@ -353,6 +353,13 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "Organization administrator", `org_employee` as "Employee" — and otherwise
   falls back to the raw role list. `permissions` lists the remaining role names
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
+  The words come from the roles themselves: `roleLabels` in
+  `authorization.yaml` (`label` for a persona, `phrase` for the wording inside
+  the opening sentence — "may manage clients and other relations"), which a
+  host extends for its own roles through an `authorizationPatch`; the compiler
+  emits them as `generated/compiler/role-labels.json`. A `<Area>.All.ReadWrite`
+  role without a phrase is described from its shape; any other role without
+  one is left unsaid rather than shown as a technical name.
 - `groups` are the Keycloak Organization memberships the token carries, with
   the one the session acts for marked `active`. On a per-organization endpoint
   (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
@@ -362,7 +369,7 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   row-level security fences — left open on purpose).
 - `signedInVia` names the client the token was issued to (`codex` → "Codex",
   `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
-  "Hubble", any other `azp` as is). A trusted-context session reports
+  the product name, `OPENSHAPEFORGE_PRODUCT_NAME`, any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
   summary adds "on the Zerocopter endpoint" (the organization's display name).
 - `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own

@@ -1,0 +1,58 @@
+{
+  "org_admin": {
+    "label": {
+      "en": "Organization administrator",
+      "nl": "Organisatiebeheerder"
+    },
+    "phrase": {
+      "en": "organization administrator",
+      "nl": "organisatiebeheerder"
+    }
+  },
+  "org_employee": {
+    "label": {
+      "en": "Employee",
+      "nl": "Medewerker"
+    },
+    "phrase": {
+      "en": "employee",
+      "nl": "medewerker"
+    }
+  },
+  "Relations.All.ReadWrite": {
+    "phrase": {
+      "en": "manage clients and other relations",
+      "nl": "klanten en andere relaties beheren"
+    }
+  },
+  "Relations.All.Read": {
+    "phrase": {
+      "en": "view clients and other relations",
+      "nl": "klanten en andere relaties inzien"
+    }
+  },
+  "CaseFile.All.ReadWrite": {
+    "phrase": {
+      "en": "manage case files",
+      "nl": "dossiers beheren"
+    }
+  },
+  "CaseFile.All.Read": {
+    "phrase": {
+      "en": "view case files",
+      "nl": "dossiers inzien"
+    }
+  },
+  "Organization.All.ReadWrite": {
+    "phrase": {
+      "en": "manage the organization's settings",
+      "nl": "de organisatie-instellingen beheren"
+    }
+  },
+  "General.All.Read": {
+    "phrase": {
+      "en": "view general records",
+      "nl": "algemene gegevens inzien"
+    }
+  }
+}

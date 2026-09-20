@@ -1202,6 +1202,16 @@ export interface AuthorizationUser {
   enabled?: boolean;
 }
 
+/**
+ * What a role means to the person holding it, per language. `label` is the
+ * title-case name a persona is shown as; `phrase` the lower-case wording
+ * inside a sentence. Display only.
+ */
+export interface AuthorizationRoleLabel {
+  label?: Record<string, string>;
+  phrase?: Record<string, string>;
+}
+
 export interface AuthorizationConfigFile {
   schemaVersion: number;
   kind: "authorizationConfig";
@@ -1250,6 +1260,9 @@ export interface AuthorizationConfigFile {
 
   /** v2 dev test users. */
   users?: AuthorizationUser[];
+
+  /** What each role means to its holder, keyed by role name (display only). */
+  roleLabels?: Record<string, AuthorizationRoleLabel>;
 }
 
 export interface TransformDefinition {

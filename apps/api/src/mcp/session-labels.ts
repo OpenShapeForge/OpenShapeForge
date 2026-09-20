@@ -9,101 +9,94 @@
  * the same words. Every label here is a display value; nothing decides a
  * permission by it — `TrustedSessionContext.roles` remains the authority.
  *
- * Languages: English is what `whoami` speaks (the assistant translates for
- * the person); the opening sentence is written in the person's own language,
- * so the phrases carry `nl` beside `en`. Anything else falls back to English.
+ * The words themselves are authored on the roles (`roleLabels` in
+ * authorization.yaml) and read from the generated role-labels artifact, so
+ * a host's roles are described in the host's vocabulary and a rename lands
+ * in one place. Languages: English is what `whoami` speaks (the assistant
+ * translates for the person); the opening sentence is written in the
+ * person's own language, so the phrases carry `nl` beside `en`. Anything
+ * else falls back to English.
  */
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import generatedRoleLabels from "../generated/compiler/role-labels.json" with { type: "json" };
 import { productName } from "../config/product-name.js";
 
 /** The languages a phrase is authored in. */
 export type PhraseLanguage = "en" | "nl";
 
-/** Personas the membership row records (auth/employee-invitations.ts) or the
- * realm's composites name; the label is what a person reads. */
-export const ROLE_LABELS: ReadonlyArray<{
+/**
+ * What a role means to its holder, authored on the role (`roleLabels` in
+ * authorization.yaml, extended by a host's authorizationPatch) and emitted
+ * by the compiler. `label` marks a persona — the composite a membership row
+ * records — and is what `whoami` shows; `phrase` is the wording inside a
+ * sentence. The engine carries no vocabulary of its own: a deployment's
+ * roles are described in the deployment's words or not at all.
+ */
+export type RoleLabel = {
+  label?: Record<string, string>;
+  phrase?: Record<string, string>;
+};
+
+let roleLabels: Readonly<Record<string, RoleLabel>> =
+  generatedRoleLabels as Record<string, RoleLabel>;
+
+/** Test-only: stand in for the generated role labels. */
+export function __setRoleLabelsForTests(value: Record<string, RoleLabel> | null): void {
+  roleLabels = value ?? (generatedRoleLabels as Record<string, RoleLabel>);
+}
+
+/** A persona: a role whose authored entry carries a `label`. */
+export type PersonaLabel = {
   role: string;
   label: string;
   /** Lower-case, for inside a sentence: "organization administrator of X". */
   phrase: Record<PhraseLanguage, string>;
-}> = [
-  {
-    role: "org_admin",
-    label: "Organization administrator",
-    phrase: { en: "organization administrator", nl: "organisatiebeheerder" },
-  },
-  {
-    role: "org_employee",
-    label: "Employee",
-    phrase: { en: "employee", nl: "medewerker" },
-  },
-  {
-    role: "pentester",
-    label: "Pentester",
-    phrase: { en: "pentester", nl: "pentester" },
-  },
-];
+};
+
+function inLanguage(
+  text: Record<string, string> | undefined,
+  language: PhraseLanguage,
+): string | undefined {
+  return text?.[language] ?? text?.en;
+}
+
+function personaOf(role: string): PersonaLabel | null {
+  const entry = roleLabels[role];
+  const label = inLanguage(entry?.label, "en");
+  if (!entry || !label) return null;
+  const phrase = {
+    en: inLanguage(entry.phrase, "en") ?? label.toLowerCase(),
+    nl: inLanguage(entry.phrase, "nl") ?? inLanguage(entry.label, "nl")?.toLowerCase() ?? label.toLowerCase(),
+  };
+  return { role, label, phrase };
+}
 
 /** Keycloak's own bookkeeping roles: present on every token, meaningless here. */
 export const KEYCLOAK_BUILTIN_ROLE =
   /^(default-roles-.+|offline_access|uma_authorization|manage-account|manage-account-links|manage-consent|view-profile|view-groups|view-applications|view-consent|delete-account)$/;
 
-/**
- * What a permission role lets a person do, in plain words. Keyed by the
- * role name the realm issues; `<Area>.All.ReadWrite` implies `<Area>.All.Read`,
- * which `describePermissions` collapses so a sentence never says "manage
- * assessments and view assessments".
- */
-const PERMISSION_PHRASES: Readonly<Record<string, Record<PhraseLanguage, string>>> = {
-  "Pentest.All.ReadWrite": {
-    en: "manage assessments and findings",
-    nl: "assessments en bevindingen beheren",
-  },
-  "Pentest.All.Read": {
-    en: "view assessments and findings",
-    nl: "assessments en bevindingen inzien",
-  },
-  "Relations.All.ReadWrite": {
-    en: "manage clients and other relations",
-    nl: "klanten en andere relaties beheren",
-  },
-  "Relations.All.Read": {
-    en: "view clients and other relations",
-    nl: "klanten en andere relaties inzien",
-  },
-  "CaseFile.All.ReadWrite": { en: "manage case files", nl: "dossiers beheren" },
-  "CaseFile.All.Read": { en: "view case files", nl: "dossiers inzien" },
-  "Organization.All.ReadWrite": {
-    en: "manage the organization's settings",
-    nl: "de organisatie-instellingen beheren",
-  },
-  "CpqCatalog.All.ReadWrite": {
-    en: "manage quotes and the catalog",
-    nl: "offertes en de catalogus beheren",
-  },
-  "CpqCatalog.All.Read": { en: "view quotes and the catalog", nl: "offertes en de catalogus inzien" },
-  "General.All.Read": { en: "view general records", nl: "algemene gegevens inzien" },
-  integration_admin: { en: "manage integrations", nl: "koppelingen beheren" },
-  integration_user: { en: "use integrations", nl: "koppelingen gebruiken" },
-};
-
 const PERMISSION_PATTERN = /^([A-Za-z]+)\.All\.(ReadWrite|Read)$/;
 
 /**
- * Split effective roles into the composite (the first `ROLE_LABELS` entry
- * present) and the permission roles, with Keycloak's noise removed. The
- * permissions are sorted so an answer is stable across tokens.
+ * Split effective roles into the persona (the first role, in authored
+ * order, whose entry carries a label) and the permission roles, with
+ * Keycloak's noise removed. The permissions are sorted so an answer is
+ * stable across tokens.
  */
 export function classifyRoles(roles: readonly string[]): {
-  composite: (typeof ROLE_LABELS)[number] | null;
+  composite: PersonaLabel | null;
   permissions: string[];
 } {
   const unique = [...new Set(roles)];
-  const composite = ROLE_LABELS.find((entry) => unique.includes(entry.role)) ?? null;
+  const composite =
+    Object.keys(roleLabels)
+      .filter((role) => unique.includes(role))
+      .map(personaOf)
+      .find((persona): persona is PersonaLabel => persona !== null) ?? null;
   const permissions = unique
     .filter(
       (role) =>
-        !ROLE_LABELS.some((entry) => entry.role === role) &&
+        personaOf(role) === null &&
         !KEYCLOAK_BUILTIN_ROLE.test(role),
     )
     .sort((left, right) => left.localeCompare(right));
@@ -115,7 +108,8 @@ export function classifyRoles(roles: readonly string[]): {
  * an authored phrase but in the `<Area>.All.<Read|ReadWrite>` shape gets a
  * generic one from its area; anything else is left out rather than shown
  * as a technical name. Read-only roles shadowed by a ReadWrite on the same
- * area are dropped.
+ * area are dropped, so a sentence never says "manage assessments and view
+ * assessments".
  */
 export function describePermissions(
   permissions: readonly string[],
@@ -131,7 +125,7 @@ export function describePermissions(
   for (const role of permissions) {
     const match = PERMISSION_PATTERN.exec(role);
     if (match && match[2] === "Read" && areasWithWrite.has(match[1]!)) continue;
-    const authored = PERMISSION_PHRASES[role]?.[language];
+    const authored = inLanguage(roleLabels[role]?.phrase, language);
     if (authored) {
       phrases.push(authored);
     } else if (match) {

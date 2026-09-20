@@ -80,12 +80,49 @@ export const DATA_ACQUISITION_TOOL_FOOTER =
   "than asking field-by-field. See this server's instructions for the full " +
   "order.";
 
+/** One entity this session can reach, in the words the deployment authored for it. */
+export type VocabularyEntry = {
+  /** The entity name as the tools and schemas spell it. */
+  entity: string;
+  /** The authored label in the person's language. */
+  label: string;
+  /** The authored description, when the entity has one. */
+  description?: string | undefined;
+};
+
+/** The first sentence of an authored description, bounded, for the vocabulary line. */
+function firstSentence(text: string | undefined, maximum = 140): string | undefined {
+  const trimmed = text?.trim();
+  if (!trimmed) return undefined;
+  const sentence = trimmed.split(/(?<=[.!?])\s/)[0] ?? trimmed;
+  return sentence.length > maximum ? `${sentence.slice(0, maximum - 1).trimEnd()}…` : sentence;
+}
+
+/**
+ * The words this deployment uses for its records, composed from the
+ * catalogue's authored entity labels for the entities the session can reach
+ * — never from a fixed sentence about entities this server happens to have
+ * been written beside. An entity whose label is its own name and which has
+ * no description contributes nothing the model does not already see.
+ */
+export function vocabularySentence(vocabulary: ReadonlyArray<VocabularyEntry>): string {
+  const entries = vocabulary
+    .map((entry) => {
+      const meaning = firstSentence(entry.description);
+      const named = entry.label !== entry.entity ? `"${entry.label}"` : null;
+      if (!named && !meaning) return null;
+      return `${entry.entity}${named ? ` is ${named}` : ""}${meaning ? ` — ${meaning}` : ""}`;
+    })
+    .filter((line): line is string => line !== null);
+  if (entries.length === 0) return "";
+  return ` The records here, by the word their colleagues use: ${entries.join("; ")}.`;
+}
+
 /**
  * Talking to a person — the audience rule this server had no way to state,
- * and the two mistakes it kept producing. A pentester asked for an
- * explanation and got the server's own vocabulary back ("Relation",
- * "Assessment", `assessment_create`), with a guide written for the assistant
- * read out to them verbatim.
+ * and the two mistakes it kept producing: a person asked for an explanation
+ * and got the server's own vocabulary back ("Relation", `relation_create`),
+ * with a guide written for the assistant read out to them verbatim.
  *
  * Both are the same boundary, the one that already holds elsewhere on this
  * transport: an instruction is FOR the model; material passes THROUGH the
@@ -95,24 +132,22 @@ export const DATA_ACQUISITION_TOOL_FOOTER =
  * The room here is deliberately spent on what a model cannot work out for
  * itself — that this deployment's word for a record is not the word in its
  * table — and not on what it already knows, such as what makes a chart
- * readable. The presentation rules (5-7) are here rather than in a client's
- * own prompt because they are the same rules: they say what may leave you and
- * in what shape, and rule 6 is what keeps a client that cannot draw from
- * losing half the answer.
+ * readable. The words themselves come from the catalogue (vocabularySentence),
+ * not from this text. The presentation rules (5-7) are here rather than in a
+ * client's own prompt because they are the same rules: they say what may
+ * leave you and in what shape, and rule 6 is what keeps a client that cannot
+ * draw from losing half the answer.
  */
 const AUDIENCE_AND_PRESENTATION_GUIDANCE =
   " Talking to a person — these rules are about what leaves you, not about " +
   "what you read. (1) Use their words for the subject, never this server's " +
-  "storage names: a Relation is the party the record describes (a client, a " +
-  "supplier, a colleague), an Assessment is the engagement you are doing for " +
-  "them, a TestTarget is a system in scope, a Finding is something you found. " +
-  "Each entity carries an authored label in the person's own language — the " +
-  `${ENTITY_CATALOG_URI} resource and a Service's own field labels have it — ` +
-  "and that label is the word their colleagues use; prefer it over anything " +
-  "you would translate yourself. (2) Never say a tool name, an entity name " +
-  "or a field name to a person: `assessment_create`, `relationId` and " +
-  "`deliveryMode` are your tooling, not their subject. If a sentence only " +
-  "makes sense to someone who knows this API, rewrite it. (3) A guide is " +
+  "storage names. Each entity carries an authored label in the person's own " +
+  `language — the ${ENTITY_CATALOG_URI} resource and a Service's own field ` +
+  "labels have it — and that label is the word their colleagues use; prefer " +
+  "it over anything you would translate yourself. (2) Never say a tool name, " +
+  "an entity name or a field name to a person: `relation_create`, " +
+  "`relationId` and `deliveryMode` are your tooling, not their subject. If a " +
+  "sentence only makes sense to someone who knows this API, rewrite it. (3) A guide is " +
   "written for you. Read it, follow it, and do not read it out: quoting its " +
   "steps, its order or its field names hands the person your job instead of " +
   "doing it. (4) Report what a service did, not the calls you made to do it " +
@@ -134,10 +169,14 @@ const AUDIENCE_AND_PRESENTATION_GUIDANCE =
  * has a referent. This is the seam for per-client tailoring later; nothing
  * here yet assumes what any named client can or cannot do.
  */
-export function audienceAndPresentationInstruction(client: McpClientInfo | null): string {
+export function audienceAndPresentationInstruction(
+  client: McpClientInfo | null,
+  vocabulary: ReadonlyArray<VocabularyEntry> = [],
+): string {
   const label = connectedViaLabel(client);
   return (
     AUDIENCE_AND_PRESENTATION_GUIDANCE +
+    vocabularySentence(vocabulary) +
     (label ? ` The client in front of you introduced itself as ${label}.` : "")
   );
 }
@@ -192,6 +231,8 @@ export type ServerInstructionsInput = {
   oauthCallbackUrl: string | null;
   /** Guides that must be called before creating their entity. */
   guidesBeforeCreate: ReadonlyArray<{ name: string; entity: string | null }>;
+  /** The entities this session can reach, with their authored labels (vocabularySentence). */
+  vocabulary?: ReadonlyArray<VocabularyEntry>;
   locale: ResolvedLocale;
   client: McpClientInfo | null;
 };
@@ -242,7 +283,7 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     ONBOARDING_INSTRUCTION +
     // ---- end first-use onboarding ----
     // ---- audience, vocabulary and presentation, facing this client ----
-    audienceAndPresentationInstruction(input.client) +
+    audienceAndPresentationInstruction(input.client, input.vocabulary ?? []) +
     // ---- end audience, vocabulary and presentation ----
     // ---- the person's language (mcp/locale.ts, mcp/session-identity.ts) ----
     languageInstruction(input.locale) +

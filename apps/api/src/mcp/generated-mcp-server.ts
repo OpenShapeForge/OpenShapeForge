@@ -3497,6 +3497,7 @@ function buildServer(
       module.mcp?.resourceTemplates !== undefined,
   );
   const guidesCalled = new Set<string>();
+  const tables = tableOverride ?? tablesByName();
   const server = new Server(SERVER_INFO, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
@@ -3521,11 +3522,17 @@ function buildServer(
       guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
         .map((guide) => ({ name: guide.name, entity: guide.entity ?? null })),
+      // The words this deployment uses for its records: the authored label
+      // of every entity this session can reach, in the person's language.
+      vocabulary: entitiesForSession(session, tables).map(({ entity }) => ({
+        entity: entity.entity,
+        label: entityTitle(entity, locale) ?? entity.title,
+        description: entity.description,
+      })),
       locale,
       client: sessionClientOf(session),
     }),
   });
-  const tables = tableOverride ?? tablesByName();
   const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
   // Read on the per-entity schemas, not the compact generic listing, whose
   // stubs no longer carry the upload marker of an entity's own fields.

@@ -445,6 +445,12 @@ realmRoles:                               # only when realm-global is intended
       application-api: [Relations.All.Read]
 clientRoles:
   application-api: [Relations.All.ReadWrite, Relations.All.Read]
+roleLabels:                               # what a role means to its holder
+  Application.Editor:
+    label: { en: Editor, nl: Redacteur }
+    phrase: { en: editor, nl: redacteur }
+  Relations.All.ReadWrite:
+    phrase: { en: manage clients and other relations, nl: klanten en andere relaties beheren }
 ```
 
 Rules, in the order they apply:
@@ -470,8 +476,17 @@ Rules, in the order they apply:
    error names the patch file, not the merged file nobody wrote.
 
 A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
-`clientRoles`, `clientRoleComposites`, `groups` and `users`; `schemaVersion` is the base's and cannot
-be patched. Patching a realm no earlier layer defines is an error (a new
+`clientRoles`, `clientRoleComposites`, `groups`, `users` and `roleLabels`;
+`schemaVersion` is the base's and cannot be patched.
+
+**`roleLabels`** is what a role means to the person holding it, keyed by role
+name and display only: `label` (title case) marks a persona — the composite a
+membership row records, shown as `whoami.role` — and `phrase` (lower case) is
+the wording inside a sentence: "is an organization administrator", "may manage
+clients and other relations". The MCP session reads them from the compiled
+`generated/compiler/role-labels.json`; the engine has no vocabulary of its own,
+so a host labels its roles here or they are described from their shape
+(`<Area>.All.ReadWrite` → "manage <area>") or left unsaid. Patching a realm no earlier layer defines is an error (a new
 realm is an `authorizationConfig` under its own filename), as is a patch
 filed anywhere but the layer root. Patches stack across layers in order.
 

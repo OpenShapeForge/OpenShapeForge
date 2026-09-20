@@ -101,9 +101,11 @@ platform `HttpError` occurs before the handler, such as centralized session or
 role authorization. This keeps authentication in core while allowing a
 compatibility route to retain a previously published REST error body. Thrown
 errors without such a declaration keep the platform's standard normalization.
-Authentication-service unavailability remains the historical unauthenticated
-response unless the operation explicitly declares the
-`503 AUTHENTICATION_UNAVAILABLE` error.
+Authentication-service unavailability (a bearer verifier that is not
+configured or cannot be reached, an API key path that is not fully
+configured) is always answered with `503 AUTHENTICATION_UNAVAILABLE`, on every
+transport and whether or not the operation declares that error; a declaration
+only lets the operation carry a fixed body for it.
 
 For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;

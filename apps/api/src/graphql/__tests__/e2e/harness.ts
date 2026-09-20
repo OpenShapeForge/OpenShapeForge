@@ -48,6 +48,12 @@ process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
   "openshapeforge-local-dev-context-secret";
 process.env.DATABASE_URL ??=
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
+// The realm a trusted-context session's identity is issued by: the session
+// layer refuses a linkable session that names none (503), so the harness's
+// signed identities need one. Unreachable on purpose — the opt-in bearer
+// tests still skip because no token can be fetched from it, and no JWKS is
+// configured, so no bearer verifier switches on.
+process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER ??= "http://127.0.0.1:9/realms/e2e";
 // The sweeps put thousands of requests a minute through one identity — a load
 // the API's per-caller limiter (600/min anonymous, five times that trusted)
 // rightly refuses in production, and not what these suites measure. A

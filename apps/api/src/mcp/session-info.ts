@@ -192,8 +192,10 @@ export type SessionInfo = {
    * The Relation the person acts as in the organization (auth/identity-link.ts).
    * "Linked": `name` and `kind` describe that record. "Pending confirmation":
    * a record carrying the person's e-mail exists and `name`/`kind` describe
-   * the candidate, which `confirm_my_link` adopts. "Not linked": no record,
-   * or a session that carries no person (API key, development identity).
+   * the candidate, which `confirm_my_link` adopts. "Not linked": the identity
+   * has no record yet — a login or API key an administrator still has to link
+   * (`link_identity`) — or the session carries no identity at all (the
+   * development identity without a verifier issuer).
    */
   relation: {
     status: "Linked" | "Pending confirmation" | "Not linked";
@@ -262,9 +264,11 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
   const idleDays = input.sessionIdleDays ?? sessionIdleDaysFromEnv();
   const idle = plural(idleDays, "day");
 
-  const who =
-    identity.name ??
-    (identity.credential === "trusted-context" ? "the development identity" : "an unnamed user");
+  // A name comes from the credential (claims, or the integration an API key
+  // belongs to); without one, say what signed in rather than guess. "Unlinked"
+  // is a statement about the record, so it is only said when the identity is
+  // recorded and no record has been linked or proposed for it.
+  const who = identity.name ?? describeAnonymous(identity.credential, input.relation ?? null);
   const of = organizationName ?? "an unknown organization";
   const rolePhrase = composite
     ? `${composite.phrase.en} of ${of}`
@@ -301,6 +305,17 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     sentences.push(`You act as the record ${relation.name}.`);
   } else if (relation.status === "Pending confirmation") {
     sentences.push("A record with your e-mail exists — run confirm_my_link to use it.");
+  } else if (input.relation?.status === "pending_confirmation") {
+    // Recorded but not linked: how the link is made depends on what signed in.
+    // An integration has no e-mail, so an administrator finds it under
+    // list_pending_members.unlinked. The identity id itself stays out of this
+    // text: whoami names nothing identifier-shaped, and the administrator who
+    // needs the id is not the caller.
+    sentences.push(
+      identity.credential === "api-key"
+        ? "This integration is not linked to a record yet; an organization administrator finds it with list_pending_members and links it with link_identity."
+        : "Your login is not linked to a record yet; an organization administrator links it with link_identity by your e-mail address.",
+    );
   }
   sentences.push(
     `You can use ${plural(access.tools, "tool")} and ${plural(access.resources, "resource")}.`,
@@ -329,6 +344,23 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     relation,
     summary: sentences.join(" "),
   };
+}
+
+/**
+ * What to call a session whose credential carries no name. A trusted-context
+ * session without an identity is the development identity; a recorded
+ * identity with neither a record nor a candidate is unlinked; anything else is
+ * simply what signed in.
+ */
+function describeAnonymous(
+  credential: SessionIdentity["credential"],
+  link: IdentityLinkState | null,
+): string {
+  if (credential === "trusted-context" && !link) return "the development identity";
+  const unlinked =
+    link?.status === "pending_confirmation" && !link.relationId && !link.candidateRelationId;
+  const noun = credential === "api-key" ? "an integration" : "a login";
+  return unlinked ? noun.replace(/^an? /, "an unlinked ") : noun;
 }
 
 /**

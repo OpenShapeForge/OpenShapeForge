@@ -83,6 +83,7 @@ export function statusFromGraphqlPayload(payload: unknown): number {
     case "CONCURRENT_MODIFICATION":
     case "CONFLICT":
       return 409;
+    case "AUTHENTICATION_UNAVAILABLE":
     case "DATABASE_NOT_CONFIGURED":
     case "SERVICE_UNAVAILABLE":
       return 503;

@@ -133,11 +133,16 @@ export function identityFromBearerClaims(
   };
 }
 
-/** The identity of a session whose credential carries no display facts. */
+/**
+ * The identity of a session whose credential carries no claims. What the
+ * session itself knows is kept: an API key names the integration it belongs
+ * to (`userDisplayName`), so a linked key summarises by that name instead of
+ * as an anonymous one.
+ */
 export function identityFromSession(session: TrustedSessionContext): SessionIdentity {
   return {
     credential: session.credential,
-    name: null,
+    name: session.userDisplayName ?? null,
     email: null,
     authorizedParty: null,
     locale: null,

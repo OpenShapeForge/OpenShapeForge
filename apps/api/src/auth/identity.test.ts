@@ -67,21 +67,20 @@ describe("resolveSessionContext bearer fail-closed", () => {
     expect(trustedOnly.userId).toBe("user-a");
 
     // Now the caller signals bearer auth. With no verifier configured, the
-    // bearer signal must fail closed and NOT downgrade to the (valid) trusted
-    // context — otherwise the bearer signal would be downgrade-attackable.
+    // bearer signal must NOT downgrade to the (valid) trusted context —
+    // otherwise the bearer signal would be downgrade-attackable — and must not
+    // run as nobody either: a browser whose host forwards its token would
+    // silently lose its session. It is the deployment that is unavailable.
     headers.set("authorization", "Bearer some.jwt.token");
-    const session = await resolveSessionContext(headers);
-    expect(session).toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   });
 
-  test("can report an unconfigured bearer verifier without changing the default fallback", async () => {
+  test("reports an unconfigured bearer verifier as unavailable", async () => {
     const headers = new Headers({ authorization: "Bearer some.jwt.token" });
-    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-      .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+    await expect(resolveSessionContext(headers)).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
   });
 
-  test("can distinguish an unavailable remote verifier from an invalid credential", async () => {
+  test("reports a JWKS outage as unavailable on every call, never as an anonymous session", async () => {
     const jwks = Bun.serve({
       port: 0,
       fetch: () => new Response(null, { status: 503 }),
@@ -97,9 +96,11 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
     const headers = new Headers({ authorization: `Bearer ${token}` });
     try {
-      await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
-      await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-        .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+      await expect(resolveSessionContext(headers)).rejects.toMatchObject({
+        status: 503,
+        code: "AUTHENTICATION_UNAVAILABLE",
+        message: "Bearer tokens cannot be verified: the remote bearer verifier is unavailable.",
+      });
     } finally {
       jwks.stop(true);
     }
@@ -123,7 +124,7 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
     const headers = new Headers({ authorization: `Bearer ${token}` });
 
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+    await expect(resolveSessionContext(headers))
       .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
   });
 
@@ -134,8 +135,7 @@ describe("resolveSessionContext bearer fail-closed", () => {
     __resetSessionResolverForTests();
 
     const headers = new Headers({ authorization: "Bearer not-a-jwt" });
-    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
-      .resolves.toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
   });
 
   test("reports unusable matching remote key material as unavailable", async () => {
@@ -159,10 +159,8 @@ describe("resolveSessionContext bearer fail-closed", () => {
     ].join(".");
 
     try {
-      await expect(resolveSessionContext(
-        new Headers({ authorization: `Bearer ${token}` }),
-        { failOnUnavailable: true },
-      )).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+      await expect(resolveSessionContext(new Headers({ authorization: `Bearer ${token}` })))
+        .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
     } finally {
       jwks.stop(true);
     }

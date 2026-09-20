@@ -59,7 +59,8 @@ const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSession
 });
 
 const facts = (overrides: Partial<OnboardingFacts> = {}): OnboardingFacts => ({
-  relation: { status: "linked", candidateRelationId: null },
+  credential: "bearer",
+  relation: { identityId: IDENTITY_ID, status: "linked", candidateRelationId: null },
   organizationConnections: null,
   personalSignIns: null,
   preferences: { offered: true, count: 0 },
@@ -82,15 +83,27 @@ describe("computeOnboarding", () => {
     expect(step(computeOnboarding(facts()), "identity").status).toBe("done");
 
     const pending = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: RELATION_ID } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: RELATION_ID } }),
     );
     expect(step(pending, "identity").status).toBe("todo");
     expect(step(pending, "identity").howTo).toContain("confirm_my_link");
 
     const noCandidate = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: null } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null } }),
     );
     expect(step(noCandidate, "identity").howTo).toContain("link_identity");
+    // A web-only login has no e-mail on its identity yet: the identity id is the other handle.
+    expect(step(noCandidate, "identity").howTo).toContain(IDENTITY_ID);
+  });
+
+  it("is not applicable for an API key even though its first session recorded a pending link", () => {
+    const summary = computeOnboarding(facts({
+      credential: "api-key",
+      relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null },
+      record: null,
+    }));
+    expect(summary.status).toBe("Not applicable");
+    expect(summary.steps).toEqual([]);
   });
 
   it("makes connections not applicable without personal-sign-in Services", () => {
@@ -161,7 +174,7 @@ describe("computeOnboarding", () => {
 
   it("derives the overall status from the steps and the record", () => {
     const notStarted = computeOnboarding(
-      facts({ relation: { status: "pending_confirmation", candidateRelationId: null } }),
+      facts({ relation: { identityId: IDENTITY_ID, status: "pending_confirmation", candidateRelationId: null } }),
     );
     expect(notStarted.status).toBe("Not started");
 

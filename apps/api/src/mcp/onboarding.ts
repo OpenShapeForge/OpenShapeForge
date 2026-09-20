@@ -212,8 +212,10 @@ export type OrganizationConnectionFact = {
 
 /** Everything the checklist is computed from. Gathered by `gatherOnboardingFacts`. */
 export type OnboardingFacts = {
+  /** What signed in: an integration (API key) is never onboarded, whatever its link says. */
+  credential: TrustedSessionContext["credential"];
   /** The session's identity link; null when the session carries no person. */
-  relation: Pick<IdentityLinkState, "status" | "candidateRelationId"> | null;
+  relation: Pick<IdentityLinkState, "identityId" | "status" | "candidateRelationId"> | null;
   /**
    * For an organization administrator: every Adapter in the organization
    * that needs an organization-level Connection, with whether it has a
@@ -239,7 +241,7 @@ export type OnboardingFacts = {
 
 function stepIdentity(facts: OnboardingFacts): OnboardingStep {
   const title = ONBOARDING_STEP_TITLES.identity;
-  if (!facts.relation) {
+  if (!facts.relation || facts.credential === "api-key") {
     return {
       key: "identity",
       title,
@@ -256,7 +258,7 @@ function stepIdentity(facts: OnboardingFacts): OnboardingStep {
     status: "todo",
     howTo: facts.relation.candidateRelationId
       ? "Run confirm_my_link to confirm you are the Relation this organization already has under your e-mail address."
-      : "Ask an organization administrator to run link_identity with your e-mail address and your Relation.",
+      : `Ask an organization administrator to run link_identity with your e-mail address (or your identity id ${facts.relation.identityId}) and your Relation.`,
   };
 }
 
@@ -429,7 +431,9 @@ export function computeOnboarding(
   facts: OnboardingFacts,
   options: { skipPreferences?: boolean } = {},
 ): OnboardingSummary {
-  if (!facts.relation && !facts.record) {
+  // An API key is an integration, not a person: it records an identity so an
+  // administrator can link it, but it is never onboarded.
+  if ((!facts.relation || facts.credential === "api-key") && !facts.record) {
     return {
       status: "Not applicable",
       version: ONBOARDING_VERSION,
@@ -1023,8 +1027,9 @@ export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise
     preferencesFor(env),
   ]);
   return {
+    credential: env.session.credential,
     relation: relation
-      ? { status: relation.status, candidateRelationId: relation.candidateRelationId }
+      ? { identityId: relation.identityId, status: relation.status, candidateRelationId: relation.candidateRelationId }
       : null,
     organizationConnections,
     personalSignIns,

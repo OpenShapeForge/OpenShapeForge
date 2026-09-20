@@ -33,6 +33,7 @@ const server = new SQL(ADMIN_URL, { max: 1 });
 let app: ReturnType<typeof createApiApp> | undefined;
 let admin: ReturnType<typeof createDatabaseRuntime> | undefined;
 const savedSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+const savedIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 const savedMode = process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
 
 function databaseUrl(): string {
@@ -51,6 +52,8 @@ beforeAll(async () => {
            (${TENANT_B}, 'beta', 'Beta', 'active', 'openshapeforge')
   `.execute(admin.db);
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = SECRET;
+  // A trusted-context session's identity must name its realm; unreachable on purpose.
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "http://127.0.0.1:9/realms/e2e";
   delete process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
   __resetSessionResolverForTests();
   app = createApiApp({ cors: false, databaseUrl: databaseUrl(), modules: await loadRuntimeModules() });
@@ -64,6 +67,8 @@ afterAll(async () => {
   await server.close();
   if (savedSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = savedSecret;
+  if (savedIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = savedIssuer;
   if (savedMode === undefined) delete process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
   else process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = savedMode;
   __resetSessionResolverForTests();

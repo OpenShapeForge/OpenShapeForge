@@ -71,7 +71,8 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
   return activeDbSession.getStore()?.db;
 }
 
-const UUID_PATTERN =
+/** RFC 4122 shape, the one every id this layer accepts must have. */
+export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function assertUuid(value: string, label: string) {

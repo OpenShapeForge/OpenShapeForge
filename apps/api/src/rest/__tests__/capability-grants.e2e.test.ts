@@ -237,8 +237,11 @@ async function present(path: string, token: string | undefined, payload: Record<
 
 beforeAll(async () => {
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = SECRET;
+  // No bearer verifier (no JWKS), but the realm a trusted-context identity is
+  // issued by must be named or the session layer refuses the session as
+  // unavailable; unreachable on purpose.
   delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
-  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "http://127.0.0.1:9/realms/e2e";
   __resetSessionResolverForTests();
   admin = new SQL(ADMIN_URL, { max: 1 });
   await admin.unsafe(`create database "${scratch}"`);

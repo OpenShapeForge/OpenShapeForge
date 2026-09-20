@@ -18,9 +18,6 @@ import {
 } from "./identity-contract.js";
 import type { IdentityClaims, IdentityLinkState, IdentityLinkStatus } from "./identity-link.js";
 
-export const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 export type LinkRow = {
   identity_id: string;
   issuer: string;
@@ -38,7 +35,7 @@ export type LinkRow = {
 export async function upsertIdentity(
   trx: Transaction<DB>,
   claims: IdentityClaims,
-  displayName: string,
+  displayName: string | null,
 ): Promise<string> {
   const result = await sql<{ id: string }>`
     insert into platform.identities (issuer, subject, email, display_name)
@@ -79,6 +76,26 @@ export async function readLinkRow(
   return result.rows[0] ?? null;
 }
 
+/**
+ * The link row for the identity (issuer, subject) names, in this tenant —
+ * the same row `readLinkRow` reads, found from the side a session without
+ * token claims has: its issuer and its user id, which IS the identity
+ * subject (the identities visibility policy says so). Identities are unique
+ * on the pair, never on the subject alone: two realms may hand out the
+ * same subject.
+ */
+export async function readLinkRowByIdentity(
+  trx: Transaction<DB>,
+  identity: { issuer: string; subject: string },
+  tenantId: string,
+): Promise<LinkRow | null> {
+  const found = await sql<{ id: string }>`
+    select id from platform.identities where issuer = ${identity.issuer} and subject = ${identity.subject}
+  `.execute(trx);
+  const identityId = found.rows[0]?.id;
+  return identityId ? readLinkRow(trx, identityId, tenantId) : null;
+}
+
 /** The roles column, bound as jsonb and unpacked: the driver serialises a JS
  * array as JSON for a jsonb parameter but not as a PostgreSQL array literal. */
 function rolesArray(roles: readonly string[]) {
@@ -104,6 +121,35 @@ export async function writeMembershipRoles(
      where identity_id = ${identityId}
        and tenant_id = ${tenantId}
        and status = 'linked'
+    returning identity_id
+  `.execute(trx);
+  return result.rows.length > 0;
+}
+
+/**
+ * Turn an existing EMPTY pending row (no Relation, no candidate — what a
+ * session that could not be admitted by an e-mail recorded) into the linked
+ * row admission would have inserted. Returns whether a row was claimed; a
+ * row that meanwhile got a Relation or a candidate is left alone.
+ */
+export async function linkEmptyPendingRow(
+  trx: Transaction<DB>,
+  row: { identityId: string; tenantId: string; relationId: string; linkedBy: string; roles: readonly string[] },
+): Promise<boolean> {
+  const result = await sql<{ identity_id: string }>`
+    update platform.identity_relations
+       set status = 'linked',
+           relation_id = ${row.relationId},
+           linked_at = now(),
+           linked_by = ${row.linkedBy},
+           roles = ${rolesArray(row.roles)},
+           needs_role_assignment = false,
+           updated_at = now()
+     where identity_id = ${row.identityId}
+       and tenant_id = ${row.tenantId}
+       and status = 'pending_confirmation'
+       and relation_id is null
+       and candidate_relation_id is null
     returning identity_id
   `.execute(trx);
   return result.rows.length > 0;

@@ -11,12 +11,12 @@ import { looksLikeApiKey } from "./api-key/format.js";
 import {
   NotInvitedError,
   identityClaimsFromToken,
-  ensureServiceIdentityLink,
-  readSessionLink,
+  ensureSessionIdentityLink,
   resolveIdentityLink,
   type IdentityClaims,
   type IdentityLinkState,
 } from "./identity-link.js";
+import { canHoldLink } from "./identity-link-session.js";
 // ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
@@ -234,7 +234,7 @@ export async function withSessionRelation(
   options: ResolveSessionOptions,
 ): Promise<TrustedSessionContext> {
   if (session.credential !== "trusted-context" && session.credential !== "api-key") return session;
-  if (!options.db || !session.tenantId || !session.userId || !session.issuer) return session;
+  if (!options.db || !session.tenantId || !session.userId) return session;
   const link = {
     tenantId: session.tenantId,
     userId: session.userId,
@@ -242,16 +242,28 @@ export async function withSessionRelation(
     groups: [...session.groups],
     scope: session.scope,
   };
-  const identity = { issuer: session.issuer, subject: session.userId };
-  // A service account never signs in interactively, so nothing else would
-  // ever create its identity row: its first API-key session does, exactly
-  // as a person's first bearer session does, minus the admission question —
-  // and an administrator links it to a Relation with link_identity like any
-  // other identity. A trusted-context session names a person whose bearer
-  // login already made the row; it only reads.
-  const relation = session.credential === "api-key"
-    ? await ensureServiceIdentityLink(options.db, link, identity, session.userDisplayName ?? session.userId)
-    : await readSessionLink(options.db, link, identity);
+  if (!canHoldLink(link)) return session;
+  if (!session.issuer) {
+    // A session that could be linked but names no realm is a deployment
+    // that cannot say who acts: not "nobody", unavailable. An API-key
+    // session always carries its issuer; a trusted-context bundle needs
+    // OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER.
+    throw new SessionAuthenticationUnavailableError(
+      "The session names no issuer, so its identity cannot be resolved; set OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER.",
+    );
+  }
+  // Neither kind carries token claims to be admitted by, so both record
+  // what they can on first use — their identity row and an empty pending
+  // link, under their own session — and are linked from there: a person by
+  // the bearer login or invitation that admits them, a service account by
+  // an administrator's link_identity. A trusted-context session brings no
+  // name; the row keeps whatever a bearer login recorded.
+  const relation = await ensureSessionIdentityLink(
+    options.db,
+    link,
+    { issuer: session.issuer, subject: session.userId },
+    session.credential === "api-key" ? session.userDisplayName ?? session.userId : null,
+  );
   return {
     ...session,
     relation,

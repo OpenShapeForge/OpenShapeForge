@@ -439,7 +439,10 @@ describe("canonical operation database sessions", () => {
           { secret: CONTEXT_SECRET },
         );
         const priorSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+        const priorIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
         process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = CONTEXT_SECRET;
+        // A trusted-context session's identity must name its realm; unreachable on purpose.
+        process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "http://127.0.0.1:9/realms/e2e";
         __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
           options.execute(() => {}));
         try {
@@ -528,6 +531,8 @@ describe("canonical operation database sessions", () => {
           } else {
             process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = priorSecret;
           }
+          if (priorIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+          else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = priorIssuer;
         }
 
         expect(observations.map((entry) => entry.transport)).toEqual([

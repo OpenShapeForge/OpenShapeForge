@@ -10,7 +10,7 @@
 import { compareCodeUnits } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
-import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/index.js";
+import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/queries.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { definitionFieldKeys, secretFieldKeys, type ExecutionCatalogEntry } from "./declarative-execution.js";

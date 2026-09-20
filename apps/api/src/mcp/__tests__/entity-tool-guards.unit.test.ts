@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Reverse catalog mapping: binding-row writes and referenced
- * operation/provider deletes revalidate the published owner they affect.
+ * operation/provider/connection mutations revalidate the published owner
+ * they affect. Overlay helpers live in the write engine.
  */
 import { describe, expect, it } from "bun:test";
 import {
@@ -10,7 +11,7 @@ import {
   derivedToolEntriesForBindingTable,
   derivedToolEntriesForReferencedTable,
   type BindingRowOverlay,
-} from "../entity-tool-guards.js";
+} from "../../operations/entity/derived-execution-guards.js";
 import { validateVisibleDefinition } from "../publication-validation.js";
 import type { DerivedToolsCatalogEntry } from "../derived-tools.js";
 
@@ -27,23 +28,6 @@ const ENTRY: DerivedToolsCatalogEntry = {
     bindingsEntity: "Binding",
     bindingsTable: "core.bindings",
     parentRef: "serviceId",
-    operationRef: "operationId",
-    operationEntity: "Operation",
-    operationTable: "core.operations",
-    providerRef: "providerId",
-    providerEntity: "Provider",
-    providerTable: "core.providers",
-    connectionEntity: "Connection",
-    connectionTable: "core.connections",
-    connectionProviderRef: "providerId",
-    connectionValuesField: "values",
-  },
-};
-
-const JSON_ENTRY: DerivedToolsCatalogEntry = {
-  ...ENTRY,
-  execution: {
-    bindingsField: "bindings",
     operationRef: "operationId",
     operationEntity: "Operation",
     operationTable: "core.operations",
@@ -99,9 +83,9 @@ async function failure(
 }
 
 describe("derivedToolEntriesForBindingTable", () => {
-  it("maps a binding table back to published owners and ignores JSON form", () => {
+  it("maps a binding table back to published owners", () => {
     expect(
-      derivedToolEntriesForBindingTable("core.bindings", [ENTRY, JSON_ENTRY]).map(
+      derivedToolEntriesForBindingTable("core.bindings", [ENTRY]).map(
         (entry) => entry.entity,
       ),
     ).toEqual(["Service"]);
@@ -110,7 +94,7 @@ describe("derivedToolEntriesForBindingTable", () => {
 });
 
 describe("derivedToolEntriesForReferencedTable", () => {
-  it("maps operation and provider tables back to published owners", () => {
+  it("maps operation, provider and connection tables back to published owners", () => {
     expect(
       derivedToolEntriesForReferencedTable("core.operations", [ENTRY]).map(
         (entry) => entry.execution?.operationEntity,
@@ -121,9 +105,11 @@ describe("derivedToolEntriesForReferencedTable", () => {
         (entry) => entry.execution?.providerEntity,
       ),
     ).toEqual(["Provider"]);
-    expect(derivedToolEntriesForReferencedTable("core.connections", [ENTRY])).toEqual(
-      [],
-    );
+    expect(
+      derivedToolEntriesForReferencedTable("core.connections", [ENTRY]).map(
+        (entry) => entry.execution?.connectionEntity,
+      ),
+    ).toEqual(["Connection"]);
   });
 });
 
@@ -261,5 +247,20 @@ describe("published owner revalidation after a binding mutation", () => {
       readBindingPages: async () => ({ rows: [BINDING], nextCursor: null }),
     });
     expect(message).toContain("does not exist");
+  });
+
+  it("refuses deleting the tenant connection a published owner still uses", async () => {
+    const message = await failure({
+      entry: ENTRY,
+      row: OWNER,
+      rowId: "svc-1",
+      reservedNames: new Set(),
+      readRows: async (table, filter) => {
+        if (table === "core.connections") return [];
+        return readerFor(data)(table, filter);
+      },
+      readBindingPages: async () => ({ rows: [BINDING], nextCursor: null }),
+    });
+    expect(message).toContain("no Connection is configured");
   });
 });

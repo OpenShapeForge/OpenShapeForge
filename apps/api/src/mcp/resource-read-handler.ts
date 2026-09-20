@@ -158,24 +158,20 @@ export function registerResourceReadHandler(
         });
         if (result.intent !== "list") throw new Error("Unexpected entity result.");
         if ("error" in result) throw new OperationFailure(result.error);
-        payload = (table.source?.authoringVersion ?? 1) >= 2
-          ? {
-              data: {
-                ...result.data,
-                items: result.data.items.map((item) => ({
-                  data: serializeRowForEntity(
-                    entityForTable(direct.table),
-                    table,
-                    item.data,
-                  ),
-                  operations: item.operations,
-                })),
-              },
-              operations: result.operations,
-            }
-          : result.data.items.map((item) =>
-              serializeRowForEntity(entityForTable(direct.table), table, item.data),
-            );
+        payload = {
+          data: {
+            ...result.data,
+            items: result.data.items.map((item) => ({
+              data: serializeRowForEntity(
+                entityForTable(direct.table),
+                table,
+                item.data,
+              ),
+              operations: item.operations,
+            })),
+          },
+          operations: result.operations,
+        };
       } else {
         const templated = readable.find((resource) =>
           uri.startsWith(`${resource.uri}/`),
@@ -199,9 +195,7 @@ export function registerResourceReadHandler(
               table,
               result.data,
             );
-            payload = (table.source?.authoringVersion ?? 1) >= 2
-              ? { data, operations: result.operations }
-              : data;
+            payload = { data, operations: result.operations };
           }
         }
         if (payload === undefined) {

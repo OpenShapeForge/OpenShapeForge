@@ -39,6 +39,7 @@ const session = (...roles: string[]) =>
 
 const table = {
   name: "erp.widgets",
+  generatedCrudEligible: true,
   columns: [],
   source: {
     crud: { operations: { list: true, get: true, create: true, update: true, delete: true } },

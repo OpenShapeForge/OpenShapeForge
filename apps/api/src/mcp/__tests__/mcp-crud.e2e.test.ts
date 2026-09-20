@@ -104,7 +104,7 @@ describe("generated MCP server", () => {
     expect(status).toBe(200);
     const tools = body.result.tools as {
       name: string;
-      outputSchema?: Record<string, unknown>;
+      outputSchema: Record<string, unknown>;
       annotations?: { idempotentHint?: boolean };
     }[];
     const names = tools.map((tool) => tool.name);
@@ -134,31 +134,19 @@ describe("generated MCP server", () => {
     const create = advertisedFor("create", "Relation")!;
     const remove = advertisedFor("delete")!;
     const update = advertisedFor("update")!;
-    const canonicalTools = [get, list, create].filter(
-      (tool) => tool.outputSchema !== undefined,
-    );
-    for (const tool of canonicalTools) {
-      expect(tool.outputSchema?.type).toBe("object");
-      expect(Array.isArray(tool.outputSchema?.oneOf)).toBe(true);
-      const definitions = tool.outputSchema?.$defs as Record<string, unknown>;
+    for (const tool of [get, list, create]) {
+      expect(tool.outputSchema.type).toBe("object");
+      expect(Array.isArray(tool.outputSchema.oneOf)).toBe(true);
+      const definitions = tool.outputSchema.$defs as Record<string, unknown>;
       expect(definitions.OperationOffer).toBeDefined();
       expect(definitions.OperationError).toBeDefined();
     }
-    const legacyNames = new Set(
-      catalog.tools
-        .filter((tool) => tool.outputSchema === undefined)
-        .map((tool) => tool.name),
-    );
-    expect(
-      tools.filter((tool) => legacyNames.has(tool.name))
-        .every((tool) => tool.outputSchema === undefined),
-    ).toBe(true);
-    const getSuccess = (get.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const getSuccess = (get.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     const getProperties = getSuccess.properties as Record<string, Record<string, unknown>>;
     expect(getSuccess.required).toEqual(["data", "operations"]);
     expect(getProperties.data?.type).toBe("object");
     expect(getProperties.operations?.type).toBe("array");
-    const listSuccess = (list.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const listSuccess = (list.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     expect(listSuccess).toMatchObject({
       properties: {
         data: {
@@ -168,7 +156,7 @@ describe("generated MCP server", () => {
     });
     // A canonical delete answers with the deletion envelope: `data.deleted`
     // is the constant true (a missing row is an error, never `deleted: false`).
-    const removeSuccess = (remove.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    const removeSuccess = (remove.outputSchema.oneOf as Record<string, unknown>[])[0]!;
     expect(removeSuccess.required).toEqual(["data", "operations"]);
     expect(removeSuccess.properties).toMatchObject({
       data: { required: ["deleted"], properties: { deleted: { type: "boolean", const: true } } },
@@ -198,14 +186,12 @@ describe("generated MCP server", () => {
       input: { definitionId: randomUUID() },
       idempotencyKey: randomUUID(),
     });
-    // The Operation is keyed and declares an external write, so the runtime
-    // records a running receipt and marks effects admitted BEFORE it invokes
-    // the handler (operations/runtime.ts, execute); the handler's NOT_FOUND
-    // for a definition that never existed therefore surfaces fail-closed as
-    // OPERATION_OUTCOME_UNKNOWN. That is the dispatch this test proves. (It
-    // used to read NOT_FOUND only because the receipt insert failed on an
-    // unseeded platform.tenants row — REFERENCE_NOT_FOUND matched the regex.)
-    expect(toolError(called.body)).toMatch(/OPERATION_OUTCOME_UNKNOWN/);
+    // The Operation is keyed and declares database-only effects, so its
+    // receipt shares the handler's transaction (operations/runtime.ts,
+    // execute) and the handler's own NOT_FOUND for a definition that never
+    // existed is the answer. That the handler's refusal comes back at all is
+    // the dispatch this test proves.
+    expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });
 
   test("carries the authored field schema into the tool input schema", async () => {
@@ -534,7 +520,6 @@ describe("generated MCP server", () => {
       operation: CrudOperation,
       args: Record<string, unknown> = {},
     ) => callTool(identity, toolNameFor(table, operation), argsFor(table, args));
-    const canonical = catalogTool(table, "create").outputSchema !== undefined;
 
     test(`${prefix}: create, get, list, update, delete round-trip`, async () => {
       const args = await createArgs(table, tenantA);
@@ -542,26 +527,21 @@ describe("generated MCP server", () => {
       const createdEnvelope = toolEnvelope(created.body);
       let row = toolPayload(created.body);
       expect(toolError(created.body)).toBeUndefined();
-      if (canonical) {
-        expectCanonicalToolOutput(table, "create", created.body);
-        // A fresh record offers every Operation; only a transition whose
-        // `from` excludes the initial state may be listed as INVALID_STATE.
-        expectFreshRecordOffers(table, createdEnvelope.operations);
-      } else {
-        expect(createdEnvelope).not.toHaveProperty("data");
-        expect(createdEnvelope).not.toHaveProperty("operations");
-      }
+      expectCanonicalToolOutput(table, "create", created.body);
+      // A fresh record offers every Operation; only a transition whose
+      // `from` excludes the initial state may be listed as INVALID_STATE.
+      expectFreshRecordOffers(table, createdEnvelope.operations);
       expect(row.id).toBeTruthy();
       createdRows.push({ table, id: row.id, identity: tenantA });
 
       const fetchedCall = await call(tenantA, "get", { id: row.id });
-      if (canonical) expectCanonicalToolOutput(table, "get", fetchedCall.body);
+      expectCanonicalToolOutput(table, "get", fetchedCall.body);
       const fetched = toolPayload(fetchedCall.body);
       expect(fetched.id).toBe(row.id);
       row = fetched;
 
       const listedCall = await call(tenantA, "list", { first: 5 });
-      if (canonical) expectCanonicalToolOutput(table, "list", listedCall.body);
+      expectCanonicalToolOutput(table, "list", listedCall.body);
       const listed = toolPayload(listedCall.body);
       expect(Array.isArray(listed.items)).toBe(true);
       expect(listed.totalCount).toBeGreaterThan(0);
@@ -579,7 +559,7 @@ describe("generated MCP server", () => {
           values: { [fieldName(textColumn)]: `updated-${seed}` },
           ...controls,
         });
-        if (canonical) expectCanonicalToolOutput(table, "update", updatedCall.body);
+        expectCanonicalToolOutput(table, "update", updatedCall.body);
         expect(toolError(updatedCall.body)).toBeUndefined();
         const updated = toolPayload(updatedCall.body);
         expect(updated[fieldName(textColumn)]).toBe(`updated-${seed}`);
@@ -622,27 +602,20 @@ describe("generated MCP server", () => {
         expect(await expectedDeleteOutcome(table, row.id, tenantA)).toEqual(outcome);
         return;
       }
-      if (canonical) expectCanonicalToolOutput(table, "delete", deleted.body);
+      expectCanonicalToolOutput(table, "delete", deleted.body);
       expect(toolError(deleted.body)).toBeUndefined();
       expect(toolPayload(deleted.body)).toEqual({ deleted: true });
       untrackRow(row.id);
 
       const missing = await call(tenantA, "get", { id: row.id });
-      if (canonical) expectCanonicalToolOutput(table, "get", missing.body);
+      expectCanonicalToolOutput(table, "get", missing.body);
       expect(toolError(missing.body)).toMatch(/NOT_FOUND/);
       const missingError = missing.body.result.structuredContent.error;
-      if (canonical) {
-        expect(missingError).toMatchObject({
-          code: "NOT_FOUND",
-          message: "Resource not found.",
-          retryable: false,
-        });
-      } else {
-        expect(missingError).toEqual({
-          code: "NOT_FOUND",
-          message: "Resource not found.",
-        });
-      }
+      expect(missingError).toMatchObject({
+        code: "NOT_FOUND",
+        message: "Resource not found.",
+        retryable: false,
+      });
     });
 
     test(`${prefix}: does not leak rows across tenants`, async () => {

@@ -2,7 +2,7 @@
 /**
  * Binding a bearer token to one per-organization MCP resource.
  *
- * A request to `/api/mcp/organizations/<alias>` is accepted only when the
+ * A request to `/<alias>` (the organization MCP resource) is accepted only when the
  * verified token, the path and the tenant registry all name the same
  * organization:
  *

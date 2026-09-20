@@ -20,7 +20,6 @@ describe("workerGrantedTablesFromManifest", () => {
     const generatedBusinessTable = {
       schema: "erp",
       table: "relations",
-      generatedCrud: true,
       generatedCrudEligible: true,
     };
     expect(workerGrantedTablesFromManifest([

@@ -243,10 +243,10 @@ function toolsForControlSession(
         outputSchema: entry.operation.outputSchema as Tool["outputSchema"],
         annotations: {
           title: entry.operation.title,
-          readOnlyHint: entry.operation.effects?.data === "read",
-          destructiveHint: entry.operation.effects?.data === "delete",
+          readOnlyHint: entry.operation.effects.data === "read",
+          destructiveHint: entry.operation.effects.data === "delete",
           idempotentHint: entry.operation.idempotency.mode !== "none",
-          openWorldHint: (entry.operation.effects?.external ?? "none") !== "none",
+          openWorldHint: entry.operation.effects.external !== "none",
         },
       },
     }));

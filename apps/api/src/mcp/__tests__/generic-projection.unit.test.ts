@@ -16,7 +16,13 @@ import {
 } from "../generated-mcp-server.js";
 
 const catalog = rawCatalog as unknown as {
-  tools: { name: string; entity: string; operation: string; inputSchema: Record<string, unknown> }[];
+  tools: {
+    name: string;
+    entity: string;
+    operation: string;
+    inputSchema: Record<string, unknown>;
+    errors: { status: number; code: string; description: string }[];
+  }[];
   entities: { entity: string; tools?: string; labels?: Record<string, string> }[];
 };
 
@@ -35,6 +41,8 @@ const session = (...roles: string[]) =>
 
 // A role that reaches the generic Address entity and nothing else generic.
 const RELATIONS = "Relations.All.ReadWrite";
+const compiledErrors = (name: string) =>
+  catalog.tools.find((tool) => tool.name === name && tool.entity === "Address")!.errors;
 
 describe("the generic osf_* listing", () => {
   const generic = catalog.entities.filter((entity) => entity.tools === "generic");
@@ -75,6 +83,30 @@ describe("the generic osf_* listing", () => {
     }
     const one = describeGenericEntity("Address", "list", session(RELATIONS), tables as never, english) as any;
     expect(Object.keys(one.operations)).toEqual(["list"]);
+    // The declared refusals travel with the exact contract, not with the listing.
+    expect(one.operations.list.errors).toEqual(
+      compiledErrors("osf_list").map(({ status, code, description }) => ({ status, code, description })),
+    );
+    expect(one.operations.list.errors.map((error: any) => error.code)).toContain("FORBIDDEN");
+    const listed = crudToolsForSession(session(RELATIONS), tables as never, english).find((tool) => tool.name === "osf_list")!;
+    expect(listed).not.toHaveProperty("errors");
+  });
+
+  it.skipIf(generic.length === 0)("describes and lists a Dutch session in Dutch, one language on the wire", () => {
+    const compiledCreate = catalog.tools.find((tool) => tool.name === "osf_create" && tool.entity === "Address")!;
+    const property = Object.entries(compiledCreate.inputSchema.properties as Record<string, any>)
+      .find(([, schema]) => schema["x-osf-i18n"]?.title?.nl && schema["x-osf-i18n"].title.nl !== schema["x-osf-i18n"].title.en);
+    expect(property).toBeDefined();
+    const [key, compiledSchema] = property!;
+    const described = describeGenericEntity("Address", "create", session(RELATIONS), tables as never, dutch) as any;
+    const answered = described.operations.create.inputSchema.properties[key];
+    expect(answered.title).toBe(compiledSchema["x-osf-i18n"].title.nl);
+    expect(answered).not.toHaveProperty("x-osf-i18n");
+    const inEnglish = describeGenericEntity("Address", "create", session(RELATIONS), tables as never, english) as any;
+    expect(inEnglish.operations.create.inputSchema.properties[key].title).toBe(compiledSchema["x-osf-i18n"].title.en);
+    // The listing is the same shape: no per-language copy, the session's language.
+    const listed = JSON.stringify(crudToolsForSession(session(RELATIONS), tables as never, dutch));
+    expect(listed).not.toContain("x-osf-i18n");
   });
 
   it.skipIf(generic.length === 0)("refuses an entity the session cannot address, naming only what it can", () => {

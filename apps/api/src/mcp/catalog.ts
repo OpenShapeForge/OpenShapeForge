@@ -26,20 +26,27 @@ export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
 export type CatalogTool = {
   name: string;
-  /** Strict v2 catalogues publish the canonical id; v1 resolves it internally. */
-  operationId?: string;
+  /** The id of the canonical Operation this tool invokes (`<Entity>.<operation>`). */
+  operationId: string;
   operation: McpOperation;
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
+  /** The tool's output envelope: `{ data, operations }` as the Operation answers it. */
+  outputSchema: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
     idempotentHint: boolean;
   };
+  /**
+   * The failures the canonical Operation declares. Not part of the listed
+   * tool — the listing is budgeted by the byte — but answered by osf_describe,
+   * where a model asks for one entity's exact contract.
+   */
+  errors: readonly { status: number; code: string; description: string }[];
 };
 
 export type CatalogEntity = {

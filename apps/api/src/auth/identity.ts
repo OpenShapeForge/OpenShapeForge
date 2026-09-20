@@ -61,7 +61,7 @@ export type ResolveSessionOptions = {
    */
   requiredAudience?: string;
   /**
-   * Set by the per-organization MCP resource (`/api/mcp/organizations/<alias>`).
+   * Set by the per-organization MCP resource (`/<alias>`).
    * The session is then only produced from a bearer JWT that is bound to that
    * resource — membership of the organization, the resource URL in `aud`, a
    * tenant linked to the organization — and is pinned to that tenant. Any
@@ -76,8 +76,6 @@ export type ResolveSessionOptions = {
 function hostOrganizationContext(): boolean {
   return process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT === "host";
 }
-
-export { OrganizationAddressError, SessionAuthenticationUnavailableError };
 
 function bearerVerifierUnavailable(error: unknown): boolean {
   return error instanceof BearerVerifierUnavailableError;
@@ -133,13 +131,6 @@ export function __resetSessionResolverForTests(): void {
   __resetOrganizationAddressForTests();
 }
 
-export {
-  __setTenantForOrganizationForTests,
-  organizationTenantCacheKey,
-  realmFromIssuer,
-  selectOrganizationMembership,
-} from "./tenant-resolution.js";
-
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
 
 /**
@@ -187,7 +178,7 @@ async function verifyBearerIdentity(
 }
 
 /**
- * Legacy effective roles for a SERVICE identity = realm roles ∪ every
+ * Effective roles for a SERVICE identity outside host organization context = realm roles ∪ every
  * `resource_access` client's roles. Keycloak expands realm and client
  * composites into per-client roles under `resource_access`, so entity roles
  * like `Relations.All.ReadWrite` only exist there — realm_access alone would
@@ -368,8 +359,8 @@ async function resolveCredentialSession(
       if (hostMode && (!hostTenantId || !identity.userId)) return EMPTY_SESSION;
       // On a per-organization resource the tenant is the one the path's
       // organization links to, and nothing else in the token may pick it.
-      // Shared host endpoints use the verified selected organization. Legacy
-      // mode retains tid preference followed by organization resolution.
+      // Shared host endpoints use the verified selected organization. The shared
+      // mount retains tid preference followed by organization resolution.
       const tenantId = options.organization
         ? await resolveTenantForBoundOrganization(
             identity,

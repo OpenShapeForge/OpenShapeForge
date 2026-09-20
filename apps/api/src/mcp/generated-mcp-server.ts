@@ -72,7 +72,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance } from "fastify";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
-import { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
+import { MCP_MOUNT_PATH, ORGANIZATION_MCP_ROUTES } from "./organization-resource.js";
 import { McpTransportError, SHORT_ADDRESS_VARY } from "./address.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -116,7 +116,7 @@ import { createServerScope } from "./server-scope.js";
 import { createSessionSurface } from "./session-surface.js";
 import { hasMcpSurface } from "./catalog.js";
 
-export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
+export { MCP_MOUNT_PATH } from "./organization-resource.js";
 
 
 /**
@@ -307,18 +307,16 @@ export function registerGeneratedMcpServer(
       handler: handleMcpRequest,
     });
     // One resource per Keycloak Organization, same server, same handler;
-    // what differs is how the session is admitted (requireMcpSession).
-    instance.route({
-      url: `${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
-      method: ["GET", "POST", "DELETE"],
-      handler: handleMcpRequest,
-    });
-    // The short spellings `/<alias>` and `/<alias>/mcp` arrive here already
-    // rewritten to the long URL (roles/api.ts, rewriteUrl), so there is one
-    // handler, one set of routes and one parser for the alias. What a client
-    // is TOLD the resource is called comes from organizationMcpPath, which is
-    // the short form — the long URL is now an internal spelling that also
-    // happens to still be reachable from outside.
+    // what differs is how the session is admitted (requireMcpSession). Both
+    // spellings of the resource are routed as spelled; what a client is TOLD
+    // the resource is called comes from organizationMcpPath.
+    for (const url of ORGANIZATION_MCP_ROUTES) {
+      instance.route({
+        url,
+        method: ["GET", "POST", "DELETE"],
+        handler: handleMcpRequest,
+      });
+    }
   });
 }
 

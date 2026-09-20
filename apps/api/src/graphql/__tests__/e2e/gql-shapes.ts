@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Shape-aware GraphQL documents and result readers for the entity sweeps.
+ * GraphQL documents and result readers for the entity sweeps.
  *
- * The generated schema speaks two shapes. A v1 entity answers `x(id)` with the
- * record, `xs(...)` with a Relay connection, `deleteX(id)` with a Boolean, and
- * throws refusals as top-level `errors[].extensions.code`. A canonical (v2)
- * entity wraps every answer in an operation result — `{ data, operations,
- * error }`, a collection as `data { items { data } nextCursor totalCount }`,
- * a delete as `data { deleted }` — and reports refusals IN BAND at
- * `data.<field>.error.code` with no top-level error at all. Only failures that
- * precede dispatch (UNAUTHENTICATED, schema validation) still throw.
+ * A canonical entity wraps every answer in an operation result — `{ data,
+ * operations, error }`, a collection as `data { items { data } nextCursor
+ * totalCount }`, a delete as `data { deleted }` — and reports refusals IN
+ * BAND at `data.<field>.error.code` with no top-level error at all. Only
+ * failures that precede dispatch (UNAUTHENTICATED, schema validation) still
+ * throw.
  *
- * Every builder here renders the document for the table's shape and every
- * reader unwraps it, so a suite states its intent once and runs unchanged
- * against either generation. The v1 branches are marked so they can be
- * deleted together once no v1 entity remains.
+ * Every builder here renders the document and every reader unwraps it, so a
+ * suite states its intent once rather than spelling out the envelope itself.
  */
 import { expect } from "bun:test";
 import { gql, type GeneratedTable, type GqlResponse, type Identity } from "./harness.js";
@@ -23,7 +19,6 @@ import {
   acquireLease,
   challengeAnswerFor,
   challengeFieldFor,
-  isCanonical,
   isEntityBackedCreate,
   type MutationControls,
 } from "./operations.js";
@@ -40,14 +35,14 @@ function graphqlOf(table: GeneratedTable): Graphql {
 const ERROR_SELECTION = "error { code message retryable data }";
 
 function recordSelection(table: GeneratedTable, selection: string): string {
-  return isCanonical(table) ? `data { ${selection} } ${ERROR_SELECTION}` : selection;
+  return `data { ${selection} } ${ERROR_SELECTION}`;
 }
 
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
 
-/** `query($id: ID!) { x(id: $id) { <selection> } }` for the table's shape. */
+/** `query($id: ID!) { x(id: $id) { data { <selection> } error {...} } }`. */
 export function getDoc(table: GeneratedTable, selection = "id"): string {
   const graphql = graphqlOf(table);
   return `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { ${recordSelection(table, selection)} } }`;
@@ -61,7 +56,7 @@ export type ListDocOptions = {
   /** Selection on each record; omit to select nothing per record. */
   selection?: string;
   totalCount?: boolean;
-  /** Cursor bookkeeping: `pageInfo` at v1, `nextCursor` at v2. */
+  /** Cursor bookkeeping: selects `nextCursor`. */
   pageInfo?: boolean;
 };
 
@@ -73,9 +68,9 @@ const LIST_VARIABLE_TYPES = {
 } as const;
 
 /**
- * A list query for the table's shape. The record selection, count and cursor
- * bookkeeping are named by intent, so a test asks for "ids and totalCount"
- * rather than spelling out edges/nodes or items/data itself.
+ * A list query. The record selection, count and cursor bookkeeping are named
+ * by intent, so a test asks for "ids and totalCount" rather than spelling out
+ * items/data itself.
  */
 export function listDoc(table: GeneratedTable, options: ListDocOptions = {}): string {
   const graphql = graphqlOf(table);
@@ -87,27 +82,16 @@ export function listDoc(table: GeneratedTable, options: ListDocOptions = {}): st
     .join(", ");
   const record = options.selection ?? "";
 
-  if (isCanonical(table)) {
-    const body = [
-      record ? `items { data { ${record} } }` : "",
-      options.totalCount ? "totalCount" : "",
-      options.pageInfo ? "nextCursor" : "",
-    ].filter(Boolean).join(" ");
-    return `query${declared ? `(${declared})` : ""} {
-      ${graphql.listQueryName}${args ? `(${args})` : ""} {
-        data { ${body || "__typename"} }
-        ${ERROR_SELECTION}
-      }
-    }`;
-  }
-  // v1-only: Relay connection shape.
   const body = [
-    record ? `edges { node { ${record} } }` : "",
+    record ? `items { data { ${record} } }` : "",
     options.totalCount ? "totalCount" : "",
-    options.pageInfo ? "pageInfo { hasNextPage endCursor }" : "",
+    options.pageInfo ? "nextCursor" : "",
   ].filter(Boolean).join(" ");
   return `query${declared ? `(${declared})` : ""} {
-    ${graphql.listQueryName}${args ? `(${args})` : ""} { ${body || "__typename"} }
+    ${graphql.listQueryName}${args ? `(${args})` : ""} {
+      data { ${body || "__typename"} }
+      ${ERROR_SELECTION}
+    }
   }`;
 }
 
@@ -132,30 +116,24 @@ export function updateDoc(table: GeneratedTable, selection = "id"): string {
 
 export function deleteDoc(table: GeneratedTable): string {
   const graphql = graphqlOf(table);
-  if (isCanonical(table)) {
-    return `mutation($input: Delete${graphql.typeName}Input!) {
-      ${graphql.deleteMutationName}(input: $input) { data { deleted } ${ERROR_SELECTION} }
-    }`;
-  }
-  // v1-only: `deleteX(id: ID!): Boolean!`.
-  return `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`;
+  return `mutation($input: Delete${graphql.typeName}Input!) {
+    ${graphql.deleteMutationName}(input: $input) { data { deleted } ${ERROR_SELECTION} }
+  }`;
 }
 
-/** Variables for `deleteDoc`: the bare id at v1, an input carrying controls at v2. */
+/** Variables for `deleteDoc`: an input carrying the id and its controls. */
 export function deleteVariables(
   table: GeneratedTable,
   id: string,
   controls: MutationControls = {},
 ): Record<string, unknown> {
-  return isCanonical(table)
-    ? {
-        input: {
-          id,
-          ...controls,
-          ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
-        },
-      }
-    : { id };
+  return {
+    input: {
+      id,
+      ...controls,
+      ...(acknowledgementRequired(table, "delete") ? { confirmed: true } : {}),
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -170,9 +148,9 @@ export type OperationErrorShape = {
 };
 
 /**
- * The refusal a response carries for `field`, wherever the shape puts it:
- * `data.<field>.error` at v2, `errors[0].extensions` at v1. Undefined when the
- * request succeeded.
+ * The refusal a response carries for `field`: the in-band `data.<field>.error`,
+ * or a pre-dispatch failure thrown as `errors[0].extensions`. Undefined when
+ * the request succeeded.
  */
 export function operationErrorOf(
   table: GeneratedTable,
@@ -181,8 +159,7 @@ export function operationErrorOf(
 ): OperationErrorShape | undefined {
   const thrown = result.errors?.[0];
   if (thrown) {
-    // Pre-dispatch failures (UNAUTHENTICATED, validation) throw at both
-    // generations; at v1 every refusal does.
+    // Pre-dispatch failures (UNAUTHENTICATED, validation) throw.
     const extensions = thrown.extensions as { code?: string; data?: unknown } | undefined;
     return {
       code: extensions?.code ?? "GRAPHQL_ERROR",
@@ -190,15 +167,14 @@ export function operationErrorOf(
       ...(extensions?.data === undefined ? {} : { data: extensions.data as Record<string, any> }),
     };
   }
-  if (!isCanonical(table)) return undefined;
   const error = result.data?.[field]?.error;
   return error ? (error as OperationErrorShape) : undefined;
 }
 
 /**
  * Asserts `field` was refused with `code`, and that the refusal did not also
- * answer the question: a v1 error nulls the payload, a v2 result carries no
- * data next to its error.
+ * answer the question: a thrown error nulls the payload, an in-band result
+ * carries no data next to its error.
  */
 export function expectOperationError(
   table: GeneratedTable,
@@ -208,7 +184,7 @@ export function expectOperationError(
 ): OperationErrorShape {
   const error = operationErrorOf(table, result, field);
   expect(error?.code).toBe(code);
-  if (isCanonical(table) && !result.errors) {
+  if (!result.errors) {
     expect(result.data?.[field]?.data ?? null).toBeNull();
   } else {
     expect(result.data?.[field] ?? null).toBeNull();
@@ -225,12 +201,9 @@ export function expectOperationData(
   expect(result.errors ?? []).toEqual([]);
   expect(result.data).toBeTruthy();
   const payload = result.data![field];
-  if (isCanonical(table)) {
-    expect(payload).toBeTruthy();
-    expect(payload.error ?? null).toBeNull();
-    return payload.data ?? null;
-  }
-  return payload ?? null;
+  expect(payload).toBeTruthy();
+  expect(payload.error ?? null).toBeNull();
+  return payload.data ?? null;
 }
 
 /** The single record (or null for "not found") a get/create/update answered with. */
@@ -245,7 +218,7 @@ export type Collection = {
   hasNextPage: boolean;
 };
 
-/** A list answer normalized across shapes: records, count and cursor. */
+/** A list answer unwrapped: records, count and cursor. */
 export function collectionOf(
   table: GeneratedTable,
   result: GqlResponse,
@@ -253,21 +226,12 @@ export function collectionOf(
 ): Collection {
   const payload = expectOperationData(table, result, field);
   expect(payload).toBeTruthy();
-  if (isCanonical(table)) {
-    const nextCursor = payload.nextCursor as string | null | undefined;
-    return {
-      items: (payload.items ?? []).map((item: { data: unknown }) => item.data),
-      totalCount: payload.totalCount,
-      nextCursor,
-      hasNextPage: nextCursor !== null && nextCursor !== undefined,
-    };
-  }
-  // v1-only: Relay connection shape.
+  const nextCursor = payload.nextCursor as string | null | undefined;
   return {
-    items: (payload.edges ?? []).map((edge: { node: unknown }) => edge.node),
+    items: (payload.items ?? []).map((item: { data: unknown }) => item.data),
     totalCount: payload.totalCount,
-    nextCursor: payload.pageInfo?.endCursor,
-    hasNextPage: payload.pageInfo?.hasNextPage === true,
+    nextCursor,
+    hasNextPage: nextCursor !== null && nextCursor !== undefined,
   };
 }
 
@@ -275,7 +239,7 @@ export function collectionOf(
 export function deletedOf(table: GeneratedTable, result: GqlResponse): boolean {
   const field = graphqlOf(table).deleteMutationName;
   const payload = expectOperationData(table, result, field);
-  return isCanonical(table) ? payload?.deleted === true : payload === true;
+  return payload?.deleted === true;
 }
 
 // ---------------------------------------------------------------------------

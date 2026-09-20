@@ -263,8 +263,8 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   with separate `schema`/`table` fields. Render qualified names yourself:
   `` `${table.schema}.${table.name}` ``.
 - CRUD-eligible tables are selected with `isGeneratedCrudEligible(table)` and
-  a `source.graphql` block. The helper understands both the current
-  `generatedCrudEligible` marker and legacy manifests.
+  a `source.graphql` block: `generatedCrudEligible: true` and not
+  `domainInternal`.
 - A contributed table may declare **`workerAccess: "<role>"`** to let a
   background worker reach it across tenants without `app.bypass_rls`. It
   requires `tenantScoped: true`, widens rather than narrows, and belongs only

@@ -8,7 +8,6 @@ import { getGeneratedCrudTables } from "./catalog.js";
 test("schema-3 GraphQL exposes a relation once, not both scalar and entity under the field key", () => {
   const original = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "Relation")!;
   const table = structuredClone(original);
-  table.source!.authoringVersion = 3;
   table.columns.push({ name: "owner_id", sourceField: "owner", type: "uuid", required: false, primaryKey: false, generated: null });
   table.source!.graphql!.relationships = [{ name: "owner", fieldKey: "owner", kind: "belongsTo", type: "Relation", target: "Relation", resolve: "belongsTo", foreignKey: "owner_id" }];
   const definition = parse(renderTypeDefinition(table)).definitions.find((definition) => definition.kind === Kind.OBJECT_TYPE_DEFINITION && definition.name.value === "Relation");
@@ -20,12 +19,13 @@ test("schema-3 GraphQL exposes a relation once, not both scalar and entity under
 
 test("MCP live tools do not advertise unsupported collection values", () => {
   const table = structuredClone(getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "Relation")!);
-  table.source!.authoringVersion = 3;
   table.source!.graphql!.relationships = [{ name: "blocks", fieldKey: "blocks", type: "[Relation!]!", target: "Relation", resolve: "hasMany", via: "relation_blocks", mutationSupport: "unsupported" }];
   const projected = describeTool({
-    name: "create_relation", operation: "create", entity: "Relation", table: table.name, description: "Creates a fixture",
+    name: "create_relation", operationId: "Relation.create", operation: "create", entity: "Relation", table: table.name, description: "Creates a fixture",
+    outputSchema: { type: "object" },
     inputSchema: { type: "object", properties: { values: { type: "object", properties: { blocks: { type: "array" }, displayName: { type: "string" } }, required: ["blocks"] } } },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    errors: [],
   }, undefined, table, { roles: [] });
   expect(projected.inputSchema).toMatchObject({ properties: { values: { properties: { displayName: { type: "string" } }, required: [] } } });
   expect(JSON.stringify(projected.inputSchema)).not.toContain('"blocks"');

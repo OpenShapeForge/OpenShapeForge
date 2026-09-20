@@ -22,13 +22,13 @@ describe("bounded integer storage and GraphQL projection", () => {
     expect(fieldGraphqlBaseType(field)).toBe("Int");
   });
 
-  test("uses bigint and Float when a numeric rule exceeds either 32-bit boundary", () => {
+  test("uses bigint and Decimal when a numeric rule exceeds either 32-bit boundary", () => {
     const high = integerField({ max: Number.MAX_SAFE_INTEGER });
     const low = integerField({ min: -2_147_483_649 });
     expect(fieldSqlType(high)).toBe("bigint");
-    expect(fieldGraphqlBaseType(high)).toBe("Float");
+    expect(fieldGraphqlBaseType(high)).toBe("Decimal");
     expect(fieldSqlType(low)).toBe("bigint");
-    expect(fieldGraphqlBaseType(low)).toBe("Float");
+    expect(fieldGraphqlBaseType(low)).toBe("Decimal");
   });
 
   test("reads message-bearing validation rules without changing JSON Schema constraints", () => {
@@ -37,7 +37,7 @@ describe("bounded integer storage and GraphQL projection", () => {
       max: { value: Number.MAX_SAFE_INTEGER, message: { en: "Too large" } },
     });
     expect(fieldSqlType(field)).toBe("bigint");
-    expect(fieldGraphqlBaseType(field)).toBe("Float");
+    expect(fieldGraphqlBaseType(field)).toBe("Decimal");
     expect(constrainedType({ ...field, baseType: "integer" })).toEqual({
       type: "integer",
       minimum: -2_147_483_649,
@@ -50,8 +50,8 @@ describe("bounded integer storage and GraphQL projection", () => {
     const unbounded = integerField({ max: 2_147_483_648 }, { max: "unbounded" });
     const narrow = integerField({ max: 2_147_483_647 }, "collection");
     expect(fieldSqlType(wide)).toBe("jsonb");
-    expect(fieldGraphqlBaseType(wide)).toBe("[Float]");
-    expect(fieldGraphqlBaseType(unbounded)).toBe("[Float]");
+    expect(fieldGraphqlBaseType(wide)).toBe("[Decimal]");
+    expect(fieldGraphqlBaseType(unbounded)).toBe("[Decimal]");
     expect(fieldSqlType(narrow)).toBe("jsonb");
     expect(fieldGraphqlBaseType(narrow)).toBe("[Int]");
   });
@@ -60,7 +60,7 @@ describe("bounded integer storage and GraphQL projection", () => {
     const number = { baseType: "number", validation: { max: Number.MAX_SAFE_INTEGER } } as const;
     const uuid = { baseType: "string", validation: { format: "uuid" } } as const;
     expect(fieldSqlType(number)).toBe("numeric");
-    expect(fieldGraphqlBaseType(number)).toBe("Float");
+    expect(fieldGraphqlBaseType(number)).toBe("Decimal");
     expect(fieldSqlType(uuid)).toBe("uuid");
     expect(fieldGraphqlBaseType(uuid)).toBe("ID");
   });

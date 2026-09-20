@@ -20,10 +20,8 @@ import {
   pluginCreateInput,
   schemaSample,
   tables,
-  tablesByName,
 } from "../../../graphql/__tests__/e2e/entity-factory.js";
 import {
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
@@ -95,7 +93,7 @@ export function toolEnvelope(body: any): any {
   return text ? JSON.parse(text) : undefined;
 }
 
-/** Normalize strict-v2 envelopes and legacy-v1 payloads for shared assertions. */
+/** Unwrap a `{ data, operations }` tool envelope (list items included) for shared assertions. */
 export function toolPayload(body: any): any {
   const envelope = toolEnvelope(body);
   const canonical = envelope && Object.hasOwn(envelope, "data");
@@ -302,7 +300,7 @@ export async function createMcpRow(
   // that intentionally has no MCP mutation projection of its own. Seed that
   // dependency through the shared database fixture instead of inventing a
   // tool the catalog does not advertise.
-  if (!table.source?.mcp || !isCanonical(table)) {
+  if (!table.source?.mcp) {
     return createRow(table, identity, overrides, depth);
   }
   const created = await callTool(
@@ -374,11 +372,6 @@ export async function createForeignKeyTarget(
   identity: Identity,
   depth = 1,
 ): Promise<string> {
-  const fullCrudTarget = tablesByName.get(target);
-  if (fullCrudTarget?.source?.graphql && !isCanonical(fullCrudTarget)) {
-    return createRow(fullCrudTarget, identity);
-  }
-
   const mcpTarget = mcpCreateTables.find(
     (candidate) => candidate.name === target && candidate.source?.mcp?.operations.create,
   );

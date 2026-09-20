@@ -94,14 +94,14 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
     const parent = parents.length === 1 ? parents[0] : undefined;
     const rels = parent?.source?.graphql?.relationships?.filter((rel) => rel.fieldKey === binding.field) ?? [];
     const rel = rels.length === 1 ? rels[0] : undefined;
-    if (!parent || parent.source?.authoringVersion !== 3 || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || rel.ownership !== "owned" || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
+    if (!parent || !rel || rel.kind !== "hasMany" || rel.resolve !== "hasMany" || rel.ownership !== "owned" || rel.via || !rel.inverse || !rel.foreignKey) unsupported("A canonical owned inverse collection is required.");
     const owner = parent!;
     const relation = rel!;
     if (binding.action === "move" && !relation.sortable) unsupported("Move requires a sortable collection.");
     if (!relation.sortable && request.beforeId !== undefined) invalid("beforeId is not accepted for a non-sortable collection.");
     const targets = catalog.tables.filter((table) => table.source?.graphql?.typeName === relation.target);
     const child = targets.length === 1 ? targets[0] : undefined;
-    if (!child || child.source?.authoringVersion !== 3 || !owner.tenantScoped || !child.tenantScoped || owner.primaryKey !== "id" || child.primaryKey !== "id") unsupported("Tenant-scoped canonical parent and child metadata is required.");
+    if (!child || !owner.tenantScoped || !child.tenantScoped || owner.primaryKey !== "id" || child.primaryKey !== "id") unsupported("Tenant-scoped canonical parent and child metadata is required.");
     const target = child!;
     const entityValues = catalog.entityValues ?? generatedEntityValues;
     entityValueCarriers(owner, entityValues);

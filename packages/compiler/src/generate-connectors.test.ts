@@ -44,7 +44,7 @@ function manifestWith(
         schema: "erp",
         name: "relations",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source,
       },
@@ -162,7 +162,7 @@ describe("shared MCP tool budget", () => {
       schema: "erp",
       name: `t${index}`,
       tenantScoped: true,
-      generatedCrud: true,
+      generatedCrudEligible: true,
       columns: [{ name: "id", type: "uuid" as const, primaryKey: true }],
       source: {
         mcp: {

@@ -6,7 +6,7 @@
  * Pipeline position: called by the main compiler alongside buildGraphQL. The
  * section is carried on the compiled contract and bridged into
  * TableDefinition.source.rest by the backend manifest, which is where the
- * fail-closed interaction with generatedCrud is enforced.
+ * fail-closed interaction with generatedCrudEligible is enforced.
  *
  * Input:  Core entity definition (authored `rest` block).
  * Output: RestSection | undefined — undefined means "no REST exposure".

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 
 /**
  * The write path for `platform.tenants.relation_id` — the tenant's own
@@ -35,7 +36,7 @@ export async function applyOrganizationRelationLinkMigration(db: OpenShapeForgeD
         app.bypass_rls()
         or (
           id = app.current_tenant()
-          and 'Organization.All.ReadWrite' = any (
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
             string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
           )
         )
@@ -44,7 +45,7 @@ export async function applyOrganizationRelationLinkMigration(db: OpenShapeForgeD
         app.bypass_rls()
         or (
           id = app.current_tenant()
-          and 'Organization.All.ReadWrite' = any (
+          and ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
             string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
           )
         )

@@ -259,12 +259,8 @@ export type PluginOperationContract = {
     inputField?: string;
     description?: string;
   };
-  /**
-   * Interface-neutral effects. Optional only for existing plugins; new
-   * contracts should declare it. The compiler keeps the historical HTTP
-   * method inference as a compatibility fallback until those plugins migrate.
-   */
-  effects?: {
+  /** Interface-neutral effects; every transport projection derives from them. */
+  effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };

@@ -346,7 +346,8 @@ operations:
           agreementsPlanned: { type: integer, x-osf-i18n: { title: { en: Agreements planned, nl: Geplande overeenkomsten } } }
           agreementsCompleted: { type: integer, x-osf-i18n: { title: { en: Agreements invoiced, nl: Gefactureerde overeenkomsten } } }
           invoicesProduced: { type: integer, x-osf-i18n: { title: { en: Invoices produced, nl: Geproduceerde facturen } } }
-          totalAmount: { type: number, x-osf-i18n: { title: { en: Total amount, nl: Totaalbedrag } } }
+          # Amounts cross the wire as decimal strings (docs/api.md, Numbers on the wire).
+          totalAmount: { type: string, pattern: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$", x-osf-i18n: { title: { en: Total amount, nl: Totaalbedrag } } }
           items:
             type: array
             x-osf-i18n: { title: { en: Items, nl: Regels } }
@@ -359,7 +360,7 @@ operations:
                 agreementId: { type: string, format: uuid, x-osf-i18n: { title: { en: Agreement, nl: Overeenkomst } } }
                 invoiceId: { type: [string, "null"], format: uuid, x-osf-i18n: { title: { en: Invoice, nl: Factuur } } }
                 invoiceNumber: { type: [integer, "null"], x-osf-i18n: { title: { en: Invoice number, nl: Factuurnummer } } }
-                amount: { type: number, x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
+                amount: { type: string, pattern: "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$", x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
     auth: { mode: session, roles: [Finance.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: write, external: none }

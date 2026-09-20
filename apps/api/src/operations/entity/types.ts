@@ -83,8 +83,7 @@ export type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
+  generatedCrudEligible: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   /** Compiler- and plugin-owned table constraints, as the manifest carries them. */
@@ -109,8 +108,6 @@ export type GeneratedCrudTable = {
       }>;
     }>;
     authoringEntityName?: string;
-    /** Present only for strict v2 entity authoring; absence means legacy v1. */
-    authoringVersion?: 2 | 3;
     versioning?: {
       strategy: "publishedSnapshot";
       versionEntity: string;
@@ -202,7 +199,8 @@ export type EntityOperationContract = EntityOperationRef & {
   target?:
     | { entityId: string; entityName: string; scope: "collection" }
     | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  errors?: import("../runtime.js").OperationContract["errors"];
+  /** Every failure the Operation declares; derived by the compiler for every entity Operation. */
+  errors: import("../runtime.js").OperationContract["errors"];
   interfaces?: {
     rest?: false | {
       method?: string;

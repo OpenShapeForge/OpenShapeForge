@@ -159,6 +159,7 @@ const restOperation: OperationContract = {
     header: "Idempotency-Key",
     inputField: "idempotencyKey",
   },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -208,6 +209,7 @@ const declaredErrorOperation: OperationContract = {
   auth: { mode: "public" },
   tenancy: { mode: "none" },
   idempotency: { mode: "none" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -1898,6 +1900,7 @@ test("binary and stream responses pass through canonical REST routes without buf
     auth: { mode: "public" },
     tenancy: { mode: "none" },
     idempotency: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: {
       rest: {
         method: "GET",
@@ -1962,6 +1965,7 @@ test("REST maps a required idempotency header into canonical input only", () => 
       header: "Idempotency-Key",
       inputField: "idempotencyKey",
     },
+    effects: { data: "write", external: "none" },
     transports: { rest: { method: "POST", path: "/api/demo/quotes/:quoteId" } },
   } as unknown as OperationContract;
   const request = {
@@ -2005,6 +2009,7 @@ test("REST coerces typed GET and DELETE query values before canonical validation
       additionalProperties: false,
     },
     idempotency: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: { rest: { method: "GET", path: "/api/demo/quotes" } },
   } as unknown as OperationContract;
   const request = {

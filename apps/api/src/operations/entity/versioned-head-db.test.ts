@@ -23,7 +23,7 @@ const column = (name: string, type: string, extra: Record<string, unknown> = {})
 const owned = (table: string, fk: string, children: unknown[] = []) => ({ schema: "erp", table, childColumns: ["tenant_id", fk], parentColumns: ["tenant_id", "id"], children });
 function table(name: string, columns: ReturnType<typeof column>[], versioning?: { owned: unknown[] }): GeneratedCrudTable {
   return {
-    name: `erp.${name}`, schema: "erp", table: name, tenantScoped: true, domainInternal: false, generatedCrud: true, primaryKey: "id",
+    name: `erp.${name}`, schema: "erp", table: name, tenantScoped: true, domainInternal: false, generatedCrudEligible: true, primaryKey: "id",
     columns: [column("id", "uuid", { primaryKey: true }), column("tenant_id", "uuid"), column("updated_at", "timestamptz"), ...columns],
     source: {
       authoringEntityName: name,

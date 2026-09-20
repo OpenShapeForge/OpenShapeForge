@@ -17,7 +17,7 @@ export const FIELD_VALUE_TYPE_TO_SQL: Record<string, string> = {
 export const FIELD_VALUE_TYPE_TO_GQL: Record<string, string> = {
   string: "String",
   integer: "Int",
-  number: "Float",
+  number: "Decimal",
   boolean: "Boolean",
   date: "String",
   datetime: "String",
@@ -73,12 +73,12 @@ export function fieldGraphqlBaseType(
         : isUuidField(field)
           ? "ID"
           : needsWideInteger(field)
-            ? "Float"
+            ? "Decimal"
             : (FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String");
     return `[${itemType}]`;
   }
   if (isUuidField(field)) return "ID";
-  if (needsWideInteger(field)) return "Float";
+  if (needsWideInteger(field)) return "Decimal";
   return FIELD_VALUE_TYPE_TO_GQL[field.baseType] ?? "String";
 }
 

@@ -19,7 +19,6 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntityAfterElicitation,
-  entityOperationRef,
   entityOperationContract,
   executeEntityOperation,
   currentRecordOffers,
@@ -53,11 +52,7 @@ export async function invokeTool(
   elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
-  const canonical = tool.outputSchema !== undefined;
-  const operationRef = (intent: McpOperation) =>
-    tool.operationId
-      ? { id: tool.operationId, intent }
-      : entityOperationRef(table, intent);
+  const operationRef = (intent: McpOperation) => ({ id: tool.operationId, intent });
   const offerIntents = (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
     McpOperation,
     boolean,
@@ -99,15 +94,6 @@ export async function invokeTool(
       if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
       if ("error" in operationResult) throw new OperationFailure(operationResult.error);
       const result = operationResult.data;
-      if (!canonical) {
-        return ok({
-          items: result.items.map((item) =>
-            serializeRowForEntity(entity, table, item.data),
-          ),
-          totalCount: result.totalCount,
-          nextCursor: result.nextCursor,
-        });
-      }
       return ok({
         data: {
           items: result.items.map((item) => ({
@@ -131,7 +117,6 @@ export async function invokeTool(
       if ("error" in result) throw new OperationFailure(result.error);
       const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
       return ok({
         data: serializeRowForEntity(entity, table, row),
         operations: result.operations,
@@ -140,7 +125,7 @@ export async function invokeTool(
 
     case "create": {
       const operation = entityOperationContract(operationRef("create").id);
-      if (canonical && operation.implementation?.type === "plugin") {
+      if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
           operation: operationRef("create"), offerIntents,
           input: pluginEntityTransportInput(operation, args),
@@ -150,13 +135,11 @@ export async function invokeTool(
         if (!result.data) throw new Error("Create operation returned no record.");
         return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
       }
-      const values = canonical
-        ? Object.fromEntries(
-            Object.entries(requireArguments(args)).filter(
-              ([key]) => key !== "confirmed" && key !== "blueprintId",
-            ),
-          )
-        : requireArguments(args);
+      const values = Object.fromEntries(
+        Object.entries(requireArguments(args)).filter(
+          ([key]) => key !== "confirmed" && key !== "blueprintId",
+        ),
+      );
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -176,13 +159,11 @@ export async function invokeTool(
       assertEntityValuesValid(operation, table, modelValues, {
         partial: typeof args.blueprintId === "string",
       });
-      if (canonical) {
-        requireCreateOperationConfirmation(operation, {
-          ...(typeof args.confirmed === "boolean"
-            ? { confirmed: args.confirmed }
-            : {}),
-        });
-      }
+      requireCreateOperationConfirmation(operation, {
+        ...(typeof args.confirmed === "boolean"
+          ? { confirmed: args.confirmed }
+          : {}),
+      });
       await assertPublishableWrite(db, session, tables, table, values);
       if (elicitationCompleted && elicitField) {
         const row = await createGeneratedEntityAfterElicitation(db, session, {
@@ -191,7 +172,6 @@ export async function invokeTool(
               into: elicitField,
             });
         const data = serializeRowForEntity(entity, table, row);
-        if (!canonical) return ok(data);
         return ok({
           data,
           operations: await currentRecordOffers(
@@ -226,9 +206,6 @@ export async function invokeTool(
       if (result.intent !== "create") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
       if (!result.data) throw new Error("Create operation returned no record.");
-      if (!canonical) {
-        return ok(serializeRowForEntity(entity, table, result.data));
-      }
       return ok({
         data: serializeRowForEntity(entity, table, result.data),
         operations: result.operations,
@@ -237,7 +214,7 @@ export async function invokeTool(
 
     case "update": {
       const operation = entityOperationContract(operationRef("update").id);
-      if (canonical && operation.implementation?.type === "plugin") {
+      if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
           operation: operationRef("update"), offerIntents,
           input: pluginEntityTransportInput(operation, args),
@@ -275,7 +252,6 @@ export async function invokeTool(
       if ("error" in result) throw new OperationFailure(result.error);
       const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
       return ok({
         data: serializeRowForEntity(entity, table, row),
         operations: result.operations,
@@ -296,7 +272,6 @@ export async function invokeTool(
       const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      if (!canonical) return ok({ deleted: true });
       return ok({ data: result.data, operations: result.operations });
     }
   }

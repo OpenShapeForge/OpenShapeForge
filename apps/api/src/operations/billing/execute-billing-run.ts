@@ -28,13 +28,15 @@ import { createGeneratedEntityForTable, updateGeneratedEntityForTable } from "..
 import { executeTransition, transitionBinding } from "../entity/transitions.js";
 import { billingTable, roundCurrency } from "./agreement-milestone.js";
 import { issueNumberedInvoice } from "./invoice-numbering.js";
+import { decimalText } from "@openshapeforge/operations";
 
 export type BillingRunItemResult = {
   agreementMilestoneId: string;
   agreementId: string;
   invoiceId: string | null;
   invoiceNumber: number | null;
-  amount: number;
+  /** The invoiced amount as the decimal text every transport carries. */
+  amount: string;
 };
 
 export type BillingRunResult = {
@@ -45,7 +47,8 @@ export type BillingRunResult = {
   agreementsPlanned: number;
   agreementsCompleted: number;
   invoicesProduced: number;
-  totalAmount: number;
+  /** The run's total as the decimal text every transport carries. */
+  totalAmount: string;
   items: BillingRunItemResult[];
 };
 
@@ -163,7 +166,7 @@ export async function runMilestoneBilling(
       const amount = roundCurrency(Number(milestone.amount));
       totalAmount = roundCurrency(totalAmount + amount);
       if (dryRun) {
-        results.push({ agreementMilestoneId: milestone.id, agreementId: milestone.agreement_id, invoiceId: null, invoiceNumber: null, amount });
+        results.push({ agreementMilestoneId: milestone.id, agreementId: milestone.agreement_id, invoiceId: null, invoiceNumber: null, amount: String(decimalText(amount)) });
         continue;
       }
       const relationId = await agreementRelation(trx, tenantId, milestone.agreement_id);
@@ -210,7 +213,7 @@ export async function runMilestoneBilling(
         producedInvoiceId: invoiceId,
       });
       await executeTransition(db, session, invoice, { id: milestone.id, producedInvoiceId: invoiceId });
-      results.push({ agreementMilestoneId: milestone.id, agreementId: milestone.agreement_id, invoiceId, invoiceNumber, amount });
+      results.push({ agreementMilestoneId: milestone.id, agreementId: milestone.agreement_id, invoiceId, invoiceNumber, amount: String(decimalText(amount)) });
     }
 
     const completed = await updateGeneratedEntityForTable(db, session, runs, runId, {
@@ -232,7 +235,7 @@ export async function runMilestoneBilling(
       agreementsPlanned,
       agreementsCompleted,
       invoicesProduced,
-      totalAmount,
+      totalAmount: String(decimalText(totalAmount)),
       items: results,
     };
   });

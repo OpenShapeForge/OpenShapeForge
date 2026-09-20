@@ -49,8 +49,7 @@ type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
+  generatedCrudEligible: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   source?: {
@@ -71,9 +70,7 @@ type ConditionInput = Record<string, unknown>;
 const generatedCrudTables = (manifest.tables as GeneratedCrudTable[]).filter(
   (table) =>
     !table.domainInternal &&
-    (table.generatedCrudEligible === undefined
-      ? table.generatedCrud === true
-      : table.generatedCrudEligible === true) &&
+    table.generatedCrudEligible === true &&
     table.primaryKey,
 );
 
@@ -141,10 +138,11 @@ function isWorkflowEntityActionEnabled(
   action: GeneratedWorkflowEntityAction,
 ): boolean {
   const operation = WORKFLOW_ACTION_OPERATION[action];
-  if (table.source?.crud !== undefined) {
-    return table.source.crud.operations?.[operation] === true;
-  }
-  return table.generatedCrud === true;
+  return (
+    !table.domainInternal &&
+    table.generatedCrudEligible === true &&
+    table.source?.crud?.operations?.[operation] === true
+  );
 }
 
 function requireWorkflowRelationshipRead(

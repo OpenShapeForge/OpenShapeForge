@@ -30,6 +30,17 @@ export {
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
+/**
+ * The AAD scope under which a connection row's OAuth tokens are encrypted.
+ * Tokens share the values object with the elicited configuration but not its
+ * scope: the elicited fields are bound to the source table, the tokens to the
+ * connection table, so rotating one key never invalidates the other. One
+ * scope per connection table, whoever owns the row.
+ */
+export function connectionTokenSecretScope(connectionTable: string): string {
+  return `${connectionTable}:tokens`;
+}
+
 const MAX_ELICITED_VALUE_JSON_DEPTH = 64;
 
 function looksLikeStoredSecret(value: unknown): value is Record<string, unknown> {

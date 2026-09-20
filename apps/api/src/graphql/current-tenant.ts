@@ -14,7 +14,7 @@
  *
  * ══ WHY IT IS NOT THE `tenants` COLLECTION THE WEB APP ASKED FOR ════════════
  *
- * `platform.tenants` is declared `generatedCrud: false` and `domainInternal:
+ * `platform.tenants` is declared `generatedCrudEligible: false` and `domainInternal:
  * true` precisely so it gets NO generated GraphQL or REST surface, and that is
  * not an oversight to work around. The tenant graph is per-tenant: every type on
  * it is fenced by a tenant predicate, and a registry whose rows ARE tenants has

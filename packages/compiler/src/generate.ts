@@ -11,6 +11,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { SCALAR_PROJECTION } from "@openshapeforge/operations";
 import { assertTenantBoundReferences, renderOnDeleteSql, renderTenantRegistryWritePolicies } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
@@ -110,54 +111,8 @@ function stableIdentifier(value: string): string {
   return `${value.slice(0, 54)}_${hash}`;
 }
 
-function sqlType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-      return "uuid";
-    case "text":
-      return "text";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "integer";
-    case "bigint":
-      return "bigint";
-    case "numeric":
-      return "numeric";
-    case "date":
-      return "date";
-    case "timestamptz":
-      return "timestamptz";
-    case "jsonb":
-      return "jsonb";
-    case "text[]":
-      return "text[]";
-  }
-}
-
-function tsType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-    case "text":
-      return "string";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "number";
-    case "bigint":
-      return "string";
-    case "numeric":
-      return "Numeric";
-    case "date":
-      return "DateOnly";
-    case "timestamptz":
-      return "Timestamp";
-    case "jsonb":
-      return "Json";
-    case "text[]":
-      return "string[]";
-  }
-}
+const sqlType = (type: ScalarType): string => SCALAR_PROJECTION[type].sql;
+const tsType = (type: ScalarType): string => SCALAR_PROJECTION[type].ts;
 
 function generatedTsType(column: ColumnDefinition): string {
   if (column.type === "timestamptz") {
@@ -719,20 +674,6 @@ ${dbFields}
 `;
 }
 
-function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
-  const crud = table.source?.crud;
-  if (crud === undefined) return true;
-
-  const operations = crud.operations;
-  return (
-    operations?.list === true &&
-    operations.get === true &&
-    operations.create === true &&
-    operations.update === true &&
-    operations.delete === true
-  );
-}
-
 /**
  * How a caller reaches an operation that writes a `writtenBy` column.
  *
@@ -845,14 +786,6 @@ function renderManifestJson(
       },
     } : {}),
     generatedCrudEligible: isGeneratedCrudEligible(table),
-    // Legacy all-or-nothing marker. Partial policies deliberately keep this
-    // false so an older runtime hides them; current runtimes read the explicit
-    // eligibility marker and per-operation source.crud block above.
-    generatedCrud:
-      isGeneratedCrudEligible(table) &&
-      isLegacyFullCrudCompatible(table) &&
-      table.generatedCrud === true &&
-      table.domainInternal !== true,
     // The single column generated CRUD addresses a row by; null for a
     // composite key, which no CRUD-eligible table carries.
     primaryKey: singlePrimaryKey(table)?.name ?? null,

@@ -42,7 +42,17 @@ const tables = new Map<string, never>([
 ]);
 
 const tool = (operation: "list" | "get" | "create" | "update" | "delete", entity: string, table: string) =>
-  ({ name: `${entity}_${operation}`, operation, entity, table, description: "", inputSchema: {}, annotations: {} }) as never;
+  ({
+    name: `${entity}_${operation}`,
+    operationId: `${entity}.${operation}`,
+    operation,
+    entity,
+    table,
+    description: "",
+    inputSchema: {},
+    outputSchema: { type: "object" },
+    annotations: {},
+  }) as never;
 
 describe("crudToolCanSucceed", () => {
   it("omits the delete of an owned child, which the generic path always refuses", () => {

@@ -171,6 +171,7 @@ describe("renderTypeDefinition", () => {
     ]);
     expect(() => buildSchema(`
       scalar JSON
+      scalar Decimal
       ${entityOperationSharedTypeDefs}
       ${sdl}
     `)).not.toThrow();
@@ -193,6 +194,7 @@ describe("renderTypeDefinition", () => {
     );
     const schema = buildSchema(`
       scalar JSON
+      scalar Decimal
       ${entityOperationSharedTypeDefs}
       ${sdl}
     `);

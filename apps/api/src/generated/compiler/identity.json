@@ -1,0 +1,32 @@
+{
+  "administratorRole": "Organization.All.ReadWrite",
+  "memberRoles": [
+    "General.All.Read"
+  ],
+  "actingParty": {
+    "entity": "Relation",
+    "nameField": "displayName",
+    "typeField": "relationType",
+    "personType": "person",
+    "organizationType": "organization",
+    "statusField": "status",
+    "activeStatus": "active",
+    "profileField": "businessContext"
+  },
+  "person": {
+    "entity": "NaturalPerson",
+    "relationField": "relationId",
+    "firstNameField": "firstName",
+    "lastNameField": "lastName"
+  },
+  "loginContact": {
+    "entity": "ContactDetail",
+    "relationField": "relationId",
+    "typeField": "type",
+    "emailType": "email",
+    "valueField": "value",
+    "primaryField": "isPrimary",
+    "statusField": "status",
+    "activeStatus": "active"
+  }
+}

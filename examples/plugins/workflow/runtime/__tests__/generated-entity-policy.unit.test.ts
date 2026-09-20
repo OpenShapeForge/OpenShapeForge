@@ -4,7 +4,7 @@ import { __generatedEntityBridgeInternals } from "../generated-entity-bridges.js
 
 const table = {
   name: "erp.read_only_widgets",
-  generatedCrud: false,
+  generatedCrudEligible: true,
   source: {
     crud: {
       operations: {
@@ -27,10 +27,10 @@ describe("generated workflow entity CRUD policy", () => {
     expect(enabled(table as never, "delete")).toBe(false);
   });
 
-  test("preserves all operations only for a legacy opted-in table", () => {
+  test("an eligibility marker alone enables nothing", () => {
     const enabled = __generatedEntityBridgeInternals.isWorkflowEntityActionEnabled;
-    expect(enabled({ generatedCrud: true } as never, "update")).toBe(true);
-    expect(enabled({ generatedCrud: false } as never, "list")).toBe(false);
+    expect(enabled({ generatedCrudEligible: true } as never, "update")).toBe(false);
+    expect(enabled({ generatedCrudEligible: false } as never, "list")).toBe(false);
   });
 
   test("relationship filters cannot read a target whose matching operation is disabled", () => {

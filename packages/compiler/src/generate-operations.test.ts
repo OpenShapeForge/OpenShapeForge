@@ -44,6 +44,7 @@ const operation: PluginOperationContract = {
   auth: { mode: "session", roles: ["seller"], scopes: ["quotes:write"] },
   tenancy: { mode: "required" },
   idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: { method: "POST", path: "/api/demo/quotes/:quoteId/publish", response: { status: 202, kind: "json" } },
     mcp: { enabled: true, name: "demo_publish_quote" },
@@ -167,6 +168,7 @@ describe("first-class plugin operations", () => {
   const entityOperation: CompiledEntityOperation = {
     key: "list",
     id: "Relation.list",
+    errors: [],
       entityId: "hubble.Relation",
     entityName: "Relation",
     name: "List Relation",
@@ -220,6 +222,7 @@ describe("first-class plugin operations", () => {
     const entityOperation: CompiledEntityOperation = {
       key: "remove",
       id: "Relation.remove",
+      errors: [],
       entityId: "hubble.Relation",
       entityName: "Relation",
       name: "Delete relation",
@@ -347,6 +350,7 @@ describe("first-class plugin operations", () => {
     const target: CompiledEntityOperation = {
       id: "Adapter.create",
       key: "create",
+      errors: [],
       intent: "create",
       entityId: "osf-integration.Adapter",
       entityName: "Adapter",
@@ -1118,7 +1122,7 @@ describe("first-class plugin operations", () => {
         schema: "public",
         name: "legacy_quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           rest: {
@@ -1206,7 +1210,7 @@ describe("first-class plugin operations", () => {
         schema: "demo",
         name: "quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           graphql: {

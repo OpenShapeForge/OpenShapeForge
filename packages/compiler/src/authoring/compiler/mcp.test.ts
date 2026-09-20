@@ -137,11 +137,11 @@ describe("buildMcp", () => {
     });
   });
 
-  it("object-form operations carry enabled plus name/description overrides", () => {
+  it("object-form operations carry enabled plus name overrides", () => {
     const section = mcpSection({
         operations: {
           list: false,
-          get: { name: "read_contact_detail", description: "Read one contact detail." },
+          get: { name: "read_contact_detail" },
           update: { name: "edit_contact_detail" },
           delete: { enabled: false },
         },
@@ -154,7 +154,7 @@ describe("buildMcp", () => {
       delete: false,
     });
     expect(section?.toolOverrides).toEqual({
-      get: { name: "read_contact_detail", description: "Read one contact detail." },
+      get: { name: "read_contact_detail" },
       update: { name: "edit_contact_detail" },
     });
   });
@@ -164,7 +164,7 @@ describe("buildMcp", () => {
     expect(section?.toolOverrides).toBeUndefined();
   });
 
-  it("rejects name/description overrides on the generic tool style", () => {
+  it("rejects name overrides on the generic tool style", () => {
     expect(() =>
       mcpSection({ tools: "generic", operations: { get: { name: "read_contact" } } }),
     ).toThrow(/generic tool style/);

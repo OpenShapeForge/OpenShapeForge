@@ -3,10 +3,15 @@
 import type {
   CompiledAuthorization,
   CompiledEntityOperation,
+  CompiledRelationship,
   CrudSection,
   EntityOperationIntent,
 } from "../types.js";
 import type { CoreEntity } from "../types.js";
+import {
+  deriveEntityOperationErrors,
+  withDeclaredEntityOperationErrors,
+} from "./entity-operation-errors.js";
 import { operationByAction } from "../entity-model.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
@@ -22,6 +27,8 @@ type OperationSource = {
   coreEntity?: CoreEntity;
   crud: CrudSection;
   authorization: CompiledAuthorization;
+  /** The entity's compiled relationships; a collection field makes its generic writes refusable. */
+  relationships?: readonly Pick<CompiledRelationship, "kind">[];
 };
 
 function defaultEffects(intent: EntityOperationIntent) {
@@ -107,7 +114,16 @@ function compileOperation(
           },
         }
       : {}),
-    ...(pluginImplementation && definition?.errors ? { errors: definition.errors } : {}),
+    errors: withDeclaredEntityOperationErrors(
+      deriveEntityOperationErrors(source.entity.name, intent, {
+        concurrency: definition?.concurrency,
+        confirmation: definition?.confirmation ?? { mode: "none" },
+        recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
+        secureInput: definition?.interaction !== undefined,
+        collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
+      }),
+      pluginImplementation ? definition?.errors : undefined,
+    ),
     ...(pluginImplementation && source.coreEntity?.interfaces
       ? {
           interfaces: Object.fromEntries(

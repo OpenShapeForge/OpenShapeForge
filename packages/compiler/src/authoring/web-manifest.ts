@@ -403,11 +403,8 @@ function projectableEntities(
 ): ProjectableEntity[] {
   return entities.flatMap(({ slug, contract }) => {
     if (contract.entity.valueDefinition) return [];
-    if (contract.authoringVersion === 1 && !contract.rest) return [];
-    const exposed = contract.authoringVersion >= 2
-      ? contract.interfaces?.web?.operations
-      : undefined;
-    if (!contract.entityOperations.list || (contract.authoringVersion >= 2 && !exposed?.list)) return [];
+    const exposed = contract.interfaces?.web?.operations;
+    if (!contract.entityOperations.list || !exposed?.list) return [];
     const view = contextFor(contract, options.context);
     const operations = Object.fromEntries(
       (["list", "get", "create", "update", "delete"] as const)

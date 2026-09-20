@@ -2,6 +2,8 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
+import { manifestTableForEntity } from "../manifest-lookup.js";
 
 /**
  * Grants the provisioned, restricted `openshapeforge_app` role exactly the
@@ -44,8 +46,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * automatically on every migrate.
  */
 
-/** The restricted runtime role. */
-export const APP_ROLE = "openshapeforge_app";
+/** The restricted runtime role, as the generated manifest's role contract names it. */
+export const APP_ROLE = databaseRole("app").name;
 
 /**
  * The local-dev-only default password for {@link APP_ROLE}. It matches the
@@ -281,19 +283,21 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
   // remains generic; these final revokes are re-applied on every migrate so a
   // fresh table, default privilege, or manual grant cannot reopen updates or
   // deletes for the runtime role. Generated reads remain available.
+  const documents = manifestTableForEntity("Document");
+  const documentVersions = manifestTableForEntity("DocumentVersion");
   await sql`
     do $$
     begin
-      if to_regclass('erp.documents') is not null then
+      if to_regclass(${sql.lit(documents.name)}) is not null then
         execute format(
-          'revoke insert on erp.documents from %I',
-          ${sql.lit(APP_ROLE)}
+          'revoke insert on %I.%I from %I',
+          ${sql.lit(documents.schema)}, ${sql.lit(documents.table)}, ${sql.lit(APP_ROLE)}
         );
       end if;
-      if to_regclass('erp.document_versions') is not null then
+      if to_regclass(${sql.lit(documentVersions.name)}) is not null then
         execute format(
-          'revoke update, delete on erp.document_versions from %I',
-          ${sql.lit(APP_ROLE)}
+          'revoke update, delete on %I.%I from %I',
+          ${sql.lit(documentVersions.schema)}, ${sql.lit(documentVersions.table)}, ${sql.lit(APP_ROLE)}
         );
       end if;
       -- The bypass audit trail is append-only for the runtime: rows are

@@ -10,7 +10,7 @@
  * inside the realm itself.
  */
 import { describe, expect, it } from "bun:test";
-import { organizationTenantCacheKey, realmFromIssuer } from "../identity.js";
+import { organizationTenantCacheKey, realmFromIssuer } from "../tenant-resolution.js";
 
 const NUL = "\u0000";
 

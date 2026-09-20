@@ -122,17 +122,17 @@ describe("the milestone billing run against PostgreSQL", () => {
     const result = await executeBillingRun({ idempotencyKey: "run-1" }, handlerContext(session));
     const run = (result as { value: BillingRunResult }).value;
     // Two agreements, three milestones: the agreement counts count agreements.
-    expect(run).toMatchObject({ status: "completed", mode: "milestone", dryRun: false, agreementsPlanned: 2, agreementsCompleted: 2, invoicesProduced: 3, totalAmount: 400.5 });
-    expect(run.items.map((item) => [item.agreementMilestoneId, item.invoiceNumber, item.amount])).toEqual([[triggered1, 1, 100], [triggered2, 2, 250.5], [triggered3, 3, 50]]);
+    expect(run).toMatchObject({ status: "completed", mode: "milestone", dryRun: false, agreementsPlanned: 2, agreementsCompleted: 2, invoicesProduced: 3, totalAmount: "400.5" });
+    expect(run.items.map((item) => [item.agreementMilestoneId, item.invoiceNumber, item.amount])).toEqual([[triggered1, 1, "100"], [triggered2, 2, "250.5"], [triggered3, 3, "50"]]);
 
     for (const [id, item] of [[triggered1, run.items[0]!], [triggered2, run.items[1]!], [triggered3, run.items[2]!]] as const) {
       expect(await milestoneRow(id)).toEqual({ status: "invoiced", produced_invoice_id: item.invoiceId });
       const invoice = (await sql<Record<string, unknown>>`select to_jsonb(i.*) as row from erp.invoices i where id = ${item.invoiceId}::uuid`.execute(privileged.db)).rows[0]!.row as Record<string, unknown>;
       expect(invoice).toMatchObject({ tenant_id: tenantA, invoice_kind: "sales", invoice_status: "issued", invoice_number: item.invoiceNumber, agreement_id: item.agreementId });
-      expect(Number(invoice.amount_total)).toBe(item.amount);
+      expect(Number(invoice.amount_total)).toBe(Number(item.amount));
       expect(invoice.relation_id).toBe(item.agreementId === first.agreementId ? first.relationId : second.relationId);
       const lines = (await sql<{ amount_total: string }>`select amount_total from erp.invoice_lines where invoice_id = ${item.invoiceId}::uuid`.execute(privileged.db)).rows;
-      expect(lines.map((line) => Number(line.amount_total))).toEqual([item.amount]);
+      expect(lines.map((line) => Number(line.amount_total))).toEqual([Number(item.amount)]);
     }
     expect((await milestoneRow(pending)).status).toBe("pending");
     expect((await milestoneRow(cancelled)).status).toBe("cancelled");
@@ -150,7 +150,7 @@ describe("the milestone billing run against PostgreSQL", () => {
 
     // A second run finds nothing left: invoiced is terminal.
     const again = (await executeBillingRun({ idempotencyKey: "run-2" }, handlerContext(session)) as { value: BillingRunResult }).value;
-    expect(again).toMatchObject({ agreementsPlanned: 0, invoicesProduced: 0, totalAmount: 0, items: [] });
+    expect(again).toMatchObject({ agreementsPlanned: 0, invoicesProduced: 0, totalAmount: "0", items: [] });
   }, 60_000);
 
   test("a replay with the same key returns the first result through the core receipt; another actor's reuse is refused", async () => {
@@ -191,7 +191,7 @@ describe("the milestone billing run against PostgreSQL", () => {
     const { agreementId } = await agreement(tenantId);
     const id = await milestone(session, agreementId, 30);
     const dry = await keyed(session, { idempotencyKey: "dry", dryRun: true });
-    expect(dry).toMatchObject({ dryRun: true, agreementsPlanned: 1, agreementsCompleted: 0, invoicesProduced: 0, totalAmount: 30, items: [{ agreementMilestoneId: id, invoiceId: null, invoiceNumber: null, amount: 30 }] });
+    expect(dry).toMatchObject({ dryRun: true, agreementsPlanned: 1, agreementsCompleted: 0, invoicesProduced: 0, totalAmount: "30", items: [{ agreementMilestoneId: id, invoiceId: null, invoiceNumber: null, amount: "30" }] });
     expect((await milestoneRow(id)).status).toBe("triggered");
     expect((await sql<{ count: string }>`select count(*)::text as count from erp.invoices where tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows[0]!.count).toBe("0");
     await fails(keyed(session, { idempotencyKey: "missing", agreementId: randomUUID() }), "REFERENCE_NOT_FOUND");

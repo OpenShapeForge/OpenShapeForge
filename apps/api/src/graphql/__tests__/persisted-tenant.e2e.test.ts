@@ -5,10 +5,8 @@
  * persisted endpoint, and cross-tenant isolation holds there too.
  *
  * The entity is chosen by what the manifest actually persists — the first
- * GraphQL table with both documents — not by position. The readers are
- * shape-aware (e2e/gql-shapes.ts); today every persisted CRUD document is
- * v1-shaped, so the canonical branch stays unexercised until the generator
- * emits persisted documents for a converted entity.
+ * GraphQL table with both documents — not by position. The readers come from
+ * e2e/gql-shapes.ts.
  */
 import { expect } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
@@ -31,7 +29,7 @@ import {
   type GqlResponse,
   type Identity,
 } from "./e2e/harness.js";
-import { acquireLease, isCanonical, isEntityBackedCreate } from "./e2e/operations.js";
+import { acquireLease, isEntityBackedCreate } from "./e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -114,8 +112,8 @@ describe("persisted operations with live tenant data", () => {
     expect(foreign.errors?.[0]?.extensions?.code).not.toBe("FORBIDDEN");
     expect(recordOf(table!, foreign, graphql.singleQueryName)).toBeNull();
 
-    // A canonical delete carries its lease controls in the persisted input.
-    const controls = isCanonical(table!) ? await acquireLease(tenantA, table!, id, "delete") : {};
+    // A delete carries its lease controls in the persisted input.
+    const controls = await acquireLease(tenantA, table!, id, "delete");
     const deleted = await requestPersisted(
       tenantA,
       `Delete${graphql.typeName}`,

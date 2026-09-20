@@ -8,7 +8,7 @@ import { resolveSessionContext } from "../auth/identity.js";
 import { OrganizationBindingError } from "../auth/organization-binding.js";
 import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import { canonicalResourceUri, resourcePathOf } from "./protected-resource-metadata.js";
-import { isOrganizationAlias } from "./organization-resource.js";
+import { organizationAliasFromPath } from "./organization-resource.js";
 import {
   assertBearerCredential,
   assertJsonRpcContentType,
@@ -30,8 +30,8 @@ export function createMcpSessionAdmission(
 ): McpRouteContext["requireMcpSession"] {
   /**
    * The resource a request is addressed to. `/api/mcp` resolves the tenant
-   * from the token alone (legacy). `/api/mcp/organizations/<alias>` binds the
-   * session to that organization: the token must be a member of it, carry
+   * from the token alone. `/<alias>` binds the session to that
+   * organization: the token must be a member of it, carry
    * this resource's URL in `aud` and link to a tenant through the registry
    * (auth/organization-binding.ts). A refusal there is a 403 with the same
    * body for every cause, so the path cannot enumerate organizations.
@@ -41,11 +41,14 @@ export function createMcpSessionAdmission(
     session: TrustedSessionContext;
     resource: string;
   }> {
-    const alias = (request.params as { alias?: unknown } | undefined)?.alias;
-    if (usesHostOrganizationContext() && alias !== undefined) {
+    const routed = (request.params as { alias?: unknown } | undefined)?.alias;
+    if (usesHostOrganizationContext() && routed !== undefined) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
-    if (alias !== undefined && !isOrganizationAlias(alias)) {
+    // The parametric route also matches a reserved first segment and a
+    // malformed alias; the one path parser decides, not the route table.
+    const alias = routed === undefined ? undefined : organizationAliasFromPath(request.url);
+    if (routed !== undefined && (alias === null || alias !== routed)) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
     const resource = resourcePathOf(request, alias ?? null);

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The two role names the organization-membership modules have to agree on,
- * and nothing else.
+ * and nothing else. Neither is typed here: both are declared in the identity
+ * contract (`identity:` in authorization.yaml → generated/compiler/identity.json,
+ * read through ./identity-contract.ts), so the engine holds no role name of
+ * its own.
  *
  * They live in a leaf module on purpose. ./identity-link.ts and
  * ./employee-invitations.ts import each other — an invitation is what admits
@@ -16,11 +19,16 @@
  *
  * Both are re-exported from ./identity-link.ts (and, for
  * NEEDS_ROLE_ASSIGNMENT_ROLES, from ./identity.ts) so no existing importer
- * has to know this file exists.
+ * has to know this file exists. ./identity-contract.ts is itself a leaf that
+ * only reads generated JSON, so the cycle argument above still holds.
  */
+import { IDENTITY_CONTRACT } from "./identity-contract.js";
 
-/** Gates every organization-admin surface: link_identity, invite_employee, set_member_role. */
-export const IDENTITY_LINK_ADMIN_ROLE = "Organization.All.ReadWrite";
+/**
+ * Gates every organization-admin surface: link_identity, invite_employee,
+ * set_member_role. Declared as `identity.administratorRole` in the contract.
+ */
+export const IDENTITY_LINK_ADMIN_ROLE: string = IDENTITY_CONTRACT.administratorRole;
 
 /**
  * What a brand-new identity's session may do before an administrator has
@@ -32,10 +40,10 @@ export const IDENTITY_LINK_ADMIN_ROLE = "Organization.All.ReadWrite";
  * nothing short of overriding the session itself can affect that very first
  * request.
  *
- * `General.All.Read` is read-only access to the generic entity surface
- * (whatever the realm's "read everything" composite grants) — enough to look
- * around — deliberately not `Organization.All.ReadWrite` (org admin) or any
- * `Pentest.*` role. `whoami`/`day_start` need no role at all, so they keep
- * working regardless of this override.
+ * Declared as `identity.memberRoles` in the contract: by default the realm's
+ * read-only composite over the generic entity surface — enough to look
+ * around — deliberately not the administrator role or any domain role.
+ * `whoami`/`day_start` need no role at all, so they keep working regardless
+ * of this override.
  */
-export const NEEDS_ROLE_ASSIGNMENT_ROLES: readonly string[] = ["General.All.Read"];
+export const NEEDS_ROLE_ASSIGNMENT_ROLES: readonly string[] = IDENTITY_CONTRACT.memberRoles;

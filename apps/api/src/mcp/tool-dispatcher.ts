@@ -218,10 +218,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
       }
     } catch (error) {
       return {
-        result: failed(
-          error,
-          current?.source !== "crud" || current.tool.outputSchema !== undefined,
-        ),
+        result: failed(error),
       };
     }
     if (!current) {
@@ -357,10 +354,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
         : await run();
     } catch (error) {
       return {
-        result: failed(
-          error,
-          current.source !== "crud" || current.tool.outputSchema !== undefined,
-        ),
+        result: failed(error),
       };
     }
   };

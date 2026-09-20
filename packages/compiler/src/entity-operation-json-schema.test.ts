@@ -71,7 +71,7 @@ entityOperations.delete!.interaction.confirmation = {
 };
 
 const contract = {
-  authoringVersion: 2,
+  authoringVersion: 3,
   entity: { ...entity, title: "Work item", domains: [] },
   model: {
     fields: [

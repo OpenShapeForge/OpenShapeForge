@@ -26,10 +26,7 @@ import type {
 } from "./types.js";
 
 export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean {
-  if (table.domainInternal) return false;
-  return table.generatedCrudEligible === undefined
-    ? table.generatedCrud === true
-    : table.generatedCrudEligible === true;
+  return !table.domainInternal && table.generatedCrudEligible === true;
 }
 
 /**
@@ -51,10 +48,10 @@ export function isGeneratedCrudOperationEnabled(
   table: GeneratedCrudTable,
   operation: GeneratedCrudExposureOperation,
 ): boolean {
-  if (table.source?.crud !== undefined) {
-    return table.source.crud.operations?.[operation] === true;
-  }
-  return table.generatedCrud === true;
+  return (
+    isGeneratedCrudTableEligible(table) &&
+    table.source?.crud?.operations?.[operation] === true
+  );
 }
 
 const generatedCrudTables = new Map(
@@ -107,7 +104,7 @@ export function requireEntityOperation(
   const authorizationOperation = AUTHORIZATION_OPERATION[operation];
   const allowed = entityRoleSets.get(table.name)?.[authorizationOperation];
   if (!allowed || allowed.size === 0) {
-    // A generatedCrud table without role metadata means the manifest predates
+    // A CRUD-eligible table without role metadata means the manifest predates
     // the authorization bridge (stale artifacts) — deny with distinct wording
     // so operators recognize the regeneration bug instead of a policy denial.
     throw operationFailure({

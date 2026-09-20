@@ -11,6 +11,7 @@ import {
   DATA_ACQUISITION_TOOL_FOOTER,
   advertisedEntityTool,
   advertisedToolBytes,
+  schemaInLanguage,
 } from "@openshapeforge/operations";
 import {
   advertisedToolSizes,
@@ -38,7 +39,7 @@ const field = (
 
 const contract = (
   overrides: {
-    authoringVersion?: 1 | 2;
+    authoringVersion?: 3;
     name?: string;
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
@@ -48,7 +49,7 @@ const contract = (
   } = {},
 ): CompiledEntityContract => {
   const compiled = {
-    authoringVersion: overrides.authoringVersion ?? 1,
+    authoringVersion: overrides.authoringVersion ?? 3,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -61,7 +62,18 @@ const contract = (
       domains: ["things"],
       ...(overrides.filterField ? { filterField: overrides.filterField } : {}),
     },
-    storage: { table: "widgets", columns: overrides.columns ?? [] },
+    storage: {
+      table: "widgets",
+      // Every persisted field has a storage column; a fixture that names none
+      // gets one per field, as the compiler would have derived.
+      columns: overrides.columns ?? (overrides.fields ?? [field({ key: "name" })]).map((entry) => ({
+        field: entry.key,
+        column: entry.key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+        type: entry.baseType === "boolean" ? "boolean" : entry.baseType === "object" || entry.cardinality === "collection" ? "jsonb" : "text",
+        nullable: !entry.required,
+        storageClass: "core" as const,
+      })),
+    },
     model: {
       fields: overrides.fields ?? [field({ key: "name" })],
       relationships: overrides.relationships ?? [],
@@ -126,6 +138,7 @@ const staticOperation = (index: number): CompiledPluginOperation => ({
   auth: { mode: "session", roles: ["Demo.Read"] },
   tenancy: { mode: "required" },
   idempotency: { mode: "none" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -188,8 +201,8 @@ describe("buildMcpCatalog", () => {
     expect(catalog.tools[0]).toMatchObject({
       operation: "list",
     });
-    expect(catalog.tools[0]).not.toHaveProperty("operationId");
-    expect(catalog.tools[0]).not.toHaveProperty("outputSchema");
+    expect(catalog.tools[0]).toHaveProperty("operationId");
+    expect(catalog.tools[0]).toHaveProperty("outputSchema");
   });
 
   it("emits canonical output envelopes for every generated entity operation", () => {
@@ -197,7 +210,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
-            authoringVersion: 2,
+            authoringVersion: 3,
             fields: [
               field({ key: "id", required: true, validation: { format: "uuid" } }),
               field({ key: "name" }),
@@ -331,7 +344,7 @@ describe("buildMcpCatalog", () => {
   });
 
   it("projects version, lease and confirmation controls into v2 mutation inputs", () => {
-    const secured = contract({ authoringVersion: 2 });
+    const secured = contract({ authoringVersion: 3 });
     secured.entityOperations.create = {
       ...secured.entityOperations.create!,
       interaction: { confirmation: { mode: "acknowledgement" } },
@@ -382,7 +395,7 @@ describe("buildMcpCatalog", () => {
     const update = catalog.tools.find((tool) => tool.operation === "update")!;
     const deletion = catalog.tools.find((tool) => tool.operation === "delete")!;
 
-    expect(create.inputSchema.required).not.toContain("confirmed");
+    expect(create.inputSchema.required ?? []).not.toContain("confirmed");
     expect(prop(create.inputSchema, "confirmed")).toMatchObject({
       type: "boolean",
     });
@@ -438,7 +451,7 @@ describe("buildMcpCatalog", () => {
   });
 
   it("leaves acknowledgement to the canonical runtime instead of MCP schema rejection", () => {
-    const acknowledged = contract({ authoringVersion: 2 });
+    const acknowledged = contract({ authoringVersion: 3 });
     for (const intent of ["create", "update", "delete"] as const) {
       acknowledged.entityOperations[intent] = {
         ...acknowledged.entityOperations[intent]!,
@@ -449,13 +462,13 @@ describe("buildMcpCatalog", () => {
     const catalog = buildMcpCatalog([input(acknowledged)], "test");
     for (const intent of ["create", "update", "delete"] as const) {
       const tool = catalog.tools.find((candidate) => candidate.operation === intent)!;
-      expect(tool.inputSchema.required).not.toContain("confirmed");
+      expect(tool.inputSchema.required ?? []).not.toContain("confirmed");
       expect(prop(tool.inputSchema, "confirmed")).toMatchObject({
         type: "boolean",
       });
       expect(prop(tool.inputSchema, "confirmed")).not.toHaveProperty("const");
       expect(prop(tool.inputSchema, "confirmed").description).toContain(
-        "Only true",
+        "acknowledges",
       );
     }
   });
@@ -465,7 +478,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
-            authoringVersion: 2,
+            authoringVersion: 3,
             mcp: {
               toolPrefix: "widget",
               tools: "generic",
@@ -502,7 +515,7 @@ describe("buildMcpCatalog", () => {
 
   it("keeps plugin-backed CRUD schemas under the canonical generic tools", () => {
     const pluginBacked = contract({
-      authoringVersion: 2,
+      authoringVersion: 3,
       mcp: {
         toolPrefix: "widget",
         tools: "generic",
@@ -966,7 +979,7 @@ describe("buildMcpCatalog", () => {
       expect(prop(metadata, "source").default).toBeUndefined();
     });
 
-    it("constrains list sorting to scalar fields and mentions the filter field", () => {
+    it("constrains list sorting to scalar fields", () => {
       const catalog = buildMcpCatalog(
         [
           input(
@@ -984,7 +997,6 @@ describe("buildMcpCatalog", () => {
       );
       const list = catalog.tools.find((tool) => tool.operation === "list")!;
       expect(prop(list.inputSchema, "sortField").enum).toEqual(["name"]);
-      expect(list.description).toContain('"name"');
     });
   });
 
@@ -1180,11 +1192,14 @@ describe("buildMcpCatalog", () => {
         description: { en: create.description.split(".")[0] + ".", nl: "Maakt één widget aan na validatie van de canonieke velden, uitgebreid." },
       }]]),
     });
-    // The bare compiled entry, plus what the listing adds: the reminder on a
-    // write tool, the title in the annotations and the app link.
+    // The bare compiled entry in one language, plus what the listing adds:
+    // the reminder on a write tool, the title in the annotations and the app
+    // link. (The compiled entry carries every language; the listing one.)
     const bare = advertisedToolBytes({
       name: create.name, title: create.title, description: create.description,
-      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+      inputSchema: schemaInLanguage(create.inputSchema, "en"),
+      outputSchema: schemaInLanguage(create.outputSchema, "en"),
+      annotations: create.annotations,
     });
     const listed = advertisedToolBytes(advertisedEntityTool({
       name: create.name, operation: "create", title: create.title, description: create.description,
@@ -1194,6 +1209,16 @@ describe("buildMcpCatalog", () => {
     expect(listed).toBeGreaterThan(bare + DATA_ACQUISITION_TOOL_FOOTER.length);
     // The longer Dutch text is what the budget counts.
     expect(measured!.bytes).toBeGreaterThan(listed);
+    // A third language authored on the catalogue is measured too: a tool
+    // whose German copy is the longest weighs what the German listing weighs.
+    const german = advertisedToolSizes({
+      tools: [{ ...create, inputSchema: { ...create.inputSchema, properties: { ...(create.inputSchema.properties as Record<string, unknown>),
+        name: { type: "string", "x-osf-i18n": { title: { en: "Name", nl: "Naam", de: "Bezeichnung des Datensatzes, ausführlich".repeat(4) } } } } } }],
+      entities: catalog.entities,
+      operationTools: [],
+      projection: "dedicated",
+    }).find((entry) => entry.name === create.name)!;
+    expect(german.bytes).toBeGreaterThan(measured!.bytes);
     expect(JSON.stringify(advertisedEntityTool({
       name: create.name, operation: "create", title: "t", description: "d",
       inputSchema: {}, annotations: create.annotations, linksConfigurationApp: true,
@@ -1260,12 +1285,12 @@ describe("authored tool overrides", () => {
       delete: true,
     },
     toolOverrides: {
-      get: { name: "read_widget", description: "Read one Widget by id." },
+      get: { name: "read_widget" },
       update: { name: "edit_widget" },
     },
   };
 
-  it("uses override names and descriptions, composed defaults elsewhere", () => {
+  it("uses override names, composed defaults elsewhere", () => {
     const catalog = buildMcpCatalog(
       [input(contract({ mcp: mcpWithOverrides }))],
       "test",
@@ -1274,12 +1299,9 @@ describe("authored tool overrides", () => {
       catalog.tools.map((tool) => [tool.operation, tool]),
     );
     expect(byOperation.get("get")?.name).toBe("read_widget");
-    expect(byOperation.get("get")?.description).toBe("Read one Widget by id.");
+    expect(byOperation.get("get")?.description).toBe("get Widget");
     expect(byOperation.get("update")?.name).toBe("edit_widget");
-    // Description override was not authored for update: composed default stays.
-    expect(byOperation.get("update")?.description).toContain(
-      "Partially updates",
-    );
+    expect(byOperation.get("update")?.description).toContain("update Widget");
     expect(byOperation.get("create")?.name).toBe("widget_create");
     expect(byOperation.get("delete")?.name).toBe("widget_delete");
   });
@@ -1687,7 +1709,9 @@ describe("relationship keys", () => {
 
   /** A Finding-shaped contract: two belongsTo keys and a hasMany that must not leak. */
   const finding = (
-    columns: CompiledEntityContract["storage"]["columns"] = [],
+    columns: CompiledEntityContract["storage"]["columns"] = [
+      { field: "title", column: "title", type: "text", nullable: false, storageClass: "core" },
+    ],
   ) =>
     labelled(contract({
       name: "Finding",
@@ -1755,6 +1779,7 @@ describe("relationship keys", () => {
     expect(prop(create, "assessmentId")).toEqual({
       type: "string",
       format: "uuid",
+      "x-osf-type": "Assessment",
       description:
         "Identifier of the Assessment this Finding belongs to, as returned by `assessment_list`.",
     });
@@ -1886,6 +1911,7 @@ describe("control-realm Operation tools", () => {
     plugin: "osf-control",
     auth: { mode: "control", roles: ["platform_admin"] },
     tenancy: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: {
       ...staticOperation(index).transports,
       rest: {
@@ -1911,7 +1937,6 @@ describe("control-realm Operation tools", () => {
       plugin: "osf-control",
       name: "control_operation_0",
       auth: { mode: "control", roles: ["platform_admin"] },
-      // No authored effects, so the hint follows the GET projection.
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
     });
     // Sixty-one tenant tools would flip the catalog to searchable; these

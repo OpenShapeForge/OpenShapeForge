@@ -34,10 +34,7 @@ import {
 import { loadRuntimeModules, type ModuleRegistry } from "../../../modules/registry.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
 import { createApiApp } from "../../../roles/api.js";
-import {
-  getGeneratedCrudTables,
-  isGeneratedCrudOperationEnabled,
-} from "../../generated-crud.js";
+import { getGeneratedCrudTables } from "../../generated-crud.js";
 import persistedManifest from "../../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { seedKeycloakTokenPeople } from "./keycloak.js";
 export {
@@ -462,27 +459,11 @@ export function registerSuiteLifecycle() {
     for (let i = 0; i < rows.length; i += batchSize) {
       await Promise.all(
         rows.slice(i, i + batchSize).map((row) => {
-          const graphql = row.table.source?.graphql;
-          // v1-only: a legacy delete mutation removes the row in one call.
-          // Delete this branch with the last v1 entity.
-          if (
-            row.table.source?.authoringVersion !== 2 &&
-            graphql &&
-            graphql.operations?.delete !== false &&
-            isGeneratedCrudOperationEnabled(row.table, "delete")
-          ) {
-            return gql(
-              row.identity,
-              `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-              { id: row.id },
-            ).catch(() => {});
-          }
-
           // A canonical delete is a product interaction — lease, version,
-          // confirmation challenge — and a strict-v2 entity may have no
-          // GraphQL mutation at all. Test cleanup must not re-enact that
-          // interaction merely to remove a fixture, so the owner connection
-          // deletes the exact row.
+          // confirmation challenge — and an entity may have no GraphQL
+          // mutation at all. Test cleanup must not re-enact that interaction
+          // merely to remove a fixture, so the owner connection deletes the
+          // exact row.
           if (!row.table.primaryKey) return Promise.resolve();
           const tenantWhere = row.table.tenantScoped
             ? sql`and ${sql.id("tenant_id")} = ${row.identity.tenantId}::uuid`

@@ -1229,11 +1229,6 @@ export function compileAuthoringBackendManifest(
       generatedCrudAllowlist.has(candidateCrudKey) &&
       Object.values(crudOperations).some(Boolean) &&
       !domainInternal;
-    // Compatibility guard: runtimes predating per-operation CRUD understand
-    // only `generatedCrud`. Mark partial policies false there so those runtimes
-    // hide the entity instead of exposing operations they cannot interpret.
-    const generatedCrud =
-      generatedCrudEligible && Object.values(crudOperations).every(Boolean);
     // Fail closed: an authored `rest:` block on an entity that is not
     // generated-CRUD enabled (not allowlisted, or domain-internal) is a
     // misconfiguration — REST routes delegate to the generated CRUD layer,
@@ -1396,7 +1391,6 @@ export function compileAuthoringBackendManifest(
       domainInternal,
       ...(candidate.contract.workerAccess ? { workerAccess: candidate.contract.workerAccess } : {}),
       generatedCrudEligible,
-      generatedCrud,
       columns,
       ...(rowScope ? { rowScope } : {}),
       ...(compiledIndexes.length > 0 ? { indexes: compiledIndexes } : {}),
@@ -1408,9 +1402,6 @@ export function compileAuthoringBackendManifest(
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
-        ...([2, 3].includes(candidate.contract.authoringVersion)
-          ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
-          : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
         ...(() => {
@@ -1577,7 +1568,7 @@ export function buildAuthoringBackendReport(
       const candidateGeneratedCrud = isGeneratedCrudEligible(candidateTable);
       if (currentGeneratedCrud !== candidateGeneratedCrud) {
         changedMetadata.push(
-          `generatedCrud current=${currentGeneratedCrud} candidate=${candidateGeneratedCrud}`,
+          `generatedCrudEligible current=${currentGeneratedCrud} candidate=${candidateGeneratedCrud}`,
         );
       }
       const currentCrudOperations = JSON.stringify(

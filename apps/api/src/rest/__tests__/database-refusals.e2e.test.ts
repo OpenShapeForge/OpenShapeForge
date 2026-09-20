@@ -40,10 +40,7 @@ import {
   textColumnFor,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 import { createDoc, expectOperationError } from "../../graphql/__tests__/e2e/gql-shapes.js";
-import {
-  isCanonical,
-  isEntityBackedCreate,
-} from "../../graphql/__tests__/e2e/operations.js";
+import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
 
 registerSuiteLifecycle();
 
@@ -175,18 +172,12 @@ async function createBody(
   return { ...body, ...overrides };
 }
 
-const CANONICAL_REFUSED = {
+const REFUSED = {
   code: "OPERATION_REFUSED",
   message: RULE_MESSAGE,
   detail: RULE_DETAIL,
   retryable: false,
   data: { hint: RULE_HINT },
-};
-const LEGACY_REFUSED = {
-  code: "OPERATION_REFUSED",
-  message: RULE_MESSAGE,
-  detail: RULE_DETAIL,
-  hint: RULE_HINT,
 };
 
 describe("a trigger's refusal", () => {
@@ -204,20 +195,15 @@ describe("a trigger's refusal", () => {
       body,
     );
     expect(response.status).toBe(409);
-    expect(response.body).toEqual({
-      error: isCanonical(table!)
-        ? CANONICAL_REFUSED
-        : LEGACY_REFUSED,
-    });
+    expect(response.body).toEqual({ error: REFUSED });
   });
 
   test("GraphQL answers the code unmasked, with the trigger's message", async () => {
     const graphql = table!.source!.graphql!;
     const input = await createBody(tenantA, { [fieldName(markerColumn!)]: MARKER });
     const response = await gql(tenantA, createDoc(table!), { input });
-    // A v1 entity throws the refusal as the single top-level error; a canonical
-    // entity reports it in band. Either way the code is unmasked and the
-    // trigger's own message and hint reach the caller.
+    // The refusal is reported in band: the code is unmasked and the trigger's
+    // own message and hint reach the caller.
     const refused = expectOperationError(
       table!,
       response,
@@ -226,12 +212,7 @@ describe("a trigger's refusal", () => {
     );
     expect(refused.message).toBe(RULE_MESSAGE);
     expect(refused.data).toMatchObject({ hint: RULE_HINT });
-    if (isCanonical(table!)) {
-      expect(response.errors).toBeUndefined();
-    } else {
-      // v1-only: the thrown error is the whole answer.
-      expect(response.errors).toHaveLength(1);
-    }
+    expect(response.errors).toBeUndefined();
   });
 
   test("a row without the marker is still accepted", async () => {

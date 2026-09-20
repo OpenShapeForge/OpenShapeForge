@@ -48,6 +48,8 @@ export type GenericToolBranch = {
   inputSchema: Record<string, unknown>;
 };
 
+import { schemaInLanguage } from "./mcp-entity-tool-shape.js";
+
 type JsonObject = Record<string, unknown>;
 
 /** A text per language; `en` is the fallback and is always authored. */
@@ -389,8 +391,13 @@ export function advertisedGenericTool(tool: GenericToolAdvertisement): {
     name: tool.name,
     title: text.title,
     description: text.description,
-    inputSchema: compactGenericInputSchema(tool.operation, tool.branches, tool.locale),
-    ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+    inputSchema: schemaInLanguage(
+      compactGenericInputSchema(tool.operation, tool.branches, tool.locale),
+      genericTextLanguage(tool.locale),
+    ) as JsonObject,
+    ...(tool.outputSchema
+      ? { outputSchema: schemaInLanguage(tool.outputSchema, genericTextLanguage(tool.locale)) as JsonObject }
+      : {}),
     annotations: { title: text.title, ...tool.annotations },
     ...(tool.operation === "create" && tool.linksConfigurationApp
       ? { _meta: { ui: { resourceUri: "ui://openshapeforge/configuration" } } }

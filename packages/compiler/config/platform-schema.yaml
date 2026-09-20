@@ -19,7 +19,7 @@ tables:
     name: schema_migrations
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: version, type: text, primaryKey: true }
       - { name: checksum, type: text, required: true }
@@ -41,7 +41,7 @@ tables:
   # would either be handed a tenant_id column plus tenant-isolation RLS
   # (meaningless on this table) or forfeit role-based authorization entirely.
   #
-  # domainInternal + generatedCrud:false follow from the same fact: a tenant
+  # domainInternal + generatedCrudEligible:false follow from the same fact: a tenant
   # registry is cross-tenant by nature and must never surface on the per-tenant
   # GraphQL/REST schema, where every other row is fenced by a tenant predicate
   # this table has no way to satisfy. The control plane reaches it directly.
@@ -60,7 +60,7 @@ tables:
     tenantScoped: false
     tenantIdentityColumn: id
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       # The RLS key: this uuid is what the `tid` claim carries, what
       # applyDbSession puts in app.tenant_id, and therefore what every
@@ -148,7 +148,7 @@ tables:
     name: entity_page_configs
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: text, primaryKey: true }
       - { name: entity_slug, type: text, required: true }
@@ -167,7 +167,7 @@ tables:
     name: entity_events
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     # A workflow collection-wait is satisfied by events, so the sweep that
     # resolves waits reads this table inside each wait's own tenant. workerDml
     # (a grant) and not workerAccess (a policy widening): the sweep never reads
@@ -205,7 +205,7 @@ tables:
     name: entity_edit_leases
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -238,7 +238,7 @@ tables:
     name: operation_confirmation_challenges
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -268,7 +268,7 @@ tables:
     name: org_unit
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -336,7 +336,7 @@ tables:
     name: org_unit_closure
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     # Every tenant-scoped session expands its groups through this table in
     # applyDbSession, before any policy applies — a worker's included. Without
     # the grant a worker's own tenant-scoped session fails at setup rather than
@@ -386,7 +386,7 @@ tables:
     name: connector_installations
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -423,7 +423,7 @@ tables:
     name: connector_secrets
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -474,7 +474,7 @@ tables:
     name: api_key_integrations
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -532,7 +532,7 @@ tables:
     name: api_keys
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -581,7 +581,7 @@ tables:
     name: connector_entitlements
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -611,7 +611,7 @@ tables:
     name: connector_oauth_states
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -654,7 +654,7 @@ tables:
     name: mcp_handoffs
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     rowScope:
       userColumns: [user_id]
     columns:
@@ -691,7 +691,7 @@ tables:
     name: capability_grants
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
@@ -773,7 +773,7 @@ tables:
     name: system_bypass_audit
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: actor_subject, type: text, required: true }
@@ -801,7 +801,7 @@ tables:
     name: identities
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: issuer, type: text, required: true }
@@ -844,7 +844,7 @@ tables:
     name: identity_relations
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: identity_id, type: uuid, primaryKey: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
@@ -916,7 +916,7 @@ tables:
     name: employee_invitations
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
@@ -948,7 +948,7 @@ tables:
     name: update_notices
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: key, type: text, primaryKey: true }
       - { name: title, type: text, required: true }
@@ -983,7 +983,7 @@ tables:
     name: user_update_notices
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       # The signed-in subject, as app.current_user_id() reports it.
@@ -1014,7 +1014,7 @@ tables:
     name: jobs
     tenantScoped: true
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     workerAccess: job-worker
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
@@ -1076,7 +1076,7 @@ tables:
     name: operation_execution_receipts
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: actor_id, type: uuid, primaryKey: true }
@@ -1106,7 +1106,7 @@ tables:
     name: blueprint_libraries
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: blueprint_tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id } }
@@ -1120,7 +1120,7 @@ tables:
     name: blueprint_versions
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id } }
       - { name: entity_name, type: text, primaryKey: true }
@@ -1141,7 +1141,7 @@ tables:
     name: blueprint_copies
     tenantScoped: false
     domainInternal: true
-    generatedCrud: false
+    generatedCrudEligible: false
     columns:
       - { name: tenant_id, type: uuid, primaryKey: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
       - { name: entity_name, type: text, primaryKey: true }

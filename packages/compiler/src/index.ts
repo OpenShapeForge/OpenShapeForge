@@ -20,6 +20,11 @@ import {
 } from "./authoring/role-composites.js";
 import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
 import {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+} from "./authoring/identity-contract.js";
+import {
   activeManifestSource,
   loadActivePlatformCompile,
   resolveActiveAuthoringDir,
@@ -44,6 +49,7 @@ import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./g
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
+import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
@@ -162,6 +168,12 @@ export {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+export {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+  type IdentityContract,
+} from "./authoring/identity-contract.js";
 export {
   buildRoleComposites,
   renderRoleComposites,
@@ -346,6 +358,9 @@ export async function collectAllArtifacts(
   // Every compiled entity, core and plugin alike: a transition's agreesOn
   // reaches across entities, so it is checked here where all of them are.
   assertTransitionAgreements(entities.map((entity) => entity.contract));
+  // The member of an owned collection learns it here, where every owner is
+  // compiled: its generic writes then declare the collection refusal.
+  withOwnedChildErrors(entities.map((entity) => entity.contract));
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -542,6 +557,29 @@ export async function collectAllArtifacts(
       {
         path: ROLE_LABELS_PATH,
         contents: renderRoleLabels(buildRoleLabels(loadAuthorizationConfigs(authoringDir))),
+      },
+      // Who a login is, in entity terms, so the auth layer names entities and
+      // fields through the contract instead of tables and columns by hand.
+      {
+        path: IDENTITY_CONTRACT_PATH,
+        contents: renderIdentityContract(
+          buildIdentityContract(
+            loadAuthorizationConfigs(authoringDir),
+            entities.map((entity) => entity.contract),
+            {
+              // The platform schema's own references to the acting party:
+              // authored there because it is loaded before the entities are
+              // compiled, and held to the contract here.
+              platformPartyReferences: (manifest.relationshipRegister ?? [])
+                .filter((entry) => entry.from.schema === "platform")
+                .map((entry) => ({
+                  from: `${entry.from.schema}.${entry.from.table}.${entry.from.column}`,
+                  to: `${entry.to.schema}.${entry.to.table}`,
+                })),
+              schemaByModule: { core: "erp" },
+            },
+          ),
+        ),
       },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),

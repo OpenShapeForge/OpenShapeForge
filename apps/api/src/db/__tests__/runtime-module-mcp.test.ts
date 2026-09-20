@@ -24,7 +24,7 @@ import {
   __buildGeneratedMcpServerForTests,
 } from "../../mcp/generated-mcp-server.js";
 import { createRuntimeDeclarativeServiceExecutor } from "../../mcp/runtime-executors.js";
-import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
+import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 
 // The public plugin keeps its database generic unbound; the API runtime
@@ -103,7 +103,6 @@ function table(
     tenantScoped: true,
     domainInternal: false,
     generatedCrudEligible: true,
-    generatedCrud: true,
     primaryKey: "id",
     columns,
   };

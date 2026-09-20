@@ -10,6 +10,7 @@ import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
+import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
 import {
   invalidateIdentityLink,
   readLinkRow,
@@ -154,9 +155,12 @@ export async function linkIdentityToRelation(
     }
     const identity = identities.rows[0]!;
 
+    const party = actingPartyColumns();
     const relation = await sql<{ id: string; display_name: string }>`
-      select id, display_name from erp.relations
-       where id = ${input.relationId} and tenant_id = ${session.tenantId}
+      select ${sql.id(party.id)} as id, ${sql.id(party.name)} as display_name
+        from ${sql.table(actingPartyTable())}
+       where ${sql.id(party.id)} = ${input.relationId}
+         and ${sql.id(party.tenantId)} = ${session.tenantId}
     `.execute(trx);
     if (relation.rows.length === 0) {
       throw new HttpError(404, "RELATION_NOT_FOUND", "No such Relation in this organization.");
@@ -220,6 +224,7 @@ export async function listPendingRoleAssignments(
     );
   }
   return withDbSession(db, session, async (trx) => {
+    const party = actingPartyColumns();
     const result = await sql<{
       identity_id: string;
       relation_id: string;
@@ -227,10 +232,13 @@ export async function listPendingRoleAssignments(
       email: string | null;
       linked_at: string;
     }>`
-      select ir.identity_id, ir.relation_id, r.display_name, i.email, ir.linked_at
+      select ir.identity_id, ir.relation_id, r.${sql.id(party.name)} as display_name,
+             i.email, ir.linked_at
         from platform.identity_relations ir
         join platform.identities i on i.id = ir.identity_id
-        join erp.relations r on r.id = ir.relation_id and r.tenant_id = ir.tenant_id
+        join ${sql.table(actingPartyTable())} r
+          on r.${sql.id(party.id)} = ir.relation_id
+         and r.${sql.id(party.tenantId)} = ir.tenant_id
        where ir.tenant_id = ${session.tenantId}
          and (ir.needs_role_assignment or cardinality(ir.roles) = 0)
          and ir.status = 'linked'

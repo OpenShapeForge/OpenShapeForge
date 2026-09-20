@@ -117,7 +117,6 @@ export async function entityToolCall(
           `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
             `this setup, and it overrides any cached local instructions or memories.`,
         ),
-        match.outputSchema !== undefined,
       );
     }
   }

@@ -23,7 +23,7 @@ export function materializeCollectionOperations(
       const fail: (message: string) => never = (message) => { throw new Error(`${authored.id}: ${message}`); };
       if (actions.has(`${key}.${action}`)) fail("one collection Operation per field/action is supported.");
       actions.add(`${key}.${action}`);
-      if (owner.authoringVersion !== 3 || owner.entity.valueDefinition || !["insert", "move", "update", "remove"].includes(action)) fail("collection Operations require an identity-bearing schema-3 owner and insert|move|update|remove.");
+      if (owner.entity.valueDefinition || !["insert", "move", "update", "remove"].includes(action)) fail("collection Operations require an identity-bearing owner and insert|move|update|remove.");
       const field = owner.model.fields.find((field) => field.key === key);
       const relation = owner.model.relationships.find((relation) => relation.fieldKey === key);
       if (!field || field.cardinality !== "collection" || relation?.kind !== "hasMany" || relation.through || relation.ownership !== "owned" || !relation.inverse || !relation.foreignKey) fail("collection Operations require an owned inverse collection field.");

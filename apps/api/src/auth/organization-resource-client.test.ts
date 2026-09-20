@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { __resetSessionResolverForTests, __setTenantForOrganizationForTests, resolveSessionContext } from "./identity.js";
+import { __resetSessionResolverForTests, resolveSessionContext } from "./identity.js";
+import { __setTenantForOrganizationForTests } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const issuer = "https://identity.example.test/realms/example";

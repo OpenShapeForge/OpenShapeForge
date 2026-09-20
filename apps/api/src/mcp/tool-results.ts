@@ -98,21 +98,7 @@ export const __operationToolResultForTests = operationToolResult;
  * model sees the code and the retry meaning before anything else. The
  * summary is derived from the same fields, so it cannot contradict them.
  */
-export function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
-  const error = body.error as Record<string, unknown> | undefined;
-  if (!error) return body;
-  const data = error.data as Record<string, unknown> | undefined;
-  return {
-    error: {
-      code: error.code,
-      message: error.message,
-      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
-      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
-    },
-  };
-}
-
-export function failed(error: unknown, canonical = true): ToolResult {
+export function failed(error: unknown): ToolResult {
   if (error instanceof DeclaredOperationError) {
     const body = error.body;
     const bodyMessage = body && typeof body === "object" && !Array.isArray(body)
@@ -132,10 +118,7 @@ export function failed(error: unknown, canonical = true): ToolResult {
       isError: true,
     };
   }
-  const mapped = withConfirmationHint(toHttpError(error).body);
-  const body = canonical
-    ? mapped
-    : legacyFailureBody(mapped as unknown as Record<string, unknown>);
+  const body = withConfirmationHint(toHttpError(error).body);
   const failure = body.error as Parameters<typeof failureSummary>[0];
   const hint = (body.error as { hint?: unknown }).hint;
   return {

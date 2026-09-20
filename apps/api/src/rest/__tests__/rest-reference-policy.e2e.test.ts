@@ -28,7 +28,7 @@ describe("REST transport: operation-written references", () => {
   for (const table of restCreateTables) {
     const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
     const listedIds = async (identity: Identity, field: string, value: string) =>
-      listPayload(table, await rest(identity, "GET", `${base}?${field}=${value}`)).items.map((item: any) => item.id);
+      listPayload(await rest(identity, "GET", `${base}?${field}=${value}`)).items.map((item: any) => item.id);
 
     for (const reference of operationWrittenReferences(table)) {
       const { field, writers, column } = reference;
@@ -51,13 +51,13 @@ describe("REST transport: operation-written references", () => {
         expectCreateWriteRefusal(table, refusedCreate.body.error, field, writers);
 
         const id = await createRestRow(table, tenantA, body);
-        expect(recordPayload(table, await rest(tenantA, "GET", `${base}/${id}`))[field] ?? null).toBeNull();
+        expect(recordPayload(await rest(tenantA, "GET", `${base}/${id}`))[field] ?? null).toBeNull();
 
         const controls = await acquireLease(table, tenantA, id, "update");
         const refusedUpdate = await rest(tenantA, "PATCH", `${base}/${id}`, { [field]: randomUUID(), ...controls });
         expect(refusedUpdate.status).toBe(400);
         expectWriterRefusal(refusedUpdate.body.error, field, writers);
-        expect(recordPayload(table, await rest(tenantA, "GET", `${base}/${id}`))[field] ?? null).toBeNull();
+        expect(recordPayload(await rest(tenantA, "GET", `${base}/${id}`))[field] ?? null).toBeNull();
       });
 
       test(`${table.source!.rest!.basePath}: a filter on ${field} finds the row that carries it and never another tenant's rows`, async () => {

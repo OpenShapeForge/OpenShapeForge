@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-export type ScalarType =
-  | "uuid"
-  | "text"
-  | "boolean"
-  | "integer"
-  | "bigint"
-  | "numeric"
-  | "date"
-  | "timestamptz"
-  | "jsonb"
-  /**
-   * A text array, spelled the way Postgres spells it because the manifest
-   * type doubles as the SQL type token in the generated schema.sql. Platform
-   * bookkeeping only: no authoring field maps onto it, so no generated CRUD,
-   * GraphQL or MCP surface has to render one — the runtime tables that hold a
-   * role list or a read-guides list are the reason it exists.
-   */
-  | "text[]";
+/**
+ * The storage scalars a manifest column may carry; every projection of one
+ * (DDL, Kysely, GraphQL, JSON Schema) is a row of SCALAR_PROJECTION in
+ * @openshapeforge/operations. `text[]` is platform bookkeeping only: no
+ * authoring field maps onto it.
+ */
+import type { ScalarType } from "@openshapeforge/operations";
+export type { ScalarType };
 
 export type ReferenceDefinition = {
   schema: string;
@@ -356,8 +346,6 @@ export type TableSourceDefinition = {
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
-  /** Present for strict entity authoring; absence means legacy v1. */
-  authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   versioning?: {
     strategy: "publishedSnapshot";
@@ -550,16 +538,11 @@ export type TableDefinition = {
   tenantScoped: boolean;
   domainInternal?: boolean;
   /**
-   * Current generated-CRUD eligibility marker. New runtimes use this exact
-   * boolean; when absent they fall back to the legacy `generatedCrud` flag.
+   * Whether the generic entity runtime may serve this table at all; which of
+   * the five common operations it serves is `source.crud.operations`.
+   * Absent means false.
    */
   generatedCrudEligible?: boolean;
-  /**
-   * Legacy all-or-nothing runtime marker. New manifests set this only when all
-   * five common operations are enabled, so an older runtime fails closed for
-   * partial policies it cannot understand.
-   */
-  generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
   /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
@@ -667,7 +650,7 @@ export type TableDefinition = {
    * every manifest-covered schema (db/migrations/app-role.ts), so a policyless
    * cross-tenant registry is readable in full by any raw-SQL path reachable from
    * an ordinary tenant session. Nothing exposes one today — the table is
-   * `generatedCrud: false` — but "no query happens to do it yet" is not a
+   * `generatedCrudEligible: false` — but "no query happens to do it yet" is not a
    * boundary, and a cross-tenant registry is a materially different table from
    * the global configuration catalogs that legitimately have no policy.
    *
@@ -688,12 +671,9 @@ export type TableDefinition = {
 };
 
 export function isGeneratedCrudEligible(
-  table: Pick<TableDefinition, "domainInternal" | "generatedCrudEligible" | "generatedCrud">,
+  table: Pick<TableDefinition, "domainInternal" | "generatedCrudEligible">,
 ): boolean {
-  if (table.domainInternal === true) return false;
-  return table.generatedCrudEligible === undefined
-    ? table.generatedCrud === true
-    : table.generatedCrudEligible === true;
+  return table.domainInternal !== true && table.generatedCrudEligible === true;
 }
 
 export type RelationshipRegisterEntry = {

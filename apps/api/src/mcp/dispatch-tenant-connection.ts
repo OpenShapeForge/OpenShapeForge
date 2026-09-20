@@ -7,7 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { definitionFieldKeys, resolveTemplate } from "./declarative-execution.js";
-import { connectionTokenSecretScope } from "./entity-oauth.js";
+import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import {
   accessTokenNeedsRefresh,
   type ConnectionTokenAudit,

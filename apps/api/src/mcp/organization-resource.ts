@@ -2,11 +2,11 @@
 /**
  * Per-organization MCP resources.
  *
- * Beside the legacy `/api/mcp` mount — one resource for every tenant of a
+ * Beside the shared `/api/mcp` mount — one resource for every tenant of a
  * deployment, tenant taken from the token alone — the MCP server also answers
  * on one resource PER Keycloak Organization:
  *
- *   /api/mcp/organizations/<alias>
+ *   /<alias>   (and, said explicitly, /<alias>/mcp)
  *
  * The path names the Organization by its Keycloak alias, which is what the
  * Organization Membership mapper keys the `organization` claim by and what the
@@ -29,14 +29,6 @@
  */
 
 export const MCP_MOUNT_PATH = "/api/mcp";
-
-/**
- * The spelling this server used to publish: `/api/mcp/organizations/<alias>`.
- * Still routed, still answered — see {@link organizationAliasFromPath} — but no
- * longer the resource's NAME. Kept as a prefix constant because the routes, the
- * tests and the metadata alias-suffix all have to agree on one string.
- */
-export const ORGANIZATION_MCP_PATH_PREFIX = `${MCP_MOUNT_PATH}/organizations`;
 
 /**
  * Root path segments that can never be an organization alias.
@@ -112,8 +104,7 @@ export function isOrganizationAlias(value: unknown): value is string {
  * form that still says which organization it is.
  *
  * The alias comes from the Keycloak Organization, which is also the tenant's
- * slug, so nothing extra had to be invented to make it short: the long spelling
- * simply repeated `api/mcp/organizations` in front of the only part that varied.
+ * slug, so nothing extra had to be invented to make it short.
  */
 export function organizationMcpPath(alias: string): string {
   return `/${alias}`;
@@ -132,10 +123,16 @@ export function organizationMcpExplicitPath(alias: string): string {
   return `/${alias}${ORGANIZATION_MCP_SUFFIX}`;
 }
 
-/** The pre-rename spelling; still routed, never advertised. */
-export function legacyOrganizationMcpPath(alias: string): string {
-  return `${ORGANIZATION_MCP_PATH_PREFIX}/${alias}`;
-}
+/**
+ * The Fastify route patterns that serve an organization's MCP resource:
+ * `/:alias` and `/:alias/mcp`. The handler behind them reads the alias back
+ * through {@link organizationAliasFromPath}, which is what refuses a reserved
+ * first segment that the parametric route would otherwise match.
+ */
+export const ORGANIZATION_MCP_ROUTES = [
+  organizationMcpPath(":alias"),
+  organizationMcpExplicitPath(":alias"),
+] as const;
 
 /**
  * The REALM CLIENT SCOPE that `organization:<alias>` is an instance of.
@@ -211,7 +208,7 @@ export function deploymentMcpScopes(
 }
 
 /**
- * The scopes a client should request for `/api/mcp/organizations/<alias>` —
+ * The scopes a client should request for `/<alias>` —
  * and, because a client that discovers this server registers ITSELF first,
  * the scopes it will put in its RFC 7591 registration request.
  *
@@ -275,7 +272,7 @@ export function organizationResourceScopeNames(
 }
 
 /**
- * The organization a request path names, or null for the legacy mount and
+ * The organization a request path names, or null for the shared mount and
  * anything else. Fastify already split the alias into `params`; it is read
  * from the URL here so the metadata route, the challenge builder and the MCP
  * handler agree on one parser. The query string is not part of the resource.
@@ -283,16 +280,10 @@ export function organizationResourceScopeNames(
 export function organizationAliasFromPath(url: string | undefined): string | null {
   const path = typeof url === "string" ? (url.split("?")[0] ?? "") : "";
 
-  // The long spelling, first, because it is unambiguous.
-  if (path.startsWith(`${ORGANIZATION_MCP_PATH_PREFIX}/`)) {
-    const rest = path.slice(ORGANIZATION_MCP_PATH_PREFIX.length + 1);
-    return isOrganizationAlias(rest) ? rest : null;
-  }
-
-  // The short spelling: `/<alias>`, `/<alias>/mcp`, `/<alias>/api/...`,
-  // `/<alias>/graphql`. Everything below the alias belongs to the same
-  // organization, so one parser serves all four and there is no second place
-  // that could disagree about which organization a request is addressed to.
+  // `/<alias>`, `/<alias>/mcp`, `/<alias>/api/...`, `/<alias>/graphql`.
+  // Everything below the alias belongs to the same organization, so one
+  // parser serves all four and there is no second place that could disagree
+  // about which organization a request is addressed to.
   if (!path.startsWith("/")) return null;
   const first = path.slice(1).split("/")[0] ?? "";
   if (first.length === 0) return null;
@@ -304,9 +295,10 @@ export function organizationAliasFromPath(url: string | undefined): string | nul
  * What the part of the path BELOW the alias addresses, for a short address.
  *
  * Returns the path as the server's own routes spell it — `/api/...`,
- * `/graphql`, or `/api/mcp/organizations/<alias>` for the MCP resource itself —
- * so `/<alias>/…` is a rewrite with one implementation rather than a set of
- * duplicated routes. `null` means the path is not a short address at all.
+ * `/graphql`, or the address itself for the MCP resource, which is routed as
+ * spelled — so `/<alias>/…` is a rewrite with one implementation rather than
+ * a set of duplicated routes. `null` means the path is not a short address at
+ * all.
  */
 export function shortAddressTarget(url: string | undefined): {
   alias: string;
@@ -324,12 +316,11 @@ export function shortAddressTarget(url: string | undefined): {
   const rest = `/${segments.slice(1).join("/")}`;
   const suffix = query === undefined ? "" : `?${query}`;
 
-  // `/<alias>` and `/<alias>/mcp` are the resource itself. They keep the long
-  // route's URL internally so ONE handler and one set of route registrations
-  // serve every spelling; what the client sees is decided by
-  // organizationMcpPath, never by which URL got matched.
+  // `/<alias>` and `/<alias>/mcp` are the resource itself, routed under
+  // ORGANIZATION_MCP_ROUTES exactly as spelled; what the client is TOLD the
+  // resource is called comes from organizationMcpPath either way.
   if (rest === "/" || rest === ORGANIZATION_MCP_SUFFIX) {
-    return { alias, target: `${legacyOrganizationMcpPath(alias)}${suffix}` };
+    return { alias, target: `${pathOnly}${suffix}` };
   }
   // GraphQL is published one segment shorter than it is mounted: the address
   // people type is `/<alias>/graphql`, the route is `/api/graphql`.

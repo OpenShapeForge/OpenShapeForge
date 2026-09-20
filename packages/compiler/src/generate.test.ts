@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { loadManifest } from "./load-manifest.js";
 import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import type { CompiledEntityContract } from "./authoring/types.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 
 const manifest: PlatformSchemaManifest = {
   version: 1,
@@ -809,7 +811,7 @@ describe("platform schema generator", () => {
           schema: "messaging",
           name: "mail_accounts",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -820,7 +822,7 @@ describe("platform schema generator", () => {
           name: "mail_account_credentials",
           tenantScoped: true,
           domainInternal: true,
-          generatedCrud: false,
+          generatedCrudEligible: false,
           columns: [
             { name: "account_id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -832,7 +834,6 @@ describe("platform schema generator", () => {
           name: "legacy_inconsistent_entities",
           tenantScoped: true,
           generatedCrudEligible: false,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -843,7 +844,6 @@ describe("platform schema generator", () => {
           name: "partial_policy_entities",
           tenantScoped: true,
           generatedCrudEligible: true,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -865,7 +865,6 @@ describe("platform schema generator", () => {
           name: "malformed_plugin_policy_entities",
           tenantScoped: true,
           generatedCrudEligible: true,
-          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -882,7 +881,6 @@ describe("platform schema generator", () => {
     const manifestPayload = JSON.parse(manifestJson ?? "{}") as {
       tables: Array<{
         name: string;
-        generatedCrud: boolean;
         generatedCrudEligible: boolean;
         domainInternal: boolean;
         primaryKey: string | null;
@@ -892,7 +890,7 @@ describe("platform schema generator", () => {
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.mail_accounts",
-        generatedCrud: true,
+        generatedCrudEligible: true,
         domainInternal: false,
         primaryKey: "id",
       }),
@@ -900,7 +898,7 @@ describe("platform schema generator", () => {
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.mail_account_credentials",
-        generatedCrud: false,
+        generatedCrudEligible: false,
         domainInternal: true,
         primaryKey: "account_id",
       }),
@@ -909,21 +907,18 @@ describe("platform schema generator", () => {
       expect.objectContaining({
         name: "messaging.legacy_inconsistent_entities",
         generatedCrudEligible: false,
-        generatedCrud: false,
       }),
     );
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.partial_policy_entities",
         generatedCrudEligible: true,
-        generatedCrud: false,
       }),
     );
     expect(manifestPayload.tables).toContainEqual(
       expect.objectContaining({
         name: "messaging.malformed_plugin_policy_entities",
         generatedCrudEligible: true,
-        generatedCrud: false,
       }),
     );
   });
@@ -936,7 +931,7 @@ describe("platform schema generator", () => {
           schema: "erp",
           name: "label_rules",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -960,7 +955,7 @@ describe("platform schema generator", () => {
           name: "mail_account_credentials",
           tenantScoped: true,
           domainInternal: true,
-          generatedCrud: false,
+          generatedCrudEligible: false,
           columns: [
             { name: "account_id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -1459,7 +1454,7 @@ tables:
     name: mail_account_credentials
     tenantScoped: true
     domainInternal: true
-    generatedCrud: true
+    generatedCrudEligible: true
     columns:
       - { name: account_id, type: uuid, primaryKey: true }
       - { name: tenant_id, type: uuid, required: true }
@@ -1784,7 +1779,7 @@ tables:
     }
   });
 
-  it("only marks tables generatedCrud when they opt in explicitly", () => {
+  it("only marks tables CRUD-eligible when they opt in explicitly", () => {
     const optInManifest: PlatformSchemaManifest = {
       version: 1,
       tables: [
@@ -1792,7 +1787,7 @@ tables:
           schema: "erp",
           name: "exposed",
           tenantScoped: true,
-          generatedCrud: true,
+          generatedCrudEligible: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -1816,9 +1811,9 @@ tables:
       throw new Error("manifest.json artifact not found");
     }
     const parsed = JSON.parse(json) as {
-      tables: Array<{ table: string; generatedCrud: boolean }>;
+      tables: Array<{ table: string; generatedCrudEligible: boolean }>;
     };
-    const byName = new Map(parsed.tables.map((t) => [t.table, t.generatedCrud]));
+    const byName = new Map(parsed.tables.map((t) => [t.table, t.generatedCrudEligible]));
     expect(byName.get("exposed")).toBe(true);
     expect(byName.get("omitted")).toBe(false);
   });
@@ -1872,7 +1867,7 @@ describe("generated REST OpenAPI artifact", () => {
         schema: "erp",
         name: "widgets",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [
           { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
           { name: "tenant_id", type: "uuid", required: true },
@@ -1892,15 +1887,68 @@ describe("generated REST OpenAPI artifact", () => {
         schema: "erp",
         name: "gadgets",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: { authoringEntityName: "Gadget" },
       },
     ],
   };
 
+  /** The compiled contract a REST table always has beside its manifest row. */
+  function contractFor(table: TableDefinition): CompiledEntityContract {
+    const name = table.source!.authoringEntityName!;
+    const crud = { operations: { list: true, get: true, create: true, update: true, delete: true } };
+    const authorization = {
+      entitySlug: name.toLowerCase(),
+      roles: { read: [], create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    };
+    const contract = {
+      authoringVersion: 3,
+      contractVersion: 2,
+      kind: "compiledEntityContract",
+      entity: { id: `core.${name}`, name, module: "core", title: name, labels: { en: name }, domains: [] },
+      storage: {
+        table: table.name,
+        columns: table.columns.map((column) => ({
+          field: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+          column: column.name,
+          type: column.type,
+          nullable: !(column.required === true || column.primaryKey === true),
+          storageClass: "core" as const,
+        })),
+      },
+      model: {
+        fields: table.columns
+          .filter((column) => !column.primaryKey && !["tenant_id", "created_at", "updated_at"].includes(column.name))
+          .map((column) => ({
+            key: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+            baseType: column.type === "boolean" ? "boolean" : "string",
+            osfType: column.type === "boolean" ? "boolean" : "string",
+            cardinality: "single",
+            required: column.required === true,
+            label: { en: column.name },
+          })),
+        relationships: [],
+      },
+      crud,
+      graphql: {},
+      authorization,
+      views: {},
+      profiles: {},
+      entityOperations: {},
+    } as unknown as CompiledEntityContract;
+    contract.entityOperations = buildEntityOperations({ entity: contract.entity, crud, authorization: contract.authorization });
+    return contract;
+  }
+
   function openApiFor(input: PlatformSchemaManifest) {
-    const artifact = generateArtifacts(input).find((item) =>
+    const entities = input.tables
+      .filter((table) => table.source?.rest && table.source.authoringEntityName)
+      .map((table) => ({ contract: contractFor(table) }));
+    const artifact = generateArtifacts(input, { openApi: { entities } }).find((item) =>
       item.path.endsWith("rest/openapi.json"),
     );
     expect(artifact?.path).toBe("apps/api/src/generated/rest/openapi.json");
@@ -1933,8 +1981,9 @@ describe("generated REST OpenAPI artifact", () => {
       "displayName",
       "isActive",
       "createdAt",
+      "updatedAt",
     ]);
-    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt"]);
+    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt", "updatedAt"]);
 
     const input = spec.components.schemas.WidgetInput!;
     expect(Object.keys(input.properties ?? {})).toEqual(["displayName", "isActive"]);
@@ -1951,9 +2000,7 @@ describe("generated REST OpenAPI artifact", () => {
   });
 
   it("is deterministic: two renders are byte-identical", () => {
-    const render = () =>
-      generateArtifacts(restManifest).find((item) => item.path.endsWith("rest/openapi.json"))!
-        .contents;
+    const render = () => JSON.stringify(openApiFor(restManifest));
     expect(render()).toBe(render());
   });
 });
@@ -2084,7 +2131,7 @@ describe("platform bookkeeping shapes", () => {
         name: "identity_links",
         tenantScoped: false,
         domainInternal: true,
-        generatedCrud: false,
+        generatedCrudEligible: false,
         columns: [
           { name: "identity_id", type: "uuid", primaryKey: true },
           { name: "tenant_id", type: "uuid", primaryKey: true },

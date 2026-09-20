@@ -15,7 +15,6 @@ import {
   type Identity,
 } from "../../../graphql/__tests__/e2e/harness.js";
 import {
-  createRow,
   eligibleTables,
   fieldName,
   foreignKeyTargets,
@@ -29,7 +28,6 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
@@ -45,15 +43,13 @@ export const restCreateTables = eligibleTables.filter(
 
 export type RestResponse = { status: number; body: any };
 
-export function recordPayload(table: (typeof restTables)[number], response: RestResponse): any {
-  return isCanonical(table) ? response.body.data : response.body;
+export function recordPayload(response: RestResponse): any {
+  return response.body.data;
 }
 
-export function listPayload(table: (typeof restTables)[number], response: RestResponse): any {
-  const data = isCanonical(table) ? response.body.data : response.body;
-  return isCanonical(table)
-    ? { ...data, items: data.items.map((item: any) => item.data) }
-    : data;
+export function listPayload(response: RestResponse): any {
+  const data = response.body.data;
+  return { ...data, items: data.items.map((item: any) => item.data) };
 }
 
 export async function rest(
@@ -120,7 +116,7 @@ export async function acquireLease(
     const base = `${REST_MOUNT_PATH}/${table.source!.rest!.basePath}`;
     const current = await rest(identity, "GET", `${base}/${id}`);
     expect(current.status).toBe(200);
-    const expectedVersion = recordPayload(table, current)?.updatedAt;
+    const expectedVersion = recordPayload(current)?.updatedAt;
     expect(expectedVersion).toBeString();
     return { expectedVersion };
   }
@@ -151,7 +147,7 @@ export async function restDelete(
   expect(first.body.error.code).toBe("CONFIRMATION_REQUIRED");
   expect(first.body.error.retryAt).toBeUndefined();
   expect(first.body.error.data.confirmation.expiresAt).toBeString();
-  const row = recordPayload(table, await rest(identity, "GET", `${base}/${id}`));
+  const row = recordPayload(await rest(identity, "GET", `${base}/${id}`));
   return rest(identity, "DELETE", `${base}/${id}`, {
     ...lease,
     confirmationToken: first.body.error.data.confirmation.challengeToken,
@@ -219,7 +215,7 @@ export async function createForeignKeyTarget(
     await buildCreateBody(restTarget, identity, {}, depth + 1),
   );
   expect(response.status).toBe(201);
-  const id = recordPayload(restTarget, response).id as string;
+  const id = recordPayload(response).id as string;
   createdRows.push({ table: restTarget, id, identity });
   return id;
 }
@@ -234,7 +230,6 @@ export async function createRestRow(
   overrides: Record<string, unknown> = {},
   depth = 0,
 ): Promise<string> {
-  if (!isCanonical(table)) return createRow(table, identity, overrides, depth);
   const response = await rest(
     identity,
     "POST",
@@ -242,7 +237,7 @@ export async function createRestRow(
     await buildCreateBody(table, identity, overrides, depth),
   );
   expect(response.status).toBe(201);
-  const id = recordPayload(table, response).id as string;
+  const id = recordPayload(response).id as string;
   trackRestRow(table, id, identity);
   return id;
 }

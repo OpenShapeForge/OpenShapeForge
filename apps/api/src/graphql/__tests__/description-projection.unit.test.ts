@@ -189,7 +189,7 @@ describe("authoring description projections", () => {
     const graphqlMetadata = table!.source!.graphql!;
     const schema = buildSchema(`
       scalar JSON
-      type PageInfo { hasNextPage: Boolean, endCursor: String }
+      scalar Decimal
       type AggregateResult { count: Int! }
       type EntityOperationOffer { available: Boolean! }
       type EntityOperationError { code: String! }
@@ -270,6 +270,7 @@ describe("authoring description projections", () => {
   test("the shipped JSON artifact is wired through the production default renderer", async () => {
     const schema = buildSchema(`
       scalar JSON
+      scalar Decimal
       ${generatedEntityTypeDefs}
       type Query { _health: String }
     `);

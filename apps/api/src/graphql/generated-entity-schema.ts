@@ -13,7 +13,7 @@ import {
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
-import { operationErrorOf } from "@openshapeforge/operations";
+import { isScalarType, operationErrorOf, SCALAR_PROJECTION } from "@openshapeforge/operations";
 import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
@@ -204,25 +204,8 @@ function assertGraphqlMetadata(table: GeneratedTable): GraphqlMetadata {
   return graphql;
 }
 
-function graphqlScalarForColumn(column: GeneratedTable["columns"][number]) {
-  switch (column.type) {
-    case "boolean":
-      return "Boolean";
-    case "integer":
-      return "Int";
-    case "bigint":
-    case "numeric":
-      return "Float";
-    case "uuid":
-      return "ID";
-    case "jsonb":
-      return "JSON";
-    case "date":
-    case "timestamptz":
-    case "text":
-    default:
-      return "String";
-  }
+function graphqlScalarForColumn(column: GeneratedTable["columns"][number]): string {
+  return isScalarType(column.type) ? SCALAR_PROJECTION[column.type].gql : "String";
 }
 
 function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
@@ -427,17 +410,6 @@ ${renderDescription(documentation?.description, "    ")}
 ${[...columnFields, ...relationshipFields].join("\n")}
     }
 
-    type ${graphql.typeName}Edge {
-      node: ${graphql.typeName}
-      cursor: String
-    }
-
-    type ${graphql.typeName}Connection {
-      edges: [${graphql.typeName}Edge!]!
-      pageInfo: PageInfo!
-      totalCount: Int
-    }
-
     input ${graphql.typeName}Filter {
 ${queryableColumns
   .flatMap((column) => {
@@ -500,11 +472,6 @@ ${canonicalResultTypes}
 
 /** The result envelope, offer and error types every generated entity's SDL refers to. */
 export const entityOperationSharedTypeDefs = /* GraphQL */ `
-  type PageInfo {
-    hasNextPage: Boolean
-    endCursor: String
-  }
-
   type AggregateResult {
     count: Int!
   }

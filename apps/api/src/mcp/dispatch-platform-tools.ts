@@ -142,8 +142,8 @@ export async function platformToolCall(
               : false;
           })
           .map((tool) => ({
-            nativeOperation: tool.operationId ?? tool.name,
-            ...(tool.operationId && tool.operationId !== tool.name
+            nativeOperation: tool.operationId,
+            ...(tool.operationId !== tool.name
               ? { legacyNativeOperation: tool.name }
               : {}),
             operation: tool.operation,

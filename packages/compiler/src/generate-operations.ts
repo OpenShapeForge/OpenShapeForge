@@ -21,6 +21,7 @@ import type { LocalizedText } from "./authoring/types.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
+import { withOperationControlProperties, type JsonObject } from "./entity-operation-controls.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
@@ -80,74 +81,17 @@ function withCapabilityGrantErrors(operation: PluginOperationContract): PluginOp
 }
 
 /**
- * Platform-owned mutation controls are derived from the canonical Operation
- * policy. Authors describe business input only; every adapter — REST, GraphQL,
- * MCP and the Web manifest alike — receives this one augmented schema and
- * therefore asks for the same lease/version or confirmation values that the
- * shared executor enforces. Every control carries both interface languages so
- * a host that requires complete UI translations accepts the projected schema.
+ * Platform mutation controls merged into an authored Operation input. The
+ * controls themselves are described once (entity-operation-controls.ts).
  */
 export function withOperationControls(
   inputSchema: JsonSchema,
   definition: Pick<EntityOperationDefinition, "concurrency" | "confirmation">,
 ): JsonSchema {
-  const properties = {
-    ...((inputSchema.properties ?? {}) as Record<string, unknown>),
-  };
-  const required = new Set(
-    Array.isArray(inputSchema.required) ? inputSchema.required as string[] : [],
-  );
-  const dependentRequired = {
-    ...((inputSchema.dependentRequired ?? {}) as Record<string, string[]>),
-  };
-  const titled = (schema: Record<string, unknown>, en: string, nl: string) => ({
-    ...schema,
-    "x-osf-i18n": { title: { en, nl } },
-  });
-
-  if (definition.concurrency?.version) {
-    properties.expectedVersion = titled({
-      type: "string",
-      format: "date-time",
-      description: `Version from the record's ${definition.concurrency.version.field} field.`,
-    }, "Expected version", "Verwachte versie");
-    required.add("expectedVersion");
-  }
-  if (definition.concurrency?.editLease) {
-    properties.leaseToken = titled({
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this Operation and record.",
-    }, "Edit lease", "Bewerkingslease");
-    required.add("leaseToken");
-  }
-  if (definition.confirmation.mode === "acknowledgement") {
-    properties.confirmed = titled({
-      type: "boolean",
-      description: "Set to true after the user explicitly acknowledges this Operation.",
-    }, "Confirmed", "Bevestigd");
-  }
-  if (definition.confirmation.mode === "challenge") {
-    properties.confirmationToken = titled({
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    }, "Confirmation token", "Bevestigingstoken");
-    properties.confirmationAnswer = titled({
-      type: "string",
-      minLength: 1,
-      description: `Exact current value requested for ${definition.confirmation.challenge.field}.`,
-    }, "Confirmation answer", "Bevestigingsantwoord");
-    dependentRequired.confirmationToken = ["confirmationAnswer"];
-    dependentRequired.confirmationAnswer = ["confirmationToken"];
-  }
-
-  return {
-    ...inputSchema,
-    properties,
-    ...(required.size > 0 ? { required: [...required] } : {}),
-    ...(Object.keys(dependentRequired).length > 0 ? { dependentRequired } : {}),
-  };
+  return withOperationControlProperties(inputSchema as JsonObject, {
+    concurrency: definition.concurrency,
+    confirmation: definition.confirmation,
+  }) as JsonSchema;
 }
 
 const KEY = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;

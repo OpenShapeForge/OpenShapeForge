@@ -26,6 +26,7 @@ import { HttpError } from "../rest/http-error.js";
 import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
+  connectionTokenSecretScope,
   decryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -216,9 +217,9 @@ export async function testElicitedRow(
           );
         }
         // Token fields were encrypted by the sign-in callback under the
-        // personal scope; elicited fields under the source table scope.
+        // connection's token scope; elicited fields under the source table.
         const scope = TOKEN_FIELDS.has(field)
-          ? `${input.table}:personal`
+          ? connectionTokenSecretScope(input.table)
           : elicit.sourceTable;
         return decryptSecret(keyring, scope, field, stored);
       },

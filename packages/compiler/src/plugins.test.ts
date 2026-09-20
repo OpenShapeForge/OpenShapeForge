@@ -241,7 +241,7 @@ describe("compiler plugins", () => {
       (table) => table.schema === "platform" && table.name === "workflow_node_catalog_entries",
     )!;
     expect(catalogTable.tenantScoped).toBe(false);
-    expect(catalogTable.generatedCrud).toBe(false);
+    expect(catalogTable.generatedCrudEligible).toBe(false);
     expect(catalogTable.columns.map((column) => column.name)).toContain("catalog_checksum");
   });
 

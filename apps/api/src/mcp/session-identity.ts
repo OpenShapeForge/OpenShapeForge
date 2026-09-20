@@ -17,7 +17,7 @@
  * `whoami` answer; `session-opening.ts` reads them for the sentence a session
  * starts with.
  */
-import { selectOrganizationMembership } from "../auth/identity.js";
+import { selectOrganizationMembership } from "../auth/tenant-resolution.js";
 import type { OrganizationResourceBinding } from "../auth/organization-binding.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { LOCALE_CLAIM, resolveLocale, type ResolvedLocale } from "./locale.js";
@@ -52,7 +52,7 @@ export type SessionIdentity = {
   organizations: Array<{ alias: string; active: boolean }>;
   /**
    * Alias of the organization whose per-organization endpoint
-   * (`/api/mcp/organizations/<alias>`) the session was opened on; null on the
+   * (`/<alias>`) the session was opened on; null on the
    * shared `/api/mcp` path. When set it is the active membership, whatever
    * scope the token also carries: the binding pinned the tenant.
    */

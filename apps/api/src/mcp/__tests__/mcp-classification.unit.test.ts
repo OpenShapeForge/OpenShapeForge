@@ -204,6 +204,7 @@ const session = (...roles: string[]) =>
 const table = (columns: AnyRecord[] = []) =>
   ({
     name: "erp.payment_details",
+    generatedCrudEligible: true,
     columns,
     source: {
       crud: {

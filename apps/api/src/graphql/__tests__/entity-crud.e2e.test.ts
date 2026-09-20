@@ -4,10 +4,9 @@
  * cursor pagination, sorting, updates, and deletes — all derived from the
  * generated db manifest, so new entities are covered automatically.
  *
- * Shape-aware: the documents and readers come from e2e/gql-shapes.ts, so the
- * same assertions run against a v1 entity (bare payloads, Relay connection,
- * Boolean delete) and a canonical v2 one (operation results, items/nextCursor,
- * lease + confirmation on delete).
+ * The documents and readers come from e2e/gql-shapes.ts, so the assertions
+ * state their intent rather than the operation-result envelope (items and
+ * nextCursor, lease + confirmation on delete).
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -279,8 +278,7 @@ for (const table of tables) {
         // Re-pointing the record at a different parent is the integrity gap.
         // The value offered is one the column would otherwise accept, so this
         // fails for the schema's reason and not the database's. Schema
-        // validation precedes dispatch at both generations, so the refusal is
-        // a top-level error whatever the entity's shape.
+        // validation precedes dispatch, so the refusal is a top-level error.
         const repointed = await valueFor();
         const refused = await gql(tenantA, updateDoc(table), {
           input: { id, [immutableField]: repointed },

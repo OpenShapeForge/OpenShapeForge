@@ -37,15 +37,14 @@ export let canonicalOperationsById: Map<string, EntityOperationContract> | undef
  * description into English at build time and appends its own advice ("use get
  * for one known id", the edit-lease reminder). The canonical operation still
  * carries every language, so the localized sentence replaces the English one
- * it was composed from and the advice is kept; a tool without a canonical
- * operation (legacy v1) or a text the catalogue did not compose that way is
- * described as compiled.
+ * it was composed from and the advice is kept; a text the catalogue did not
+ * compose that way is described as compiled.
  */
 export function localizedToolText(
   tool: CatalogTool,
   locale: ResolvedLocale | undefined,
 ): { title: string | undefined; description: string } {
-  if (!locale || !tool.operationId) return { title: tool.title, description: tool.description };
+  if (!locale) return { title: tool.title, description: tool.description };
   canonicalOperationsById ??= new Map(
     getEntityOperationContracts().map((operation) => [operation.id, operation]),
   );
@@ -82,5 +81,5 @@ export function describeTool(
     outputSchema: withholdClassifiedOutput(tool.outputSchema, tool.operation, classified),
     annotations: tool.annotations,
     linksConfigurationApp: entity?.elicitOnCreate !== undefined && publicOriginIsHttps(),
-  });
+  }, locale?.tag ?? "en");
 }

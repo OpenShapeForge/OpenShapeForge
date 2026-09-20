@@ -3,7 +3,7 @@
  * Manifest-driven k6 performance suite for the generated GraphQL CRUD API.
  *
  * Scenarios, request payloads, and thresholds are DERIVED at init time from
- * the generated db manifest — every full legacy `generatedCrud` entity gets its own
+ * the generated db manifest — every entity with all five CRUD operations gets its own
  * constant-VUs lifecycle scenario (create -> get -> list -> update -> delete,
  * with required FK dependencies created and cleaned per iteration). Adding a
  * new entity YAML and rerunning `bun run generate` extends the load test
@@ -37,9 +37,16 @@ const graphqlErrors = new Counter("graphql_errors");
 
 const manifest = JSON.parse(open("../src/generated/db/manifest.json"));
 const tables = manifest.tables.filter(
-  // A lifecycle scenario requires all five operations. Partial-policy
-  // entities deliberately carry generatedCrud:false for old-runtime safety.
-  (table) => table.generatedCrud && table.source && table.source.graphql,
+  // A lifecycle scenario requires all five operations.
+  (table) =>
+    table.generatedCrudEligible &&
+    !table.domainInternal &&
+    table.source &&
+    table.source.graphql &&
+    table.source.crud &&
+    ["list", "get", "create", "update", "delete"].every(
+      (operation) => table.source.crud.operations[operation] === true,
+    ),
 );
 const tablesByName = {};
 for (const table of tables) {

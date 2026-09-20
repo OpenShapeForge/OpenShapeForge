@@ -252,12 +252,6 @@ export interface McpOperationConfig {
    * fails closed on a duplicate across the catalog.
    */
   name?: string;
-  /**
-   * Override the generated tool description for this operation (`dedicated`
-   * style only). Use for short, operational, entity-specific guidance; the
-   * compiler-composed default is used when absent.
-   */
-  description?: string;
 }
 
 export interface McpResourceConfig {
@@ -1229,6 +1223,42 @@ export interface AuthorizationConfigFile {
   /** v2 dev test users. */
   users?: AuthorizationUser[];
 
+  /**
+   * Who a login is, in entity terms: the party it acts as, the person record
+   * beside it, where its e-mail lives and which role administers the
+   * organization. Declared once per deployment; emitted as identity.json.
+   */
+  identity?: {
+    administratorRole: string;
+    memberRoles: string[];
+    actingParty: {
+      entity: string;
+      nameField: string;
+      typeField: string;
+      personType: string;
+      organizationType: string;
+      statusField: string;
+      activeStatus: string;
+      /** The field the organization resource shows as its profile text. */
+      profileField: string;
+    };
+    person: {
+      entity: string;
+      relationField: string;
+      firstNameField: string;
+      lastNameField: string;
+    };
+    loginContact: {
+      entity: string;
+      relationField: string;
+      typeField: string;
+      emailType: string;
+      valueField: string;
+      primaryField: string;
+      statusField: string;
+      activeStatus: string;
+    };
+  };
   /** What each role means to its holder, keyed by role name (display only). */
   roleLabels?: Record<string, AuthorizationRoleLabel>;
 }

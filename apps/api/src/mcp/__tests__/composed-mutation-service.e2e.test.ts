@@ -95,7 +95,6 @@ function table(name: string, columns: ReturnType<typeof column>[]) {
     tenantScoped: true,
     domainInternal: false,
     generatedCrudEligible: true,
-    generatedCrud: true,
     primaryKey: "id",
     columns,
   };

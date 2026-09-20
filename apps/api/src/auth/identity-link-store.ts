@@ -9,8 +9,14 @@
  */
 import { sql, type Transaction } from "kysely";
 import type { DB } from "../generated/db/types.js";
+import {
+  actingPartyColumns,
+  actingPartyTable,
+  IDENTITY_CONTRACT,
+  loginContactColumns,
+  loginContactTable,
+} from "./identity-contract.js";
 import type { IdentityClaims, IdentityLinkState, IdentityLinkStatus } from "./identity-link.js";
-
 
 export const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -54,17 +60,20 @@ export async function readLinkRow(
   identityId: string,
   tenantId: string,
 ): Promise<LinkRow | null> {
+  const party = actingPartyColumns();
   const result = await sql<LinkRow>`
     select ir.identity_id, i.issuer, i.subject, ir.status, ir.relation_id,
            ir.candidate_relation_id, ir.linked_by, ir.needs_role_assignment, ir.roles,
-           coalesce(linked.display_name, candidate.display_name) as display_name,
-           coalesce(linked.relation_type, candidate.relation_type) as relation_type
+           coalesce(linked.${sql.id(party.name)}, candidate.${sql.id(party.name)}) as display_name,
+           coalesce(linked.${sql.id(party.type)}, candidate.${sql.id(party.type)}) as relation_type
       from platform.identity_relations ir
       join platform.identities i on i.id = ir.identity_id
-      left join erp.relations linked
-        on linked.id = ir.relation_id and linked.tenant_id = ir.tenant_id
-      left join erp.relations candidate
-        on candidate.id = ir.candidate_relation_id and candidate.tenant_id = ir.tenant_id
+      left join ${sql.table(actingPartyTable())} linked
+        on linked.${sql.id(party.id)} = ir.relation_id
+       and linked.${sql.id(party.tenantId)} = ir.tenant_id
+      left join ${sql.table(actingPartyTable())} candidate
+        on candidate.${sql.id(party.id)} = ir.candidate_relation_id
+       and candidate.${sql.id(party.tenantId)} = ir.tenant_id
      where ir.identity_id = ${identityId} and ir.tenant_id = ${tenantId}
   `.execute(trx);
   return result.rows[0] ?? null;
@@ -129,19 +138,33 @@ export async function insertLinkRow(
   return readLinkRow(trx, row.identityId, row.tenantId);
 }
 
+/**
+ * The active parties an e-mail address belongs to, through an active contact
+ * detail. Both status fields are optional in the authored contract, so a
+ * record that states no status is taken as the active one it would default
+ * to; only a record that states another status is left out. Type and value
+ * are compared case-insensitively on both sides.
+ */
 export async function relationsWithEmail(
   trx: Transaction<DB>,
   tenantId: string,
   email: string,
 ): Promise<Array<{ id: string; display_name: string }>> {
+  const party = actingPartyColumns();
+  const contact = loginContactColumns();
   const result = await sql<{ id: string; display_name: string }>`
-    select distinct r.id, r.display_name
-      from erp.relations r
-      join erp.contact_details cd
-        on cd.relation_id = r.id and cd.tenant_id = r.tenant_id
-     where r.tenant_id = ${tenantId}
-       and lower(cd.type) = 'email'
-       and lower(cd.value) = lower(${email})
+    select distinct r.${sql.id(party.id)} as id, r.${sql.id(party.name)} as display_name
+      from ${sql.table(actingPartyTable())} r
+      join ${sql.table(loginContactTable())} cd
+        on cd.${sql.id(contact.relation)} = r.${sql.id(party.id)}
+       and cd.${sql.id(contact.tenantId)} = r.${sql.id(party.tenantId)}
+     where r.${sql.id(party.tenantId)} = ${tenantId}
+       and coalesce(r.${sql.id(party.status)}, ${IDENTITY_CONTRACT.actingParty.activeStatus})
+           = ${IDENTITY_CONTRACT.actingParty.activeStatus}
+       and coalesce(cd.${sql.id(contact.status)}, ${IDENTITY_CONTRACT.loginContact.activeStatus})
+           = ${IDENTITY_CONTRACT.loginContact.activeStatus}
+       and lower(cd.${sql.id(contact.type)}) = lower(${IDENTITY_CONTRACT.loginContact.emailType})
+       and lower(cd.${sql.id(contact.value)}) = lower(${email})
   `.execute(trx);
   return result.rows;
 }

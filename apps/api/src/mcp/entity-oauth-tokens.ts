@@ -17,10 +17,10 @@ import { type ModuleEgressDispatch } from "../modules/egress.js";
 import {
   KEYRING_ENV,
   TOKEN_TIMEOUT_MS,
-  connectionTokenSecretScope,
   type JsonRecord,
   type PendingAuthorization,
 } from "./entity-oauth.js";
+import { connectionTokenSecretScope } from "../connectors/secrets.js";
 export type ExchangedTokens = {
   values: JsonRecord;
 };

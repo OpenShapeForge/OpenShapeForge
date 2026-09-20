@@ -43,7 +43,6 @@ import {
 import { storeElicitedValues } from "../elicitation.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import { REST_MOUNT_PATH } from "../../rest/generated-rest-routes.js";
-import { isCanonical } from "../../graphql/__tests__/e2e/operations.js";
 
 registerSuiteLifecycle();
 setDefaultTimeout(20_000);
@@ -57,32 +56,26 @@ const target = table.columns.find(
 )!;
 const restBase = `${REST_MOUNT_PATH}/elicited-output-test`;
 
-// REST and GraphQL answer at the entity's shape. An injected MCP fixture has
-// no advertised output schema and therefore retains the legacy bare payload,
-// while a generated canonical tool wraps it. Normalize the actual MCP payload
-// rather than inferring its projection from the entity authoring version.
-const canonical = isCanonical(table);
-const restRecord = (response: { body: any }) => (canonical ? response.body.data : response.body);
+// REST, GraphQL and MCP all answer in the operation-result envelope. The MCP
+// helpers still read the actual payload rather than inferring its projection
+// from the tool definition.
+const restRecord = (response: { body: any }) => response.body.data;
 const restItems = (response: { body: any }): any[] =>
-  canonical ? response.body.data.items.map((item: any) => item.data) : response.body.items;
+  response.body.data.items.map((item: any) => item.data);
 const mcpRecord = (call: { payload: any }) => call.payload?.data ?? call.payload;
 const mcpItems = (call: { payload: any }): any[] => {
   const items = call.payload?.data?.items ?? call.payload?.items ?? [];
   return items.map((item: any) => item?.data ?? item);
 };
 const gqlRecordSelection = (fields: string) =>
-  canonical ? `data { ${fields} } error { code message }` : fields;
-const gqlListSelection = (fields: string) => canonical
-  ? `data { items { data { ${fields} } } } error { code message }`
-  : `edges { node { ${fields} } }`;
-const gqlRecord = (data: Record<string, any>, key: string) =>
-  canonical ? data[key].data : data[key];
+  `data { ${fields} } error { code message }`;
+const gqlListSelection = (fields: string) =>
+  `data { items { data { ${fields} } } } error { code message }`;
+const gqlRecord = (data: Record<string, any>, key: string) => data[key].data;
 const gqlItems = (data: Record<string, any>, key: string): any[] =>
-  canonical ? data[key].data.items.map((item: any) => item.data) : data[key].edges.map((edge: any) => edge.node);
+  data[key].data.items.map((item: any) => item.data);
 const gqlFailureCode = (result: Record<string, any>, key: string) =>
-  canonical
-    ? result.data?.[key]?.error?.code
-    : result.errors?.[0]?.extensions?.code;
+  result.data?.[key]?.error?.code;
 const keyring = keyringFromEnv(
   `test:${Buffer.alloc(32, 23).toString("base64")}`,
 )!;
@@ -119,6 +112,7 @@ function tool(
     table: table.name,
     description: `Test ${operation} projection.`,
     inputSchema,
+    outputSchema: { type: "object" },
     annotations: {
       readOnlyHint: operation === "list" || operation === "get",
       destructiveHint: false,
@@ -642,8 +636,7 @@ test.skipIf(remoteUrl)(
       ownerScope: "banana",
     });
     expect(refused.isError).toBe(true);
-    // The fixture tools advertise no outputSchema, so the answer takes the
-    // legacy body (code, message, detail); the detail still names the field.
+    // The refusal's detail names the field.
     expect(refused.payload.error).toMatchObject({
       code: "VALIDATION",
       detail: expect.stringContaining("ownerScope must be one of"),

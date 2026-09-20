@@ -142,6 +142,17 @@ describe("catalog collision audits", () => {
       /claims the MCP tool prefix "sync"/,
     );
   });
+
+  it("rejects a connector tool under the reserved osf_ prefix of the shared generic tools", () => {
+    const reserved = buildConnector(
+      connector("Osf", { exposure: { mcp: { toolPrefix: "osf" } } as never }),
+      "osf",
+      "o.yaml",
+    );
+    expect(() => buildConnectorCatalog([reserved], EMPTY_MANIFEST)).toThrow(
+      /"osf_list_things" \(osf\.listThings\) uses the reserved "osf_" prefix/,
+    );
+  });
 });
 
 describe("shared MCP tool budget", () => {

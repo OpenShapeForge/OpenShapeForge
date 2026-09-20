@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "@/generated/compiler/field-contract";
 import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
+import { cardinalityOf, resolveFieldBaseType, type OperationFieldSchemaRegistry } from "@openshapeforge/operations";
 
 export type FieldValueType = NonNullable<Field["baseType"]>;
 
@@ -25,26 +26,21 @@ export type FieldShapeKind =
 
 /**
  * The base type behind a field's `osfType`: compiled fields carry it as
- * `baseType`; an authored field resolves a base type to itself and a
- * catalog key to the entry's `valueType`.
+ * `baseType`; an authored field resolves through the generated catalog with
+ * the same resolver the projector uses, so an unknown osfType is an error
+ * here as it is there, never a field quietly treated as text.
  */
-export function fieldValueType(field: Pick<Field, "osfType" | "baseType">): FieldValueType {
+export function fieldValueType(field: Pick<Field, "osfType" | "baseType"> & { key?: string }): FieldValueType {
   if (field.baseType) return field.baseType;
-  if (isBaseType(field.osfType)) return field.osfType;
-  const semantic = COMPILER_OSF_TYPES[field.osfType as keyof typeof COMPILER_OSF_TYPES] as { valueType?: string } | undefined;
-  return (semantic?.valueType ?? "string") as FieldValueType;
+  return resolveFieldBaseType(
+    { key: field.key ?? field.osfType, osfType: field.osfType },
+    COMPILER_OSF_TYPES as OperationFieldSchemaRegistry["osfTypes"],
+  );
 }
 
+/** The one reading of cardinality; invalid bounds are an authoring error, not a single value. */
 export function fieldCardinality(field: Field): FieldCardinality {
-  const cardinality = field.cardinality;
-  if (cardinality === "collection") return "collection";
-  if (cardinality && typeof cardinality === "object") {
-    if (cardinality.max === "unbounded") return "collection";
-    if (typeof cardinality.max === "number" && cardinality.max > 1) {
-      return "collection";
-    }
-  }
-  return "single";
+  return cardinalityOf(field.cardinality, field.key).cardinality;
 }
 
 export function isFieldCollection(field: Field): boolean {

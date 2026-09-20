@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
-import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
+import { fieldCardinality } from "./compiler/helpers.js";
+import { cardinalityOf } from "@openshapeforge/operations";
 import { type InverseCollectionSource, defaultInverseLabel, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
 
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -26,7 +27,7 @@ export function resolveBaseType(
   osfType: string | undefined,
   catalog: Record<string, OsfTypeDefinition>,
 ): FieldDefinitionValueType | undefined {
-  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.valueType;
+  return isBaseType(osfType) ? osfType : osfTypeDefinitionOf(osfType, catalog)?.baseType;
 }
 
 /** Embedded values need a policy adapter before any protected leaf may be used. */
@@ -83,7 +84,7 @@ export function deriveEntityOsfTypes(
       kind: "entity",
       entity: entity.entity,
       entityIdentity: entity.baseEntity !== false || entity.fields.some((field) => field.key === "id"),
-      valueType: "string",
+      baseType: "string",
       validation: { format: "uuid" },
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       pluralLabel: defaultInverseLabel(entity),
@@ -93,14 +94,25 @@ export function deriveEntityOsfTypes(
     };
     const identityKey = `${entity.entity[0]!.toLowerCase()}${entity.entity.slice(1)}Id`;
     if (result[entity.entity]!.entityIdentity === false) continue;
-    const route = entity.interfaces?.web?.views?.collection?.route;
+    if (Object.hasOwn(catalog, identityKey)) {
+      throw new Error(`Osf type ${identityKey} is the identity alias of entity ${entity.entity}; it is derived, not authored.`);
+    }
+    if (result[identityKey]) throw new Error(`Osf type ${identityKey} duplicates the identity alias of entity ${entity.entity}.`);
+    // Enumerating the records is the entity's own list Operation; there is no
+    // separate options endpoint to point at. Navigation (the localized web
+    // routes) stays on the entity's web interface, not on the type.
+    const enumerable = Object.values(entity.operations ?? {}).some((operation) =>
+      operation.implementation.type !== "collection" && operation.implementation.action === "list");
     // The identity alias is distinct from a relationship to that entity: an
-    // entity's own primary key must never acquire a self-referencing FK.
-    result[identityKey] ??= {
-      kind: "entityId", entity: slug(entity.entity), valueType: "string",
+    // entity's own primary key must never acquire a self-referencing FK. It
+    // carries no classification: `internal` restricts nothing (only
+    // confidential/pii/bsn do) and no consumer reads a category, so the
+    // authored `{ sensitivity: internal, category: workflow }` was noise.
+    result[identityKey] = {
+      kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       validation: { format: "uuid" },
-      listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,
+      ...(enumerable ? { optionSource: { type: "entity", source: entity.entity, valueField: "id" } } : {}),
       displayTemplate: entity.displayTemplate ?? "{{id}}",
       filterField: entity.filterField ?? "id",
       icon: "file",
@@ -148,18 +160,46 @@ export function deriveProviderOsfTypes(
       // the web manifest; the provider projection stays reachable only there.
       if (result[name]?.kind === "entity") continue;
       if (result[name]) throw new Error(`Osf type ${name} duplicates a loaded entity or provider entity.`);
-      result[name] = { kind: "provider", entity: name, valueType: "object", label: entity.title };
+      result[name] = { kind: "provider", entity: name, baseType: "object", label: entity.title };
     }
   }
   return result;
 }
 
-/** Profile fields are not normalized as an entity; they still need their base type. */
-export function withBaseTypes(fields: readonly Field[], catalog: Record<string, OsfTypeDefinition>): Field[] {
+/**
+ * Profile (partial) fields extend an entity with columns on a profile table.
+ * They resolve their base type, catalog validation and cardinality the way
+ * entity fields do, but they never go through relationship normalization:
+ * a profile table carries no foreign keys, so a field that names an entity
+ * would silently compile to a bare text column. It is refused; the
+ * relationship belongs on the entity, added with an entityPatch. The one
+ * exception is an entity-value definition, whose profile fields are its own
+ * fields and are normalized as such by the compiler.
+ */
+export function withBaseTypes(
+  fields: readonly Field[],
+  catalog: Record<string, OsfTypeDefinition>,
+  path = "",
+  options: { entityReferences?: "refuse" | "normalizedLater" } = {},
+): Field[] {
   return fields.map((field) => {
+    const origin = path ? `${path}.${field.key}` : field.key;
+    const semantic = osfTypeDefinitionOf(field.osfType, catalog);
     const baseType = field.baseType ?? resolveBaseType(field.osfType, catalog);
-    if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
-    return { ...field, baseType };
+    if (!baseType) throw new Error(`${origin}: unknown osfType ${field.osfType}.`);
+    const references = semantic?.kind === "entity" || semantic?.kind === "entityId" || semantic?.kind === "provider";
+    if (references && options.entityReferences !== "normalizedLater") {
+      throw new Error(
+        `${origin}: a profile field cannot reference entity ${semantic.entity ?? field.osfType}; ` +
+          "profile tables carry no relationships. Add the field to the entity itself (kind: entityPatch).",
+      );
+    }
+    const result: Field = { ...field, baseType };
+    if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
+    const cardinality = field.cardinality ?? semantic?.cardinality;
+    if (cardinality) result.cardinality = cardinality;
+    if (cardinalityOf(cardinality, origin).required) result.required = true;
+    return result;
   });
 }
 
@@ -176,16 +216,16 @@ export function normalizeEntityFields(
     if (entity.baseEntity === false && !entity.fields.some((field) => field.key === "id")) {
       assertEntityValueFieldPolicies(field, path, semantic);
     }
-    const baseType = isBaseType(field.osfType) ? field.osfType : semantic?.valueType;
+    const baseType = isBaseType(field.osfType) ? field.osfType : semantic?.baseType;
     if (!baseType) throw new Error(`${path}: unknown osfType ${field.osfType}.`);
     // Inline identifier values (for example arguments in a stored template)
     // are not entity relationships. Preserve their scalar semantic type;
     // only an EntityName osf type requests relational storage. A nested
     // value cannot claim its own persisted column or relationship metadata.
-    if (entity.schemaVersion === 3 && nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
+    if (nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
       throw new Error(`${path}: inline identifier values cannot declare relational storage.`);
     }
-    if (entity.schemaVersion === 3 && !nested && semantic?.kind === "entityId" && (field.key !== "id" || field.osfType !== identityKey)) {
+    if (!nested && semantic?.kind === "entityId" && (field.key !== "id" || field.osfType !== identityKey)) {
       throw new Error(`${path}: identity aliases identify primary keys; use the entity osfType for a relationship.`);
     }
     const result: Field = { ...field, baseType };
@@ -201,17 +241,10 @@ export function normalizeEntityFields(
     }
     const cardinality = field.cardinality ?? semantic?.cardinality;
     if (cardinality) result.cardinality = cardinality;
-    if (typeof cardinality === "object") {
-      const min = cardinality.min ?? 0;
-      const max = cardinality.max ?? 1;
-      if (!Number.isInteger(min) || min < 0 || (max !== "unbounded" && (!Number.isInteger(max) || max < min))) {
-        throw new Error(`${path}: invalid cardinality bounds.`);
-      }
-      if (min > 0) result.required = true;
-    }
+    if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
-    if (field.entityValue || field.allowedDefinitions) {
-      if (entity.schemaVersion !== 3 || nested) throw new Error(`${path}: entityValue and allowedDefinitions require a top-level schemaVersion 3 field.`);
+    if ((field.entityValue || field.allowedDefinitions) && nested) {
+      throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }
     if (field.entityValue) {
       if (field.osfType !== "entityValue" || baseType !== "object" || collection || field.relationship || inlineShape || item) {
@@ -256,7 +289,6 @@ export function normalizeEntityFields(
       if (field.relationship) throw new Error(`${path}: relationship requires a loaded entity osfType.`);
       return result;
     }
-    if (entity.schemaVersion === 1) throw new Error(`${path}: entity relationship fields require schemaVersion 2 or 3.`);
     if (semantic.entityIdentity === false) throw new Error(`${path}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${path}: entity references must be relational fields, not IDs inside JSON values.`);
     result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
@@ -282,7 +314,6 @@ function providerRelationshipOf(
   const path = `${entity.entity}.${field.key}`;
   const target = semantic.entity!;
   if (nested) throw new Error(`${path}: provider-backed references are top-level fields, not values inside JSON.`);
-  if (entity.schemaVersion !== 3) throw new Error(`${path}: provider-backed references require schemaVersion 3.`);
   if (field.persisted) throw new Error(`${path}: a provider-backed reference has no storage of its own; the ${target} Operations resolve it.`);
   // Normalization runs more than once (loader, then compile): a relationship
   // this function derived earlier is not authored metadata.

@@ -146,9 +146,6 @@ fields:
       nl: Relatiegroep waarvan leden gesprekken in deze queue kunnen zien. Bestaande queues mogen tijdens rollout leeg zijn;
         create- en update-APIs vereisen deze waarde.
     osfType: RelationGroup
-    options:
-      type: remote
-      remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
     persisted:
       column: visibility_relation_group_id
       storageClass: core

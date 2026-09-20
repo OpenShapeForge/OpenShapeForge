@@ -7,6 +7,7 @@ import { compile } from "./index.js";
 import { withStatusTransitions } from "./transitions.js";
 import { buildWebManifest } from "../web-manifest.js";
 import { collectAuthoredEntityPluginOperations } from "../../generate-operations.js";
+import { assertTransitionAgreements } from "./transitions.js";
 
 const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");
@@ -67,10 +68,11 @@ describe("status transitions", () => {
   });
 
   test("status is writtenBy every rule's Operation, a stamped field by its rule only", () => {
-    expect(contract.model.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]);
+    expect(contract.model.fields.find((field) => field.key === "status")!.writtenBy).toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel", "AgreementMilestone.invoice"]);
     for (const key of ["triggeredAt", "triggeredBy"]) {
       expect(contract.model.fields.find((field) => field.key === key)!.writtenBy).toEqual(["AgreementMilestone.trigger"]);
     }
+    expect(contract.model.fields.find((field) => field.key === "producedInvoiceId")!.writtenBy).toEqual(["AgreementMilestone.invoice"]);
     expect(contract.model.fields.find((field) => field.key === "description")!.writtenBy).toBeUndefined();
   });
 
@@ -83,13 +85,25 @@ describe("status transitions", () => {
           stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
         },
         { key: "cancel", operation: "AgreementMilestone.cancel", from: ["pending", "triggered"], to: "cancelled", label: { en: "Cancel", nl: "Annuleren" } },
+        { key: "invoice", operation: "AgreementMilestone.invoice", from: ["triggered"], to: "invoiced", label: { en: "Invoice", nl: "Factureren" }, writes: [{ field: "producedInvoiceId", required: true, agreesOn: ["agreementId"] }] },
       ],
     }]);
     expect(contract.interfaces?.web?.operations).toBeDefined();
     const web = buildWebManifest([{ slug: "agreement-milestone", contract }]);
     const entity = web.entities.AgreementMilestone!;
     expect(entity.transitions).toEqual(contract.transitions as typeof entity.transitions);
-    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toEqual(expect.arrayContaining(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]));
+    expect(entity.views.record!.operations.actions!.map((action) => action.id)).toEqual(expect.arrayContaining(["AgreementMilestone.trigger", "AgreementMilestone.cancel", "AgreementMilestone.invoice"]));
+  });
+
+  test("the invoice rule requires the invoice it names, under the finance role, and is the only other writer of that field", () => {
+    const invoice = contract.pluginOperations!.find((candidate) => candidate.key === "invoice")!;
+    expect(invoice.id).toBe("AgreementMilestone.invoice");
+    expect(invoice.definition.auth).toEqual({ mode: "session", roles: ["Finance.All.ReadWrite"] });
+    const schema = invoice.definition.input!.schema as { required: string[]; properties: Record<string, unknown> };
+    expect(Object.keys(schema.properties)).toEqual(["id", "producedInvoiceId"]);
+    expect(schema.required).toEqual(["id", "producedInvoiceId"]);
+    expect((invoice.definition.description as { en: string }).en).toContain("status: triggered -> invoiced");
+    expect(invoice.interfaces.rest).toEqual({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/invoice" });
   });
 
   test("the lowered Operation passes the plugin Operation gates with a REST, MCP and GraphQL projection", () => {
@@ -101,6 +115,28 @@ describe("status transitions", () => {
     expect(compiled!.transports.mcp).toEqual({ enabled: true, name: "agreement_milestone_trigger" });
     expect(compiled!.transports.graphql).toMatchObject({ enabled: true, kind: "mutation" });
     expect((compiled!.inputSchema as { required: string[] }).required).toEqual(["id", "expectedVersion"]);
+  });
+
+  test("a constrained write must be a single reference and agree on persisted fields of this entity", () => {
+    const rules = (writes: unknown[]) => withStatus({ transitions: { initial: "pending", rules: [{ key: "invoice", from: ["triggered"], to: "invoiced", writes }] } }, formless);
+    expect(() => withStatusTransitions(rules([{ field: "expectedAt", agreesOn: ["agreementId"] }]), catalogs)).toThrow('constrains "expectedAt" with agreesOn, but it is not a single entity reference');
+    expect(() => withStatusTransitions(rules([{ field: "producedInvoiceId", agreesOn: ["nothing"] }]), catalogs)).toThrow('agreesOn "nothing", which is not a persisted single comparable field');
+    const { entity } = withStatusTransitions(rules(["producedInvoiceId"]), catalogs);
+    expect((entity.operations!.invoice!.input!.schema as { required: string[] }).required).toEqual(["id"]);
+  });
+
+  test("across the corpus, the referenced entity must carry the agreed field as the same base type", () => {
+    const invoice = compile(loadEntity(authoringDir, "invoice"));
+    expect(() => assertTransitionAgreements([contract, invoice])).not.toThrow();
+    // A plugin entity constraining a reference to a core entity is the same check, keyed by name.
+    const pluginEntity = { ...contract, entity: { ...contract.entity, name: "PluginMilestone" }, transitions: contract.transitions!.map((status) => ({ ...status, rules: status.rules.map((rule) => ({ ...rule, operation: rule.operation.replace("AgreementMilestone", "PluginMilestone") })) })) };
+    expect(() => assertTransitionAgreements([pluginEntity, invoice])).not.toThrow();
+    expect(() => assertTransitionAgreements([pluginEntity])).toThrow('[PluginMilestone] PluginMilestone.invoice constrains "producedInvoiceId" with agreesOn, but it references no compiled entity');
+    expect(() => assertTransitionAgreements([contract])).toThrow('references no compiled entity');
+    const retyped = { ...invoice, storage: { ...invoice.storage, columns: invoice.storage.columns.map((column) => (column.field === "agreementId" ? { ...column, type: "text" } : column)) } };
+    expect(() => assertTransitionAgreements([contract, retyped])).toThrow('Invoice.agreementId (string text) is not a persisted single field of the same type as AgreementMilestone.agreementId (string uuid)');
+    const missing = { ...invoice, model: { ...invoice.model, fields: invoice.model.fields.filter((field) => field.key !== "agreementId") } };
+    expect(() => assertTransitionAgreements([contract, missing])).toThrow('Invoice.agreementId (absent) is not a persisted single field');
   });
 
   test("an entity without transitions is returned untouched", () => {
@@ -178,7 +214,7 @@ describe("status transition validation", () => {
     expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, stamps: [{ field: "triggeredBy", value: "now" }] }] } }, formless))).toThrow("not a datetime field");
     expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, stamps: [{ field: "triggeredAt", value: "actor" }] }] } }, formless))).toThrow("neither a Relation reference nor a string");
     expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, writes: ["triggeredAt"], stamps: [{ field: "triggeredAt", value: "now" }] }] } }, formless))).toThrow('rule "trigger" already writes');
-    expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, stamps: [{ field: "agreementId", value: "actor" }] }] } }, formless))).toThrow("neither a Relation reference nor a string");
+    expect(lower(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, stamps: [{ field: "expectedAt", value: "actor" }] }] } }, formless))).toThrow("neither a Relation reference nor a string");
     const relationField = { key: "actorRelationId", osfType: "Relation", baseType: "string", persisted: { column: "actor_relation_id", storageClass: "core" }, relationship: { ownership: "reference" } };
     const { entity, transitions } = withStatusTransitions(withStatus({ transitions: { initial: "pending", rules: [{ ...rule, stamps: [{ field: "actorRelationId", value: "actor" }] }] } }, { ...formless, fields: [...milestone.coreEntity.fields, relationField] }), catalogs);
     expect(entity.fields.find((field) => field.key === "actorRelationId")!.writtenBy).toEqual(["AgreementMilestone.trigger"]);

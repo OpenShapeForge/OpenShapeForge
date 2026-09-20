@@ -26,11 +26,20 @@ export const TRANSITIONS_PLUGIN = "osf-transitions";
 type TransitionStatus = NonNullable<NonNullable<GeneratedCrudTable["source"]>["transitions"]>[number];
 type TransitionRule = TransitionStatus["rules"][number];
 
+/** A write the rule constrains: the referenced record must equal this one on the paired columns. */
+export type TransitionAgreement = {
+  field: string;
+  column: GeneratedCrudColumn;
+  target: GeneratedCrudTable;
+  pairs: Array<{ field: string; local: GeneratedCrudColumn; remote: GeneratedCrudColumn }>;
+};
+
 export type TransitionBinding = {
   table: GeneratedCrudTable;
   status: TransitionStatus;
   statusColumn: GeneratedCrudColumn;
   rule: TransitionRule;
+  agreements: TransitionAgreement[];
 };
 
 function columnForField(table: GeneratedCrudTable, field: string): GeneratedCrudColumn {
@@ -41,6 +50,34 @@ function columnForField(table: GeneratedCrudTable, field: string): GeneratedCrud
   return column;
 }
 
+/**
+ * Bind every `agreesOn` of the rule against the generated manifest: the
+ * written column must be a single reference whose target entity carries each
+ * named field. The compiler sees one entity at a time, so this is where a
+ * field the target does not have is refused — at boot, not on the first call.
+ */
+function agreementBindings(table: GeneratedCrudTable, rule: TransitionRule): TransitionAgreement[] {
+  const tables = getGeneratedCrudTables();
+  return (rule.writes ?? []).filter((write) => write.agreesOn?.length).map((write) => {
+    const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.fieldKey === write.field && candidate.resolve === "belongsTo");
+    const target = relationship && tables.find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
+    if (!target) throw new Error(`Transition ${rule.operation} constrains "${write.field}" with agreesOn, but it is not a reference to a generated entity.`);
+    const pairs = write.agreesOn!.map((field) => {
+      const local = columnForField(table, field);
+      const remote = target.columns.find((candidate) => fieldNameForColumn(candidate) === field);
+      if (!remote) throw new Error(`Transition ${rule.operation} agreesOn "${field}", which ${target.source?.authoringEntityName ?? target.name} does not have.`);
+      // The comparison is issued in SQL between the two columns, so they must
+      // be of one type: a text against a uuid, or a numeric against an
+      // integer, is a build defect, not a runtime coercion.
+      if (local.type !== remote.type) {
+        throw new Error(`Transition ${rule.operation} agreesOn "${field}", but ${table.name}.${local.name} is ${local.type} and ${target.name}.${remote.name} is ${remote.type}.`);
+      }
+      return { field, local, remote };
+    });
+    return { field: write.field, column: columnForField(table, write.field), target, pairs };
+  });
+}
+
 /** Resolve the rule an Operation key stands for; a key no manifest rule answers to is a build defect. */
 export function transitionBinding(operation: { key: string; target?: { entityName: string } }): TransitionBinding {
   const table = getGeneratedCrudTables().find(
@@ -48,7 +85,7 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   );
   for (const status of table?.source?.transitions ?? []) {
     const rule = status.rules.find((candidate) => candidate.operation === operation.key);
-    if (rule) return { table: table!, status, statusColumn: columnForField(table!, status.field), rule };
+    if (rule) return { table: table!, status, statusColumn: columnForField(table!, status.field), rule, agreements: agreementBindings(table!, rule) };
   }
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
@@ -150,6 +187,57 @@ function stampValues(binding: TransitionBinding, session: DbSessionInput): Recor
   return values;
 }
 
+function validation(field: string, message: string): never {
+  throw operationFailure({ code: "VALIDATION", message, retryable: false, violations: [{ field, code: "INVALID_VALUE", message }] });
+}
+
+/**
+ * The caller's writes: a required one must be present, and a constrained
+ * reference must name a record of this tenant that agrees with the current
+ * row on every paired field. The comparison is the database's, column
+ * against column with IS NOT DISTINCT FROM in the query that share-locks the
+ * referenced record — typed, exact, and null-aware (a null on either side
+ * disagrees with everything but null) — never a JavaScript coercion.
+ */
+async function writtenValues(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  binding: TransitionBinding,
+  id: string,
+  input: Readonly<Record<string, unknown>>,
+): Promise<Record<string, unknown>> {
+  const values: Record<string, unknown> = {};
+  for (const write of binding.rule.writes ?? []) {
+    const value = input[write.field];
+    if (value === undefined || value === null) {
+      if (write.required) validation(write.field, `${binding.rule.key} requires ${write.field}.`);
+      continue;
+    }
+    values[write.field] = value;
+  }
+  for (const agreement of binding.agreements) {
+    const referenced = values[agreement.field];
+    if (referenced === undefined) continue;
+    const entity = agreement.target.source?.authoringEntityName ?? agreement.target.name;
+    const tenantWhere = agreement.target.tenantScoped ? sql`and ${sql.id("remote", "tenant_id")} = ${session.tenantId}::uuid` : sql``;
+    const result = await sql<{ disagrees: string | null }>`
+      select coalesce(${sql.join(agreement.pairs.map((pair) =>
+        sql`case when ${sql.id("remote", pair.remote.name)} is distinct from ${sql.id("local", pair.local.name)} then ${pair.field}::text end`))}) as disagrees
+      from ${sql.id(agreement.target.schema, agreement.target.table)} as remote,
+           ${sql.id(binding.table.schema, binding.table.table)} as local
+      where ${sql.id("remote", agreement.target.primaryKey!)}::text = ${String(referenced)} ${tenantWhere}
+        and ${sql.id("local", binding.table.primaryKey!)}::text = ${id}
+      for share of remote
+    `.execute(trx);
+    if (result.rows.length === 0) validation(agreement.field, `${agreement.field} names no ${entity} in this tenant.`);
+    const disagrees = result.rows[0]!.disagrees;
+    if (disagrees !== null) {
+      validation(agreement.field, `${agreement.field} must name ${entity} that agrees with this ${binding.table.source?.authoringEntityName ?? binding.table.name} on ${disagrees}.`);
+    }
+  }
+  return values;
+}
+
 /**
  * Execute one rule: lock the row, check the record permission the rule
  * carries, recheck the decision, write `to`, the caller's `writes` and the
@@ -170,11 +258,11 @@ export async function executeTransition(
     if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
     const refusal = transitionRefusal(binding, current);
     if (refusal) throw operationFailure(refusal);
-    const values: Record<string, unknown> = { [binding.status.field]: binding.rule.to };
-    for (const field of binding.rule.writes ?? []) {
-      if (input[field] !== undefined) values[field] = input[field];
-    }
-    Object.assign(values, stampValues(binding, session));
+    const values: Record<string, unknown> = {
+      [binding.status.field]: binding.rule.to,
+      ...(await writtenValues(trx, session, binding, id, input)),
+      ...stampValues(binding, session),
+    };
     const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
     if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
     return serializeEntityRow(binding.table, row);

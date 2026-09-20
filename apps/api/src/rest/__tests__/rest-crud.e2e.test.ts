@@ -38,6 +38,7 @@ import {
   nextMarker,
   pluginCreateInput,
   redactableColumnFor,
+  referencingRows,
   contractSample,
   tables,
   tablesByName,
@@ -48,6 +49,7 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
+  createOffersField,
   isEntityBackedCreate,
   leaseRequired,
   operationContractFor,
@@ -363,7 +365,10 @@ for (const table of restTables) {
       trackRestRow(table, id, tenantA);
       expect(createdRecord.createdAt).toBeTruthy();
       expect(Object.keys(createdRecord).some((key) => key.includes("_"))).toBe(false);
-      expect(created.body.operations.every((offer: any) => offer.available)).toBe(true);
+      // A fresh record offers every Operation, except a status transition
+      // whose `from` the initial state is not: that one is listed as
+      // unavailable with INVALID_STATE, which is the offer doing its job.
+      expect(created.body.operations.every((offer: any) => offer.available || offer.error?.code === "INVALID_STATE")).toBe(true);
 
       const fetched = await rest(tenantA, "GET", `${base}/${id}`);
       expect(fetched.status).toBe(200);
@@ -525,9 +530,23 @@ for (const table of restTables) {
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
 
-    if (isEntityBackedCreate(table)) {
-      test("DELETE answers 200 with the result envelope", async () => {
-        const id = await createRestRow(table, tenantA);
+    // What DELETE must do depends on what the create actually left behind,
+    // read from the database: a record nothing references is removed; a
+    // record whose create also made rows that reference it (a document and
+    // its first version) is refused by the schema's on-delete rule while
+    // they exist, and removing them is the create's own contract. A refusal
+    // without such rows, or a removal despite them, is a finding.
+    test("DELETE removes the row with the v2 envelope, or is refused only while rows that reference it exist", async () => {
+      const id = await createRestRow(table, tenantA);
+      const referencing = await referencingRows(table, id, tenantA);
+      if (referencing.length > 0) {
+        const refused = await restDelete(table, tenantA, id);
+        expect(refused.status).toBe(409);
+        expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
+        expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
+        return;
+      }
+      {
         const deleted = await restDelete(table, tenantA, id);
         expect(deleted.status).toBe(200);
         expect(deleted.body.data).toEqual({ deleted: true });
@@ -545,19 +564,8 @@ for (const table of restTables) {
                 : {}),
             });
         expect(again.status).toBe(404);
-      });
-    } else {
-      // A plugin-backed create makes companion records the entity delete is
-      // authored to refuse while they exist (a document and its first
-      // version); removing them is the plugin's own contract.
-      test("DELETE is refused while the create's companion records exist", async () => {
-        const id = await createRestRow(table, tenantA);
-        const refused = await restDelete(table, tenantA, id);
-        expect(refused.status).toBe(409);
-        expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
-        expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
-      });
-    }
+      }
+    });
 
     if (leaseRequired(table, "update") && leaseRequired(table, "delete")) {
       test("the central record lease blocks a second writer across update and delete", async () => {
@@ -888,16 +896,25 @@ for (const table of restTables) {
     if (!fkTarget) return contractSample(table, immutable, nextMarker());
     return createForeignKeyTarget(fkTarget, identity);
   };
-  // Only an entity-backed create offers the column as input; a plugin create
-  // owns the value (a document's current version). PATCH refuses it either
-  // way, and the schema says so.
-  const offeredOnCreate = isEntityBackedCreate(table);
+  // An entity-backed create offers the column as input; a plugin create only
+  // where its authored contract names the field (a milestone's basis amount),
+  // and otherwise owns the value (a document's current version). PATCH
+  // refuses it either way, and the schema says so.
+  const offeredOnCreate = createOffersField(table, field);
 
   describe(`${rest_.basePath} immutable fields`, () => {
     test(`${offeredOnCreate ? `POST accepts ${field}; ` : ""}PATCH rejects ${field} with 400 and the value stands`, async () => {
       const body = offeredOnCreate
         ? await buildCreateBody(table, tenantA, { [field]: await valueFor(tenantA) })
         : await buildCreateBody(table, tenantA);
+      // A column an Operation writes is not the caller's at create either: the
+      // entity-backed create refuses it by name, as the update does below.
+      if (!offeredOnCreate && isEntityBackedCreate(table)) {
+        const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: await valueFor(tenantA) });
+        expect(refusedCreate.status).toBe(400);
+        expect(refusedCreate.body.error.code).toBe("BAD_USER_INPUT");
+        expect(refusedCreate.body.error.message).toContain(field);
+      }
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
       const id = recordPayload(created).id as string;

@@ -44,7 +44,7 @@ Verified against `entities/core/relation.yaml` and the types in
 `packages/compiler/src/authoring/types/authoring.ts`:
 
 ```yaml
-schemaVersion: 1
+schemaVersion: 3             # the only authored shape; the loader refuses others
 kind: coreEntity
 module: core                 # module -> DB schema (core maps to "erp")
 entity: Relation             # PascalCase name (GraphQL type, targets)
@@ -77,7 +77,7 @@ fields:
       column: display_name
       storageClass: core
   - key: relationType
-    osfType: referenceDataCode   # a catalog entry: its valueType is the base
+    osfType: referenceDataCode   # a catalog entry: its baseType is the base
     required: true
     persisted: { column: relation_type, storageClass: core }
     options: { type: referentiedata, referentieGroep: RELATIESOORT }
@@ -91,38 +91,33 @@ fields:
         key: relations       # derives on RelationGroup (default: lower-camel
         label: { en: Relations, nl: Relaties }   # plural of this entity)
 
-ui:
-  routes:                    # localized route templates per action
-    list:   { en: /relations,            nl: /relaties }
-    detail: { en: /relations/:id,        nl: /relaties/:id }
-    create: { en: /relations/create,     nl: /relaties/aanmaken }
-    edit:   { en: /relations/:id/edit,   nl: /relaties/:id/bewerken }
-    delete: { en: /relations/:id/delete, nl: /relaties/:id/verwijderen }
-  presentations:
-    list:                    # columns, sortability, defaultSort, rowLink
-      columns: [{ key: displayName, sortable: true }, ...]
-      defaultSort: { key: displayName, direction: asc }
-    detail:                  # header (title/subtitle/badges), actions,
-      groups: [...]          # grouped field sections; a group may render a
-                             # relationship instead (relationship: members)
-    form:
-      variants:
-        create: { title: ..., groups: [...] }
-        edit:   { extends: create, title: ... }
+operations:                  # EVERY behaviour of the entity, generated CRUD
+  list:                      # included: an intent the entity does not
+    name: { en: List relations, nl: Relaties tonen }   # implement does not exist
+    description: { en: ..., nl: ... }
+    implementation: { type: entity, action: list }     # or a plugin handler
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get: { ... }               # get, create, update, delete, plus any
+  create: { ... }            # entity-specific Operation (publish, archive, ...)
 
-workflow:                    # opt-in to entity workflow nodes (consumed by
-  nodes:                     # the workflow plugin; see plugins.md)
-    actions: { create: true, getOne: true, list: true, update: true, delete: true }
-
-crud:                       # common upper bound for every generated surface
-  operations:              # absent crud: keeps the historical all-true default
-    list: true
-    get: true
-    create: false          # read-only example
-    update: false
-    delete: false
-
-rest: true                   # opt-in generated REST exposure (see below)
+interfaces:                  # thin per-transport projections of `operations`;
+  rest: {}                   # each may narrow the set, never widen it
+  graphql: {}
+  mcp:
+    operations:
+      create: { instructions: { en: ..., nl: ... } }
+    resource: { uri: app://relations, name: Relations, description: ... }
+  web:
+    views:
+      collection:            # the collection page: route, columns, sort
+        route: { en: /relations, nl: /relaties }
+        columns: [{ key: displayName, sortable: true }, ...]
+      record:                # the record page: routes, title, tabbed layout
+        routes: { read: { en: /relations/:id, nl: /relaties/:id } }
+        title: "{{displayName}}"
+        layout: { tabs: [...] }
 ```
 
 ### Action-specific record permissions
@@ -219,64 +214,46 @@ Notes on what the compiler does with this:
   trusted-context callers both match. See
   [api.md](api.md#authentication--authorization).
 
-### `crud:` — common generated-operation policy
+### Generated CRUD is the set of implemented Operations
 
-This field is part of compiled entity contract version 2. Consumers that
-validate compiled contracts must upgrade before accepting version 2. The
-version bump makes this wire-contract change detectable; it is not by itself
-a runtime barrier for plugin code that does not validate supported contract
-versions. A generated manifest marks the entity `generatedCrudEligible: true`
-and carries the partial policy in `source.crud.operations`; a runtime serves
-exactly the operations that policy enables.
+There is no separate CRUD policy. An entity exposes exactly the five
+intents (`list`, `get`, `create`, `update`, `delete`) that its `operations`
+implement, whether by the built-in entity implementation or a plugin
+handler. A read-only entity simply has no `create`, `update` or `delete`
+Operation; an internal entity has none at all. That set is the upper
+bound for GraphQL, REST, MCP and generated workflow nodes; each
+`interfaces.*` block may exclude an Operation (`operations: { delete: false }`)
+but cannot add one.
 
-`crud` is the transport-independent upper bound for GraphQL, REST, MCP and
-generated workflow nodes. Existing entities that
-omit it keep all five operations enabled. `crud: false` disables every generic
-operation; the object form can make an entity read-only or expose a smaller
-set. `rest.operations`, `mcp.operations` and `workflow.nodes.actions` may
-further narrow the common policy but cannot widen it.
+The stock generated entity pages are emitted only when all five intents are
+implemented, because those pages assume the complete list/detail/edit
+surface. Entities with a smaller set use a purpose-built UI, declared under
+`interfaces.web`.
 
-Declare `crud` only on a core entity, a standalone `contexts/*/full` entity, or
-an `entityPatch`. A `contexts/*/partial` profile extends fields on an existing
-resource and is rejected if it declares its own CRUD policy.
+Per-Operation exposure is a prerequisite for immutable, versioned resources:
+it removes generic mutation entry points, but remains defense in depth and
+does not replace database-level immutability for published records.
 
-The stock generated entity pages are emitted only when all five operations are
-enabled, because those pages assume the complete list/detail/edit surface.
-Entities with a partial policy use a purpose-built UI.
-
-Per-operation exposure is a prerequisite for immutable, versioned resources:
-it removes generic mutation entry points, but remains defense in depth and does
-not replace database-level immutability for published records.
-
-Because this is a security policy, authoring layers are monotonic: an
-`entityPatch` may turn an operation from `true` to `false`, but a later layer
-cannot restore an operation disabled by an earlier layer. Change the owning
-layer when broader exposure is intended.
-
-### `rest:` — generated REST exposure
+### `interfaces.rest` — generated REST exposure
 
 REST is **opt-in per entity** (fail closed, like the generated-CRUD
-allowlist). Absent or `false` means no REST routes. Two forms:
+allowlist). Absent means no REST routes.
 
 ```yaml
-rest: true                   # shorthand: all operations, derived basePath
-# — or —
-rest:
-  enabled: true              # default true when the block is present
-  basePath: relations        # optional; default = table name with _ → -
+interfaces:
+  rest: {}                   # every implemented Operation, derived basePath
+  # — or —
+  rest:
+    basePath: relations      # optional; default = table name with _ → -
                              # (RelationGroup → relation-groups); must match
                              # ^[a-z][a-z0-9-]*$ (emitted verbatim into routes)
-  operations:                # each defaults to true when REST is enabled
-    list: true
-    get: true
-    create: true
-    update: true
-    delete: false
+    operations:              # each implemented Operation defaults to exposed
+      delete: false          # `false` withholds one from this transport
 ```
 
 What the compiler does with it:
 
-- `buildRest()` (`authoring/compiler/rest.ts`) normalizes the block into the
+- `buildRest()` (`authoring/compiler/rest.ts`) projects the block into the
   contract's `rest` section; the backend manifest bridges it to
   `source.rest` on the table, which drives the API's route registration
   (see [api.md](api.md#the-generated-rest-surface)) and the generated
@@ -286,6 +263,9 @@ What the compiler does with it:
   engine, so the combination is a misconfiguration.
 - **Compile error** if two entities claim the same `basePath` (part of the
   collision audit).
+
+`interfaces.mcp` works the same way (`buildMcp()`, `authoring/compiler/mcp.ts`)
+with `tools`, per-Operation `instructions` and an optional `resource`.
 
 ### Relationships
 
@@ -350,7 +330,7 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   group via `render.props.referentieGroep`.
 - **`osf-types.yaml`** — reusable field semantics: validation pattern,
   render components, data classification (`pii`, `confidential`, …),
-  retention, icon. Every entry declares the base `valueType` it resolves to.
+  retention, icon. Every entry declares the `baseType` it resolves to.
   A field opts in with `osfType: email`; the compiler derives the field's
   `baseType` from the entry. Keys are camelCase — PascalCase names are
   entities, and the seven base types are not catalog entries. Resolution
@@ -456,6 +436,12 @@ realmRoles:                               # only when realm-global is intended
       application-api: [Relations.All.Read]
 clientRoles:
   application-api: [Relations.All.ReadWrite, Relations.All.Read]
+roleLabels:                               # what a role means to its holder
+  Application.Editor:
+    label: { en: Editor, nl: Redacteur }
+    phrase: { en: editor, nl: redacteur }
+  Relations.All.ReadWrite:
+    phrase: { en: manage clients and other relations, nl: klanten en andere relaties beheren }
 ```
 
 Rules, in the order they apply:
@@ -481,8 +467,19 @@ Rules, in the order they apply:
    error names the patch file, not the merged file nobody wrote.
 
 A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
-`clientRoles`, `clientRoleComposites`, `groups` and `users`; `schemaVersion` is the base's and cannot
-be patched. Patching a realm no earlier layer defines is an error (a new
+`clientRoles`, `clientRoleComposites`, `groups`, `users` and `roleLabels`;
+`schemaVersion` is the base's and cannot be patched.
+
+**`roleLabels`** is what a role means to the person holding it, keyed by role
+name and display only: `label` (title case) marks a persona — the composite a
+membership row records, shown as `whoami.role` — and `phrase` (lower case) is
+the wording inside a sentence: "is an organization administrator", "may manage
+clients and other relations". Both are per-language maps and `en` is required:
+English is what every reader falls back to, and a label without it fails the
+build rather than dropping the persona at run time. The MCP session reads them from the compiled
+`generated/compiler/role-labels.json`; the engine has no vocabulary of its own,
+so a host labels its roles here or they are described from their shape
+(`<Area>.All.ReadWrite` → "manage <area>") or left unsaid. Patching a realm no earlier layer defines is an error (a new
 realm is an `authorizationConfig` under its own filename), as is a patch
 filed anywhere but the layer root. Patches stack across layers in order.
 
@@ -497,12 +494,13 @@ The loader also understands a per-context structure that this repo does not
 use (no `contexts/` directory exists in the base layer):
 
 - `contexts/<ctx>/partial/<entity>.yaml` — profile extensions of a core
-  entity (`kind: entityProfile`, extra fields, own storage table).
-- `contexts/<ctx>/full/<entity>.yaml` — standalone entities that exist only
-  in one context; compiled into synthetic core entities (origin
-  `contextFull`).
-- `contexts/<ctx>/osf-types.yaml` — context-scoped osf-type
-  catalogs merged over the core catalog.
+  entity (`kind: entityProfile`, extra fields, own storage table). A profile
+  field resolves its type like an entity field but may not reference an
+  entity: profile tables carry no relationships, so add such a field to the
+  entity itself with an `entityPatch`.
+- `contexts/<ctx>/osf-types.yaml` — context-scoped osf-type catalogs,
+  add-only over the core catalog: a context may add types, never redefine
+  a key an earlier catalog declared.
 - `mappings/<ctx>/<entity>.mapping.yaml` — field mappings between source and
   target entities using the transform catalog.
 - `views/<entity>.view.yaml` — standalone view definitions.
@@ -566,9 +564,10 @@ verbatim into generated TypeScript, GraphQL, SQL, route strings and MCP tool
 names; a shape schema documents a shape, and both layers must fail closed
 independently.
 
-To keep an authored entity **out of every generated CRUD surface**, set
-`crud: false` on that entity. Secret-bearing and runtime-scheduler entities in
-the base catalog use this declaration; no compiled slug denylist is involved.
+To keep an authored entity **out of every generated CRUD surface**, give it
+no entity-implemented Operations (`operations: {}` or only plugin-handled
+ones). Secret-bearing and runtime-scheduler entities in the base catalog are
+authored that way; no compiled slug denylist is involved.
 
 ## Published blueprint copies
 

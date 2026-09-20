@@ -22,8 +22,9 @@ import {
   getWorkflowCoreEntityGraphqlRegistry,
 } from "./workflow-entity-nodes.js";
 import { generateWorkflowNodeConfigArtifacts } from "./workflow-node-config.js";
+import { loadOsfTypes } from "../../../../packages/compiler/src/authoring/loader.js";
 
-// The canonical kernel and authoring type sources stay in the compiler core —
+// The canonical condition sources and authoring types stay in the compiler core —
 // they are part of every compiled entity contract. This plugin only *copies*
 // them into consumer-facing generated artifacts, so it reads them from the
 // compiler package by path (deep reach-in is acceptable for an example plugin).
@@ -80,6 +81,7 @@ const CONTRACT_DECLARATIONS = [
   { kind: "interface", name: "FieldDefinitionInverseCollection" },
   { kind: "interface", name: "FieldDefinitionRelationship" },
   { kind: "interface", name: "FieldDefinitionProvider" },
+  { kind: "interface", name: "FieldDefinitionTransitionWrite" },
   { kind: "interface", name: "FieldDefinitionTransitionRule" },
   { kind: "interface", name: "FieldDefinitionTransitions" },
   { kind: "interface", name: "FieldDefinitionDeriveOnCreate" },
@@ -87,6 +89,7 @@ const CONTRACT_DECLARATIONS = [
   { kind: "interface", name: "FieldDefinitionWorkflowInspector" },
   { kind: "interface", name: "FieldDefinitionAuthoringMetadata" },
   { kind: "interface", name: "FieldDefinition" },
+  { kind: "type", name: "OsfTypeSchemaReference" },
   { kind: "interface", name: "OsfTypeDefinition" },
   { kind: "type", name: "FieldSuggestions" },
   { kind: "type", name: "FieldRelationship" },
@@ -254,7 +257,8 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
     return definition;
   }
 
-  const listUrl = typeof record.listUrl === "string" ? record.listUrl.trim() : "";
+  // `listUrl` is web navigation; the records a picker offers come from the
+  // alias's `optionSource` (the entity's list Operation), never from a route.
   return {
     ...record,
     render: {
@@ -264,28 +268,15 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
         ? record.render
         : {}),
     },
-    ...(listUrl && !record.options
-      ? {
-          options: {
-            type: "remote",
-            remoteUrl: listUrl,
-          },
-        }
-      : {}),
+    ...(record.optionSource && !record.options ? { options: record.optionSource } : {}),
   };
 }
 
 /**
- * Splits the hand-authored osf-types catalog into the three partials
- * the runtime contract emits. Entries are routed by their `kind` field:
- *   - `kind: "entityId"` → `entityIds` partial (consumed by the workflow
- *     designer's `core-entity-options` route).
- *   - everything else → `core` or `context` based on which YAML it came
- *     from (catalogs/ vs contexts/<name>/).
- *
- * Replaces the old auto-generated entity-ID synthesis. After this change
- * the YAML catalog is the single source of truth for every semantic type
- * the runtime sees.
+ * Splits the osf types into the three partials the runtime contract emits:
+ * the authored core and context catalogs by the YAML they came from, and
+ * the identity aliases (`kind: entityId`) the compiler derives per entity,
+ * limited to the entities the workflow designer can list.
  */
 function loadCategorizedOsfTypes(
   authoringDir: string,
@@ -300,18 +291,21 @@ function loadCategorizedOsfTypes(
     definition: unknown,
     bucket: "core" | "context",
   ) => {
-    const def = definition as { kind?: string; entity?: string } | undefined;
-    if (def?.kind === "entityId") {
-      if (def.entity && !readableEntitySlugs.has(toKebabCase(def.entity))) {
-        return;
-      }
-      entityIds[key] = enrichEntityIdOsfType(definition);
-    } else if (bucket === "core") {
+    if (bucket === "core") {
       core[key] = definition;
     } else {
       context[key] = definition;
     }
   };
+
+  // Identity aliases (`<entity>Id`, kind: entityId) are derived from the entity
+  // corpus by the compiler, never authored, so they come from the resolved
+  // catalog rather than from the YAML files.
+  for (const [key, definition] of Object.entries(loadOsfTypes(authoringDir))) {
+    if (definition.kind !== "entityId") continue;
+    if (definition.entity && !readableEntitySlugs.has(toKebabCase(definition.entity))) continue;
+    entityIds[key] = enrichEntityIdOsfType(definition);
+  }
 
   const corePath = join(authoringDir, "catalogs", "osf-types.yaml");
   if (existsSync(corePath)) {
@@ -370,7 +364,7 @@ function loadFieldAuthoringProfiles(authoringDir: string) {
 const SEMANTIC_PARTIALS = [
   { suffix: "core", constName: "COMPILER_OSF_TYPES_CORE", source: "catalogs/osf-types.yaml" },
   { suffix: "context", constName: "COMPILER_OSF_TYPES_CONTEXT", source: "contexts/*/osf-types.yaml" },
-  { suffix: "entity-ids", constName: "COMPILER_OSF_TYPES_ENTITY_IDS", source: "catalogs/osf-types.yaml + contexts/*/osf-types.yaml (entries with kind: entityId)" },
+  { suffix: "entity-ids", constName: "COMPILER_OSF_TYPES_ENTITY_IDS", source: "entities/**/*.yaml (identity aliases derived per entity, kind: entityId)" },
 ] as const;
 
 function buildOsfTypesPartialSource(
@@ -488,15 +482,9 @@ function buildOsfTypeLookupManifest(
       continue;
     }
 
-    if (definition.kind === "entityId" && definition.entity && definition.listUrl) {
-      lookups[osfType] = {
-        osfType,
-        provider: "generatedEntity",
-        entity: definition.entity,
-        remoteUrl: definition.listUrl,
-        searchParam: "search",
-      };
-    }
+    // An identity alias has no remote lookup endpoint: its records are
+    // enumerated through `optionSource` (the entity's list Operation), and
+    // `listUrl` is a web page, not JSON.
   }
 
   return lookups;
@@ -559,9 +547,9 @@ function buildCoreEntityGraphqlRegistrySource(
     "// Source of truth: packages/compiler/config/authoring/entity definitions",
     "// Do not edit manually.",
     "//",
-    "// Maps each entity's kebab-case slug to the GraphQL gateway names the",
-    "// workflow designer's `core-entity-options` route uses to build minimal",
-    "// list queries on the fly. Keep this in sync with the GraphQL generator.",
+    "// Maps each entity's kebab-case slug to the GraphQL gateway names a",
+    "// designer needs to build a minimal list query on the fly. Keep this in",
+    "// sync with the GraphQL generator.",
     "",
     "export interface CoreEntityGraphqlInfo {",
     "  /** GraphQL list field name (e.g. `relations`). */",

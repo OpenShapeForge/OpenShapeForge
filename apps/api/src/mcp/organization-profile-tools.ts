@@ -12,7 +12,7 @@
  *                                errors — an unconfigured tenant still gets a
  *                                resource that resolves.
  *
- * Both wired into generated-mcp-server.ts by the same delimited-hunk
+ * Both wired into the MCP server (session-surface.ts, dispatch-platform-tools.ts) by the same delimited-hunk
  * convention identity-link-tools.ts and session-info.ts use.
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";

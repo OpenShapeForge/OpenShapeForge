@@ -263,6 +263,8 @@ export type RuntimeOperationDefinition = OperationReference & {
   };
   /** Core-issued completion proof is required before this Operation may run. */
   prerequisites?: readonly OperationPrerequisite[];
+  /** The declared failure catalogue: what a caller can be answered with. */
+  errors?: readonly { status: number; code: string; description: string }[];
   concurrency?: {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };

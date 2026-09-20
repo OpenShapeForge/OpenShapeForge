@@ -103,7 +103,7 @@ export type GeneratedCrudTable = {
         label: { en?: string; nl?: string };
         recordPermission?: "edit";
         preconditions?: Array<{ field: string; present: boolean }>;
-        writes?: string[];
+        writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
         stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
       }>;
     }>;

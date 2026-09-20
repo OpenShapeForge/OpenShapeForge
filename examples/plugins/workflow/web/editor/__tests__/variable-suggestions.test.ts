@@ -61,9 +61,9 @@ function paths(input: Parameters<typeof buildWorkflowVariableSuggestions>[0]): s
   return buildWorkflowVariableSuggestions(input).map((suggestion) => suggestion.path);
 }
 
-/** A field definition as a workflow document stores one: the runtime vocabulary. */
+/** A field definition as a workflow document stores one: `osfType`, the one type axis. */
 function field(key: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return { key, valueType: "string", ...extra };
+  return { key, osfType: "string", ...extra };
 }
 
 /** A field as the compiled catalog carries one: `osfType` plus its derived `baseType`. */
@@ -80,7 +80,7 @@ describe("process variables", () => {
       paths({
         graph,
         nodeId: "loose",
-        processVariables: [field("total", { valueType: "number" }), field("channel")],
+        processVariables: [field("total", { osfType: "number" }), field("channel")],
       }),
     ).toEqual(["process.channel", "process.total"]);
   });
@@ -106,7 +106,7 @@ describe("process variables", () => {
       paths({
         graph: { nodes: [node("a", "action")], edges: [] },
         nodeId: "a",
-        processVariables: [{ valueType: "string" }, "junk", field("ok")],
+        processVariables: [{ osfType: "string" }, "junk", field("ok")],
       }),
     ).toEqual(["process.ok"]);
   });
@@ -115,7 +115,7 @@ describe("process variables", () => {
 describe("upstream node output", () => {
   const graph = {
     nodes: [
-      node("t", "triggerManual", { inputParameters: [field("amount", { valueType: "number" })] }),
+      node("t", "triggerManual", { inputParameters: [field("amount", { osfType: "number" })] }),
       node("a", "action", { outputParameters: [field("status")] }),
       node("b", "action", { outputParameters: [field("reference")] }),
     ],
@@ -203,7 +203,7 @@ describe("where a node's output fields come from", () => {
     ).toEqual(["nodes.a.output", "nodes.a.output.generic"]);
   });
 
-  test("a catalog field's osfType and baseType are read as the runtime vocabulary", () => {
+  test("a catalog field is read through its osfType and derived baseType, like a stored one", () => {
     // The catalog is compiler output; the document's own fields are not. The
     // suggestion reads the same whichever side a field came from.
     const byPath = new Map(
@@ -217,8 +217,8 @@ describe("where a node's output fields come from", () => {
         ],
       }).map((entry) => [entry.path, entry]),
     );
-    expect(byPath.get("nodes.a.output.plain")).toMatchObject({ valueType: "string" });
-    expect(byPath.get("nodes.a.output.plain")?.osfType).toBeUndefined();
+    // A base type is an osfType like any other: the suggestion names it rather than eliding it.
+    expect(byPath.get("nodes.a.output.plain")).toMatchObject({ valueType: "string", osfType: "string" });
     expect(byPath.get("nodes.a.output.counts")).toMatchObject({
       valueType: "array",
       itemOsfType: "quantity",
@@ -306,8 +306,8 @@ describe("start variables", () => {
   test("a field two triggers type differently is not offered", () => {
     const graph = {
       nodes: [
-        node("t1", "triggerManual", { inputParameters: [field("amount", { valueType: "number" })] }),
-        node("t2", "triggerWebhook", { inputParameters: [field("amount", { valueType: "string" })] }),
+        node("t1", "triggerManual", { inputParameters: [field("amount", { osfType: "number" })] }),
+        node("t2", "triggerWebhook", { inputParameters: [field("amount", { osfType: "string" })] }),
         node("a", "action"),
       ],
       edges: [edge("t1", "a"), edge("t2", "a")],
@@ -409,7 +409,7 @@ describe("flattening an authored field", () => {
       paths({
         graph: outputs([
           field("customer", {
-            valueType: "object",
+            osfType: "object",
             children: [field("name"), field("email")],
           }),
         ]),
@@ -430,9 +430,9 @@ describe("flattening an authored field", () => {
       paths({
         graph: outputs([
           field("lines", {
-            valueType: "object",
+            osfType: "object",
             cardinality: { min: 0, max: "unbounded" },
-            item: { valueType: "object", children: [field("sku")] },
+            item: { osfType: "object", children: [field("sku")] },
           }),
         ]),
         nodeId: "b",
@@ -450,9 +450,9 @@ describe("flattening an authored field", () => {
       buildWorkflowVariableSuggestions({
         graph: outputs([
           field("counts", {
-            valueType: "integer",
+            osfType: "integer",
             cardinality: "collection",
-            item: { valueType: "integer", osfType: "quantity" },
+            item: { baseType: "integer", osfType: "quantity" },
           }),
         ]),
         nodeId: "b",
@@ -481,7 +481,7 @@ describe("flattening an authored field", () => {
   test("date and datetime are strings, because every reader carries them as ISO text", () => {
     const byPath = new Map(
       buildWorkflowVariableSuggestions({
-        graph: outputs([field("due", { valueType: "date" }), field("n", { valueType: "integer" })]),
+        graph: outputs([field("due", { osfType: "date" }), field("n", { osfType: "integer" })]),
         nodeId: "b",
       }).map((entry) => [entry.path, entry.valueType]),
     );
@@ -494,7 +494,7 @@ describe("flattening an authored field", () => {
       buildWorkflowVariableSuggestions({
         graph: outputs([
           field("customer", {
-            valueType: "object",
+            osfType: "object",
             label: { en: "Customer" },
             children: [field("name", { label: { en: "Name" } })],
           }),
@@ -523,7 +523,7 @@ describe("flattening an authored field", () => {
   test("a field tree that refers to itself does not hang the picker", () => {
     // `outputFields` arrives from a JSON column, so a cycle is a document
     // nobody validated rather than a thing that cannot happen.
-    const loop: Record<string, unknown> = { key: "a", valueType: "object" };
+    const loop: Record<string, unknown> = { key: "a", osfType: "object" };
     loop.children = [loop];
     expect(paths({ graph: outputs([loop]), nodeId: "b" }).length).toBeLessThan(20);
   });

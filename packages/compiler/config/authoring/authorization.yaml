@@ -244,6 +244,35 @@ clientRoleComposites:
           - General.All.Read
           - Relations.All.Read
 
+# What a role means to the person holding it, in the languages the deployment
+# speaks. The MCP session reads these (`whoami`, the opening sentence of a
+# session): `label` is the title-case name a persona is shown as, `phrase` the
+# lower-case wording inside a sentence ("is an organization administrator",
+# "may manage clients and other relations"). Display only — nothing decides a
+# permission by a label. A `<Area>.All.ReadWrite` role without a phrase is
+# described from its shape ("manage <area>"); any other role without one is
+# left unsaid rather than shown as a technical name. A host labels its own
+# roles through an authorizationPatch.
+roleLabels:
+  org_admin:
+    label: { en: Organization administrator, nl: Organisatiebeheerder }
+    phrase: { en: organization administrator, nl: organisatiebeheerder }
+  org_employee:
+    label: { en: Employee, nl: Medewerker }
+    phrase: { en: employee, nl: medewerker }
+  Relations.All.ReadWrite:
+    phrase: { en: manage clients and other relations, nl: klanten en andere relaties beheren }
+  Relations.All.Read:
+    phrase: { en: view clients and other relations, nl: klanten en andere relaties inzien }
+  CaseFile.All.ReadWrite:
+    phrase: { en: manage case files, nl: dossiers beheren }
+  CaseFile.All.Read:
+    phrase: { en: view case files, nl: dossiers inzien }
+  Organization.All.ReadWrite:
+    phrase: { en: manage the organization's settings, nl: de organisatie-instellingen beheren }
+  General.All.Read:
+    phrase: { en: view general records, nl: algemene gegevens inzien }
+
 # Hand-authored client roles below complement roles derived from entity YAML.
 clientRoles:
   erp-provider:

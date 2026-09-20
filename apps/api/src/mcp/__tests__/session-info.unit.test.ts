@@ -5,7 +5,7 @@
  * leave `buildSessionInfo` — so every case also asserts the absence of ids,
  * slugs and raw claims.
  */
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { IdentityLinkState } from "../../auth/identity-link.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import {
@@ -24,6 +24,17 @@ import {
   type SessionIdentity,
 } from "../session-info.js";
 import { resolveLocale } from "../locale.js";
+
+// The product's own gateway is named after the deployment's product name;
+// set for this file and restored so no other file inherits it.
+const previousProductName = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+beforeAll(() => {
+  process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+});
+afterAll(() => {
+  if (previousProductName === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+  else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previousProductName;
+});
 
 const TENANT_ID = "33333333-3333-4333-8333-333333333333";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
@@ -142,7 +153,7 @@ describe("buildSessionInfo", () => {
     expectNoIdentifiers(info);
   });
 
-  it("describes an employee and names the gateway client Hubble", () => {
+  it("describes an employee and names the gateway client after the product", () => {
     const info = buildSessionInfo({
       identity: bearer({
         name: "Hans Dev",
@@ -156,9 +167,9 @@ describe("buildSessionInfo", () => {
 
     expect(info.role).toBe("Employee");
     expect(info.permissions).toEqual(["Pentest.All.Read"]);
-    expect(info.signedInVia).toBe("Hubble");
+    expect(info.signedInVia).toBe("Atlas");
     expect(info.summary).toStartWith(
-      "You are Hans Dev, employee of Zerocopter, signed in via Hubble.",
+      "You are Hans Dev, employee of Zerocopter, signed in via Atlas.",
     );
     expectNoIdentifiers(info);
   });
@@ -173,7 +184,7 @@ describe("buildSessionInfo", () => {
       nowMs: NOW,
     });
 
-    expect(info.signedInVia).toBe("Hubble");
+    expect(info.signedInVia).toBe("Atlas");
     expect(info.client).toEqual({
       name: "Claude Desktop",
       version: "1.2.3",
@@ -181,7 +192,7 @@ describe("buildSessionInfo", () => {
     });
     expect(info.connectedVia).toBe("Claude Desktop 1.2.3");
     expect(info.summary).toStartWith(
-      "You are Hans Eilers, employee of Zerocopter, signed in via Hubble. " +
+      "You are Hans Eilers, employee of Zerocopter, signed in via Atlas. " +
         "Connected through Claude Desktop 1.2.3.",
     );
     expectNoIdentifiers(info);
@@ -347,9 +358,9 @@ describe("buildSessionInfo", () => {
       { name: "hubble", active: false },
       { name: "Zerocopter", active: true },
     ]);
-    expect(info.signedInVia).toBe("Hubble");
+    expect(info.signedInVia).toBe("Atlas");
     expect(info.summary).toBe(
-      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Hubble " +
+      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Atlas " +
         "on the Zerocopter endpoint. You belong to 2 groups; Zerocopter is the active one. " +
         "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Zerocopter Admin. " +
         "You can use 5 tools and 2 resources.",

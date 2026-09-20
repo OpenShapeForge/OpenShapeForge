@@ -132,9 +132,6 @@ configFields:
           help:
             nl: Laat leeg als deze intent alleen routeert. Vul zaaksjablonen in wanneer een vervolgstap de gekozen zaak nodig heeft.
             en: Leave empty when this intent only routes. Add case templates when a downstream step needs the chosen case.
-          options:
-            type: remote
-            remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
           render:
             component: AiRemoteMultiSelect
             props:

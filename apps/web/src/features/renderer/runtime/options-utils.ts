@@ -4,10 +4,7 @@ import type {
   LocalizedText,
 } from "@/generated/compiler/field-contract";
 import { resolveReferentieGroepItems } from "@/lib/referentiedata";
-import {
-  getFieldOsfTypeDefinition,
-  resolveFieldInputRender,
-} from "@/lib/field-rendering/compiler-field-rendering";
+import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 
 export type StaticOption = {
   value: string;
@@ -40,15 +37,9 @@ export function resolveRendererReferenceItems(field: Field): StaticOption[] {
     return dedupeStaticOptions(semanticOptions.items);
   }
 
-  const resolvedRender = resolveFieldInputRender(field);
-  const semanticReferentieGroep =
-    semanticOptions?.referentieGroep;
-  const groep =
-    field.options?.referentieGroep ??
-    semanticReferentieGroep ??
-    (typeof resolvedRender.props?.referentieGroep === "string"
-      ? resolvedRender.props.referentieGroep
-      : undefined);
+  // The group is named in options (the compiler folds a select's render prop
+  // into it); presentation props never decide which values are valid.
+  const groep = field.options?.referentieGroep ?? semanticOptions?.referentieGroep;
 
   if (!groep) {
     return [];

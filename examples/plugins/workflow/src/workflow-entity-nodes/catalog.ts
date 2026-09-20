@@ -3,7 +3,9 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
+import { buildCrud } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
+import { resolveFieldOptions } from "../../../../../packages/compiler/src/authoring/compiler/model.js";
+import { graphqlOperationActions } from "../../../../../packages/compiler/src/authoring/entity-model.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
 import { inverseCollectionsFor, resolveBaseType, osfTypeDefinitionOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
 import { withInverseCollections } from "../../../../../packages/compiler/src/authoring/inverse-collections.js";
@@ -40,7 +42,7 @@ function withBaseType(field: Field, osfTypes: Record<string, OsfTypeDefinition>)
  * Workflow-only field expansion. Sets `render` from the osf-type catalog,
  * recurses into nested shapes, and — for entity-ID semantic types — overrides
  * the render with the workflow-designer `OptionVariablePicker` and attaches
- * the catalog's `listUrl` as a remote-options source. This last branch is
+ * the alias's `optionSource` (the entity's records) as the options. This last branch is
  * what lets authored fields (e.g. `contact-detail.relationId`) become picker
  * fields inside the workflow inspector without authoring YAML restating it.
  *
@@ -58,15 +60,15 @@ function expandSemanticFieldShape(
   const item = field.item ?? osfType?.item;
   const hasStructuredShape = Boolean(children || item);
   const expanded = withBaseType(cloneField(field), osfTypes);
-  const isEntityId = osfType?.kind === "entityId";
+  // Choices resolve exactly as the model compiler resolves them: the field's
+  // options, a reference group, the type's options, the select component's
+  // render prop folded in, and the alias's optionSource last.
+  const options = resolveFieldOptions(expanded, osfType);
+  if (options) expanded.options = options;
+  // An alias whose entity has no list Operation has nothing to pick from.
+  const isEntityId = osfType?.kind === "entityId" && osfType.optionSource !== undefined;
 
   if (isEntityId) {
-    if (!expanded.options && osfType.listUrl) {
-      expanded.options = {
-        type: "remote" as const,
-        remoteUrl: osfType.listUrl,
-      };
-    }
     expanded.render = {
       component: "OptionVariablePicker",
       props: {
@@ -130,25 +132,6 @@ export function resolveEntityIdOsfTypeKey(entityName: string, idField?: Field): 
     );
   }
   return declared;
-}
-
-export function toSyntheticCoreEntity(
-  contextName: string,
-  entityProfile: EntityProfile,
-): CoreEntity {
-  return {
-    schemaVersion: entityProfile.schemaVersion,
-    kind: "coreEntity",
-    module: contextName,
-    entity: entityProfile.entity,
-    title: entityProfile.title ?? entityProfile.entity,
-    description: entityProfile.description,
-    language: entityProfile.language,
-    domains: [...(entityProfile.domains ?? [])],
-    fields: entityProfile.fields ?? [],
-    crud: entityProfile.crud,
-    workflow: entityProfile.workflow,
-  };
 }
 
 function listWorkflowNodeContextNames(contextsDir: string): string[] {
@@ -223,7 +206,6 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
   const entities: CoreEntity[] = [];
   const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   const componentCatalog = loadWorkflowNodeComponentCatalog(authoringDir);
-  const contextsDir = join(authoringDir, "contexts");
   const baseEntity = loadBaseEntity(authoringDir);
 
   // Plugin-extraction adaptation: discover entity YAMLs through the core
@@ -254,32 +236,6 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
     });
   }
 
-  if (existsSync(contextsDir)) {
-    for (const contextName of readdirSync(contextsDir).sort()) {
-      const fullDir = join(contextsDir, contextName, "full");
-      if (!existsSync(fullDir)) {
-        continue;
-      }
-
-      for (const entry of readdirSync(fullDir).sort()) {
-        if (!entry.endsWith(".yaml") || entry.startsWith("_")) {
-          continue;
-        }
-
-        const entityProfile = loadYamlFile<EntityProfile>(join(fullDir, entry));
-        const rawEntity = toSyntheticCoreEntity(contextName, entityProfile);
-        const entity = applyBaseEntityToCore(rawEntity, baseEntity, {
-          kind: "contextFull",
-          path: join(fullDir, entry),
-        });
-        entities.push({
-          ...entity,
-          fields: expandEntityFieldShapes(entity.fields, osfTypes, componentCatalog),
-        });
-      }
-    }
-  }
-
   return entities;
 }
 
@@ -308,8 +264,14 @@ export function getWorkflowCoreEntityGraphqlRegistry(
   return registry;
 }
 
+/**
+ * The registry maps to GraphQL list queries, so an entity belongs in it only
+ * when its list Operation is projected to GraphQL — not merely implemented.
+ * A list withheld from GraphQL (`interfaces.graphql` absent, or the
+ * Operation excluded there) has no query to build.
+ */
 export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
-  return resolveCrudOperations(entity.crud).list;
+  return buildCrud(entity).operations.list && graphqlOperationActions(entity).list;
 }
 
 /**
@@ -317,7 +279,7 @@ export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
  * to enrich authored `Field`s with the same entity-ID picker metadata the
  * CoreEntity generator applies. Walks the field tree, derives every field's
  * `baseType` and, for any field whose `osfType` resolves to a `kind: entityId` catalog entry, attaches the
- * catalog's `listUrl` as a remote-options source and forces the render to
+ * alias's `optionSource` (the entity's records) as the options and forces the render to
  * `OptionVariablePicker`. Authoring-supplied `options` win over the catalog.
  */
 export function enrichFieldsWithEntityIdRemoteOptions(
@@ -333,14 +295,10 @@ function enrichFieldWithEntityIdRemoteOptions(
 ): Field {
   const cloned = withBaseType(cloneField(field), osfTypes);
   const osfType = osfTypeDefinitionOf(cloned.osfType, osfTypes);
+  const options = resolveFieldOptions(cloned, osfType);
+  if (options) cloned.options = options;
 
-  if (osfType?.kind === "entityId" && osfType.listUrl) {
-    if (!cloned.options) {
-      cloned.options = {
-        type: "remote" as const,
-        remoteUrl: osfType.listUrl,
-      };
-    }
+  if (osfType?.kind === "entityId" && osfType.optionSource) {
     cloned.render = {
       component: "OptionVariablePicker",
       props: {

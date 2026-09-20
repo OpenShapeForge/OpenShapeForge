@@ -26,6 +26,7 @@ import type {
   ViewRowAction,
 } from "./common.js";
 import type { FieldDefinitionDeriveOnCreate, FieldDefinitionValueType } from "./field-definition.js";
+import type { OsfTypeSchemaReference } from "./authoring.js";
 import type {
   ListColumn,
   ListFilter,
@@ -54,7 +55,6 @@ import type {
   RestOperationKey,
   ThirdPartyApiEndpoint,
 } from "./authoring.js";
-import type { CanonicalCompilerKernel } from "../compiler/canonical/index.js";
 
 export interface CompiledViewRender {
   component: string;
@@ -120,6 +120,8 @@ export interface CompiledField {
   computed?: ComputedField;
   graphqlType?: string;
   options?: FieldOptions;
+  /** The catalog-declared value schema of the field's type, when it has one. */
+  schema?: OsfTypeSchemaReference;
   lookup?: OsfTypeLookupDefinition;
   permissions?: FieldPermissions;
   authorization?: FieldAuthorizationConfig;
@@ -700,7 +702,8 @@ export interface CompiledTransitionField {
     /** Record permission the rule checks on an entity with record-level permissions. */
     recordPermission?: "edit";
     preconditions?: Array<{ field: string; present: boolean }>;
-    writes?: string[];
+    /** Input fields the rule may set; `agreesOn` names fields the referenced record must share with this one. */
+    writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
   }>;
 }
@@ -789,10 +792,7 @@ export interface CompiledEntityContract {
     entity?: RetentionPolicy;
     policies?: Record<string, RetentionPolicy>;
   };
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization: CompiledAuthorization;
   views: Record<string, CompiledViewContext>;
-  canonical: CanonicalCompilerKernel;
   profiles: Record<string, CompiledProfile>;
 }

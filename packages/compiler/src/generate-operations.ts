@@ -43,10 +43,11 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * no plugin runtime in the module registry: `osf-blueprints` serves the
  * blueprint Operations, `osf-control` the platform's own administration,
  * `osf-grants` the operator side of capability grants, `osf-jobs` the
- * durable job queue and `osf-transitions` the status transitions declared on
- * entity fields.
+ * durable job queue, `osf-transitions` the status transitions declared on
+ * entity fields and `osf-billing` the milestone billing run and the
+ * milestone create that freezes a computed amount.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["osf-billing", "osf-blueprints", "osf-control", "osf-grants", "osf-jobs", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -120,15 +121,16 @@ const RESERVED_API_NAMESPACES = new Set([
 
 /**
  * Reserved namespaces a core module owns outright. The reservation exists so
- * a plugin cannot squat on a core prefix; the core module that IS that prefix
- * is the one contributor allowed to author Operations under it.
+ * a plugin cannot squat on a core prefix; the core modules that ARE that
+ * prefix are the only contributors allowed to author Operations under it.
  */
-const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, string> = new Map([
-  ["control", "osf-control"],
-  ["jobs", "osf-jobs"],
-  // Status transitions live under the entity's own generated REST resource
-  // (POST /api/rest/v1/<base>/:id/<key>): they are that resource's verbs.
-  ["rest", "osf-transitions"],
+const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, readonly string[]> = new Map([
+  ["control", ["osf-control"]],
+  ["jobs", ["osf-jobs"]],
+  // Status transitions and the billing run live under the entity's own
+  // generated REST resource (POST /api/rest/v1/<base>/:id/<key>, POST
+  // /api/rest/v1/billing-runs/execute): they are that resource's verbs.
+  ["rest", ["osf-transitions", "osf-billing"]],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {
@@ -291,7 +293,7 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   const routeNamespace = restPath.split("/")[2] ?? "";
   const reservedNamespace = (authored ? [routeNamespace] : [apiNamespace, plugin, routeNamespace])
     .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()) &&
-      CORE_MODULE_API_NAMESPACES.get(value.toLowerCase()) !== plugin);
+      !CORE_MODULE_API_NAMESPACES.get(value.toLowerCase())?.includes(plugin));
   if (reservedNamespace) {
     throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }

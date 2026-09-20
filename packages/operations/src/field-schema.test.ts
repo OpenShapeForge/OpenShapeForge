@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { operationFieldObjectSchema } from "./field-schema.js";
+import { cardinalityOf, operationFieldObjectSchema, resolveFieldBaseType } from "./field-schema.js";
 
 test("entity semantic types retain their inferred target in parameter schemas", () => {
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
-    osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } } },
+    osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", baseType: "string", validation: { format: "uuid" } } },
   });
   expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" }, "x-osf-type": "ExampleRecord" } } });
 });
@@ -13,7 +13,7 @@ test("cardinality bounds with max one preserve a scalar value", () => {
   for (const cardinality of [{ min: 0, max: 1 }, { min: 1, max: 1 }, {}]) {
     const schema = operationFieldObjectSchema([{
       key: "email", osfType: "email", cardinality, required: true,
-    }], { osfTypes: { email: { valueType: "string", validation: { format: "email" } } } });
+    }], { osfTypes: { email: { baseType: "string", validation: { format: "email" } } } });
     expect(schema).toMatchObject({
       properties: { email: { type: "string", format: "email" } }, required: ["email"],
     });
@@ -38,7 +38,7 @@ test("runtime fields use the host semantic and reference-data registries", () =>
   }], {
     osfTypes: {
       shortReason: {
-        valueType: "string",
+        baseType: "string",
         label: { en: "Reason" },
         validation: { maxLength: 80 },
       },
@@ -79,7 +79,7 @@ test("entity semantic types project an identity reference without recursively in
       ExampleRecord: {
         kind: "entity",
         entity: "ExampleRecord",
-        valueType: "string",
+        baseType: "string",
         validation: { format: "uuid" },
         shape: [{ key: "parent", osfType: "ExampleRecord" }],
       },
@@ -106,9 +106,9 @@ test("compiler-authored fields resolve their base from the single osfType axis",
     { key: "address", osfType: "postalAddress" },
   ], {
     osfTypes: {
-      shortReason: { valueType: "string", validation: { maxLength: 80 } },
-      ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } },
-      postalAddress: { kind: "object", valueType: "object", shape: [{ key: "street", osfType: "string", required: true }] },
+      shortReason: { baseType: "string", validation: { maxLength: 80 } },
+      ExampleRecord: { kind: "entity", entity: "ExampleRecord", baseType: "string", validation: { format: "uuid" } },
+      postalAddress: { kind: "object", baseType: "object", shape: [{ key: "street", osfType: "string", required: true }] },
     },
   });
   expect(schema).toMatchObject({
@@ -148,4 +148,93 @@ test("an enumeration value that does not convert exactly to the field's type is 
 test("an empty English label does not hide the Dutch one", () => {
   const schema = operationFieldObjectSchema([{ key: "kind", osfType: "string", label: { en: "", nl: "Soort" } }], {});
   expect((schema.properties as Record<string, Record<string, unknown>>).kind!.title).toBe("Soort");
+});
+
+test("an unknown osfType is refused, never projected as a free string", () => {
+  expect(() => operationFieldObjectSchema([{ key: "account", osfType: "Acount" }], { osfTypes: {} }))
+    .toThrow("account: unknown osfType Acount.");
+  expect(() => resolveFieldBaseType({ key: "v", osfType: "shortReason" }, { shortReason: { baseType: "string" } })).not.toThrow();
+  expect(() => resolveFieldBaseType({ key: "v", osfType: "toString" }, {})).toThrow("unknown osfType toString");
+});
+
+test("cardinalityOf is the one reading of bounds: min >= 1 is required, invalid bounds are refused", () => {
+  expect(cardinalityOf(undefined)).toEqual({ cardinality: "single", required: false });
+  expect(cardinalityOf("collection")).toEqual({ cardinality: "collection", required: false });
+  expect(cardinalityOf({ min: 1, max: 1 })).toEqual({ cardinality: "single", required: true });
+  expect(cardinalityOf({ min: 1, max: "unbounded" })).toEqual({ cardinality: "collection", bounds: { min: 1, max: "unbounded" }, required: true });
+  expect(cardinalityOf({ max: 3 })).toEqual({ cardinality: "collection", bounds: { max: 3 }, required: false });
+  for (const bounds of [{ min: 2, max: 1 }, { min: 2 }, { min: -1 }, { min: 0.5, max: 2 }, { max: 0 }] as const) {
+    expect(() => cardinalityOf(bounds, "Entity.field")).toThrow("Entity.field: invalid cardinality bounds.");
+  }
+  const schema = operationFieldObjectSchema([
+    { key: "email", osfType: "string", cardinality: { min: 1, max: 1 } },
+    { key: "tags", osfType: "string", cardinality: { min: 1, max: "unbounded" } },
+    { key: "note", osfType: "string", cardinality: { min: 0, max: 1 } },
+  ]);
+  expect(schema.required).toEqual(["email", "tags"]);
+  expect((schema.properties as Record<string, Record<string, unknown>>).tags).toMatchObject({ type: "array", minItems: 1 });
+});
+
+test("stored definitions carry authored copy in x-osf-i18n and merge catalog validation", () => {
+  const schema = operationFieldObjectSchema([
+    { key: "reason", osfType: "shortReason", label: { en: "Reason", nl: "Reden" }, help: { en: "Why", nl: "Waarom" }, validation: { minLength: 2 } },
+  ], { osfTypes: { shortReason: { baseType: "string", validation: { maxLength: 80 } } } });
+  expect((schema.properties as Record<string, unknown>).reason).toEqual({
+    type: "string",
+    minLength: 2,
+    maxLength: 80,
+    "x-osf-i18n": { title: { en: "Reason", nl: "Reden" }, description: { en: "Why", nl: "Waarom" } },
+    title: "Reason",
+    "x-osf-type": "shortReason",
+    description: "Reason Why",
+  });
+});
+
+test("entity options and relationship constraints project as the live reference annotation", () => {
+  const schema = operationFieldObjectSchema([
+    { key: "category", osfType: "string", options: { type: "entity", source: "Category", valueField: "code" } },
+    { key: "customer", osfType: "Relation", relationship: { constraints: { relationType: { eq: "organization" } } } },
+  ], { osfTypes: { Relation: { kind: "entity", entity: "Relation", baseType: "string", validation: { format: "uuid" } } } });
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  expect(properties.category!["x-osf-reference"]).toEqual({ entity: "Category", valueField: "code" });
+  expect(properties.category!.enum).toBeUndefined();
+  expect(properties.customer).toMatchObject({
+    type: "string", format: "uuid",
+    "x-osf-reference": { entity: "Relation", valueField: "id", constraints: { relationType: { eq: "organization" } } },
+    description: "customer References the relation entity.",
+  });
+  expect(() => operationFieldObjectSchema([{ key: "category", osfType: "string", options: { type: "entity" } }])).toThrow("require a source");
+});
+
+test("a catalog type that declares its schema projects through it, bundled once at the root", () => {
+  const definitions = { fieldDefinition: { type: "object", required: ["key"], properties: { key: { type: "string" } } } };
+  const schema = operationFieldObjectSchema([
+    { key: "form", osfType: "object", children: [
+      { key: "fields", osfType: "fieldDefinition", cardinality: "collection" },
+    ] },
+    { key: "definition", osfType: "fieldDefinition" },
+  ], { osfTypes: { fieldDefinition: { baseType: "object", schema: { $ref: "#/$defs/fieldDefinition" } } }, fieldDefinitionDefinitions: definitions });
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  expect(properties.definition).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-i18n": { title: { en: "definition", nl: "definition" } }, title: "definition", "x-osf-type": "fieldDefinition", description: "definition" });
+  expect((properties.form!.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
+  expect(properties.form!.$defs).toBeUndefined();
+  expect(schema.$defs).toEqual(definitions);
+});
+
+test("a catalog type's optionSource is the default choice source; authored options and catalog options win", () => {
+  const registry = { osfTypes: {
+    accountId: { kind: "entityId", entity: "Account", baseType: "string", validation: { format: "uuid" }, optionSource: { type: "entity", source: "Account", valueField: "id" } },
+    status: { baseType: "string", options: { type: "static", items: [{ value: "open", label: "Open" }] }, optionSource: { type: "entity", source: "Never" } },
+  } } as const;
+  const schema = operationFieldObjectSchema([
+    { key: "owner", osfType: "accountId" },
+    { key: "state", osfType: "status" },
+    { key: "authored", osfType: "accountId", options: { type: "static", items: [{ value: "x", label: "X" }] } },
+  ], registry);
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  expect(properties.owner!["x-osf-reference"]).toEqual({ entity: "Account", valueField: "id" });
+  expect(properties.state!.enum).toEqual(["open"]);
+  expect(properties.state!["x-osf-reference"]).toBeUndefined();
+  expect(properties.authored!.enum).toEqual(["x"]);
+  expect(properties.authored!["x-osf-reference"]).toBeUndefined();
 });

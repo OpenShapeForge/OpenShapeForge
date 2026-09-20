@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./connector": "./src/connector.ts",
     "./secrets": "./src/secrets.ts",
     "./package.json": "./package.json"
   },

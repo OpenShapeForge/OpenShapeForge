@@ -18,7 +18,7 @@ describe("field authoring registry", () => {
       osfTypes: {
         exampleType: {
           label: { nl: "Voorbeeld", en: "Example" },
-          valueType: "string",
+          baseType: "string",
           kind: "scalar",
           props: { futureSemanticProperty: true },
         },
@@ -52,7 +52,7 @@ describe("field authoring registry", () => {
       osfTypes: {
         exampleType: {
           label: { nl: "Voorbeeld", en: "Example" },
-          valueType: "string",
+          baseType: "string",
           kind: "scalar",
           props: { futureSemanticProperty: true },
         },

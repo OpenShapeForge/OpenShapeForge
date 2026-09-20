@@ -22,8 +22,8 @@ import type {
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import {
   __buildGeneratedMcpServerForTests,
-  createRuntimeDeclarativeServiceExecutor,
 } from "../../mcp/generated-mcp-server.js";
+import { createRuntimeDeclarativeServiceExecutor } from "../../mcp/runtime-executors.js";
 import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 

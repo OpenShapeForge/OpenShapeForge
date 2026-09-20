@@ -204,30 +204,28 @@ function catalogTool(table: McpTable, operation: CrudOperation) {
 
 /**
  * The input schema a session is shown for one entity's operation: the tool's
- * own for a dedicated entity, the entity's `anyOf` branch (minus the `entity`
- * selector) for a generic one. Throws when the listing omits it, so a test
- * that expected the tool sees why instead of a property read on undefined.
+ * own for a dedicated entity, the answer of `osf_describe` for a generic one
+ * (the listing only carries the compact projection: the `entity` enum and
+ * the shared properties). Throws when the listing omits it, so a test that
+ * expected the tool sees why instead of a property read on undefined.
  */
-function advertisedSchema(
+async function advertisedSchema(
+  identity: Identity,
   tools: { name: string; inputSchema: any }[],
   table: McpTable,
   operation: CrudOperation,
-): any {
+): Promise<any> {
   const name = toolNameFor(table, operation);
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`The session was not offered ${name}.`);
   if (table.source!.mcp!.tools !== "generic") return tool.inputSchema;
   const entity = table.source!.authoringEntityName;
-  const branch = (tool.inputSchema.anyOf as any[] | undefined)?.find(
-    (candidate) => candidate.properties?.entity?.const === entity,
-  );
-  if (!branch) throw new Error(`${name} advertises no ${entity} branch to this session.`);
-  const { entity: _selector, ...properties } = branch.properties;
-  return {
-    ...branch,
-    properties,
-    required: (branch.required as string[]).filter((key) => key !== "entity"),
-  };
+  expect(tool.inputSchema.properties.entity.enum).toContain(entity);
+  const described = await callTool(identity, "osf_describe", { entity, operation });
+  expect(toolError(described.body)).toBeUndefined();
+  const schema = toolPayload(described.body)?.operations?.[operation]?.inputSchema;
+  if (!schema) throw new Error(`osf_describe advertises no ${entity} ${operation} schema to this session.`);
+  return schema;
 }
 
 async function acquireLease(
@@ -1092,10 +1090,10 @@ describe("generated MCP server", () => {
       test(`${prefix}: advertises ${key} as a uuid on ${onCreate ? "create, " : ""}update and filter`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
         const tools = body.result.tools as { name: string; inputSchema: any }[];
-        const update = advertisedSchema(tools, table, "update");
-        const list = advertisedSchema(tools, table, "list");
+        const update = await advertisedSchema(tenantA, tools, table, "update");
+        const list = await advertisedSchema(tenantA, tools, table, "list");
         if (onCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(create.properties[key]).toMatchObject({ type: "string", format: "uuid" });
         }
         expect(list.properties.filter.properties[key]).toMatchObject({
@@ -1191,21 +1189,21 @@ describe("generated MCP server", () => {
     test(`${prefix}: the update schema ${immutable ? "withholds" : "matches create on"} immutable fields`, async () => {
       const { body } = await rpc(tenantA, "tools/list");
       const tools = body.result.tools as { name: string; inputSchema: any }[];
-      const update = advertisedSchema(tools, table, "update");
+      const update = await advertisedSchema(tenantA, tools, table, "update");
       // Authored fields only: a create may also offer a blueprint control,
       // an update its version and lease controls.
       const updatable = authoredKeys(update.properties.values.properties);
 
       if (!immutable) {
         if (offeredOnCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(updatable).toEqual(authoredKeys(create.properties));
         }
         return;
       }
       for (const field of immutableFields) expect(updatable).not.toContain(field);
       if (offeredOnCreate) {
-        const creatable = authoredKeys(advertisedSchema(tools, table, "create").properties);
+        const creatable = authoredKeys((await advertisedSchema(tenantA, tools, table, "create")).properties);
         for (const field of immutableFields) expect(creatable).toContain(field);
         expect(updatable).toEqual(creatable.filter((key) => !immutableFields.includes(key)));
       }

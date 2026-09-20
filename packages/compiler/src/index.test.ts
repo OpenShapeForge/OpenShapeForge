@@ -87,7 +87,7 @@ describe("compiler host artifact assembly", () => {
         "types:",
         "  hostType:",
         "    label: { nl: Hosttype, en: Host type }",
-        "    valueType: string",
+        "    baseType: string",
         "    futureSemanticProperty: keep-me",
         "",
       ].join("\n"),
@@ -131,7 +131,7 @@ describe("compiler host artifact assembly", () => {
         hostProfile: { futureProfileProperty: "keep-me" },
       },
       osfTypes: {
-        email: { valueType: "string" },
+        email: { baseType: "string" },
         hostType: { futureSemanticProperty: "keep-me" },
       },
       referentiedata: {

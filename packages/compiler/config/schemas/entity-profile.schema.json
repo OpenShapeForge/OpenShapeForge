@@ -115,12 +115,6 @@
         "presentations": { "$ref": "core-entity.schema.json#/$defs/presentations" }
       }
     },
-    "crud": {
-      "$ref": "core-entity.schema.json#/properties/crud"
-    },
-    "workflow": {
-      "$ref": "core-entity.schema.json#/properties/workflow"
-    },
     "storage": {
       "type": "object",
       "additionalProperties": false,

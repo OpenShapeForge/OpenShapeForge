@@ -13,6 +13,7 @@
  * Input:  ViewDefinition + CompiledEntityContract.
  * Output: Map<string, string> — file path to generated TypeScript/TSX source code.
  */
+import { templatePaths } from "@openshapeforge/operations";
 import { surfacedRelationshipKeys } from "./surfaced-relationships.js";
 import path from "node:path";
 import type {
@@ -2369,13 +2370,10 @@ function resolveFieldPath(
 }
 
 function appendTemplatePaths(paths: string[], template?: string): void {
-  if (!template) return;
-
-  for (const match of template.matchAll(/\{\{(.+?)\}\}/g)) {
-    const expression = match[1];
-    for (const candidate of expression.split("||").map((part) => part.trim()).filter(Boolean)) {
-      appendUnique(paths, candidate);
-    }
+  // One template reader for every surface: the same parser names a picker's
+  // selection at runtime (@openshapeforge/operations, display-template.ts).
+  for (const segments of templatePaths(template)) {
+    appendUnique(paths, segments.join("."));
   }
 }
 

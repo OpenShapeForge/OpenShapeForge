@@ -18,6 +18,7 @@ import {
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
 } from "./authoring/role-composites.js";
+import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
 import {
   buildIdentityContract,
   IDENTITY_CONTRACT_PATH,
@@ -36,6 +37,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { connectorMcpTools } from "@openshapeforge/operations";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
 import {
   collectPluginMigrationRegistry,
@@ -46,6 +48,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
+import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
@@ -178,6 +181,12 @@ export {
   type RoleCompositeMember,
   type RoleCompositesByRealm,
 } from "./authoring/role-composites.js";
+export {
+  buildRoleLabels,
+  renderRoleLabels,
+  ROLE_LABELS_PATH,
+  type RoleLabelTable,
+} from "./authoring/role-labels.js";
 export type {
   AuthoringConfig,
   AuthoringSettingValue,
@@ -269,10 +278,10 @@ function mcpCatalogInputs(
 }
 
 /**
- * Every referentiedata group an entity points at, from either authoring
- * spelling: the documented `options.referentieGroep`, and the
- * `render.props.referentieGroep` the UI select components consume. Walks
- * nested children/item so a group referenced inside an object field counts.
+ * Every referentiedata group an entity points at, through `options` (the
+ * model compiler folds the select component's `render.props.referentieGroep`
+ * into it). Walks nested children/item so a group referenced inside an
+ * object field counts.
  */
 function collectReferentieGroepReferences(
   fields: readonly CompiledField[] | undefined,
@@ -280,15 +289,11 @@ function collectReferentieGroepReferences(
   entityName: string,
 ): Map<string, Set<string>> {
   for (const field of fields ?? []) {
-    const fromOptions =
-      field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
-    const fromRender = field.render?.props?.referentieGroep;
-    for (const groep of [fromOptions, fromRender]) {
-      if (typeof groep === "string" && groep.length > 0) {
-        const where = into.get(groep) ?? new Set<string>();
-        where.add(`${entityName}.${field.key}`);
-        into.set(groep, where);
-      }
+    const groep = field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
+    if (typeof groep === "string" && groep.length > 0) {
+      const where = into.get(groep) ?? new Set<string>();
+      where.add(`${entityName}.${field.key}`);
+      into.set(groep, where);
     }
     collectReferentieGroepReferences(field.children, into, entityName);
     if (field.item) collectReferentieGroepReferences([field.item], into, entityName);
@@ -349,6 +354,9 @@ export async function collectAllArtifacts(
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
+  // Every compiled entity, core and plugin alike: a transition's agreesOn
+  // reaches across entities, so it is checked here where all of them are.
+  assertTransitionAgreements(entities.map((entity) => entity.contract));
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -469,6 +477,8 @@ export async function collectAllArtifacts(
           operations,
           executionCompatibility,
           operationToolProjection,
+          // The connector tools share the listing, so they share its byte budget.
+          connectorMcpTools(connectors),
         ),
       },
     ],
@@ -537,6 +547,12 @@ export async function collectAllArtifacts(
       {
         path: ROLE_COMPOSITES_PATH,
         contents: renderRoleComposites(buildRoleComposites(keycloakArtifacts)),
+      },
+      // What each role means to its holder, authored on the role, so the MCP
+      // session describes a person's roles in the deployment's own words.
+      {
+        path: ROLE_LABELS_PATH,
+        contents: renderRoleLabels(buildRoleLabels(loadAuthorizationConfigs(authoringDir))),
       },
       // Who a login is, in entity terms, so the auth layer names entities and
       // fields through the contract instead of tables and columns by hand.

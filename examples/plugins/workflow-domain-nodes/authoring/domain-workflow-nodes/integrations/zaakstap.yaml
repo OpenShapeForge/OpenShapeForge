@@ -223,9 +223,6 @@ configFields:
           en: Choose the relation group or use a variable that resolves to a relationGroupId. The value is stored on the ERP
             process step for work assignment.
         osfType: relationGroupId
-        options:
-          type: remote
-          remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
         render:
           component: OptionVariablePicker
           props:

@@ -32,7 +32,7 @@ export type CompiledEntityInfo = {
   slug: string;
   /** Repo-root-relative provenance path of the entity YAML. */
   path: string;
-  origin: "core" | "contextFull";
+  origin: "core";
   contract: CompiledEntityContract;
 };
 

@@ -39,7 +39,7 @@ import type {
 export interface Field extends FieldDefinition {
   /**
    * Compiler-derived base of `osfType`: the type itself for a base type, the
-   * catalog entry's `valueType` otherwise. Never authored.
+   * catalog entry's `baseType` otherwise. Never authored.
    */
   baseType?: FieldDefinitionValueType;
   /**
@@ -87,16 +87,17 @@ export interface OsfTypeDefinition {
   /** Derived: this entity is the immutable version entity of the named versioned entity, so a reference to it may be `version: pinned`. */
   versionEntityOf?: string;
   /**
-   * Discriminator for entity-ID semantic types. When set to `"entityId"`,
-   * the entry MUST also declare `entity`, `listUrl`, `displayTemplate`,
-   * `filterField`, `icon`, and `render.{display,input}` (see the catalog
-   * JSON schema and `checks.ts` for enforcement). Absent on value-shape
-   * semantic types.
+   * `scalar` and `object` are authored. `entity` (a loaded entity, the
+   * relationship target), `entityId` (its identity alias, `<entity>Id`) and
+   * `provider` (an Operation-catalog entity) are derived from the corpus by
+   * `deriveEntityOsfTypes` / `deriveProviderOsfTypes`; an authored entry
+   * under a derived key is a compile error.
    */
   kind?: "scalar" | "entityId" | "entity" | "object" | "provider";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType:
+  /** The base type every transport maps this type to: storage, GraphQL and JSON Schema. */
+  baseType:
     | "string"
     | "integer"
     | "number"
@@ -107,6 +108,14 @@ export interface OsfTypeDefinition {
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
+  /**
+   * The complete value schema of this type: a `$ref` into the bundled
+   * field-definition definitions. A type that declares one is projected
+   * through it instead of through `baseType` and `shape`, which is how a
+   * recursive contract (a stored FieldDefinition) is a catalog type like any
+   * other, with no engine code that knows its name.
+   */
+  schema?: OsfTypeSchemaReference;
   lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
@@ -130,18 +139,19 @@ export interface OsfTypeDefinition {
    */
   icon?: string;
   /**
-   * For entity-ID semantic types (`kind: "entityId"`): the kebab-case slug
-   * of the entity this type identifies. Lets downstream consumers
-   * (variable pickers, workflow inspector, the core-entity-options route)
-   * resolve from an `osfType` string back to the entity it represents.
+   * For derived entity, entity-ID and provider types: the name of the entity
+   * this type identifies or references, spelled as the entity's own osfType
+   * (PascalCase), so a consumer can resolve from an `osfType` string back
+   * to the entity without a second spelling.
    */
   entity?: string;
   /**
-   * For entity-ID semantic types: the canonical workflow-designer options
-   * URL, always shaped as
-   * `/api/workflow/designer/core-entity-options?entity=<entity-slug>`.
+   * For entity-ID types: where a picker enumerates the records a value of
+   * this type identifies — the entity itself, resolved through its list
+   * Operation. Absent when the entity has no list Operation. A field that
+   * declares its own `options` keeps them.
    */
-  listUrl?: string;
+  optionSource?: FieldOptions;
   /**
    * Copied from the entity's `displayTemplate`. Variable pickers and
    * cards render instances with this template.
@@ -153,6 +163,8 @@ export interface OsfTypeDefinition {
    */
   filterField?: string;
 }
+
+export type OsfTypeSchemaReference = { $ref: string } & Record<string, unknown>;
 
 export interface OsfTypeCatalog {
   schemaVersion: number;
@@ -185,11 +197,12 @@ export interface AuthoredEntityIndex {
    */
   unique?: boolean;
   /**
-   * Partial index: only rows whose field equals the value take part, so a
-   * unique index enforces at most one such row per key
-   * (`{ field: isDefault, equals: true }`).
+   * Partial index: only rows whose field equals the value (`{ field:
+   * isDefault, equals: true }`) or holds one at all (`{ field: invoiceNumber,
+   * present: true }`) take part, so a unique index enforces at most one such
+   * row per key and leaves the rows without the value alone.
    */
-  where?: { field: string; equals: boolean | string | number };
+  where?: { field: string; equals: boolean | string | number } | { field: string; present: boolean };
 }
 
 export type CrudOperationKey = "list" | "get" | "create" | "update" | "delete";
@@ -798,41 +811,18 @@ export interface CoreEntity {
     snapshot?: { ownedRelationships?: "recursive" };
   };
   fields: Field[];
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
+  /** Derived by the compiler from `interfaces.web`; never authored. */
   ui?: UIDefinition;
   /**
-   * Common generated-CRUD policy shared by every transport. Absent or `true`
-   * preserves the historical all-operations default; `false` disables the
-   * entity completely. The object form can make an entity read-only or expose
-   * any smaller operation set. REST, MCP, workflow and later layers may narrow
-   * this policy but never widen it.
+   * Canonical Operations: every behaviour of the entity, including generated
+   * CRUD, is one of these. Exposure per transport is declared under
+   * `interfaces`, which may narrow this set but never widen it.
    */
-  crud?: boolean | CrudConfig;
-  /**
-   * Opt-in generated REST exposure for this entity. Absent or `false` means
-   * no REST routes are generated (fail closed, mirroring the generated-CRUD
-   * allowlist). `true` enables every operation under a base path derived
-   * from the entity name (plural kebab-case, e.g. `RelationGroup` →
-   * `relation-groups`). The object form allows per-operation flags and a
-   * custom base path; `basePath` is emitted verbatim into route strings and
-   * OpenAPI paths, so the loader restricts it to `^[a-z][a-z0-9-]*$`.
-   */
-  rest?: boolean | RestConfig;
-  /**
-   * Opt-in generated MCP (Model Context Protocol) exposure for this entity.
-   * Absent or `false` means no tools are generated — fail closed, exactly as
-   * `rest` does. `true` emits one tool per operation under a prefix derived
-   * from the entity name (snake_case, e.g. `ContactDetail` →
-   * `contact_detail`). The object form allows per-operation flags, a custom
-   * prefix, and the `generic` tool style for large catalogs.
-   */
-  mcp?: boolean | McpConfig;
-  /** Canonical version-2 operations. Forbidden on schemaVersion 1 by JSON Schema. */
   operations?: Record<string, EntityOperationDefinition>;
-  /** Thin version-2 interface projections. Forbidden on schemaVersion 1 by JSON Schema. */
+  /** Thin interface projections (REST, GraphQL, MCP, web, workflow). */
   interfaces?: EntityInterfacesDefinition;
+  /** Workflow node generation settings; an entityPatch from the workflow plugin adds them. */
   workflow?: {
     nodes?: {
       actions?: {
@@ -933,28 +923,6 @@ export interface EntityProfile {
     };
   };
   ui?: UIDefinition;
-  crud?: boolean | CrudConfig;
-  workflow?: {
-    nodes?: {
-      actions?: Partial<
-        Record<
-          | "create"
-          | "getOne"
-          | "list"
-          | "update"
-          | "delete"
-          | "wait"
-          | "awaitAction",
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            }
-        >
-      >;
-    };
-  };
   storage?: {
     profileTable: string;
   };
@@ -1196,6 +1164,16 @@ export interface AuthorizationUser {
   enabled?: boolean;
 }
 
+/**
+ * What a role means to the person holding it, per language. `label` is the
+ * title-case name a persona is shown as; `phrase` the lower-case wording
+ * inside a sentence. Display only.
+ */
+export interface AuthorizationRoleLabel {
+  label?: Record<string, string>;
+  phrase?: Record<string, string>;
+}
+
 export interface AuthorizationConfigFile {
   schemaVersion: number;
   kind: "authorizationConfig";
@@ -1278,6 +1256,8 @@ export interface AuthorizationConfigFile {
       activeStatus: string;
     };
   };
+  /** What each role means to its holder, keyed by role name (display only). */
+  roleLabels?: Record<string, AuthorizationRoleLabel>;
 }
 
 export interface TransformDefinition {

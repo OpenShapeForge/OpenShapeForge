@@ -86,6 +86,8 @@ const contract = {
         key: "relationType",
         required: true,
         label: { en: "Relation type" },
+        // A compiled field names its group in options; the model compiler folded the select's render prop into it.
+        options: { type: "referentiedata", referentieGroep: "RELATIONTYPE" },
         render: {
           component: "ReferenceSelect",
           props: { referentieGroep: "RELATIONTYPE" },
@@ -1039,6 +1041,7 @@ describe("rich generated REST OpenAPI", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
     const semanticManifest = structuredClone(manifest);

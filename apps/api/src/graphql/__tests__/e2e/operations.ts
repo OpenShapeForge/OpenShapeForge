@@ -22,6 +22,8 @@ import {
   entityOperationRef,
   isGeneratedCrudOperationEnabled,
 } from "../../generated-crud.js";
+import { fieldNameForColumn } from "../../../operations/entity/columns.js";
+import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
 import type { EntityOperationContract } from "../../../operations/entity/types.js";
 import { OPERATION_LEASES_PATH } from "../../../rest/edit-lease-routes.js";
 import { REST_MOUNT_PATH } from "../../../rest/rest-paths.js";
@@ -67,6 +69,22 @@ export function operationIdFor(table: GeneratedTable, intent: Intent): string {
 export function isEntityBackedCreate(table: GeneratedTable): boolean {
   const contract = operationContractFor(table, "create");
   return contract === undefined || contract.implementation?.type !== "plugin";
+}
+
+/**
+ * Whether the create's contract lets the caller supply `field` at the top
+ * level. An entity-backed create offers every column except one an
+ * Operation writes (`writtenBy`: an invoice number the billing run issues);
+ * a plugin create offers what its authored input names.
+ */
+export function createOffersField(table: GeneratedTable, field: string): boolean {
+  if (isEntityBackedCreate(table)) {
+    const column = table.columns.find((candidate) => fieldNameForColumn(candidate) === field);
+    return column !== undefined && !isOperationWrittenColumn(column);
+  }
+  const contract = operationContractFor(table, "create");
+  const schema = (contract?.input as { schema?: { properties?: Record<string, unknown> } } | undefined)?.schema;
+  return field in (schema?.properties ?? {});
 }
 
 export function versionRequired(table: GeneratedTable, intent: MutationIntent): boolean {

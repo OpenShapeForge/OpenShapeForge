@@ -16,6 +16,7 @@
  * Runs in the db-tests job (`bun test src/db`), which is the job that has a
  * database. The connector unit suites are not currently run by any CI job.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
@@ -45,7 +46,6 @@ import {
 } from "../../connectors/secrets.js";
 import { readSecrets } from "../../connectors/store.js";
 import type { ConnectorContract } from "../../connectors/catalog.js";
-import type { FetchLike } from "../../connectors/executor.js";
 import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
 import { selectOAuthConnectionRow } from "../../mcp/generated-mcp-server.js";
 

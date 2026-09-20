@@ -11,18 +11,7 @@
  * secret never reaches package code at all, not even to be forwarded.
  */
 
-/**
- * Mirrors `ConnectorContext` in apps/api/src/connectors/executor.ts. Declared
- * structurally rather than imported: a real connector package depends on a
- * published types package, not on the API's source tree.
- */
-type ConnectorContext = {
-  config: Readonly<Record<string, unknown>>;
-  secrets: Readonly<Record<string, string>>;
-  fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-  signal: AbortSignal;
-  log: (message: string, fields?: Record<string, unknown>) => void;
-};
+import type { ConnectorContext } from "@openshapeforge/plugin-runtime/connector";
 
 type GetRecordsInput = {
   entity: string;

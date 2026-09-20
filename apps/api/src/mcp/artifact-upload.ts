@@ -5,10 +5,12 @@ import type { SecretKeyring } from "../connectors/secrets.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
+import { escapeHtml } from "./browser-pages.js";
+import { productName } from "../config/product-name.js";
 
 export const ARTIFACT_UPLOAD_APP_URI = "ui://openshapeforge/artifact-upload";
 export const ARTIFACT_UPLOAD_PATH = "/api/artifact-upload";
-export const ARTIFACT_UPLOAD_TOOL_NAME = "upload_document_file";
+export { ARTIFACT_UPLOAD_TOOL_NAME } from "@openshapeforge/operations";
 export const ARTIFACT_UPLOAD_TTL_SECONDS = 10 * 60;
 
 export type PendingArtifactUpload = {
@@ -106,7 +108,7 @@ export async function renderArtifactUploadApp(): Promise<string> {
   const script = await bundledArtifactUploadApp();
   return (
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
-    `<title>Upload document</title><body style="${PAGE_STYLE}">` +
+    `<title>Upload document</title><body style="${PAGE_STYLE}" data-product-name="${escapeHtml(productName())}">` +
     `<h2 style="font-size:1.2rem">Upload document</h2>` +
     `<p id="upload-message">Preparing the private file picker…</p>` +
     `<input id="upload-file" hidden type="file">` +
@@ -123,7 +125,7 @@ export function renderArtifactUploadPage(uploadUrl: string): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Upload document</title><body style="${PAGE_STYLE}">
 <h1 style="font-size:1.35rem">Upload document</h1>
-<p id="message">Choose the file that should be used by Hubble.</p>
+<p id="message">Choose the file that should be used by ${escapeHtml(productName())}.</p>
 <input id="file" type="file"><progress id="progress" hidden style="width:100%"></progress>
 <script>
 const url=${jsonForHtml(uploadUrl)}, file=document.getElementById('file'), message=document.getElementById('message'), progress=document.getElementById('progress');

@@ -58,6 +58,19 @@ export type FieldDefinitionRelationshipConstraints = Record<
 export type FieldDefinitionValidation = FieldValidation;
 
 /** One arc of a status state machine; compiles to the Operation `<Entity>.<key>`. */
+export interface FieldDefinitionTransitionWrite {
+  field: string;
+  /** The rule refuses to run without this input. */
+  required?: boolean;
+  /**
+   * On a single entity reference: field keys, present on both entities, on
+   * which the referenced record must equal this record — an Invoice named by
+   * a milestone must carry the milestone's agreementId. Checked by the
+   * generic handler inside the transaction; a mismatch is a VALIDATION refusal.
+   */
+  agreesOn?: string[];
+}
+
 export interface FieldDefinitionTransitionRule {
   /** Operation key; becomes `<Entity>.<key>`, the REST segment and the web action. */
   key: string;
@@ -81,8 +94,13 @@ export interface FieldDefinitionTransitionRule {
    * Operation.
    */
   preconditions?: Array<{ field: string; present: boolean }>;
-  /** Fields this transition, and only this transition, may set from its input. */
-  writes?: string[];
+  /**
+   * Fields this transition, and only this transition, may set from its
+   * input. A bare key is optional input; the object form makes it required
+   * for this rule and, on a single entity reference, demands that the
+   * referenced record agree with this one on the named fields (`agreesOn`).
+   */
+  writes?: Array<string | FieldDefinitionTransitionWrite>;
   /**
    * Fields this transition, and only this transition, sets from the server:
    * `now` (a datetime field) or `actor` (the session's linked Relation for a
@@ -320,10 +338,11 @@ export interface FieldDefinitionOsfType {
   kind?: FieldDefinitionOsfTypeKind;
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType: FieldDefinitionValueType;
+  baseType: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   validation?: FieldDefinitionValidation;
   options?: FieldOptions;
+  schema?: { $ref: string };
   render?: {
     display?: string;
     input?: string;
@@ -336,7 +355,7 @@ export interface FieldDefinitionOsfType {
   audit?: boolean;
   hints?: ContextHints;
   entity?: string;
-  listUrl?: string;
+  optionSource?: FieldOptions;
   displayTemplate?: string;
   filterField?: string;
   shape?: FieldDefinition[];

@@ -4,7 +4,6 @@
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import type { Field } from "@/generated/compiler/field-contract";
-import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
 import { useRemoteOptionSourceData } from "@/features/renderer/hooks/use-remote-options";
 import { TextDisplay } from "@/features/renderer/display/text-display";
 
@@ -24,24 +23,9 @@ function displayId(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/** The option source (entity records or a declared endpoint) is resolved by the data hook; the field passes through. */
 function workflowLookupField(field: Field): Field {
-  const osfType = getFieldOsfTypeDefinition(field);
-  const remoteUrl =
-    field.options?.type === "remote"
-      ? field.options.remoteUrl
-      : osfType?.options?.type === "remote"
-        ? osfType.options.remoteUrl
-        : osfType?.listUrl;
-
-  return remoteUrl
-    ? {
-        ...field,
-        options: {
-          type: "remote",
-          remoteUrl,
-        },
-      }
-    : field;
+  return field;
 }
 
 function resolveLabel(

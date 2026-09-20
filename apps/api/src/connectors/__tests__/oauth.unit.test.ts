@@ -8,6 +8,7 @@
  * in the db-backed suite, and saying so is better than a green test that checks
  * the easy half.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, it } from "bun:test";
 import {
   ConnectorOAuthError,
@@ -16,7 +17,6 @@ import {
   withOAuthAuthorization,
 } from "../oauth.js";
 import type { ConnectorContract } from "../catalog.js";
-import type { FetchLike } from "../executor.js";
 
 const CONTRACT = { slug: "provider" } as ConnectorContract;
 

@@ -8,7 +8,15 @@ import type {
   CompiledRelationship,
 } from "./authoring/types.js";
 import {
+  DATA_ACQUISITION_TOOL_FOOTER,
+  advertisedEntityTool,
+  advertisedToolBytes,
+} from "@openshapeforge/operations";
+import {
+  advertisedToolSizes,
+  assertAdvertisedToolBytes,
   buildMcpCatalog,
+  MAX_ADVERTISED_TOOL_BYTES,
   MAX_DEDICATED_TOOLS,
   operationMcpServer,
   type McpCatalogInput,
@@ -98,7 +106,6 @@ const contract = (
       profileAuthorizations: {},
     },
     views: {},
-    canonical: {} as never,
     profiles: {},
     entityOperations: {},
   } as unknown as CompiledEntityContract;
@@ -628,6 +635,7 @@ describe("buildMcpCatalog", () => {
                   key: "definition",
                   baseType: "object",
                   osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
                 }),
               ],
             }),
@@ -1060,6 +1068,167 @@ describe("buildMcpCatalog", () => {
         ),
     );
     expect(() => buildMcpCatalog(many, "test")).toThrow(/over the 60 limit/);
+  });
+
+  it("fails the build when the advertised listing would exceed the byte budget, naming the largest tools", () => {
+    // Forty wide dedicated entities: a description per field of a few hundred
+    // bytes puts the listing far over the budget, the way a real catalogue's
+    // record schemas do when every entity keeps its own tools.
+    const wide = Array.from({ length: 12 }, (_unused, index) =>
+      input(
+        contract({
+          name: `Wide${index}`,
+          fields: Array.from({ length: 60 }, (_f, fieldIndex) =>
+            field({
+              key: `wide${index}Field${fieldIndex}`,
+              description: { en: "A field whose description is long enough to weigh. ".repeat(6) },
+            }),
+          ),
+          mcp: {
+            toolPrefix: `wide_${index}`,
+            tools: "dedicated",
+            operations: { list: true, get: true, create: true, update: true, delete: true },
+          },
+        }),
+        `wide-${index}`,
+        `erp.wide_${index}`,
+      ),
+    );
+    expect(() => buildMcpCatalog(wide, "test")).toThrow(
+      /over the 640 KB listing budget \(MAX_ADVERTISED_TOOL_BYTES\)\. Largest: wide_\d+_\w+ \(\d+ KB\)/,
+    );
+    // The same entities on the generic tools fit: the listing carries the
+    // entity enum and the shared properties, the schemas move to osf_describe.
+    const generic = wide.map((entry) => ({
+      ...entry,
+      contract: { ...entry.contract, mcp: { ...entry.contract.mcp!, tools: "generic" as const } },
+    }));
+    const catalog = buildMcpCatalog(generic, "test");
+    const sizes = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: catalog.operationTools,
+      projection: catalog.operationToolProjection.mode,
+    });
+    // The release lease tool is always listed; nothing here is lease-protected.
+    expect(sizes.map((entry) => entry.name)).toEqual([
+      "osf_list", "osf_get", "osf_create", "osf_update", "osf_delete", "osf_describe",
+      "osf_release_edit_lease",
+    ]);
+    expect(sizes.reduce((sum, entry) => sum + entry.bytes, 0)).toBeLessThan(64 * 1024);
+    expect(() => assertAdvertisedToolBytes(sizes)).not.toThrow();
+    // The reservations count: a maximum below them fails before any tool weighs.
+    expect(() => assertAdvertisedToolBytes(sizes, 1024)).toThrow(/over the 1 KB listing budget/);
+    expect(MAX_ADVERTISED_TOOL_BYTES).toBe(640 * 1024);
+  });
+
+  it("measures the whole static listing: searchable pair, lease tools, derived helpers, guides, connectors", () => {
+    const withGuide = input(
+      contract({
+        mcp: {
+          toolPrefix: "widget",
+          tools: "dedicated",
+          operations: { list: true, get: true, create: false, update: false, delete: false },
+          guide: { name: "widget_guide", description: "How widgets work.", roles: ["Widgets.All.Read"], content: "..." },
+        } as never,
+      }),
+    );
+    const operations = Array.from({ length: MAX_DEDICATED_TOOLS + 1 }, (_unused, index) => staticOperation(index));
+    const catalog = buildMcpCatalog([withGuide], "test", {}, operations);
+    const sizes = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: catalog.operationTools,
+      projection: catalog.operationToolProjection.mode,
+      guideTools: catalog.guideTools,
+      derivedTools: [
+        {
+          entity: "Service", table: "erp.services", roles: [], keyField: "key", descriptionField: "description",
+          inputFieldsField: "inputs",
+          connect: { name: "connect_service", description: "Sign in.", roles: [] },
+          dryRun: { name: "dry_run", description: "Compose.", roles: [] },
+          execution: {} as never,
+        } as never,
+      ],
+      editLeaseOperationIds: ["Widget.update"],
+      connectorTools: [{
+        name: "example_list", title: "List", description: "Lists.", inputSchema: { type: "object" },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+      }],
+    });
+    expect(sizes.map((entry) => entry.name)).toEqual([
+      "widget_list", "widget_get",
+      "osf_search_operations", "osf_execute_operation",
+      "osf_acquire_edit_lease", "osf_renew_edit_lease", "osf_release_edit_lease",
+      "connect_service", "dry_run",
+      "widget_guide",
+      "example_list",
+    ]);
+    for (const entry of sizes) expect(entry.bytes).toBeGreaterThan(100);
+  });
+
+  it("measures the shape the runtime lists: write reminder, mirrored title, app link, localized text", () => {
+    const elicits = input(
+      contract({
+        fields: [field({ key: "name" }), field({ key: "fields", baseType: "json" } as never), field({ key: "values", baseType: "json" } as never)],
+        mcp: {
+          toolPrefix: "widget",
+          tools: "dedicated",
+          operations: { list: false, get: false, create: true, update: false, delete: false },
+          elicitOnCreate: { sourceEntity: "Widget", sourceField: "id", definitionsField: "fields", into: "values" },
+        } as never,
+      }),
+    );
+    const catalog = buildMcpCatalog([elicits], "test");
+    const create = catalog.tools.find((tool) => tool.name === "widget_create")!;
+    const [measured] = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: [],
+      projection: "dedicated",
+      canonicalTexts: new Map([[create.operationId ?? "", {
+        name: { en: "Create widget", nl: "Widget aanmaken met een langere titel" },
+        description: { en: create.description.split(".")[0] + ".", nl: "Maakt één widget aan na validatie van de canonieke velden, uitgebreid." },
+      }]]),
+    });
+    // The bare compiled entry, plus what the listing adds: the reminder on a
+    // write tool, the title in the annotations and the app link.
+    const bare = advertisedToolBytes({
+      name: create.name, title: create.title, description: create.description,
+      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+    });
+    const listed = advertisedToolBytes(advertisedEntityTool({
+      name: create.name, operation: "create", title: create.title, description: create.description,
+      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+      linksConfigurationApp: true,
+    }));
+    expect(listed).toBeGreaterThan(bare + DATA_ACQUISITION_TOOL_FOOTER.length);
+    // The longer Dutch text is what the budget counts.
+    expect(measured!.bytes).toBeGreaterThan(listed);
+    expect(JSON.stringify(advertisedEntityTool({
+      name: create.name, operation: "create", title: "t", description: "d",
+      inputSchema: {}, annotations: create.annotations, linksConfigurationApp: true,
+    }))).toContain("ui://openshapeforge/configuration");
+  });
+
+  it("classifies generic tools by the entity's declared policy and refuses the osf_ prefix on a dedicated tool", () => {
+    // A dedicated entity whose prefix spells like the shared tools: refused,
+    // not silently merged into osf_list and exempted from the checks.
+    expect(() =>
+      buildMcpCatalog(
+        [input(contract({ mcp: { toolPrefix: "osf", tools: "dedicated", operations: { list: true, get: true, create: true, update: true, delete: true } } }))],
+        "test",
+      ),
+    ).toThrow(/"osf_list" \(Widget\.list\) uses the reserved "osf_" prefix/);
+    // The same names on a generic entity are the shared tools, counted as such.
+    const catalog = buildMcpCatalog(
+      [input(contract({ mcp: { toolPrefix: "osf", tools: "generic", operations: { list: true, get: true, create: true, update: true, delete: true } } }))],
+      "test",
+    );
+    expect(catalog.entities[0]!.tools).toBe("generic");
+    expect(advertisedToolSizes({
+      tools: catalog.tools, entities: catalog.entities, operationTools: [], projection: "dedicated",
+    }).map((entry) => entry.name)).toContain("osf_describe");
   });
 
   it("retains every static Operation and switches the advertised projection over the limit", () => {

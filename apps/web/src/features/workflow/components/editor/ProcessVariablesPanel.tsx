@@ -47,11 +47,11 @@ import {
   removeProcessVariable,
   setProcessVariableField,
   setProcessVariableStartValue,
-  PROCESS_VARIABLE_VALUE_TYPES,
+  PROCESS_VARIABLE_TYPES,
   type EditableCanvasGraph,
   type ProcessVariableKeyRefusal,
   type ProcessVariableSet,
-  type ProcessVariableValueType,
+  type ProcessVariableType,
 } from "../../../../../../../examples/plugins/workflow/web/editor/index";
 
 export type ProcessVariablesPanelProps = {
@@ -196,20 +196,20 @@ export function ProcessVariablesPanel({
               <label className="flex flex-col gap-1 text-xs">
                 <span className="text-muted-foreground">Type</span>
                 <select
-                  value={view.valueType}
+                  value={view.baseType}
                   disabled={readOnly}
                   className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
                   onChange={(event) =>
                     onEdit((current) =>
                       setProcessVariableField(current, {
                         key: view.key,
-                        property: "valueType",
-                        value: event.target.value as ProcessVariableValueType,
+                        property: "osfType",
+                        value: event.target.value as ProcessVariableType,
                       }),
                     )
                   }
                 >
-                  {PROCESS_VARIABLE_VALUE_TYPES.map((type) => (
+                  {PROCESS_VARIABLE_TYPES.map((type) => (
                     <option key={type} value={type}>
                       {type}
                     </option>

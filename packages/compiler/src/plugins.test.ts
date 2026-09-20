@@ -87,7 +87,7 @@ describe("compiler plugins", () => {
       typePickerUsage: "requestInput",
     });
     expect(fieldAuthoringRegistry.osfTypes.email).toMatchObject({
-      valueType: "string",
+      baseType: "string",
       classification: { sensitivity: "pii" },
     });
     expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE).toMatchObject({
@@ -133,6 +133,38 @@ describe("compiler plugins", () => {
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
     );
+  }, FULL_CORPUS_TIMEOUT_MS);
+
+  test("no generated option source points at a web route: options come from an endpoint or an entity", async () => {
+    // An identity alias's listUrl is navigation. A picker that fetched it would
+    // get an HTML page; its records are the entity's own list Operation.
+    const { all } = await collectAllArtifacts(repoRoot);
+    const remoteUrls = new Set<string>();
+    for (const artifact of all) {
+      for (const match of artifact.contents.matchAll(/"?remoteUrl"?\s*:\s*"([^"]*)"/g)) remoteUrls.add(match[1]!);
+    }
+    expect(remoteUrls.size).toBeGreaterThan(0);
+    expect([...remoteUrls].filter((url) => !url.startsWith("/api/"))).toEqual([]);
+    // The designer's core-entity-options route never existed; nothing may point at it, authored or generated.
+    expect(all.filter((artifact) => artifact.contents.includes("core-entity-options")).map((artifact) => artifact.path)).toEqual([]);
+    const registry = JSON.parse(all.find((artifact: { path: string }) => artifact.path.endsWith("operations/field-schema-registry.json"))!.contents) as {
+      osfTypes: Record<string, { kind?: string; optionSource?: { type: string; source?: string; valueField?: string } }>;
+    };
+    const aliases = Object.entries(registry.osfTypes).filter(([, type]) => type.kind === "entityId");
+    expect(aliases.length).toBeGreaterThan(100);
+    for (const [key, alias] of aliases) {
+      expect(JSON.stringify(alias)).not.toContain("listUrl");
+      if (alias.optionSource) expect(alias.optionSource).toEqual({ type: "entity", source: key.replace(/Id$/, "").replace(/^./, (c) => c.toUpperCase()), valueField: "id" });
+    }
+    expect(registry.osfTypes.relationId!.optionSource).toEqual({ type: "entity", source: "Relation", valueField: "id" });
+    // TenantSetting has no list Operation: nothing to enumerate, so no source.
+    expect(registry.osfTypes.tenantSettingId!.optionSource).toBeUndefined();
+    // The web's GraphQL registry lists only entities whose list Operation is
+    // projected to GraphQL; ContactDetail and PaymentDetail withhold it.
+    const graphqlRegistry = all.find((artifact: { path: string }) => artifact.path === "apps/web/src/generated/compiler/core-entity-graphql-registry.ts")!.contents;
+    expect(graphqlRegistry).toContain('"relation": {');
+    expect(graphqlRegistry).not.toContain('"contact-detail"');
+    expect(graphqlRegistry).not.toContain('"payment-detail"');
   }, FULL_CORPUS_TIMEOUT_MS);
 
   test("plugin context exposes compiled entity contracts", async () => {

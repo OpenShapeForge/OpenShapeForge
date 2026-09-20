@@ -7,6 +7,13 @@
   "required": ["schemaVersion", "kind"],
 
   "$defs": {
+    "localizedText": {
+      "type": "object",
+      "description": "One text per language, keyed by base language tag. English is the fallback every reader resolves to, so it is required.",
+      "required": ["en"],
+      "propertyNames": { "pattern": "^[a-z]{2,3}$" },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
     "authorizationGroupNode": {
       "type": "object",
       "additionalProperties": false,
@@ -399,6 +406,20 @@
             }
           },
           "enabled": { "type": "boolean" }
+        }
+      }
+    },
+
+    "roleLabels": {
+      "type": "object",
+      "description": "What a role means to the person holding it, per language, keyed by role name: a persona such as org_admin or a permission role such as Relations.All.ReadWrite. `label` is the title-case name whoami shows for a persona; `phrase` is the lower-case wording used inside a sentence (\"is an organization administrator\", \"may manage clients\"). Display only: nothing decides a permission by it. A host declares the labels of its own roles through an authorizationPatch.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "label": { "$ref": "#/$defs/localizedText" },
+          "phrase": { "$ref": "#/$defs/localizedText" }
         }
       }
     }

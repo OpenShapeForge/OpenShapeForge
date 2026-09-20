@@ -84,9 +84,15 @@ operationHandlers: {
 },
 ```
 
-`enqueue` runs inside the Operation's active transaction when there is one —
-the outbox: the job exists exactly when the domain write does, and a rolled
-back handler enqueues nothing. The tenant, the actor and the actor's whole
+`enqueue` runs inside the active transaction when there is one — the
+outbox: the job exists exactly when the domain write does, and a rolled back
+handler enqueues nothing. The active transaction is the Operation's, or, for
+a storage contribution called from its `stage` or `read`, the transaction
+that artifact call opened: a provider that stages a file and schedules its
+collection commits the row and the job together, and an Operation invoked
+inside that stage joins the same transaction rather than opening a second
+one. The same rule holds for `platform.db.withSession`, `platform.events`
+and the record oracle. The tenant, the actor and the actor's whole
 effective session — roles, org-unit groups, RelationGroup memberships,
 scope — come from the verified session, never from input, and are persisted
 on the row: the job will run as this person, with what this request could

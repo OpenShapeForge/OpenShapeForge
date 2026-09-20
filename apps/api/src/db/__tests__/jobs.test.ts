@@ -197,6 +197,29 @@ describe("platform.jobs", () => {
     expect(finished!.leaseUntil).toBeNull();
   });
 
+  test("a retry with retryAt defers to exactly that moment; the claim it came from still counts an attempt", async () => {
+    // What a handler that is claimed before its work is due relies on: the
+    // deferral lands on the moment it names, and the budget is per claim —
+    // a deferral at the bound is dead like any other retry, so a kind that
+    // can defer once sizes maxAttempts for it.
+    const due = new Date(Date.now() + 60 * 60 * 1_000);
+    const { id } = await enqueue(sessionA, "test.defer", { maxAttempts: 2 });
+    const [first] = await claim(1, ["test.defer"]);
+    const deferred = await withJobWorkerSession(suite.worker.db, (trx) =>
+      settleJob(trx, { id, claimToken: first!.claimToken, outcome: "retry", retryAt: due, error: { code: "NOT_DUE", message: "not yet" } }));
+    expect(deferred).toEqual({ settled: true, status: "queued" });
+    const queued = await appSession(sessionA, (trx) => getJob(trx, id));
+    expect(queued!.attempts).toBe(1);
+    expect(queued!.availableAt.getTime()).toBe(due.getTime());
+    expect(await claim(10, ["test.defer"])).toEqual([]);
+    await sql`update platform.jobs set available_at = now() where id = ${id}::uuid`.execute(suite.root.db);
+    const [second] = await claim(1, ["test.defer"]);
+    expect(second!.attempts).toBe(2);
+    const dead = await withJobWorkerSession(suite.worker.db, (trx) =>
+      settleJob(trx, { id, claimToken: second!.claimToken, outcome: "retry", retryAt: due, error: { code: "NOT_DUE", message: "not yet" } }));
+    expect(dead).toEqual({ settled: true, status: "dead" });
+  });
+
   test("an expired lease is reclaimed by the next claim, and closed dead at the attempt bound", async () => {
     const { id } = await enqueue(sessionA, "test.lease", { maxAttempts: 2 });
     const [first] = await claim(1, ["test.lease"]);

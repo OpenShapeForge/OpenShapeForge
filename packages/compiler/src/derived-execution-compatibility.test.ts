@@ -110,6 +110,14 @@ describe("buildMcpCatalog execution compatibility", () => {
     expect(catalog.derivedTools[0]?.roles).toEqual(["integration_user", "integration_admin"]);
   });
 
+  it("fails closed on an authored audience when the build has no realm role set", () => {
+    expect(() =>
+      buildMcpCatalog(catalogInputs(serviceOwner()), "test", {}, [], withAudience(["integration_user"])),
+    ).toThrow(/declares an audience, but this build has no realm role set to validate it against/);
+    // Nothing to validate: the role set may be omitted.
+    expect(() => buildMcpCatalog(catalogInputs(serviceOwner()), "test", {}, [], withAudience())).not.toThrow();
+  });
+
   it("refuses an audience role the realm does not declare, and an empty audience", () => {
     expect(() =>
       buildMcpCatalog(

@@ -1229,10 +1229,10 @@ export function buildMcpCatalog(
   /** The connector tools the same listing carries, for the byte budget. */
   connectorTools: readonly McpToolShape[] = [],
   /**
-   * Every role the generated realm declares (client roles, realm roles,
+   * Every role the tenant realm declares (client roles, realm roles,
    * composites, the ones entities and Operations name), for validating an
-   * execution compatibility record's audience. Undefined skips that check
-   * (callers without a realm, such as unit fixtures).
+   * execution compatibility record's audience. May be omitted only when no
+   * record authors an audience; a record that does fails the build without it.
    */
   knownRoles?: ReadonlySet<string>,
 ): McpCatalog {
@@ -1734,9 +1734,17 @@ export function buildMcpCatalog(
               `declares an empty audience; name at least one role or omit it.`,
           );
         }
-        const unknown = knownRoles
-          ? record.audience.filter((role) => !knownRoles.has(role))
-          : [];
+        // An authored audience is only ever accepted against the realm's
+        // roles: a build that cannot say what the realm knows refuses the
+        // record rather than admitting a role nobody may hold.
+        if (!knownRoles) {
+          throw new Error(
+            `Plugin "${plugin}" execution compatibility record "${record.entity}" ` +
+              `declares an audience, but this build has no realm role set to validate it ` +
+              `against; pass the tenant realm's roles (knownRoles) or omit the audience.`,
+          );
+        }
+        const unknown = record.audience.filter((role) => !knownRoles.has(role));
         if (unknown.length > 0) {
           throw new Error(
             `Plugin "${plugin}" execution compatibility record "${record.entity}" ` +

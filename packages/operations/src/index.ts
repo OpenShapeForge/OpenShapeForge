@@ -58,6 +58,7 @@ export {
   operationFieldSchema,
   resolveFieldBaseType,
   resolveFields,
+  resolveOptions,
   ruleValue,
   stringRule,
   typedEnumValues,

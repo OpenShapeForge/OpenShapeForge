@@ -272,16 +272,10 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
 }
 
 /**
- * Splits the hand-authored osf-types catalog into the three partials
- * the runtime contract emits. Entries are routed by their `kind` field:
- *   - `kind: "entityId"` → `entityIds` partial (consumed by the workflow
- *     designer's `core-entity-options` route).
- *   - everything else → `core` or `context` based on which YAML it came
- *     from (catalogs/ vs contexts/<name>/).
- *
- * Replaces the old auto-generated entity-ID synthesis. After this change
- * the YAML catalog is the single source of truth for every semantic type
- * the runtime sees.
+ * Splits the osf types into the three partials the runtime contract emits:
+ * the authored core and context catalogs by the YAML they came from, and
+ * the identity aliases (`kind: entityId`) the compiler derives per entity,
+ * limited to the entities the workflow designer can list.
  */
 function loadCategorizedOsfTypes(
   authoringDir: string,
@@ -552,9 +546,9 @@ function buildCoreEntityGraphqlRegistrySource(
     "// Source of truth: packages/compiler/config/authoring/entity definitions",
     "// Do not edit manually.",
     "//",
-    "// Maps each entity's kebab-case slug to the GraphQL gateway names the",
-    "// workflow designer's `core-entity-options` route uses to build minimal",
-    "// list queries on the fly. Keep this in sync with the GraphQL generator.",
+    "// Maps each entity's kebab-case slug to the GraphQL gateway names a",
+    "// designer needs to build a minimal list query on the fly. Keep this in",
+    "// sync with the GraphQL generator.",
     "",
     "export interface CoreEntityGraphqlInfo {",
     "  /** GraphQL list field name (e.g. `relations`). */",

@@ -5,6 +5,7 @@ import {
   type CompilerOsfTypeLookupDefinition,
 } from "@/generated/compiler/osf-type-lookups";
 import { getFieldOsfTypeDefinition } from "@/lib/field-rendering/compiler-field-rendering";
+import { resolveFieldOptionSource } from "@/features/renderer/runtime/entity-option-source";
 
 function normalizeOsfType(field: Field) {
   const osfType = field.osfType?.trim();
@@ -91,30 +92,28 @@ export function buildSemanticLookupPickerField(field: Field): Field | null {
   };
 }
 
+/**
+ * An entity-ID field becomes a record picker when its choices can be
+ * enumerated: through the entity's records (its identity alias's
+ * `optionSource`, the entity's list Operation) or a declared remote endpoint.
+ * A web route is never a source, so an alias without one gets no picker.
+ */
 export function buildEntityReferencePickerField(field: Field): Field | null {
   const osfType = getFieldOsfTypeDefinition(field);
   if (osfType?.kind !== "entityId") {
     return null;
   }
 
-  // `listUrl` is a web page; only a declared remote endpoint serves options.
-  const remoteUrl =
-    field.options?.type === "remote"
-      ? field.options.remoteUrl
-      : osfType.options?.type === "remote"
-        ? osfType.options.remoteUrl
-        : undefined;
-
-  if (!remoteUrl?.trim()) {
+  const source = resolveFieldOptionSource(field);
+  if (!source) {
     return null;
   }
 
   return {
     ...field,
-    options: {
-      type: "remote",
-      remoteUrl: remoteUrl.trim(),
-    },
+    options: source.type === "entity"
+      ? { type: "entity", source: source.entity, valueField: source.valueField }
+      : { type: "remote", remoteUrl: source.remoteUrl },
     render: {
       component: "OptionVariablePicker",
       props: {

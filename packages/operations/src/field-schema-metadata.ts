@@ -91,17 +91,13 @@ export type FieldEnumeration = {
   uiLabels: Record<string, Exclude<OperationLocalizedText, string>>;
 };
 
+/** The closed vocabulary a field's `options` name; `referentiedata` groups resolve through the registry. */
 export function fieldEnumeration(
-  field: Pick<ResolvedOperationField, "options" | "render">,
+  field: Pick<ResolvedOperationField, "options">,
   registry: Pick<OperationFieldSchemaRegistry, "referentiedata">,
 ): FieldEnumeration | undefined {
   const options = field.options;
-  const renderGroep = field.render?.props?.referentieGroep;
-  const groep = options?.type === "referentiedata" && options.referentieGroep
-    ? options.referentieGroep
-    : typeof renderGroep === "string"
-      ? renderGroep
-      : undefined;
+  const groep = options?.type === "referentiedata" && options.referentieGroep ? options.referentieGroep : undefined;
   const items = options?.type === "static" && options.items?.length
     ? options.items
     : groep

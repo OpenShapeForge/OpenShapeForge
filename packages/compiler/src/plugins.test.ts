@@ -145,13 +145,15 @@ describe("compiler plugins", () => {
     }
     expect(remoteUrls.size).toBeGreaterThan(0);
     expect([...remoteUrls].filter((url) => !url.startsWith("/api/"))).toEqual([]);
+    // The designer's core-entity-options route never existed; nothing may point at it, authored or generated.
+    expect(all.filter((artifact) => artifact.contents.includes("core-entity-options")).map((artifact) => artifact.path)).toEqual([]);
     const registry = JSON.parse(all.find((artifact: { path: string }) => artifact.path.endsWith("operations/field-schema-registry.json"))!.contents) as {
-      osfTypes: Record<string, { kind?: string; listUrl?: string; optionSource?: { type: string; source?: string; valueField?: string } }>;
+      osfTypes: Record<string, { kind?: string; optionSource?: { type: string; source?: string; valueField?: string } }>;
     };
     const aliases = Object.entries(registry.osfTypes).filter(([, type]) => type.kind === "entityId");
     expect(aliases.length).toBeGreaterThan(100);
     for (const [key, alias] of aliases) {
-      expect(alias.listUrl?.startsWith("/")).toBe(true);
+      expect(JSON.stringify(alias)).not.toContain("listUrl");
       if (alias.optionSource) expect(alias.optionSource).toEqual({ type: "entity", source: key.replace(/Id$/, "").replace(/^./, (c) => c.toUpperCase()), valueField: "id" });
     }
     expect(registry.osfTypes.relationId!.optionSource).toEqual({ type: "entity", source: "Relation", valueField: "id" });

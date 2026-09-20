@@ -92,7 +92,6 @@
             }
           },
           "entity": { "type": "string" },
-          "listUrl": { "type": "string" },
           "displayTemplate": { "type": "string" },
           "filterField": { "type": "string" }
         }

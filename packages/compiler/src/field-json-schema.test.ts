@@ -181,6 +181,7 @@ describe("compiled field JSON Schema projection", () => {
         defaultValue: "active",
         relationship: { kind: "belongsTo", entity: "StatusDefinition" },
         hints: { aiInstructions: "Choose the closest status." },
+        options: { type: "referentiedata", referentieGroep: "STATUS" },
         render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
       }),
       {

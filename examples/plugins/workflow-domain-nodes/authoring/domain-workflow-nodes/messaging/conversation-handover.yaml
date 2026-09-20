@@ -41,9 +41,6 @@ configFields:
         for AI handling but is not assigned to a queue.
       nl: Kies een vaste queue of voeg een variabele met een werkqueue-ID in. Als dit leeg blijft, wordt AI-afhandeling nog
         steeds gepauzeerd maar wordt de conversatie niet aan een queue toegewezen.
-    options:
-      type: remote
-      remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
     render:
       component: OptionVariablePicker
       props:

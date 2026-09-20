@@ -84,6 +84,8 @@ export type OperationFieldOsfType = {
   label?: OperationLocalizedText;
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
+  /** Where a value of this type is picked from when the field authors no options (a derived identity alias names its entity). */
+  optionSource?: OperationFieldOptions;
   shape?: readonly OperationFieldDefinition[];
   children?: readonly OperationFieldDefinition[];
   item?: OperationFieldDefinition;

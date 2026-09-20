@@ -75,7 +75,7 @@ export function generateWorkflowEntityNodeArtifacts(
     validateWorkflowReferentieGroepen(readableFields, entityKey);
     validateWorkflowReferentieGroepen(writableFields, entityKey);
 
-    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdOsfType, entity.entity);
+    const recordIdField = buildRecordIdField(entityLabels, idField, entityIdOsfType, entity.entity, osfTypes[entityIdOsfType]?.optionSource);
     const listOutputFields = buildListOutputFields(entityLabels, readableFields, toKebabCase(entity.entity));
     const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdOsfType);
     const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdOsfType, readableFields);

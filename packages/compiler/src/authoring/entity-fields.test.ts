@@ -24,10 +24,10 @@ describe("one relational field contract", () => {
   });
   test("derives the identity alias of every entity with one spelling, and refuses an authored copy", () => {
     expect(catalog().pageId).toMatchObject({
-      kind: "entityId", entity: "Page", baseType: "string", validation: { format: "uuid" }, listUrl: "/pages",
+      kind: "entityId", entity: "Page", baseType: "string", validation: { format: "uuid" },
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     });
-    // listUrl is navigation; a picker enumerates records through the list Operation, when there is one.
+    // Navigation stays on the web interface; a picker enumerates records through the list Operation, when there is one.
     expect(catalog().pageId!.optionSource).toBeUndefined();
     const listable = { ...page, operations: { list: { implementation: { type: "entity", action: "list" } } } } as unknown as CoreEntity;
     expect(deriveEntityOsfTypes([listable], {}).pageId!.optionSource).toEqual({ type: "entity", source: "Page", valueField: "id" });

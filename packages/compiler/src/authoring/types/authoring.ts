@@ -146,12 +146,6 @@ export interface OsfTypeDefinition {
    */
   entity?: string;
   /**
-   * For entity-ID types: the web route a user navigates to for the entity's
-   * records (its collection view route, or `/<table-name-with-dashes>`).
-   * Navigation only — it serves a page, never options.
-   */
-  listUrl?: string;
-  /**
    * For entity-ID types: where a picker enumerates the records a value of
    * this type identifies — the entity itself, resolved through its list
    * Operation. Absent when the entity has no list Operation. A field that

@@ -140,16 +140,19 @@ function slug(entity: string): string {
 }
 
 /**
- * The two authoring spellings in the corpus: `options` is canonical;
- * `render.props.referentieGroep` remains a compatibility fallback until those
- * fields are normalized without changing unrelated generated UI.
+ * A field's choices: its own `options`, else a `reference` group, else the
+ * catalog type's `options`, else where the catalog type says a value is
+ * picked from (`optionSource`: an identity alias names its entity).
  */
-function resolveOptions(field: OperationFieldDefinition, semantic: OperationFieldOsfType | undefined): OperationFieldOptions | undefined {
+export function resolveOptions(
+  field: Pick<OperationFieldDefinition, "options" | "reference">,
+  semantic: Pick<OperationFieldOsfType, "options" | "optionSource"> | undefined,
+): OperationFieldOptions | undefined {
   if (field.options) return field.options;
   if (field.reference?.kind === "referentiedata" && field.reference.group) {
     return { type: "referentiedata", referentieGroep: field.reference.group };
   }
-  return semantic?.options;
+  return semantic?.options ?? semantic?.optionSource;
 }
 
 /** Resolve stored or plugin-authored definitions against the host registries. */

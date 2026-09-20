@@ -49,6 +49,7 @@ export {
   numericRule,
   resolveFieldBaseType,
   resolveFields,
+  resolveOptions,
   ruleValue,
   stringRule,
   typedEnumValues,

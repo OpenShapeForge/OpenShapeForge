@@ -220,3 +220,21 @@ test("a catalog type that declares its schema projects through it, bundled once 
   expect(properties.form!.$defs).toBeUndefined();
   expect(schema.$defs).toEqual(definitions);
 });
+
+test("a catalog type's optionSource is the default choice source; authored options and catalog options win", () => {
+  const registry = { osfTypes: {
+    accountId: { kind: "entityId", entity: "Account", baseType: "string", validation: { format: "uuid" }, optionSource: { type: "entity", source: "Account", valueField: "id" } },
+    status: { baseType: "string", options: { type: "static", items: [{ value: "open", label: "Open" }] }, optionSource: { type: "entity", source: "Never" } },
+  } } as const;
+  const schema = operationFieldObjectSchema([
+    { key: "owner", osfType: "accountId" },
+    { key: "state", osfType: "status" },
+    { key: "authored", osfType: "accountId", options: { type: "static", items: [{ value: "x", label: "X" }] } },
+  ], registry);
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  expect(properties.owner!["x-osf-reference"]).toEqual({ entity: "Account", valueField: "id" });
+  expect(properties.state!.enum).toEqual(["open"]);
+  expect(properties.state!["x-osf-reference"]).toBeUndefined();
+  expect(properties.authored!.enum).toEqual(["x"]);
+  expect(properties.authored!["x-osf-reference"]).toBeUndefined();
+});

@@ -43,15 +43,14 @@ const osfTypeEntries: [string, OsfTypeDefinition][] = [
       kind: "entityId",
       label: { en: "Relation", nl: "Relatie" },
       baseType: "string",
-      listUrl: "/relations",
       optionSource: { type: "entity", source: "Relation", valueField: "id" },
     },
   ],
   // An entity ID whose entity has no list Operation: `kind` alone must not
-  // be enough to attach a source, and its web route never is one.
+  // be enough to attach a source.
   [
     "orphanId",
-    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string", listUrl: "/orphans" },
+    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string" },
   ],
   // Not an entity reference at all — the enricher must leave it untouched.
   [
@@ -122,7 +121,7 @@ describe("entity-ID enrichment", () => {
     expect(preAuthored.options).toEqual({ type: "static", items: [{ value: "a" }] });
     expect(preAuthored.render.component).toBe("OptionVariablePicker");
 
-    // An entity ID with nothing to enumerate gets neither; its listUrl is a page.
+    // An entity ID with nothing to enumerate gets neither.
     expect(orphan.options).toBeUndefined();
     expect(orphan.render).toBeUndefined();
 

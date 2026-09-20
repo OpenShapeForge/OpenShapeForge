@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
-import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
+import { fieldCardinality } from "./compiler/helpers.js";
 import { cardinalityOf } from "@openshapeforge/operations";
 import { type InverseCollectionSource, defaultInverseLabel, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
 
@@ -98,9 +98,9 @@ export function deriveEntityOsfTypes(
       throw new Error(`Osf type ${identityKey} is the identity alias of entity ${entity.entity}; it is derived, not authored.`);
     }
     if (result[identityKey]) throw new Error(`Osf type ${identityKey} duplicates the identity alias of entity ${entity.entity}.`);
-    const route = entity.interfaces?.web?.views?.collection?.route;
     // Enumerating the records is the entity's own list Operation; there is no
-    // separate options endpoint to point at, and the web route is navigation.
+    // separate options endpoint to point at. Navigation (the localized web
+    // routes) stays on the entity's web interface, not on the type.
     const enumerable = Object.values(entity.operations ?? {}).some((operation) =>
       operation.implementation.type !== "collection" && operation.implementation.action === "list");
     // The identity alias is distinct from a relationship to that entity: an
@@ -112,7 +112,6 @@ export function deriveEntityOsfTypes(
       kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       validation: { format: "uuid" },
-      listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,
       ...(enumerable ? { optionSource: { type: "entity", source: entity.entity, valueField: "id" } } : {}),
       displayTemplate: entity.displayTemplate ?? "{{id}}",
       filterField: entity.filterField ?? "id",

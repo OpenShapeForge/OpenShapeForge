@@ -337,7 +337,6 @@ export interface FieldDefinitionOsfType {
   audit?: boolean;
   hints?: ContextHints;
   entity?: string;
-  listUrl?: string;
   optionSource?: FieldOptions;
   displayTemplate?: string;
   filterField?: string;

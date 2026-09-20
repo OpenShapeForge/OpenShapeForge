@@ -210,7 +210,7 @@ fields:
       max: unbounded
     osfType: fieldDefinition
     authoring:
-      profile: workflowInputField
+      profile: caseVariable
   - key: confidentiality
     required: false
     label:
@@ -576,15 +576,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
-        wait: true
   web:
     fields:
       description:

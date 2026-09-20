@@ -347,11 +347,3 @@ interfaces:
           props:
             referentieGroep: AGREEMENTTYPE
             clearable: false
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

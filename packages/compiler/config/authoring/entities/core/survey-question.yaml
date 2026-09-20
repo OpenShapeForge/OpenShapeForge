@@ -258,18 +258,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list:
-          enabled: true
-          defaultSort:
-            field: sequenceNumber
-            direction: asc
-        update: true
-        delete: true
   web:
     fields:
       questionKind:

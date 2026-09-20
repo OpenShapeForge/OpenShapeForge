@@ -251,11 +251,3 @@ interfaces:
             title:
               en: Edit point
               nl: Punt bewerken
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

@@ -13,7 +13,7 @@ services:
   # them are DATABASE_URL and OPENSHAPEFORGE_WORKER_DATABASE_URL in
   # apps/api/.env.example. `trust` auth means the local passwords are never
   # checked, so the two roles are still distinct identities to Postgres — which
-  # is what the workflow queue policies compare — without local credential
+  # is what the queue policies compare — without local credential
   # juggling.
   platform-db:
     image: pgvector/pgvector:pg17

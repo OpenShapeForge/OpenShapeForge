@@ -760,16 +760,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
-        wait: true
-        awaitAction: true
   web:
     views:
       collection:

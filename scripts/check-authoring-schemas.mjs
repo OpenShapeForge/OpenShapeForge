@@ -76,14 +76,15 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "retention-policy-catalog.schema.json": 1,
   "osf-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,
-  "workflow-node.schema.json": 44,
   // Zero on purpose: the compiler reads these kinds, but no layer in this
-  // repository authors one today. Stated rather than inferred — an inferred
+  // repository authors one today (workflow nodes are authored by the workflow
+  // plugin a host composes, and validated at load like any packaged layer). Stated rather than inferred — an inferred
   // zero is indistinguishable from a corpus that went missing, which is the
   // whole failure this map exists to close.
   "entity-mapping.schema.json": 0,
   "entity-profile.schema.json": 0,
   "view.schema.json": 0,
+  "workflow-node.schema.json": 0,
 });
 
 /**

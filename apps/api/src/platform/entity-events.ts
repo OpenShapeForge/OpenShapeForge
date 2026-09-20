@@ -89,8 +89,6 @@ function normalizeSequence(value?: string | number | bigint | null) {
   }
 }
 
-// Inlined from the full service's workflow/definitions.ts so this runtime does
-// not depend on the workflow module.
 export function normalizeJsonValue(value: Json): Json {
   if (typeof value === "string") {
     try {

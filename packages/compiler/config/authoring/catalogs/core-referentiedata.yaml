@@ -703,12 +703,10 @@ groepen:
         label: { nl: Handmatige goedkeuring, en: Manual approval, fr: Approbation manuelle }
 
   CASESTEPACTIONKIND:
-    description: Kerncodetabel voor typen acties binnen een zaakstap.
+    description: Kerncodetabel voor soorten acties binnen een zaakstap; een plugin kan soorten toevoegen.
     items:
       - value: task
         label: { nl: Taak, en: Task, fr: Tâche }
-      - value: workflow
-        label: { nl: Workflow, en: Workflow, fr: Workflow }
 
   CASESTEPACTIONSTARTMODE:
     description: Kerncodetabel voor hoe zaakstapacties gestart worden.

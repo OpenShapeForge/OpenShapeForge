@@ -2,8 +2,7 @@
 /**
  * The `job-worker` role: one poll loop draining platform.jobs across tenants.
  *
- * It follows the workflow control-command worker exactly, because the
- * properties it needs are the same ones. The poll runs under the worker
+ * The poll runs under the worker
  * session — `app.worker_role = 'job-worker'`, which the table's policy admits
  * across tenants because it declares `workerAccess: job-worker`; nothing is
  * bypassed. Each claimed job then runs its handler under an ordinary tenant
@@ -76,7 +75,7 @@ export function readJobWorkerOptions(env: NodeJS.ProcessEnv = process.env): JobW
 }
 
 /**
- * The worker session: only the GUC, as the workflow worker sets it. The other
+ * The worker session: only the GUC. The other
  * half of the policy predicate is the connection itself, which connects as
  * `openshapeforge_worker` and which nothing in a transaction can change.
  */

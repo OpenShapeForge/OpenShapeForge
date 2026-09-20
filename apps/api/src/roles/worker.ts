@@ -5,7 +5,7 @@
  * A worker is its own process rather than a timer inside the API. A poll loop
  * and a request path have unrelated failure modes and unrelated scaling needs,
  * and a wedged worker must not take GraphQL down with it. It is also what keeps
- * the database sessions distinct: the workflow worker connects as
+ * the database sessions distinct: a worker connects as
  * `openshapeforge_worker` and presents `app.worker_role`, and the queue
  * policies check both — the first is what the database can verify, the second
  * says which worker it is (see docs/api.md#the-worker-axis).
@@ -183,10 +183,9 @@ export async function startWorkerRole(
   try {
     databaseRuntime = createDatabaseRuntime({ databaseUrl });
 
-    // `init` is not optional for a worker. The workflow module hydrates its node
-    // catalog and registers its node bridges there; a worker that skipped it
-    // would claim commands and then fail every one of them with NO_BRIDGE —
-    // burning the retry bound on a configuration problem.
+    // `init` is not optional for a worker. A module that hydrates a catalog or
+    // registers handlers there would otherwise have its worker claim work it
+    // cannot resolve, burning the retry bound on a configuration problem.
     initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
     // The core jobs module is not in the generated registry — nothing can
     // drop it — and joins the loaded plugins here so `job-worker` is indexed

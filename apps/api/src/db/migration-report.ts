@@ -12,8 +12,8 @@ import type { ModuleRegistry } from "../modules/registry.js";
 
 /**
  * One reporting line per catalog seed, omitted entirely when the compiler did
- * not emit that seed — a repo without `apps/web`, or without the workflow
- * plugin, should not read as though a catalog failed to load.
+ * not emit that seed — a repo without `apps/web`, or without the plugin that
+ * seeds it, should not read as though a catalog failed to load.
  */
 function seedReport(name: string, result: CatalogSeedResult): Record<string, string> {
   if (!result.present) return {};

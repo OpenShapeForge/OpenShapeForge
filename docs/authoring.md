@@ -221,7 +221,7 @@ intents (`list`, `get`, `create`, `update`, `delete`) that its `operations`
 implement, whether by the built-in entity implementation or a plugin
 handler. A read-only entity simply has no `create`, `update` or `delete`
 Operation; an internal entity has none at all. That set is the upper
-bound for GraphQL, REST, MCP and generated workflow nodes; each
+bound for GraphQL, REST and MCP; each
 `interfaces.*` block may exclude an Operation (`operations: { delete: false }`)
 but cannot add one.
 

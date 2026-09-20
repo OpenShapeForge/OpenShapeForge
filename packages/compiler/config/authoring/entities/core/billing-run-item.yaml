@@ -319,11 +319,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        getOne: true
-        list: true
   web:
     views:
       collection:

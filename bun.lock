@@ -107,7 +107,6 @@
         "tailwind-merge": "^3.6.0",
       },
       "devDependencies": {
-        "@playwright/test": "^1.62.1",
         "@tailwindcss/postcss": "^4",
         "@types/node": "^26",
         "@types/react": "^19",
@@ -152,27 +151,11 @@
         "@openshapeforge/plugin-runtime": "workspace:*",
       },
     },
-    "examples/plugins/workflow": {
-      "name": "@openshapeforge/example-plugin-workflow",
+    "examples/plugins/notebook": {
+      "name": "@openshapeforge/example-plugin-notebook",
       "version": "0.1.0",
       "dependencies": {
-        "@restatedev/restate-sdk": "^1.10.4",
-        "cron-parser": "^5.5.0",
-        "fastify": "^5.8.2",
         "kysely": "^0.29.4",
-        "react": "19.2.7",
-        "yaml": "^2.8.3",
-        "zod": "^4.3.6",
-      },
-      "devDependencies": {
-        "@types/react": "^19",
-      },
-    },
-    "examples/plugins/workflow-domain-nodes": {
-      "name": "@openshapeforge/example-plugin-workflow-domain-nodes",
-      "version": "0.1.0",
-      "dependencies": {
-        "yaml": "^2.8.3",
       },
     },
     "packages/auth": {
@@ -564,9 +547,7 @@
 
     "@openshapeforge/documents": ["@openshapeforge/documents@workspace:packages/documents"],
 
-    "@openshapeforge/example-plugin-workflow": ["@openshapeforge/example-plugin-workflow@workspace:examples/plugins/workflow"],
-
-    "@openshapeforge/example-plugin-workflow-domain-nodes": ["@openshapeforge/example-plugin-workflow-domain-nodes@workspace:examples/plugins/workflow-domain-nodes"],
+    "@openshapeforge/example-plugin-notebook": ["@openshapeforge/example-plugin-notebook@workspace:examples/plugins/notebook"],
 
     "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
 
@@ -748,10 +729,6 @@
 
     "@repeaterjs/repeater": ["@repeaterjs/repeater@3.1.0", "", {}, "sha512-TaoVksZRSx2KWYYpyLQtMQXXeS98VsgZImzW65xmiVgbYhXLk+aEsmzPLirqVuE4/XuUapH2iMtxUzaBNDzdSQ=="],
 
-    "@restatedev/restate-sdk": ["@restatedev/restate-sdk@1.16.2", "", { "dependencies": { "@restatedev/restate-sdk-core": "1.16.2" } }, "sha512-L2XqUukvdGYmqCqsFvJzTsaU3JiuFzsYSh6nK19Q1yKNOr/bBBZKdic0o0hza5P5QdiiFC5jLHJ5wCWt77IO0Q=="],
-
-    "@restatedev/restate-sdk-core": ["@restatedev/restate-sdk-core@1.16.2", "", {}, "sha512-dytd78+c7x24NFhfj7XpziqYJCY5E4DE2Qd0N6la/hXoF2SbhhM5/Iey82MCwELCEnN7RPfN3+/Th58LQezTQw=="],
-
     "@scarf/scarf": ["@scarf/scarf@1.4.0", "", {}, "sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
@@ -925,8 +902,6 @@
     "cookie-signature": ["cookie-signature@1.2.2", "", {}, "sha512-D76uU73ulSXrD1UXF4KE2TMxVVwhsnCgfAyTg9k8P6KGZjlXKrOLe4dJQKI3Bxi5wjesZoFXJWElNWBjPZMbhg=="],
 
     "cors": ["cors@2.8.6", "", { "dependencies": { "object-assign": "^4", "vary": "^1" } }, "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw=="],
-
-    "cron-parser": ["cron-parser@5.6.2", "", { "dependencies": { "luxon": "^3.7.2" } }, "sha512-yJ/G1LVir6CnlkLI40CsampPLKl1SprGGlUagWtGJxewytRVYezv5xVyzzbT+Pvzx+VIRvZVF7/a0eEMTxdnTA=="],
 
     "cross-inspect": ["cross-inspect@1.0.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-Pcw1JTvZLSJH83iiGWt6fRcT+BjZlCDRVwYLbUcHzv/CRpB7r0MlSrGbIyQvVSNyGnbt7G4AXuyCiDR3POvZ1A=="],
 
@@ -1149,8 +1124,6 @@
     "lru-cache": ["lru-cache@10.4.3", "", {}, "sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ=="],
 
     "lucide-react": ["lucide-react@1.28.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-fARAFJULsGuDDydjp6+6blekG/sBIM29TerzLjc9bQUKAcEfrSc4ZQKb25KRz4OMKd87cZTb5dgq0w/T6KufVg=="],
-
-    "luxon": ["luxon@3.7.2", "", {}, "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew=="],
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 

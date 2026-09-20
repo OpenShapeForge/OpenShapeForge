@@ -399,7 +399,7 @@ describe("generated MCP runtime module security boundary", () => {
         let childToolsStarted = Promise.resolve();
         let childOutcome: Promise<unknown> | undefined;
         let moduleToolArgument: unknown;
-        let workflowCalls = 0;
+        let notebookCalls = 0;
         const egressRequests: any[] = [];
         let egressEntered!: () => void;
         let egressStarted = Promise.resolve();
@@ -717,7 +717,7 @@ describe("generated MCP runtime module security boundary", () => {
               const expectedVersion = uri.endsWith("/stale") ? 8 : 7;
               if (uri.endsWith("/override")) mode = "hidden-override";
               const toolName = uri.endsWith("/collision")
-                ? "workflow_start_webhook"
+                ? "notebook_import"
                 : "hidden_read";
               if (uri.endsWith("/collision")) mode = "hidden-collision";
               const outcome = await platform.services.mcp.callTool(
@@ -748,7 +748,7 @@ describe("generated MCP runtime module security boundary", () => {
               if (
                 call.name === "hidden_read" ||
                 (mode === "hidden-collision" &&
-                  call.name === "workflow_start_webhook")
+                  call.name === "notebook_import")
               ) {
                 hiddenInterceptors += 1;
                 if (mode === "hidden-block") {
@@ -831,16 +831,16 @@ describe("generated MCP runtime module security boundary", () => {
             },
           },
         };
-        const workflowModule: RuntimeModule = {
-          name: "workflow",
+        const notebookModule: RuntimeModule = {
+          name: "notebook",
           operationHandlers: {
-            startWebhook: async (input) => {
-              workflowCalls += 1;
+            importNotebook: async (input) => {
+              notebookCalls += 1;
               return {
                 value: {
                   status: "accepted",
-                  instanceId: "11111111-1111-4111-8111-111111111111",
-                  definitionId: input.definitionId,
+                  importId: "11111111-1111-4111-8111-111111111111",
+                  notebookId: input.notebookId,
                 },
               };
             },
@@ -858,7 +858,7 @@ describe("generated MCP runtime module security boundary", () => {
             scope: "self",
             credential: "bearer",
           },
-          modules: [documentsRuntime, versioningRuntime, workflowModule, module],
+          modules: [documentsRuntime, versioningRuntime, notebookModule, module],
           modulePlatform: platform,
           egressOwner: module.egress,
           tables,
@@ -1244,18 +1244,18 @@ describe("generated MCP runtime module security boundary", () => {
           `.execute(trx));
 
           const beforeHiddenCollision = hiddenInterceptors;
-          const beforeWorkflow = workflowCalls;
+          const beforeNotebook = notebookCalls;
           const beforeCollisionEgress = egressRequests.length;
           await admin.connection().execute((trx) => sql`
             update public.module_service_test
-               set key = 'workflow_start_webhook'
+               set key = 'notebook_import'
              where id = ${hiddenDefinitionId}::uuid
           `.execute(trx));
           expect(JSON.parse(resourceText(
             await client.readResource({ uri: "app://internal/collision" }),
           )).isError).toBe(true);
           expect(hiddenInterceptors).toBe(beforeHiddenCollision);
-          expect(workflowCalls).toBe(beforeWorkflow);
+          expect(notebookCalls).toBe(beforeNotebook);
           expect(egressRequests).toHaveLength(beforeCollisionEgress);
           await admin.connection().execute((trx) => sql`
             update public.module_service_test
@@ -1493,7 +1493,7 @@ describe("generated MCP runtime module security boundary", () => {
             .not.toContain("public_read");
           const directExecutor = createRuntimeDeclarativeServiceExecutor({
             db,
-            modules: [documentsRuntime, versioningRuntime, workflowModule, module],
+            modules: [documentsRuntime, versioningRuntime, notebookModule, module],
             modulePlatform: platform,
             egressOwner: module.egress,
             tablesForTests: tables,

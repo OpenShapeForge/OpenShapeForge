@@ -21,19 +21,6 @@ function caseStepActionTarget(
   action: Record<string, unknown>,
   item: Record<string, unknown>,
 ) {
-  const workflow =
-    typeof action.workflow === "object" && action.workflow !== null
-      ? action.workflow as Record<string, unknown>
-      : null;
-  const workflowDefinitionId =
-    typeof workflow?.workflowDefinitionId === "string" && workflow.workflowDefinitionId.trim()
-      ? workflow.workflowDefinitionId
-      : null;
-
-  if (workflowDefinitionId) {
-    return `/workflow-designer/${encodeURIComponent(workflowDefinitionId)}`;
-  }
-
   const itemId = typeof item.id === "string" && item.id.trim() ? item.id : null;
 
   if (action.kind === "task" && itemId) {
@@ -91,14 +78,10 @@ function renderCaseStepActionsSummary(
           "inline-flex max-w-full items-center gap-1 rounded-md border border-border-subtle bg-muted/30 px-2 py-1 text-xs leading-5 text-foreground";
 
         if (href) {
-          const actionLabel = kind === "workflow"
-            ? (lang === "nl" ? `Open workflow ${label}` : `Open workflow ${label}`)
-            : (lang === "nl" ? `Bewerk taak ${label}` : `Edit task ${label}`);
-
           return (
             <a
               key={`${key}-${index}`}
-              aria-label={actionLabel}
+              aria-label={lang === "nl" ? `Bewerk taak ${label}` : `Edit task ${label}`}
               className={cn(
                 className,
                 "transition-colors hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

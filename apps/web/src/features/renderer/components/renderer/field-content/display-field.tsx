@@ -9,7 +9,6 @@ import {
   FormDefinitionDisplay,
   MarkdownDisplay,
   TextDisplay,
-  WorkflowDefinitionReferenceDisplay,
 } from "@/features/renderer/display";
 import type {
   RendererFieldConfig,
@@ -54,16 +53,6 @@ export function renderDisplayField(
 
   if (getFieldOsfTypeDefinition(field)?.kind === "entityId") {
     return <EntityReferenceDisplay field={field} value={value} lang={lang} />;
-  }
-
-  if (field.osfType === "workflowDefinitionId") {
-    return (
-      <WorkflowDefinitionReferenceDisplay
-        field={field}
-        value={value}
-        lang={lang}
-      />
-    );
   }
 
   if (field.osfType === "condition") {
@@ -119,16 +108,6 @@ export function renderDisplayField(
 
   if (displayComponent === "EntityReferenceDisplay") {
     return <EntityReferenceDisplay field={field} value={value} lang={lang} />;
-  }
-
-  if (displayComponent === "WorkflowDefinitionReferenceDisplay") {
-    return (
-      <WorkflowDefinitionReferenceDisplay
-        field={field}
-        value={value}
-        lang={lang}
-      />
-    );
   }
 
   if (

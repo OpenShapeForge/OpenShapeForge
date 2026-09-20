@@ -74,7 +74,7 @@ which is exactly what the chart's other fail-closed guards exist for.
 {{- define "openshapeforge-api.workerRole" -}}
 {{- $role := .Values.workers.role | default "" | trim -}}
 {{- if or (not $role) (eq $role "api") -}}
-{{- fail "workers.enabled=true requires workers.role to name a module-contributed worker role (e.g. workflow-worker). Empty, or \"api\", would start a second copy of the HTTP server with no Service and no probes." -}}
+{{- fail "workers.enabled=true requires workers.role to name a module-contributed worker role (e.g. job-worker). Empty, or \"api\", would start a second copy of the HTTP server with no Service and no probes." -}}
 {{- end -}}
 {{- $role -}}
 {{- end -}}

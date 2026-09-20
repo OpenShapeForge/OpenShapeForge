@@ -229,11 +229,3 @@ interfaces:
           props:
             rows: 3
             maxLength: 500
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

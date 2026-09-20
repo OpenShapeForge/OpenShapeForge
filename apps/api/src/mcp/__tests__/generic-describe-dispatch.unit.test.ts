@@ -44,7 +44,7 @@ async function withServer<T>(
     modules: [
       documentsPluginRuntime as unknown as RuntimeModule,
       versioningPluginRuntime as unknown as RuntimeModule,
-      { name: "workflow", operationHandlers: { startWebhook: async () => ({ value: undefined }) } },
+      { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }) } },
       ...(module ? [module] : []),
     ],
     modulePlatform: platform,

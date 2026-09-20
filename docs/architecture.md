@@ -36,7 +36,6 @@ Generated artifacts (all gitignored; reproducible)
   apps/web/src/actions/generated/*           per-entity server actions
   apps/web/src/compiler/*                    entity manifests + field contract
   apps/api/src/generated/page-configs/*      page-config catalog seed (loaded by db:migrate)
-  apps/api/src/generated/workflow/*          workflow plugin (api side)
   apps/api/src/generated/modules/*           which plugins ship a runtime half
   docs/entities.generated.md                 entity-docs plugin
         │
@@ -162,7 +161,7 @@ configs, empty table, nothing reading it.
   emitter and the `app.*` helper functions, but no current table declares it;
   every tenant-scoped table today gets the plain
   `tenant_id = app.current_tenant()` policy. The one axis that *is* live is
-  `workerAccess`, on the five workflow queue and wait tables, where it compares
+  `workerAccess`, on the `platform.jobs` queue, where it compares
   the connected database role (`openshapeforge_worker`) as well as the
   `app.worker_role` GUC — see [api.md](api.md#the-worker-axis).
 

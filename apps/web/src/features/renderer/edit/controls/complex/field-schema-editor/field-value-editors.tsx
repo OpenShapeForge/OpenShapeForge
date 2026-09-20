@@ -41,41 +41,6 @@ export function FieldSchemaValueEditor({
             ))
       : [];
 
-  if (
-    profile.id === "workflowOutputField" &&
-    field.key === "status" &&
-    staticOptions.length > 0
-  ) {
-    return (
-      <FieldFrame
-        label={lang === "nl" ? "Waarde" : "Value"}
-        description={
-          lang === "nl"
-            ? "Kies de publieke workflowstatus die deze eindnode teruggeeft."
-            : "Choose the public workflow status returned by this end node."
-        }
-      >
-        {() => (
-          <Select
-            value={typeof value === "string" ? value : "success"}
-            onValueChange={(nextValue) => onChange(nextValue)}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {staticOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {translateText(option.label, lang) || option.value}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </FieldFrame>
-    );
-  }
-
   if (fieldValueType(field) === "object" || isFieldCardinalityCollection(field.cardinality)) {
     return (
       <JsonFieldEditor

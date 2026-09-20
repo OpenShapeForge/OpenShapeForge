@@ -3,7 +3,7 @@ kind: coreEntity
 module: core
 entity: Process
 title: Case Step Container
-description: Technical container for runtime case steps. Kept on the existing process table until the runtime tables are renamed.
+description: Runtime container of the case steps a case is working through.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
@@ -16,7 +16,6 @@ pluralLabels:
 domains:
   - cases
   - records
-  - workflow
 authorization:
   roles:
     read:
@@ -123,28 +122,6 @@ fields:
       maxLength: 200
     persisted:
       column: current_step_label
-      storageClass: core
-  - key: workflowTemplate
-    osfType: string
-    required: false
-    label:
-      en: Workflow template
-      nl: Workflowtemplate
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_template
-      storageClass: core
-  - key: workflowInstanceRef
-    osfType: string
-    required: false
-    label:
-      en: Workflow instance reference
-      nl: Workflow-instance referentie
-    validation:
-      maxLength: 200
-    persisted:
-      column: workflow_instance_ref
       storageClass: core
   - key: priority
     required: false
@@ -373,15 +350,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
-        wait: true
   web:
     fields:
       description:

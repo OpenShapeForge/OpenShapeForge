@@ -5,7 +5,6 @@ import { Badge } from "@/components/ui/display/badge";
 import { WorkspaceBodyHeader } from "@/components/entity/WorkspaceBodyHeader";
 import { WorkspaceListClient } from "@/components/entity/WorkspaceListClient";
 import { WorkspaceRelatedPane } from "@/components/entity/WorkspaceRelatedPane";
-import { EntityActionButtons } from "@/features/entity-actions/components/EntityActionButtons";
 import { detailConfigToRendererDefinition, translateDetailText } from "@/components/entity/entity-detail-contract";
 import { Renderer } from "@/features/renderer/components/renderer";
 import { Button } from "@openshapeforge/ui";
@@ -30,7 +29,6 @@ export function renderCompactRelatedLayout({
   entity,
   detailHeader,
   detailLoadError,
-  activeActions,
   activeGroupId,
   listRoute,
   searchParams,
@@ -49,7 +47,6 @@ export function renderCompactRelatedLayout({
   entity: Record<string, unknown> | null;
   detailHeader: any;
   detailLoadError: string | null;
-  activeActions: any[];
   activeGroupId: string;
   listRoute: string;
   searchParams: WorkspaceSearchParams;
@@ -115,9 +112,6 @@ export function renderCompactRelatedLayout({
             : (detailHeader as any).badges,
         }}
         notice={detailLoadError}
-        extra={activeActions.length > 0 ? (
-          <EntityActionButtons activeActions={activeActions} entityState={entity ?? {}} />
-        ) : null}
       />
       <div className="min-h-0 flex-1 overflow-auto px-6 py-6">
         <Renderer

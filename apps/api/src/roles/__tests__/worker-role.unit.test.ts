@@ -6,7 +6,7 @@
  * looks healthy and drains nothing is the worst of the available outcomes, so
  * every path that would produce one has to be an error instead. These tests
  * pin the failures, not the happy path; the happy path is proved end-to-end in
- * `graphql/__tests__/workflow-worker-role.e2e.test.ts`.
+ * `db/__tests__/worker-role-rls.test.ts` and `db/__tests__/jobs.test.ts`.
  */
 import { describe, expect, test } from "bun:test";
 import type {

@@ -230,11 +230,3 @@ interfaces:
         render:
           component: DateTimePicker
           props: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

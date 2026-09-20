@@ -175,18 +175,6 @@ types:
         - { value: verified_identity, label: { en: Verified identity, nl: Geverifieerde identiteit } }
         - { value: manual, label: { en: Manually confirmed, nl: Handmatig bevestigd } }
 
-  workflowDefinitionId:
-    label: { en: Workflow definition ID, nl: Workflow-definitie-ID }
-    pluralLabel: { en: Workflow definition IDs, nl: Workflow-definitie-IDs }
-    baseType: string
-    icon: Workflow
-    render:
-      display: WorkflowDefinitionReferenceDisplay
-      input: Input
-    # Generic workflow-definition fields use a plain input; case authoring
-    # should use caseTemplateId / caseStepTemplateId instead of category-filtered
-    # workflow-definition pickers.
-
   postalCode:
     label: { en: Postal code, nl: Postcode }
     baseType: string

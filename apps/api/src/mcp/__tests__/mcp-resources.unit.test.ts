@@ -126,9 +126,9 @@ describe("resourcesForSession", () => {
       db,
       session: session(READ),
       modules: [documentsRuntime, versioningRuntime, {
-        name: "workflow",
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,
@@ -177,9 +177,9 @@ describe("resourcesForSession", () => {
       db,
       session: session("Other.Role"),
       modules: [documentsRuntime, versioningRuntime, {
-        name: "workflow",
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,
@@ -241,9 +241,9 @@ describe("resourcesForSession", () => {
       db,
       session: session("Other.Role"),
       modules: [documentsRuntime, versioningRuntime, {
-        name: "workflow",
+        name: "notebook",
         operationHandlers: {
-          startWebhook: async () => ({ value: undefined }),
+          importNotebook: async () => ({ value: undefined }),
         },
       }, module],
       modulePlatform: platform,

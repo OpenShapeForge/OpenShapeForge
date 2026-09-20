@@ -256,11 +256,3 @@ interfaces:
           props:
             rows: 3
             maxLength: 1000
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

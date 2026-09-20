@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import {
-  isWorkflowStatusField,
-  normalizeWorkflowOutputFields,
-} from "@/lib/field-authoring/workflow-output";
 import { FIELD_DEFINITION_SEMANTIC_COLLECTION_TYPE } from "../compiler-field-types";
 import { createBaseField } from "./base-field";
 import {
@@ -19,7 +15,7 @@ export const FIELD_AUTHORING_PROFILES: Record<
 > = {
   /**
    * Canonical list editor: all compiler field types, key generated from label,
-   * no domain-specific locks. Prefer this for new workflow/prompt field lists.
+   * no domain-specific locks. Prefer this for new field lists.
    */
   fullFieldDefinition: {
     id: "fullFieldDefinition",
@@ -51,19 +47,19 @@ export const FIELD_AUTHORING_PROFILES: Record<
     }),
     createEmptyField: createBaseField,
   },
-  workflowInputField: {
-    id: "workflowInputField",
-    label: profileLabel("workflowInputField", {
-      nl: "Workflow-inputveld",
-      en: "Workflow input field",
+  caseVariable: {
+    id: "caseVariable",
+    label: profileLabel("caseVariable", {
+      nl: "Zaakvariabele",
+      en: "Case variable",
     }),
     keyBehavior: "generatedFromLabel",
-    excludedFieldTypes: profileExcludedFieldTypes("workflowInputField", []),
+    excludedFieldTypes: profileExcludedFieldTypes("caseVariable", []),
     typePickerUsage: profileTypePickerUsage(
-      "workflowInputField",
+      "caseVariable",
       "requestInput",
     ),
-    controls: profileControls("workflowInputField", {
+    controls: profileControls("caseVariable", {
       label: true,
       description: true,
       type: "combined",
@@ -74,66 +70,6 @@ export const FIELD_AUTHORING_PROFILES: Record<
       render: false,
       aiHint: true,
       defaultValue: true,
-      value: false,
-      validation: true,
-      layout: false,
-      persistence: false,
-    }),
-    createEmptyField: createBaseField,
-  },
-  workflowStartVariable: {
-    id: "workflowStartVariable",
-    label: profileLabel("workflowStartVariable", {
-      nl: "Startvariabele",
-      en: "Start variable",
-    }),
-    keyBehavior: "generatedFromLabel",
-    excludedFieldTypes: profileExcludedFieldTypes("workflowStartVariable", []),
-    typePickerUsage: profileTypePickerUsage(
-      "workflowStartVariable",
-      "requestInput",
-    ),
-    controls: profileControls("workflowStartVariable", {
-      label: true,
-      description: true,
-      type: "combined",
-      cardinality: false,
-      sortable: false,
-      shape: true,
-      options: true,
-      render: false,
-      aiHint: true,
-      defaultValue: true,
-      value: false,
-      validation: true,
-      layout: false,
-      persistence: false,
-    }),
-    createEmptyField: createBaseField,
-  },
-  workflowProcessVariable: {
-    id: "workflowProcessVariable",
-    label: profileLabel("workflowProcessVariable", {
-      nl: "Procesvariabele",
-      en: "Process variable",
-    }),
-    keyBehavior: "generatedFromLabel",
-    excludedFieldTypes: profileExcludedFieldTypes("workflowProcessVariable", []),
-    typePickerUsage: profileTypePickerUsage(
-      "workflowProcessVariable",
-      "workflowConfig",
-    ),
-    controls: profileControls("workflowProcessVariable", {
-      label: true,
-      description: true,
-      type: "combined",
-      cardinality: false,
-      sortable: false,
-      shape: true,
-      options: false,
-      render: false,
-      aiHint: true,
-      defaultValue: false,
       value: false,
       validation: true,
       layout: false,
@@ -213,62 +149,6 @@ export const FIELD_AUTHORING_PROFILES: Record<
       ...createBaseField(),
       osfType: "string",
     }),
-  },
-  workflowOutputField: {
-    id: "workflowOutputField",
-    label: profileLabel("workflowOutputField", {
-      nl: "Workflow-outputveld",
-      en: "Workflow output field",
-    }),
-    keyBehavior: "generatedFromLabel",
-    excludedFieldTypes: profileExcludedFieldTypes("workflowOutputField", []),
-    typePickerUsage: profileTypePickerUsage(
-      "workflowOutputField",
-      "requestInput",
-    ),
-    controls: profileControls("workflowOutputField", {
-      label: true,
-      description: true,
-      type: "combined",
-      cardinality: false,
-      sortable: false,
-      shape: true,
-      options: true,
-      render: false,
-      aiHint: true,
-      defaultValue: false,
-      value: true,
-      validation: true,
-      layout: false,
-      persistence: false,
-    }),
-    createEmptyField: () => ({
-      ...createBaseField(),
-      value: "",
-    }),
-    normalizeItems: normalizeWorkflowOutputFields,
-    getFieldRules: (field) => {
-      if (!isWorkflowStatusField(field)) {
-        return undefined;
-      }
-
-      return {
-        note: {
-          nl: "Systeemveld voor de workflow-uitkomst. Alleen `success` of `failure` is toegestaan.",
-          en: "System field for the workflow outcome. Only `success` or `failure` is allowed.",
-        },
-      };
-    },
-    valueAuthoring: {
-      label: {
-        nl: "Waarde",
-        en: "Value",
-      },
-      description: {
-        nl: "De runtime-waarde of expressie die deze workflow via dit outputveld teruggeeft.",
-        en: "The runtime value or expression this workflow returns through this output field.",
-      },
-    },
   },
   formDefinitionField: {
     id: "formDefinitionField",

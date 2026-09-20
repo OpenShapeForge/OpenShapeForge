@@ -194,7 +194,7 @@ fields:
       max: unbounded
     osfType: fieldDefinition
     authoring:
-      profile: workflowInputField
+      profile: caseVariable
 operations:
   list:
     name: List Case Template
@@ -269,15 +269,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
-        wait: true
   web:
     fields:
       description:

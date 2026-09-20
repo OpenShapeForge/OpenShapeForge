@@ -42,7 +42,7 @@ export function FieldSchemaTypePicker({
           value={fieldValueType(field)}
           cardinality={isFieldCardinalityCollection(field.cardinality) ? "collection" : "single"}
           osfType={isBaseType(field.osfType) ? undefined : field.osfType}
-          usage={profile.typePickerUsage}
+          excludedFieldTypes={profile.excludedFieldTypes}
           lang={lang}
           disabled={disabled}
           onSelectionChange={(selection) => {

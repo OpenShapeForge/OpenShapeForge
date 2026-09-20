@@ -1861,13 +1861,6 @@
         "nl": "Taak",
         "en": "Task"
       }
-    },
-    {
-      "value": "workflow",
-      "label": {
-        "nl": "Workflow",
-        "en": "Workflow"
-      }
     }
   ],
   "CASESTEPACTIONSTARTMODE": [

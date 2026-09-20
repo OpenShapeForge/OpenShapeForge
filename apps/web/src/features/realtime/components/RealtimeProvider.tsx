@@ -81,8 +81,6 @@ export function deriveGraphqlRealtimeResources(
     if (key.startsWith("entity-list:")) {
       const [, entityType] = key.split(":");
       if (entityType) set.add(`entity-list:${entityType}:*`);
-    } else if (key.startsWith("workflow-instance-list:")) {
-      set.add("workflow-instance-list:all");
     } else {
       set.add(key);
     }

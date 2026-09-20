@@ -245,11 +245,3 @@ interfaces:
             title:
               en: Edit cost dimension
               nl: Kostendimensie bewerken
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

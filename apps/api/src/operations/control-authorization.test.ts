@@ -29,7 +29,7 @@ const tenant: TrustedSessionContext = {
   tenantId: "tenant-a",
   userId: "user-a",
   // Role names that happen to collide with the control realm's must not help.
-  roles: ["platform_admin", "platform-operator", "workflow-admin"],
+  roles: ["platform_admin", "platform-operator", "Organization.All.ReadWrite"],
   groups: [],
   scope: "tenant",
   credential: "bearer",
@@ -37,9 +37,9 @@ const tenant: TrustedSessionContext = {
 
 const sessionOperation: OperationContract = {
   ...controlOperationContract("listTenants"),
-  key: "workflow.instance.list",
-  plugin: "workflow",
-  auth: { mode: "session", roles: ["workflow-admin"] },
+  key: "notebook.import",
+  plugin: "notebook",
+  auth: { mode: "session", roles: ["Organization.All.ReadWrite"] },
   tenancy: { mode: "required" },
 };
 
@@ -74,7 +74,7 @@ describe("requireOperationAuthorization with the control credential", () => {
   test("a control session never satisfies a session Operation, whatever it is called", () => {
     expect(status(sessionOperation, tenant)).toBe(200);
     expect(status(sessionOperation, { ...tenant, roles: ["reader"] })).toBe(403);
-    expect(status(sessionOperation, controlSessionFor(administrator, ["workflow-admin"]))).toBe(401);
+    expect(status(sessionOperation, controlSessionFor(administrator, ["Organization.All.ReadWrite"]))).toBe(401);
     expect(status(sessionOperation, admin)).toBe(401);
   });
 

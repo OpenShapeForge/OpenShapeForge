@@ -30,14 +30,14 @@
         "persistence": true
       }
     },
-    "workflowInputField": {
+    "caseVariable": {
       "label": {
-        "nl": "Workflow-inputveld",
-        "en": "Workflow input field"
+        "nl": "Zaakvariabele",
+        "en": "Case variable"
       },
       "description": {
-        "nl": "Velddefinitie voor input die een workflow moet verzamelen of ontvangen.",
-        "en": "Field definition for input a workflow must collect or receive."
+        "nl": "Velddefinitie voor het variabelencontract van een zaak of zaaksjabloon.",
+        "en": "Field definition for the variable contract of a case or case template."
       },
       "keyBehavior": "hiddenGeneratedStable",
       "excludedFieldTypes": [],
@@ -53,107 +53,6 @@
         "render": false,
         "aiHint": true,
         "defaultValue": true,
-        "value": false,
-        "validation": true,
-        "layout": false,
-        "persistence": false
-      }
-    },
-    "workflowStartVariable": {
-      "label": {
-        "nl": "Workflow-startvariabele",
-        "en": "Workflow start variable"
-      },
-      "description": {
-        "nl": "Velddefinitie voor data die bij het starten van een workflow beschikbaar is.",
-        "en": "Field definition for data available when a workflow starts."
-      },
-      "keyBehavior": "hiddenGeneratedStable",
-      "excludedFieldTypes": [],
-      "typePickerUsage": "requestInput",
-      "controls": {
-        "label": true,
-        "description": true,
-        "type": "combined",
-        "cardinality": false,
-        "sortable": false,
-        "shape": true,
-        "options": true,
-        "render": false,
-        "aiHint": true,
-        "defaultValue": true,
-        "value": false,
-        "validation": true,
-        "layout": false,
-        "persistence": false
-      }
-    },
-    "workflowOutputField": {
-      "label": {
-        "nl": "Workflow-outputveld",
-        "en": "Workflow output field"
-      },
-      "description": {
-        "nl": "Velddefinitie voor publieke output die een eindnode teruggeeft.",
-        "en": "Field definition for public output returned by an end node."
-      },
-      "keyBehavior": "hiddenGeneratedStable",
-      "excludedFieldTypes": [],
-      "typePickerUsage": "requestInput",
-      "controls": {
-        "label": true,
-        "description": true,
-        "type": "combined",
-        "cardinality": false,
-        "sortable": false,
-        "shape": true,
-        "options": true,
-        "render": false,
-        "aiHint": true,
-        "defaultValue": false,
-        "value": true,
-        "validation": true,
-        "layout": false,
-        "persistence": false
-      },
-      "lockedVisibleProperties": [
-        "value"
-      ],
-      "valueAuthoring": {
-        "label": {
-          "nl": "Waarde",
-          "en": "Value"
-        },
-        "description": {
-          "nl": "Runtime-waarde of expressie die deze workflow via dit outputveld teruggeeft.",
-          "en": "Runtime value or expression this workflow returns through this output field."
-        },
-        "component": "OutputFieldValueEditor"
-      }
-    },
-    "workflowProcessVariable": {
-      "label": {
-        "nl": "Procesvariabele",
-        "en": "Process variable"
-      },
-      "description": {
-        "nl": "Compacte velddefinitie voor workflowstatus; initializers staan buiten de definitie.",
-        "en": "Compact field definition for workflow state; initializers live outside the definition."
-      },
-      "keyBehavior": "hiddenGeneratedStable",
-      "excludedFieldTypes": [],
-      "typePickerUsage": "workflowConfig",
-      "controls": {
-        "label": true,
-        "description": true,
-        "type": "combined",
-        "cardinality": false,
-        "sortable": false,
-        "shape": true,
-        "options": false,
-        "render": false,
-        "aiHint": true,
-        "defaultValue": false,
         "value": false,
         "validation": true,
         "layout": false,
@@ -727,22 +626,6 @@
         "fileNameField": "fileName",
         "mimeTypeField": "mimeType",
         "checksumField": "checksum"
-      }
-    },
-    "workflowDefinitionId": {
-      "label": {
-        "en": "Workflow definition ID",
-        "nl": "Workflow-definitie-ID"
-      },
-      "pluralLabel": {
-        "en": "Workflow definition IDs",
-        "nl": "Workflow-definitie-IDs"
-      },
-      "baseType": "string",
-      "icon": "Workflow",
-      "render": {
-        "display": "WorkflowDefinitionReferenceDisplay",
-        "input": "Input"
       }
     },
     "postalCode": {
@@ -9332,7 +9215,7 @@
           },
           "osfType": "fieldDefinition",
           "authoring": {
-            "profile": "workflowInputField"
+            "profile": "caseVariable"
           }
         },
         {
@@ -11018,30 +10901,6 @@
           }
         },
         {
-          "key": "processStepId",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Legacy process step ID",
-            "nl": "Legacy processtap-ID"
-          },
-          "description": {
-            "en": "Optional legacy bridge to the older process-step row while the runtime migrates to process-owned actions.",
-            "nl": "Optionele legacy-koppeling naar de oudere processtaprij terwijl de runtime migreert naar proces-acties."
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "process_step_id",
-            "storageClass": "core"
-          },
-          "osfType": "ProcessStep",
-          "relationship": {
-            "ownership": "reference"
-          }
-        },
-        {
           "key": "actionKey",
           "osfType": "string",
           "required": true,
@@ -11137,39 +10996,6 @@
             "referentieGroep": "CASESTEPACTIONSTATUS"
           },
           "osfType": "referenceDataCode"
-        },
-        {
-          "key": "workflowDefinitionId",
-          "required": false,
-          "osfType": "workflowDefinitionId",
-          "label": {
-            "en": "Workflow definition",
-            "nl": "Workflowdefinitie"
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "workflow_definition_id",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowInstanceId",
-          "osfType": "string",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Workflow instance",
-            "nl": "Workflowinstantie"
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "workflow_instance_id",
-            "storageClass": "core"
-          }
         },
         {
           "key": "taskTemplate",
@@ -11604,8 +11430,8 @@
             "nl": "Acties"
           },
           "description": {
-            "en": "Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required, startMode, and task or workflow configuration.",
-            "nl": "Geordende inline actiesjablonen voor deze stap. Elke actie heeft een stabiele sleutel, volgnummer, type, verplichting, startmodus en taak- of workflowconfiguratie."
+            "en": "Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required, startMode, and the configuration of its kind, such as a task template.",
+            "nl": "Geordende inline actiesjablonen voor deze zaakstap. Elke actie heeft een stabiele sleutel, volgnummer, soort, verplichting, startmodus en de configuratie van dat soort, zoals een taaksjabloon."
           },
           "persisted": {
             "column": "actions",
@@ -11778,30 +11604,6 @@
                     "label": {
                       "en": "Form definition",
                       "nl": "Formulierdefinitie"
-                    }
-                  }
-                ]
-              },
-              {
-                "key": "workflow",
-                "osfType": "object",
-                "required": false,
-                "label": {
-                  "en": "Workflow",
-                  "nl": "Workflow"
-                },
-                "children": [
-                  {
-                    "key": "workflowDefinitionId",
-                    "required": false,
-                    "osfType": "workflowDefinitionId",
-                    "label": {
-                      "en": "Workflow definition",
-                      "nl": "Workflowdefinitie"
-                    },
-                    "options": {
-                      "type": "remote",
-                      "remoteUrl": "/api/workflow/designer/published-workflows/options?category=process"
                     }
                   }
                 ]
@@ -12148,7 +11950,7 @@
           },
           "osfType": "fieldDefinition",
           "authoring": {
-            "profile": "workflowInputField"
+            "profile": "caseVariable"
           }
         },
         {
@@ -27022,38 +26824,6 @@
           }
         },
         {
-          "key": "workflowTemplate",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Workflow template",
-            "nl": "Workflowtemplate"
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_template",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowInstanceRef",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Workflow instance reference",
-            "nl": "Workflow-instance referentie"
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_instance_ref",
-            "storageClass": "core"
-          }
-        },
-        {
           "key": "priority",
           "required": false,
           "label": {
@@ -27714,101 +27484,6 @@
           }
         },
         {
-          "key": "workflowNodeRef",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Workflow node reference",
-            "nl": "Workflow-node referentie"
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_node_ref",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowRunRef",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Workflow run reference",
-            "nl": "Workflow-run referentie"
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_run_ref",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowInstanceId",
-          "osfType": "string",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Workflow instance ID",
-            "nl": "Workflowinstantie-ID"
-          },
-          "description": {
-            "en": "Durable workflow instance currently executing this process step.",
-            "nl": "Duurzame workflowinstantie die deze processtap uitvoert."
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_instance_id",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowNodeInstanceId",
-          "osfType": "string",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Workflow node instance ID",
-            "nl": "Workflow-nodeinstantie-ID"
-          },
-          "description": {
-            "en": "Current waiting node within the workflow instance, when the process step is paused.",
-            "nl": "Huidige wachtende node binnen de workflowinstantie wanneer de processtap gepauzeerd is."
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_node_instance_id",
-            "storageClass": "core"
-          }
-        },
-        {
-          "key": "workflowWaitId",
-          "osfType": "string",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Workflow wait ID",
-            "nl": "Workflow-wacht-ID"
-          },
-          "description": {
-            "en": "Durable wait token that can be resumed by another orchestrator.",
-            "nl": "Duurzame wait-token die door een andere orchestrator hervat kan worden."
-          },
-          "validation": {
-            "maxLength": 200
-          },
-          "persisted": {
-            "column": "workflow_wait_id",
-            "storageClass": "core"
-          }
-        },
-        {
           "key": "requiredInput",
           "osfType": "object",
           "required": false,
@@ -28063,19 +27738,6 @@
                 "nl": "Vervolgstappen"
               }
             }
-          }
-        },
-        {
-          "key": "caseStepActions",
-          "label": {
-            "en": "Case step actions",
-            "nl": "Zaakstapacties"
-          },
-          "osfType": "CaseStepAction",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "processStepId",
-            "ownership": "reference"
           }
         },
         {
@@ -42650,7 +42312,7 @@
       ]
     },
     "CASESTEPACTIONKIND": {
-      "description": "Kerncodetabel voor typen acties binnen een zaakstap.",
+      "description": "Kerncodetabel voor soorten acties binnen een zaakstap; een plugin kan soorten toevoegen.",
       "items": [
         {
           "value": "task",
@@ -42658,14 +42320,6 @@
             "nl": "Taak",
             "en": "Task",
             "fr": "Tâche"
-          }
-        },
-        {
-          "value": "workflow",
-          "label": {
-            "nl": "Workflow",
-            "en": "Workflow",
-            "fr": "Workflow"
           }
         }
       ]

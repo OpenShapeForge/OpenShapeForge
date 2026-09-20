@@ -272,7 +272,6 @@
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
       "additionalProperties": { "$ref": "#/$defs/entityOperationV2" }
     },
-    "workflow": { "$ref": "#/$defs/workflowInterface" },
     "interfaces": {
       "$ref": "#/$defs/entityInterfacesV2"
     }
@@ -296,32 +295,6 @@
     }
   ],
   "$defs": {
-    "workflowInterface": {
-      "type": "object",
-      "description": "Workflow node generation settings for this entity.",
-      "additionalProperties": false,
-      "properties": {
-        "nodes": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "actions": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "create": { "$ref": "#/$defs/workflowActionConfig" },
-                "getOne": { "$ref": "#/$defs/workflowActionConfig" },
-                "list": { "$ref": "#/$defs/workflowListActionConfig" },
-                "update": { "$ref": "#/$defs/workflowActionConfig" },
-                "delete": { "$ref": "#/$defs/workflowActionConfig" },
-                "wait": { "$ref": "#/$defs/workflowActionConfig" },
-                "awaitAction": { "$ref": "#/$defs/workflowActionConfig" }
-              }
-            }
-          }
-        }
-      }
-    },
     "localizedOrString": {
       "oneOf": [
         { "type": "string", "minLength": 1 },
@@ -887,7 +860,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "workflow": { "$ref": "#/$defs/workflowInterface" },
         "rest": {
           "type": "object",
           "additionalProperties": false,
@@ -1521,81 +1493,6 @@
           "$ref": "#/$defs/localizedText"
         }
       }
-    },
-    "workflowActionConfig": {
-      "oneOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "readableFields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "$ref": "#/$defs/fieldKey"
-              }
-            },
-            "writableFields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "$ref": "#/$defs/fieldKey"
-              }
-            }
-          }
-        }
-      ]
-    },
-    "workflowListActionConfig": {
-      "oneOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "readableFields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "$ref": "#/$defs/fieldKey"
-              }
-            },
-            "writableFields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "$ref": "#/$defs/fieldKey"
-              }
-            },
-            "defaultSort": {
-              "type": "object",
-              "description": "Default ordering applied when a workflow list node does not specify its own sort.",
-              "additionalProperties": false,
-              "required": ["field", "direction"],
-              "properties": {
-                "field": {
-                  "$ref": "#/$defs/fieldKey"
-                },
-                "direction": {
-                  "type": "string",
-                  "enum": ["asc", "desc"]
-                }
-              }
-            }
-          }
-        }
-      ]
     },
     "field": {
       "type": "object",

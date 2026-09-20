@@ -61,8 +61,8 @@ runs (below). The sequence is a bigint identity, the `jobs.list` cursor:
 `created_at` is not one, because jobs enqueued in one transaction share it.
 
 The table is tenant-scoped and RLS'd. It declares `workerAccess: job-worker`,
-so the worker claims across every tenant on the same axis the workflow queue
-uses ([api.md](api.md#the-worker-axis)); an ordinary session sees its own
+so the worker claims across every tenant on the worker axis
+([api.md](api.md#the-worker-axis)); an ordinary session sees its own
 tenant's rows and nothing else.
 
 ## Enqueueing
@@ -174,8 +174,7 @@ in the same tick cannot eat it. `stop()` is checked before every claim: the
 job in hand finishes and records its outcome, the ones not yet claimed stay
 queued for the next worker, and nothing has to be released. It connects as
 the `openshapeforge_worker` database role and refuses the API's connection
-string for the same reasons the workflow worker does
-([plugins.md](plugins.md#worker-roles)).
+string ([plugins.md](plugins.md#worker-roles)).
 
 The worker refuses to start without a mail transport (below): a queue that
 would mark undelivered mail `done` is worse than a worker that is not

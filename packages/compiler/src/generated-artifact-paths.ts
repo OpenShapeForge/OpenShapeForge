@@ -43,10 +43,8 @@ export const compilerOwnedGeneratedRoots = [
   // the web-gated UI generator (no apps/web -> no page configs -> no rows), but
   // owned API-side because apps/api owns the table.
   "apps/api/src/generated/page-configs",
-  // NOTE: workflow-generated roots (apps/api/src/generated/workflow, the web
-  // workflow/renderer feature roots) are owned by the example workflow plugin
-  // (examples/plugins/workflow) via its `ownedPaths.roots` — the check scripts
-  // merge plugin-owned paths into the same stale/orphan gates.
+  // Roots a plugin emits into are declared by that plugin's `ownedPaths.roots`;
+  // the check scripts merge plugin-owned paths into the same stale/orphan gates.
   "apps/web/src/actions/generated",
   "apps/web/src/app/(generated)",
   "apps/web/src/compiler",

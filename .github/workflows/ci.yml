@@ -67,19 +67,12 @@ jobs:
       - name: Generate artifacts
         run: bun run generate
 
-      # typecheck:plugin-web is not redundant with the two projects either side
-      # of it. examples/tsconfig.json EXCLUDES plugins/workflow/web/**, and
-      # apps/web's project is rooted at apps/web — it reaches a plugin module
-      # only when something under apps/web imports it. So a plugin web module
-      # nothing has imported yet, and every test file there, is checked by this
-      # gate alone.
-      #
       # typecheck:admin is the control-plane app (apps/admin). It is NOT covered
       # by typecheck:web — separate Next project, separate tsconfig, separate
       # source root — so without it the app would be built by the step below
       # with no type gate of its own.
       - name: Typecheck
-        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:observability && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:connectors && bun run typecheck:plugin-web && bun run typecheck:layout
+        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:observability && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:connectors && bun run typecheck:layout
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building
@@ -113,16 +106,16 @@ jobs:
       - name: Web GraphQL transport tests
         run: bun run test:web-transport
 
-      # The shipped example plugins carry unit tests that nothing ran until
-      # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
-      # only reach plugin code through the API. A test that never executes is
-      # worse than no test, because it reads as coverage.
-      - name: Example plugin unit tests
-        run: bun run test:examples
+      # apps/web's pure modules (field rendering, the entity-field variable
+      # source over the generated contract). After generate, which emits what
+      # they import.
+      - name: Web unit tests
+        run: bun run test:web
 
-      # The connector packages, for the same reason: they moved out of examples/
-      # when connectors became a top level directory, and test:examples stopped
-      # covering them the moment they did.
+      # The connector packages carry unit tests that `test:compiler` (scoped
+      # to packages/compiler) and the db/e2e jobs (which reach them only
+      # through the API) never ran. A test that never executes is worse than
+      # no test, because it reads as coverage.
       - name: Connector package unit tests
         run: bun run test:connectors
 

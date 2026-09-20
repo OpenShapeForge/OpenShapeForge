@@ -10,9 +10,7 @@
     "dev": "bun run deps && next dev",
     "build": "bun run deps && next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "//test:browser": "Needs a running stack — see the header of playwright.config.ts. `playwright install chromium` once, first.",
-    "test:browser": "playwright test"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -45,7 +43,6 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26",
     "@types/react": "^19",

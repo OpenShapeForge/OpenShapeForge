@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import YAML from "yaml";
-import {
-  loadActivePlatformManifest,
-  resolveActiveAuthoringDir,
-} from "./active-manifest.js";
+import { resolve } from "node:path";
 import { collectAllArtifacts } from "./index.js";
 import { compilerOwnedGeneratedRoots } from "./generated-artifact-paths.js";
 import { mergePluginPlatformTables } from "./plugins.js";
@@ -15,10 +9,9 @@ import { isGeneratedCrudEligible, type PlatformSchemaManifest } from "./schema.j
 const repoRoot = resolve(import.meta.dir, "../../..");
 
 /**
- * Both tests below collect the whole artifact corpus TWICE, because what they
- * assert is determinism. Against the full core catalog that is a few seconds of
- * real compilation, over bun's 5s default — so state the budget rather than let
- * corpus growth read as a hang.
+ * The determinism test collects the whole artifact corpus TWICE. Against the
+ * full core catalog that is a few seconds of real compilation, over bun's 5s
+ * default — so state the budget rather than let corpus growth read as a hang.
  */
 const FULL_CORPUS_TIMEOUT_MS = 60_000;
 
@@ -53,9 +46,9 @@ describe("compiler plugins", () => {
     const operationCatalog = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path.endsWith("operations/catalog.json"),
     )!.contents) as { operations: { key: string }[] };
-    expect(operationCatalog.operations.map((entry) => entry.key)).toContain(
-      "workflow.instance.webhook-start",
-    );
+    // The notebook example plugin ships its entities through its own
+    // authoring layer; their Operations reach the catalog like the core's.
+    expect(operationCatalog.operations.map((entry) => entry.key)).toContain("Notebook.publish");
     const runtimeFieldSchemas = JSON.parse(first.groups.operations.find((artifact) =>
       artifact.path.endsWith("operations/field-schema-registry.json"),
     )!.contents) as {
@@ -82,7 +75,7 @@ describe("compiler plugins", () => {
       }>;
     };
     expect(fieldAuthoringRegistry.version).toBe(1);
-    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.workflowInputField).toMatchObject({
+    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.caseVariable).toMatchObject({
       keyBehavior: "hiddenGeneratedStable",
       typePickerUsage: "requestInput",
     });
@@ -101,21 +94,21 @@ describe("compiler plugins", () => {
     const openApi = JSON.parse(first.groups.db.find((artifact) =>
       artifact.path.endsWith("rest/openapi.json"),
     )!.contents) as { paths: Record<string, Record<string, { operationId?: string }>> };
-    expect(openApi.paths["/api/workflow/triggers/webhook/{definitionId}"]?.post?.operationId)
-      .toBe("workflow.instance.webhook-start");
+    expect(openApi.paths["/api/core-versioning/notebook/{id}/publish"]?.post?.operationId)
+      .toBe("Notebook.publish");
     const mcp = JSON.parse(first.groups.mcp[0]!.contents) as {
       operationTools: { key: string; name: string }[];
     };
     expect(mcp.operationTools).toContainEqual(expect.objectContaining({
-      key: "workflow.instance.webhook-start",
-      name: "workflow_start_webhook",
+      key: "Notebook.publish",
+      name: "notebook_publish",
     }));
     const graphql = JSON.parse(first.groups.graphql[0]!.contents) as {
       operations: { key: string; field: string }[];
     };
     expect(graphql.operations).toContainEqual(expect.objectContaining({
-      key: "workflow.instance.webhook-start",
-      field: "workflowStartWebhook",
+      key: "Notebook.publish",
+      field: "notebookPublish",
     }));
     expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/operations");
     expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/compiler");
@@ -182,85 +175,6 @@ describe("compiler plugins", () => {
       );
     expect(headings.length).toBe(crudTables.length);
   }, FULL_CORPUS_TIMEOUT_MS);
-
-  test("workflow plugin emits api workflow artifacts deterministically", async () => {
-    const first = await collectAllArtifacts(repoRoot);
-    const second = await collectAllArtifacts(repoRoot);
-
-    const workflow = first.groups.plugins.find((entry) => entry.name === "workflow");
-    expect(workflow).toBeTruthy();
-
-    const paths = workflow!.artifacts.map((artifact) => artifact.path);
-    expect(paths).toContain("apps/api/src/generated/workflow/node-catalog.seed.json");
-    expect(paths).toContain("apps/api/src/generated/workflow/node-catalog.ts");
-    expect(paths).toContain(
-      "apps/api/src/generated/workflow/entity-workflow-nodes.generated.json",
-    );
-
-    // Web-side artifacts (contract, designer registries, seeds) only exist
-    // when apps/web does — in a data-layer + API repo everything is api-side.
-    if (!existsSync(join(repoRoot, "apps/web"))) {
-      expect(paths.every((path) => path.startsWith("apps/api/"))).toBe(true);
-    }
-
-    // Double-run determinism, byte for byte.
-    const secondWorkflow = second.groups.plugins.find((entry) => entry.name === "workflow");
-    expect(secondWorkflow?.artifacts).toEqual(workflow!.artifacts);
-
-    // The node-catalog seed carries the standard catalog with a stable checksum.
-    const seed = JSON.parse(
-      workflow!.artifacts.find((artifact) =>
-        artifact.path.endsWith("node-catalog.seed.json"),
-      )!.contents,
-    ) as { checksum: string; catalog: string; entries: unknown[] };
-    expect(seed.catalog).toBe("standard");
-    expect(seed.checksum).toMatch(/^[0-9a-f]{64}$/);
-    expect(seed.entries.length).toBeGreaterThan(0);
-
-    // The plugin's authoring layer patches Relation back into workflow-node
-    // generation (entityPatch), so the entity bridge index must list it.
-    const bridge = JSON.parse(
-      workflow!.artifacts.find((artifact) =>
-        artifact.path.endsWith("entity-workflow-nodes.generated.json"),
-      )!.contents,
-    ) as { type: string }[];
-    expect(bridge.map((entry) => entry.type)).toContain("entity.core.relation.create");
-
-    // Its generated root is gated by the shared stale/orphan checks.
-    expect(first.ownedPaths.roots).toContain("apps/api/src/generated/workflow");
-  }, FULL_CORPUS_TIMEOUT_MS);
-
-  test("workflow plugin contributes the platform workflow catalog tables", async () => {
-    const manifest = await loadActivePlatformManifest(repoRoot);
-    const tableNames = manifest.tables.map((table) => `${table.schema}.${table.name}`);
-    expect(tableNames).toContain("platform.workflow_node_catalog_entries");
-    expect(tableNames).toContain("platform.entity_trigger_registry");
-    expect(tableNames).toContain("platform.entity_field_suggestions");
-
-    const catalogTable = manifest.tables.find(
-      (table) => table.schema === "platform" && table.name === "workflow_node_catalog_entries",
-    )!;
-    expect(catalogTable.tenantScoped).toBe(false);
-    expect(catalogTable.generatedCrudEligible).toBe(false);
-    expect(catalogTable.columns.map((column) => column.name)).toContain("catalog_checksum");
-  });
-
-  test("a plugin's sidebar entry reaches the resolved app shell", () => {
-    // The route file itself is asserted in the plugin's own suite, which can
-    // import it; this package cannot, because examples/ is outside its rootDir.
-    // What belongs here is the layer resolution: an appShellPatch from a plugin
-    // layer has to survive into the tree the web generator reads.
-    const shell = YAML.parse(
-      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "menu.yaml"), "utf8"),
-    ) as { kind: string; navigation: { sidebarItems: { key: string; route?: unknown }[] } };
-
-    expect(shell.kind).toBe("appShell");
-    const entry = shell.navigation.sidebarItems.find((item) => item.key === "workflow");
-    expect(entry).toBeTruthy();
-    expect(entry!.route).toEqual({ en: "/workflow", nl: "/workflow" });
-    // The base layer's entries survive: the patch appends rather than replaces.
-    expect(shell.navigation.sidebarItems.some((item) => item.key === "data")).toBe(true);
-  });
 
   test("plugin platform-table collisions are rejected", () => {
     const manifest = {

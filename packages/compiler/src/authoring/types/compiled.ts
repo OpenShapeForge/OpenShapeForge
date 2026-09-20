@@ -364,8 +364,11 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   target?:
     | { entityId: string; entityName: string; scope: "collection" }
     | { entityId: string; entityName: string; scope: "record"; inputField: string };
-  /** Declared handler failures; platform failures remain core-owned. */
-  errors?: EntityOperationDefinition["errors"];
+  /**
+   * Every failure the Operation can answer: the refusals the generic runtime
+   * derives from the policy flags, plus a plugin handler's declared ones.
+   */
+  errors: NonNullable<EntityOperationDefinition["errors"]>;
   /** Interface aliases retained without creating a second Operation. */
   interfaces?: {
     rest?: false | EntityRestOperationProjectionConfig;

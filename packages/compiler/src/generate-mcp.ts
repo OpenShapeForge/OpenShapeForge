@@ -596,6 +596,8 @@ export type McpToolDefinition = {
     destructiveHint: boolean;
     idempotentHint: boolean;
   };
+  /** The failures the canonical Operation declares, as the catalogue lists them. */
+  errors: readonly { status: number; code: string; description: string }[];
 };
 
 function annotationsFor(operation: McpToolDefinition["operation"]) {
@@ -762,6 +764,12 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => localizedText(contract.entityOperations[operation]?.name) ?? fallback;
+  const declaredErrors = (operation: McpToolDefinition["operation"]) =>
+    (contract.entityOperations[operation]?.errors ?? []).map(({ status, code, description }) => ({
+      status,
+      code,
+      description,
+    }));
   const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
     ...annotationsFor(operation),
     ...(contract.entityOperations[operation]?.reliability.idempotency.mode === "keyed"
@@ -840,6 +848,7 @@ function buildToolsForEntity(
       },
       outputSchema: outputSchema("list"),
       annotations: entityAnnotations("list"),
+      errors: declaredErrors("list"),
     });
   }
 
@@ -858,6 +867,7 @@ function buildToolsForEntity(
       inputSchema: idSchema,
       outputSchema: outputSchema("get"),
       annotations: entityAnnotations("get"),
+      errors: declaredErrors("get"),
     });
   }
 
@@ -903,6 +913,7 @@ function buildToolsForEntity(
       },
       outputSchema: outputSchema("create"),
       annotations: entityAnnotations("create"),
+      errors: declaredErrors("create"),
     });
   }
 
@@ -976,6 +987,7 @@ function buildToolsForEntity(
           },
       outputSchema: outputSchema("update"),
       annotations: entityAnnotations("update"),
+      errors: declaredErrors("update"),
     });
   }
 
@@ -1006,6 +1018,7 @@ function buildToolsForEntity(
       },
       outputSchema: outputSchema("delete"),
       annotations: entityAnnotations("delete"),
+      errors: declaredErrors("delete"),
     });
   }
 

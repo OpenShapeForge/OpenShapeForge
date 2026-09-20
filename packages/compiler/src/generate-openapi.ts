@@ -483,6 +483,28 @@ function errorResponse(description: string): JsonObject {
   };
 }
 
+/**
+ * The failure responses of a canonical entity Operation: one response per
+ * status, naming every declared code the runtime may answer it with. The
+ * list itself is derived once by the compiler (entity-operation-errors.ts);
+ * this only spells it in OpenAPI.
+ */
+function operationErrorResponses(
+  operation: Pick<CompiledEntityOperation, "errors"> | undefined,
+): JsonObject {
+  const byStatus = new Map<number, string[]>();
+  for (const error of operation?.errors ?? []) {
+    const codes = byStatus.get(error.status) ?? [];
+    codes.push(`${error.code} — ${error.description}`);
+    byStatus.set(error.status, codes);
+  }
+  return Object.fromEntries(
+    [...byStatus.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([status, codes]) => [String(status), errorResponse(codes.join("\n"))]),
+  );
+}
+
 function entityResponse(name: string, description: string): JsonObject {
   return {
     description,
@@ -1085,12 +1107,6 @@ export function renderOpenApiSpec(
           referentiedata,
         )
       : undefined;
-    const createRequiresConfirmation =
-      createOperation?.interaction?.confirmation.mode !== undefined &&
-      createOperation.interaction.confirmation.mode !== "none";
-    const updateRequiresConfirmation =
-      updateOperation?.interaction?.confirmation.mode !== undefined &&
-      updateOperation.interaction.confirmation.mode !== "none";
     const deleteRequiresChallenge =
       deleteOperation?.interaction?.confirmation.mode === "challenge";
     const deleteRequiresConfirmation =
@@ -1239,9 +1255,7 @@ export function renderOpenApiSpec(
             `${name}ListResult`,
             `${name} page and available operations`,
           ),
-          "400": errorResponse("Invalid filter, sort, or pagination input"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
+          ...operationErrorResponses(contract.entityOperations.list),
         },
       };
     }
@@ -1271,14 +1285,7 @@ export function renderOpenApiSpec(
               : `${name}Result`,
             `Created ${label} and available operations`,
           ),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          ...(createRequiresConfirmation
-            ? {
-                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
-              }
-            : {}),
+          ...operationErrorResponses(createOperation),
         },
       };
       if (projection && projection.path) {
@@ -1332,9 +1339,7 @@ export function renderOpenApiSpec(
             `${name}Result`,
             `${label} record and available operations`,
           ),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          ...operationErrorResponses(contract.entityOperations.get),
         },
       };
     }
@@ -1364,26 +1369,7 @@ export function renderOpenApiSpec(
               : `${name}Result`,
             `Updated ${label} and available operations`,
           ),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
-          ...(updateOperation?.concurrency?.version
-            ? {
-                "409": errorResponse("VERSION_CONFLICT — expectedVersion does not match the current record version"),
-                "422": errorResponse("VALIDATION — expectedVersion is not a semantically valid record version"),
-              }
-            : {}),
-          ...(updateOperation?.concurrency?.editLease
-            ? {
-                "423": errorResponse("LOCKED — another identity currently holds the record edit lease"),
-              }
-            : {}),
-          ...(updateRequiresConfirmation
-            ? {
-                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
-              }
-            : {}),
+          ...operationErrorResponses(updateOperation),
         },
       };
       if (projection && projection.path) {
@@ -1441,26 +1427,7 @@ export function renderOpenApiSpec(
           : {}),
         responses: {
           "200": entityResponse("DeletionResult", `${label} deleted`),
-          "400": errorResponse("BAD_USER_INPUT — invalid request body or mutation controls"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
-          ...(deleteOperation?.concurrency?.version
-            ? {
-                "409": errorResponse("VERSION_CONFLICT — expectedVersion does not match the current record version"),
-                "422": errorResponse("VALIDATION — expectedVersion is not a semantically valid record version"),
-              }
-            : {}),
-          ...(deleteOperation?.concurrency?.editLease
-            ? {
-                "423": errorResponse("LOCKED — another identity currently holds the record edit lease"),
-              }
-            : {}),
-          ...(deleteRequiresConfirmation
-            ? {
-                "428": errorResponse("CONFIRMATION_REQUIRED — this operation requires confirmation controls"),
-              }
-            : {}),
+          ...operationErrorResponses(deleteOperation),
         },
       };
     }

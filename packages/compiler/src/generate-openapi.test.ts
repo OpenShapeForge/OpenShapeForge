@@ -4,8 +4,27 @@ import type {
   CompiledEntityContract,
   CompiledField,
 } from "./authoring/types.js";
+import { deriveEntityOperationErrors } from "./authoring/compiler/entity-operation-errors.js";
 import { renderOpenApiSpec } from "./generate-openapi.js";
 import type { PlatformSchemaManifest } from "./schema.js";
+
+/**
+ * The fixtures below spell each Operation's policy flags by hand; the errors
+ * the compiler derives from those flags are filled in here, after a test has
+ * mutated the flags, so the projection under test sees what the compiler
+ * would have emitted.
+ */
+function withDerivedErrors(entity: CompiledEntityContract): CompiledEntityContract {
+  for (const operation of Object.values(entity.entityOperations)) {
+    if (!operation) continue;
+    operation.errors = deriveEntityOperationErrors(entity.entity.name, operation.intent, {
+      concurrency: operation.concurrency,
+      confirmation: operation.interaction?.confirmation ?? { mode: "none" },
+      recordPermissions: entity.authorization?.rowAccess?.recordPermissions !== undefined,
+    });
+  }
+  return entity;
+}
 
 function field(
   overrides: Partial<CompiledField> & Pick<CompiledField, "key">,
@@ -264,7 +283,7 @@ type TestOperation = {
 function spec() {
   return JSON.parse(
     renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       referentiedata: {
         RELATIONTYPE: [
           { value: "person", label: { en: "Person", nl: "Persoon" } },
@@ -294,7 +313,7 @@ function spec() {
 describe("rich generated REST OpenAPI", () => {
   it("puts committed host onboarding before generic safe-start guidance and provenance", () => {
     const rendered = JSON.parse(renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       documentation: {
         title: "Example Product API",
         version: "2026-09",
@@ -361,7 +380,7 @@ describe("rich generated REST OpenAPI", () => {
 
   it("emits host-authored OAuth Authorization Code metadata and public Swagger configuration", () => {
     const rendered = JSON.parse(renderOpenApiSpec(manifest, "fixture", {
-      entities: [{ contract }],
+      entities: [{ contract: withDerivedErrors(contract) }],
       documentation: {
         title: "Example Product API",
         description: "Authenticate before using protected operations.",
@@ -417,7 +436,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const rendered = JSON.parse(
       renderOpenApiSpec(partial, "fixture", {
-        entities: [{ contract }],
+        entities: [{ contract: withDerivedErrors(contract) }],
       }),
     ) as { paths: Record<string, Record<string, unknown>> };
     expect(Object.keys(rendered.paths["/api/rest/v1/relations"]!)).toEqual([
@@ -535,7 +554,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: protectedContract }],
+        entities: [{ contract: withDerivedErrors(protectedContract) }],
       }),
     ) as any;
     const create = generated.components.schemas.RelationInput;
@@ -568,7 +587,7 @@ describe("rich generated REST OpenAPI", () => {
     }
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: acknowledgedContract }],
+        entities: [{ contract: withDerivedErrors(acknowledgedContract) }],
       }),
     ) as any;
 
@@ -603,7 +622,7 @@ describe("rich generated REST OpenAPI", () => {
     };
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: acknowledgedContract }],
+        entities: [{ contract: withDerivedErrors(acknowledgedContract) }],
       }),
     ) as any;
     const inputSchema = generated.components.schemas.RelationDeleteInput;
@@ -802,7 +821,7 @@ describe("rich generated REST OpenAPI", () => {
 
     const generated = JSON.parse(
       renderOpenApiSpec(manifest, "fixture", {
-        entities: [{ contract: pluginContract }],
+        entities: [{ contract: withDerivedErrors(pluginContract) }],
       }),
     ) as any;
 
@@ -953,7 +972,7 @@ describe("rich generated REST OpenAPI", () => {
       renderOpenApiSpec(
         { ...manifest, tables: [restTable, nonRestTable] },
         "fixture",
-        { entities: [{ contract }, { contract: nonRestContract }] },
+        { entities: [{ contract: withDerivedErrors(contract) }, { contract: withDerivedErrors(nonRestContract) }] },
       ),
     ) as any;
     expect(
@@ -965,7 +984,7 @@ describe("rich generated REST OpenAPI", () => {
       renderOpenApiSpec(
         { ...manifest, tables: [nonRestTable] },
         "fixture",
-        { entities: [{ contract: nonRestContract }] },
+        { entities: [{ contract: withDerivedErrors(nonRestContract) }] },
       ),
     ) as any;
     expect(nonRestOnly.paths["/api/operation-leases"]).toBeUndefined();
@@ -991,7 +1010,7 @@ describe("rich generated REST OpenAPI", () => {
     });
     const generated = JSON.parse(
       renderOpenApiSpec(semanticManifest, "fixture", {
-        entities: [{ contract: semanticContract }],
+        entities: [{ contract: withDerivedErrors(semanticContract) }],
       }),
     ) as { components: { schemas: Record<string, Record<string, unknown>> } };
     const create = generated.components.schemas.RelationInput as {

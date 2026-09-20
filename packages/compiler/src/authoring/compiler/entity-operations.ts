@@ -8,6 +8,10 @@ import type {
 } from "../types.js";
 import type { CoreEntity } from "../types.js";
 import { isCoreEntityV2, v2OperationByAction } from "../entity-v2.js";
+import {
+  deriveEntityOperationErrors,
+  withDeclaredEntityOperationErrors,
+} from "./entity-operation-errors.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
   "list",
@@ -107,7 +111,14 @@ function compileOperation(
           },
         }
       : {}),
-    ...(pluginImplementation && definition?.errors ? { errors: definition.errors } : {}),
+    errors: withDeclaredEntityOperationErrors(
+      deriveEntityOperationErrors(source.entity.name, intent, {
+        concurrency: definition?.concurrency,
+        confirmation: definition?.confirmation ?? { mode: "none" },
+        recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
+      }),
+      pluginImplementation ? definition?.errors : undefined,
+    ),
     ...(pluginImplementation && source.coreEntity?.interfaces
       ? {
           interfaces: Object.fromEntries(

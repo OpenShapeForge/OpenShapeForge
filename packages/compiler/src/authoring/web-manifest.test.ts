@@ -540,6 +540,7 @@ describe("web manifest projection", () => {
     relation.contract.entityOperations.delete = {
       key: "remove",
       id: "Relation.remove",
+      errors: [],
       entityId: "core.Relation",
       entityName: "Relation",
       name: text("Delete relation", "Relatie verwijderen"),

@@ -168,6 +168,7 @@ describe("first-class plugin operations", () => {
   const entityOperation: CompiledEntityOperation = {
     key: "list",
     id: "Relation.list",
+    errors: [],
       entityId: "hubble.Relation",
     entityName: "Relation",
     name: "List Relation",
@@ -221,6 +222,7 @@ describe("first-class plugin operations", () => {
     const entityOperation: CompiledEntityOperation = {
       key: "remove",
       id: "Relation.remove",
+      errors: [],
       entityId: "hubble.Relation",
       entityName: "Relation",
       name: "Delete relation",
@@ -348,6 +350,7 @@ describe("first-class plugin operations", () => {
     const target: CompiledEntityOperation = {
       id: "Adapter.create",
       key: "create",
+      errors: [],
       intent: "create",
       entityId: "osf-integration.Adapter",
       entityName: "Adapter",

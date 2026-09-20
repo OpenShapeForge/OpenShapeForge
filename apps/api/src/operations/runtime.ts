@@ -13,10 +13,8 @@ import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
-import {
-  resolveSessionContext,
-  SessionAuthenticationUnavailableError,
-} from "../auth/identity.js";
+import { resolveSessionContext } from "../auth/identity.js";
+import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
 import { usesHostOrganizationContext } from "../config/host-organization.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { GraphqlContext } from "../graphql/context.js";

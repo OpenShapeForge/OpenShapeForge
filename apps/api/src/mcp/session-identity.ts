@@ -17,7 +17,7 @@
  * `whoami` answer; `session-opening.ts` reads them for the sentence a session
  * starts with.
  */
-import { selectOrganizationMembership } from "../auth/identity.js";
+import { selectOrganizationMembership } from "../auth/tenant-resolution.js";
 import type { OrganizationResourceBinding } from "../auth/organization-binding.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { LOCALE_CLAIM, resolveLocale, type ResolvedLocale } from "./locale.js";

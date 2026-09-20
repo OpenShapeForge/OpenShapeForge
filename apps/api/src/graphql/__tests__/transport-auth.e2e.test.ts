@@ -41,7 +41,7 @@ import {
 } from "./e2e/gql-shapes.js";
 import { isEntityBackedCreate } from "./e2e/operations.js";
 import { membershipRolesOf } from "./e2e/keycloak.js";
-import { realmFromIssuer } from "../../auth/identity.js";
+import { realmFromIssuer } from "../../auth/tenant-resolution.js";
 import { expandRoleComposites } from "../../auth/person-roles.js";
 
 registerSuiteLifecycle();

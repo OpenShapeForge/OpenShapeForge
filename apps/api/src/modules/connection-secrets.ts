@@ -41,6 +41,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
+  connectionTokenSecretScope,
   decryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -138,16 +139,6 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
     typeof (value as StoredSecret).ciphertext === "string" &&
     typeof (value as StoredSecret).keyId === "string"
   );
-}
-
-/**
- * OAuth tokens live in the same values object as the elicited configuration,
- * but under their own AAD scope — the connection table with `:personal`. The
- * split is deliberate upstream (a rotated elicitation key must not silently
- * invalidate live tokens), so it is honoured rather than flattened here.
- */
-function tokenSecretScope(connectionTable: string): string {
-  return `${connectionTable}:personal`;
 }
 
 const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
@@ -334,7 +325,7 @@ export async function resolveConnectionValues(
   const elicitScope =
     (artifacts.catalog.entities ?? []).find((entity) => entity.table === execution.connectionTable)
       ?.elicitOnCreate?.sourceTable ?? execution.providerTable;
-  const tokenScope = tokenSecretScope(execution.connectionTable);
+  const tokenScope = connectionTokenSecretScope(execution.connectionTable);
   const egress = Array.isArray(row.adapter_egress)
     ? (row.adapter_egress as unknown[]).filter(
         (entry): entry is string => typeof entry === "string",

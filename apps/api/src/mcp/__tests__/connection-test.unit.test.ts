@@ -9,7 +9,7 @@
 import { describe, expect, it } from "bun:test";
 import { testElicitedRow } from "../connection-test.js";
 import type { ElicitOnCreateEntry } from "../elicitation.js";
-import { encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
+import { connectionTokenSecretScope, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 
 const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 7).toString("base64")}`)!;
 const TABLE = "core.connections";
@@ -295,7 +295,7 @@ describe("testElicitedRow", () => {
         id: "c2",
         ownerUserId: "user-1",
         values: {
-          accessToken: encryptSecret(KEYRING, `${TABLE}:personal`, "accessToken", "at-1"),
+          accessToken: encryptSecret(KEYRING, connectionTokenSecretScope(TABLE), "accessToken", "at-1"),
         },
       },
       sourceRow: {

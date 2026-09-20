@@ -24,7 +24,7 @@ import {
   __buildGeneratedMcpServerForTests,
   createRuntimeDeclarativeServiceExecutor,
 } from "../../mcp/generated-mcp-server.js";
-import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
+import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 
 // The public plugin keeps its database generic unbound; the API runtime

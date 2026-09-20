@@ -19,8 +19,9 @@ import { mintApiKey } from "./api-key/format.js";
 import { __resetExchangeCacheForTests } from "./api-key/exchange.js";
 import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";
 import {
-  __resetSessionResolverForTests, __setIdentityLinkForTests, __setTenantForOrganizationForTests, resolveSessionContext,
+  __resetSessionResolverForTests, __setIdentityLinkForTests, resolveSessionContext,
 } from "./identity.js";
+import { __setTenantForOrganizationForTests } from "./tenant-resolution.js";
 import { stubLinkedMembershipForTests } from "./identity-link.test-support.js";
 
 const ISSUER = "https://identity.example.test/realms/host";

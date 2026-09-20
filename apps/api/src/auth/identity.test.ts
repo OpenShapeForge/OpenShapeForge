@@ -5,11 +5,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
-  realmFromIssuer,
   resolveSessionContext,
-  selectOrganizationMembership,
-  SessionAuthenticationUnavailableError,
 } from "./identity.js";
+import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
+import { realmFromIssuer, selectOrganizationMembership } from "./tenant-resolution.js";
 
 const MANAGED_ENV = [
   "OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI",

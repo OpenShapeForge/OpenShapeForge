@@ -16,6 +16,7 @@ import {
   scopesCovered,
 } from "../entity-oauth.js";
 import {
+  connectionTokenSecretScope,
   decryptSecret,
   keyringFromEnv,
   type StoredSecret,
@@ -108,7 +109,7 @@ describe("exchangeCodeForTokens", () => {
     expect(
       decryptSecret(
         KEYRING,
-        "erp.connections:personal",
+        connectionTokenSecretScope("erp.connections"),
         "accessToken",
         values.accessToken as StoredSecret,
       ),
@@ -116,7 +117,7 @@ describe("exchangeCodeForTokens", () => {
     expect(
       decryptSecret(
         KEYRING,
-        "erp.connections:personal",
+        connectionTokenSecretScope("erp.connections"),
         "refreshToken",
         values.refreshToken as StoredSecret,
       ),
@@ -177,7 +178,7 @@ describe("refreshTokens", () => {
     expect(
       decryptSecret(
         KEYRING,
-        "erp.connections:personal",
+        connectionTokenSecretScope("erp.connections"),
         "refreshToken",
         values.refreshToken as StoredSecret,
       ),

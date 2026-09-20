@@ -37,6 +37,7 @@ import {
   writeOAuthTokens,
 } from "../../connectors/oauth.js";
 import {
+  connectionTokenSecretScope,
   contractSecrets,
   decryptSecret,
   encryptSecret,
@@ -905,7 +906,7 @@ describe("authored connection token lifecycle", () => {
           const tenantRowId = randomUUID();
           const foreignUserId = randomUUID();
           const providerId = randomUUID();
-          const secretScope = "oauth_authored_connection_test:personal";
+          const secretScope = connectionTokenSecretScope("oauth_authored_connection_test");
           const initial = {
             accessToken: encryptSecret(KEYRING, secretScope, "accessToken", "access-1"),
             refreshToken: encryptSecret(KEYRING, secretScope, "refreshToken", "refresh-1"),

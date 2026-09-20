@@ -8,10 +8,8 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
-import {
-  __resetSessionResolverForTests,
-  __setTenantForOrganizationForTests,
-} from "../../auth/identity.js";
+import { __resetSessionResolverForTests } from "../../auth/identity.js";
+import { __setTenantForOrganizationForTests } from "../../auth/tenant-resolution.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";

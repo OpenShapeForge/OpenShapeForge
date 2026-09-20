@@ -32,6 +32,7 @@ import { fetchWithAllowedRedirects } from "./declarative-execution.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import {
+  connectionTokenSecretScope,
   encryptSecret,
   keyringFromEnv,
   type SecretKeyring,
@@ -42,15 +43,6 @@ import {
 } from "../connectors/token-lifecycle.js";
 
 type JsonRecord = Record<string, unknown>;
-
-/**
- * Authored connection tokens historically use one AAD scope per connection
- * table, including tenant-owned rows. Keep that compatibility in one place so
- * both lifecycle scopes rotate values that existing rows can still decrypt.
- */
-export function connectionTokenSecretScope(connectionTable: string): string {
-  return `${connectionTable}:personal`;
-}
 
 // The person behind this link may first be routed through the provider's own
 // login (password manager, second factor) before the consent screen; ten

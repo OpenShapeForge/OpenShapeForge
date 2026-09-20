@@ -82,25 +82,15 @@ function asDate(value: Date | string | null): Date | null {
  * was expressed.
  *
  * Exported because the key-listing in `service.ts` must answer the same
- * question as the key-check here: a subset stored by an older writer as a
- * jsonb string has to read as the same narrowing in both places, or a key
- * shows itself as unrestricted in the overview while being restricted in use.
+ * question as the key-check here, or a key shows itself as unrestricted in the
+ * overview while being restricted in use.
  */
 export function parseRoleSubset(value: unknown): string[] | null {
-  const raw = typeof value === "string" ? safeJsonParse(value) : value;
-  if (!Array.isArray(raw)) return null;
-  const roles = raw.filter(
+  if (!Array.isArray(value)) return null;
+  const roles = value.filter(
     (role): role is string => typeof role === "string" && role.trim().length > 0,
   );
   return roles.length > 0 ? roles : null;
-}
-
-function safeJsonParse(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
 }
 
 export async function resolveApiKey(

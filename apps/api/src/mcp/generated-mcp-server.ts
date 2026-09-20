@@ -180,7 +180,6 @@ import { discoverProviderSchema } from "./discovery.js";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import {
-  connectionTokenSecretScope,
   exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
@@ -194,6 +193,7 @@ import {
   refreshLeewaySeconds,
 } from "./connection-token-refresh.js";
 import {
+  connectionTokenSecretScope,
   decryptSecret,
   encryptSecret,
   keyringFromEnv,

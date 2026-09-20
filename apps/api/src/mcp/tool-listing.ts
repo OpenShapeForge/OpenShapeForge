@@ -13,7 +13,7 @@ import {
 } from "@openshapeforge/operations";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import { ListToolsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
-import { sessionInAudience } from "./derived-tools.js";
+import { derivedHelperAvailable } from "./derived-tools.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { productName } from "../config/product-name.js";
 import { EDIT_LEASE_TOOL_NAMES, editLeaseToolsForOperationIds } from "./edit-lease-tools.js";
@@ -115,27 +115,15 @@ export function createToolListing(scope: ServerScope) {
       ...crudToolsForSession(session, tables, locale),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
       ...helperEntries
-        .filter(
-          (entry) => entry.connect && sessionInAudience(entry, session.roles),
-        )
+        .filter((entry) => derivedHelperAvailable(entry, "connect", session.roles))
         .map((entry) => connectHelperTool(entry.connect!.name, entry.connect!.description)),
       ...helperEntries
-        .filter(
-          (entry) =>
-            entry.personalization && sessionInAudience(entry, session.roles),
-        )
+        .filter((entry) => derivedHelperAvailable(entry, "personalization", session.roles))
         .map((entry) =>
           personalizationHelperTool(entry.personalization!.set.name, entry.personalization!.set.description),
         ),
       ...helperEntries
-        .filter(
-          (entry) =>
-            entry.dryRun &&
-            entry.execution &&
-            entry.dryRun.roles.some((role) =>
-              (session.roles ?? []).includes(role),
-            ),
-        )
+        .filter((entry) => derivedHelperAvailable(entry, "dryRun", session.roles))
         .map((entry) => dryRunHelperTool(entry.dryRun!.name, entry.dryRun!.description)),
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),

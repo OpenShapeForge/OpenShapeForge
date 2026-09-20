@@ -7,7 +7,7 @@
 /** The dry-run helper of a derived tool: compose the provider requests without sending them. */
 import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
-import { deriveToolName, derivedToolsFromRows } from "./derived-tools.js";
+import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";
 import { bindingSelected, composeBindingRequest } from "./declarative-execution.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -40,10 +40,8 @@ export async function dryRunToolCall(
     (entry) => entry.dryRun?.name === name,
   );
   if (dryRunEntry) {
-    const allowed = dryRunEntry.dryRun!.roles.some((role) =>
-      (session.roles ?? []).includes(role),
-    );
-    if (!allowed || !dryRunEntry.execution) {
+    // The listing's rule (derivedHelperAvailable): audience AND the dry-run roles.
+    if (!derivedHelperAvailable(dryRunEntry, "dryRun", session.roles) || !dryRunEntry.execution) {
       return failed(
         new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
       );

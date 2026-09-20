@@ -11,6 +11,7 @@ import {
   deriveToolName,
   derivedToolsFromRows,
   inputSchemaFromStoredFields,
+  derivedHelperAvailable,
   sessionInAudience,
 } from "../derived-tools.js";
 import { resolveLocale } from "../locale.js";
@@ -99,6 +100,31 @@ describe("sessionInAudience with an authored audience", () => {
     expect(sessionInAudience(entry, ["integration_user"])).toBe(true);
     expect(sessionInAudience(entry, ["Integrations.All.Read"])).toBe(false);
     expect(sessionInAudience({ roles: ["Integrations.All.Read"] }, ["integration_user"])).toBe(false);
+  });
+});
+
+describe("derivedHelperAvailable", () => {
+  const entry = {
+    roles: ["integration_user", "integration_admin"],
+    connect: { name: "connect_service", description: "", roles: ["integration_admin"] },
+    dryRun: { name: "dry_run_service", description: "", roles: ["integration_admin"] },
+    personalization: { entity: "P", table: "t", serviceRef: "s", instructionField: "i", set: { name: "set_my_preferences", description: "" } },
+    execution: {} as never,
+  };
+  it("gates connect and dry run on the audience AND the helper's own roles, preferences on the audience", () => {
+    // A user of the tools: preferences yes, connect and dry run no.
+    expect(derivedHelperAvailable(entry, "personalization", ["integration_user"])).toBe(true);
+    expect(derivedHelperAvailable(entry, "connect", ["integration_user"])).toBe(false);
+    expect(derivedHelperAvailable(entry, "dryRun", ["integration_user"])).toBe(false);
+    // An administrator: all three.
+    for (const helper of ["connect", "dryRun", "personalization"] as const) {
+      expect(derivedHelperAvailable(entry, helper, ["integration_admin"])).toBe(true);
+    }
+    // The helper's role without the audience is not enough either.
+    expect(derivedHelperAvailable({ ...entry, roles: ["Integrations.All.Read"] }, "connect", ["integration_admin"])).toBe(false);
+    // Connect and dry run need an execution contract; preferences do not.
+    expect(derivedHelperAvailable({ ...entry, execution: undefined }, "connect", ["integration_admin"])).toBe(false);
+    expect(derivedHelperAvailable({ ...entry, execution: undefined }, "personalization", ["integration_admin"])).toBe(true);
   });
 });
 

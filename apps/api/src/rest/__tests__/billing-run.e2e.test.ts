@@ -72,7 +72,7 @@ describe("the milestone billing run on REST", () => {
   test("the projected create computes a percentage into a frozen amount and refuses an amountless milestone", async () => {
     const percent = await call(contracts, "POST", milestones, { agreementId, description: "Kickoff", basisAmount: 10000, percentOfBasis: 25 });
     expect(percent.status).toBe(201);
-    expect(percent.body.data).toMatchObject({ agreementId, status: "pending", basisAmount: 10000, percentOfBasis: 25, amount: 2500 });
+    expect(percent.body.data).toMatchObject({ agreementId, status: "pending", basisAmount: "10000", percentOfBasis: "25", amount: "2500" });
     const invalid = await call(contracts, "POST", milestones, { agreementId, description: "Nothing" });
     expect(invalid.status).toBe(422);
     expect(invalid.body.error).toMatchObject({ code: "VALIDATION", violations: expect.arrayContaining([expect.objectContaining({ field: "amount" })]) });
@@ -98,8 +98,8 @@ describe("the milestone billing run on REST", () => {
 
     const first = await execute(finance, runKey, { agreementId });
     expect(first.status).toBe(200);
-    expect(first.body).toMatchObject({ status: "completed", mode: "milestone", agreementsPlanned: 1, invoicesProduced: 1, totalAmount: 1200 });
-    expect(first.body.items).toEqual([expect.objectContaining({ agreementMilestoneId: triggered.id, agreementId, amount: 1200 })]);
+    expect(first.body).toMatchObject({ status: "completed", mode: "milestone", agreementsPlanned: 1, invoicesProduced: 1, totalAmount: "1200" });
+    expect(first.body.items).toEqual([expect.objectContaining({ agreementMilestoneId: triggered.id, agreementId, amount: "1200" })]);
     const item = first.body.items[0];
     expect(typeof item.invoiceId).toBe("string");
     expect(item.invoiceNumber).toBeGreaterThan(0);
@@ -110,7 +110,7 @@ describe("the milestone billing run on REST", () => {
     expect((await call(finance, "GET", `${milestones}/${pending.id}`)).body.data.status).toBe("pending");
     const invoice = await call(finance, "GET", `/api/rest/v1/invoices/${item.invoiceId}`);
     expect(invoice.status).toBe(200);
-    expect(invoice.body.data).toMatchObject({ invoiceKind: "sales", invoiceStatus: "issued", invoiceNumber: item.invoiceNumber, amountTotal: 1200, agreementId });
+    expect(invoice.body.data).toMatchObject({ invoiceKind: "sales", invoiceStatus: "issued", invoiceNumber: item.invoiceNumber, amountTotal: "1200", agreementId });
     const run = await call(finance, "GET", `${runs}/${first.body.id}`);
     expect(run.body.data).toMatchObject({ status: "completed", mode: "milestone", invoicesProduced: 1, idempotencyKey: runKey });
 

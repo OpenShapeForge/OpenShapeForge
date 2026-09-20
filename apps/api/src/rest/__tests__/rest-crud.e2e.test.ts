@@ -920,7 +920,9 @@ for (const table of restTables) {
       const id = recordPayload(created).id as string;
       trackRestRow(table, id, tenantA);
       const value = recordPayload(await rest(tenantA, "GET", `${base}/${id}`))[field];
-      if (offeredOnCreate) expect(value).toBe(body[field]);
+      // A numeric value is sent as a number and read back as its decimal text.
+      const sent = body[field];
+      if (offeredOnCreate) expect(value).toBe(typeof sent === "number" && typeof value === "string" ? String(sent) : sent);
 
       // Re-pointing the record at a different parent is the integrity gap.
       const repointed = await valueFor(tenantA);

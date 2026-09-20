@@ -9,7 +9,12 @@ import type {
   TrustedSessionContext,
 } from "../auth/trusted-context.js";
 
-export type GraphqlSessionContext = {
+/**
+ * The session a GraphQL resolver sees: the resolved session itself, arrays
+ * copied. Typed as the trusted session so a field the resolver adds (the
+ * acting Relation, the issuer) is carried without an edit here.
+ */
+export type GraphqlSessionContext = TrustedSessionContext & {
   tenantId: string | null;
   userId: string | null;
   /** Opaque binding to the verified interactive login session, when present. */
@@ -69,18 +74,16 @@ export async function createGraphqlContext(
       }
       throw error;
     });
+  // The whole resolved session, arrays copied: what the resolver established
+  // — the credential, the scope, the acting Relation — reaches every resolver
+  // as REST and MCP see it, so no field can go missing here the way `scope`
+  // once did.
   const session: GraphqlSessionContext = {
-    tenantId: resolved.tenantId,
-    userId: resolved.userId,
-    ...(resolved.loginSessionBinding
-      ? { loginSessionBinding: resolved.loginSessionBinding }
-      : {}),
+    ...resolved,
     roles: [...resolved.roles],
     oauthScopes: [...(resolved.oauthScopes ?? [])],
     groups: [...resolved.groups],
     relationGroupIds: [...(resolved.relationGroupIds ?? [])],
-    scope: resolved.scope,
-    credential: resolved.credential,
   };
   return {
     ...(options.db ? { db: options.db } : {}),

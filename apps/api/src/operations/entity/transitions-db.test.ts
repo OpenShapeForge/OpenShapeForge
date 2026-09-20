@@ -116,6 +116,45 @@ async function relatedMilestones(): Promise<[string, string]> {
   await sql`update erp.agreement_milestones set related_milestone_id = ${first}::uuid where id = ${second}::uuid`.execute(privileged!.db);
   return first < second ? [first, second] : [second, first];
 }
+/** A second Agreement reference column on the scratch table, distinct from agreement_id. */
+function twoReferencesBinding(): TransitionBinding {
+  const base = transitionBinding(operation);
+  const parentColumn = {
+    name: "parent_agreement_id", type: "uuid", required: false, primaryKey: false, generated: null, sourceField: "parentAgreementId",
+  };
+  const table: GeneratedCrudTable = {
+    ...structuredClone(base.table),
+    columns: [...base.table.columns, parentColumn],
+    source: {
+      ...structuredClone(base.table.source!),
+      graphql: {
+        ...base.table.source!.graphql!,
+        relationships: [
+          ...(base.table.source!.graphql!.relationships ?? []),
+          {
+            name: "parentAgreementId", target: "Agreement", type: "Agreement", resolve: "belongsTo",
+            foreignKey: "parent_agreement_id", fieldKey: "parentAgreementId", kind: "belongsTo", ownership: "reference",
+          },
+        ],
+      },
+    },
+  };
+  const { present: _present, ...via } = base.referenced[0]!;
+  return {
+    ...base,
+    table,
+    statusColumn: table.columns.find((column) => column.name === "status")!,
+    referenced: [
+      { ...via, in: ["approved"] },
+      { ...via, via: "parentAgreementId", viaColumn: parentColumn, in: ["signed"] },
+    ],
+  };
+}
+async function milestoneWithParent(agreementId: string, parentAgreementId: string): Promise<string> {
+  const id = await milestone("pending", tenant, agreementId);
+  await sql`update erp.agreement_milestones set parent_agreement_id = ${parentAgreementId}::uuid where id = ${id}::uuid`.execute(privileged!.db);
+  return id;
+}
 async function agreement(tenantId = tenant, code: string | null = "AGR-1"): Promise<string> {
   const id = randomUUID();
   await sql`insert into erp.agreements (id, tenant_id, code) values (${id}::uuid, ${tenantId}::uuid, ${code})`.execute(privileged!.db);
@@ -150,7 +189,7 @@ describe("status transitions against PostgreSQL", () => {
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
       create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, activated_at timestamptz, amount numeric, unique(tenant_id,id));
-      create table erp.agreement_milestones(${columnDdl()}, related_milestone_id uuid, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
+      create table erp.agreement_milestones(${columnDdl()}, parent_agreement_id uuid, related_milestone_id uuid, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,
@@ -358,29 +397,41 @@ describe("status transitions against PostgreSQL", () => {
     });
   });
 
-  test("two in preconditions on the same target field with different sets do not overwrite each other", async () => {
-    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
-    const binding: TransitionBinding = {
-      ...transitionBinding(operation),
-      referenced: [
-        { ...via, in: ["approved"] },
-        { ...via, via: "parentAgreementId", in: ["signed"] },
-      ],
-    };
-    const signed = await milestone("pending", tenant, await agreement(tenant, "signed"));
-    const approved = await milestone("pending", tenant, await agreement(tenant, "approved"));
-    const decisions = await withDbSession(restricted!.db, session, async (trx) =>
-      transitionAvailabilityFor(binding)([signed, approved], { db: trx, session: session as never }));
-    // Keying by field name would let the later set win: signed would look available.
-    expect(decisions[signed]).toMatchObject({
+  test("two references on distinct columns batch per target table and execute against both rows", async () => {
+    const binding = twoReferencesBinding();
+    const approved = await agreement(tenant, "approved");
+    const signed = await agreement(tenant, "signed");
+    const passing = await milestoneWithParent(approved, signed);
+    const onlyApproved = await milestoneWithParent(approved, approved);
+    const onlySigned = await milestoneWithParent(signed, signed);
+    const statements: string[] = [];
+    const decisions = await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: CompiledQuery) => {
+        statements.push(query.sql);
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return transitionAvailabilityFor(binding)([passing, onlyApproved, onlySigned], { db: trx, session: session as never });
+    });
+    expect(decisions[passing]).toEqual({ available: true });
+    // Distinct viaColumns: onlySigned's agreement is signed, but parentAgreementId still names its own row.
+    expect(decisions[onlySigned]).toMatchObject({
       available: false,
       error: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
     });
-    expect(decisions[approved]).toMatchObject({
+    expect(decisions[onlyApproved]).toMatchObject({
       available: false,
       error: { code: "INVALID_STATE", message: "trigger requires parentAgreementId.code to be one of signed." },
     });
-    await expect(executeTransition(restricted!.db, session, binding, { id: signed })).rejects.toMatchObject({
+    const targetReads = statements.filter((sql) => /"agreements"/.test(sql) && !/"agreement_milestones"/.test(sql));
+    expect(targetReads).toHaveLength(1);
+
+    expect(await executeTransition(restricted!.db, session, binding, { id: passing })).toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, binding, { id: onlyApproved })).rejects.toMatchObject({
+      operationError: { message: "trigger requires parentAgreementId.code to be one of signed." },
+    });
+    await expect(executeTransition(restricted!.db, session, binding, { id: onlySigned })).rejects.toMatchObject({
       operationError: { message: "trigger requires agreementId.code to be one of approved." },
     });
   });

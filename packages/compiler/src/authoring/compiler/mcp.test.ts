@@ -417,4 +417,106 @@ describe("buildMcp", () => {
       mcpSection({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*requestHeaderNameField.*caller-controlled fields/);
   });
+
+  const ownedBindingsField = {
+    key: "bindings",
+    osfType: "ServiceBinding",
+    cardinality: "collection" as const,
+    relationship: {
+      kind: "hasMany" as const,
+      ownership: "owned" as const,
+      target: "ServiceBinding",
+      inverse: "serviceId",
+    },
+  };
+
+  const relationEntity = (): CoreEntity =>
+    ({
+      ...contactDetail(),
+      fields: [
+        ...(contactDetail().fields ?? []),
+        ownedBindingsField,
+      ],
+    }) as CoreEntity;
+
+  const executionBase = {
+    operationRef: "capabilityId",
+    operationEntity: "Capability",
+    providerRef: "adapterId",
+    providerEntity: "Adapter",
+    connectionEntity: "Connection",
+    connectionProviderRef: "adapterId",
+    connectionValuesField: "values",
+  };
+
+  const relationDerivedTools = {
+    roles: ["viewer"],
+    keyField: "value",
+    descriptionField: "value",
+    inputFieldsField: "value",
+    versionField: "version",
+    execution: {
+      bindingsRelation: "bindings",
+      ...executionBase,
+    },
+  };
+
+  it("accepts bindingsRelation naming an owned hasMany collection", () => {
+    expect(
+      buildMcpSection(relationEntity(), { derivedTools: relationDerivedTools })
+        ?.derivedTools?.execution,
+    ).toEqual(relationDerivedTools.execution);
+  });
+
+  it("refuses execution with both bindingsField and bindingsRelation", () => {
+    expect(() =>
+      buildMcpSection(relationEntity(), {
+        derivedTools: {
+          ...relationDerivedTools,
+          execution: {
+            bindingsField: "value",
+            bindingsRelation: "bindings",
+            ...executionBase,
+          },
+        },
+      }),
+    ).toThrow(
+      /mcp derivedTools.execution on entity "ContactDetail" needs exactly one of bindingsRelation \(owned collection\) or bindingsField/,
+    );
+  });
+
+  it("refuses execution with neither bindingsField nor bindingsRelation", () => {
+    expect(() =>
+      mcpSection({
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "value",
+          descriptionField: "value",
+          inputFieldsField: "value",
+          versionField: "version",
+          execution: executionBase,
+        },
+      }),
+    ).toThrow(
+      /mcp derivedTools.execution on entity "ContactDetail" needs exactly one of bindingsRelation \(owned collection\) or bindingsField/,
+    );
+  });
+
+  it("refuses bindingsRelation that is not an owned hasMany collection", () => {
+    const reference = {
+      ...ownedBindingsField,
+      relationship: {
+        ...ownedBindingsField.relationship,
+        ownership: "reference" as const,
+      },
+    };
+    expect(() =>
+      buildMcpSection(
+        { ...relationEntity(), fields: [...(contactDetail().fields ?? []), reference] } as CoreEntity,
+        { derivedTools: relationDerivedTools },
+      ),
+    ).toThrow(
+      /bindingsRelation "bindings" on entity "ContactDetail" does not name an owned hasMany collection/,
+    );
+  });
 });

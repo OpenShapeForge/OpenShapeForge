@@ -31,6 +31,7 @@ import type {
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 import { mcpConfig, operationByAction } from "../entity-model.js";
+import { assertAuthoredExecutionBindings } from "../../derived-execution.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -53,6 +54,7 @@ const MCP_RESOURCE_URI_PATTERN =
 
 const MCP_DERIVED_EXECUTION_KEYS = new Set([
   "bindingsField",
+  "bindingsRelation",
   "operationRef",
   "operationEntity",
   "providerRef",
@@ -332,12 +334,7 @@ export function buildMcpSection(
             `authoring cannot redirect URL selection to caller-controlled fields.`,
         );
       }
-      if (!fieldKeys.has(execution.bindingsField)) {
-        throw new Error(
-          `mcp derivedTools.execution bindingsField ${JSON.stringify(execution.bindingsField)} ` +
-            `on entity "${coreEntity.entity}" does not name an authored field.`,
-        );
-      }
+      assertAuthoredExecutionBindings(coreEntity, execution);
       for (const [option, value] of Object.entries(execution)) {
         if (typeof value !== "string" || value.length === 0) {
           throw new Error(

@@ -1460,6 +1460,11 @@ describe("derived tools catalog", () => {
     };
     const owner = contract({
       name: "ServiceDefinition",
+      fields: [
+        field({ key: "name" }),
+        field({ key: "revision", baseType: "integer" }),
+        field({ key: "bindings", baseType: "object", cardinality: "collection" }),
+      ],
       mcp: {
         toolPrefix: "service",
         tools: "dedicated",

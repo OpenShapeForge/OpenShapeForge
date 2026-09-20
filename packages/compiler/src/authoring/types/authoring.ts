@@ -343,6 +343,23 @@ export interface McpDeclarativeRequestMapping {
   headers?: McpDeclarativeRequestHeaderMapping[];
 }
 
+/**
+ * Where a derived tool's ordered binding rows live. Exactly one of
+ * `bindingsField` (JSON on the owner) or `bindingsRelation` (owned hasMany
+ * collection whose target carries the binding vocabulary) must be given.
+ */
+export interface McpDerivedExecutionConfig {
+  bindingsField?: string;
+  bindingsRelation?: string;
+  operationRef: string;
+  operationEntity: string;
+  providerRef: string;
+  providerEntity: string;
+  connectionEntity: string;
+  connectionProviderRef: string;
+  connectionValuesField: string;
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate

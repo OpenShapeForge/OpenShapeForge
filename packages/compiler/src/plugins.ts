@@ -120,7 +120,16 @@ export type PluginExecutionCompatibility = {
     visibleToRolesField?: string;
     internalOnlyField?: string;
     execution: {
-      bindingsField: string;
+      /**
+       * JSON collection on the owner row. Mutually exclusive with
+       * `bindingsRelation`.
+       */
+      bindingsField?: string;
+      /**
+       * Owned hasMany collection on the owner whose target rows are the
+       * execution steps. Mutually exclusive with `bindingsField`.
+       */
+      bindingsRelation?: string;
       operationRef: string;
       operationEntity: string;
       providerRef: string;

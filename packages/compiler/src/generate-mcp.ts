@@ -65,6 +65,7 @@ import {
   writableEntityFields,
 } from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
+import { resolveDerivedExecution } from "./derived-execution.js";
 import {
   compiledFieldSchema,
   compiledFieldSchemaWithoutDefinitions,
@@ -746,7 +747,16 @@ export type McpElicitOnCreateDefinition = {
 };
 
 export type McpDerivedExecutionDefinition = {
-  bindingsField: string;
+  /** JSON collection on the owner row. Absent when `bindingsRelation` is set. */
+  bindingsField?: string;
+  /** Owned hasMany collection on the owner. Absent when `bindingsField` is set. */
+  bindingsRelation?: string;
+  /** Target entity of `bindingsRelation`. */
+  bindingsEntity?: string;
+  /** Physical table of the binding entity, resolved at catalog build. */
+  bindingsTable?: string;
+  /** FK on the binding entity back to the owner. */
+  parentRef?: string;
   operationRef: string;
   operationEntity: string;
   /** Physical table of the operation entity, resolved at catalog build. */
@@ -1492,34 +1502,12 @@ export function buildMcpCatalog(
           : {}),
         ...(execution
           ? {
-              execution: {
-                bindingsField: execution.bindingsField,
-                operationRef: execution.operationRef,
-                operationEntity: execution.operationEntity,
-                operationTable: resolveEntityTable(
-                  inputs,
-                  execution.operationEntity,
-                  contract.entity.name,
-                  "derivedTools.execution.operationEntity",
-                ),
-                providerRef: execution.providerRef,
-                providerEntity: execution.providerEntity,
-                providerTable: resolveEntityTable(
-                  inputs,
-                  execution.providerEntity,
-                  contract.entity.name,
-                  "derivedTools.execution.providerEntity",
-                ),
-                connectionEntity: execution.connectionEntity,
-                connectionTable: resolveEntityTable(
-                  inputs,
-                  execution.connectionEntity,
-                  contract.entity.name,
-                  "derivedTools.execution.connectionEntity",
-                ),
-                connectionProviderRef: execution.connectionProviderRef,
-                connectionValuesField: execution.connectionValuesField,
-              },
+              execution: resolveDerivedExecution(
+                inputs,
+                input,
+                execution,
+                "derivedTools.execution",
+              ),
             }
           : {}),
       });
@@ -1652,7 +1640,6 @@ export function buildMcpCatalog(
         ["descriptionField", record.descriptionField],
         ["inputFieldsField", record.inputFieldsField],
         ["versionField", record.versionField],
-        ["bindingsField", record.execution.bindingsField],
       ] as const) {
         assertCompatibilityField(plugin, record.entity, field, option);
       }
@@ -1766,28 +1753,12 @@ export function buildMcpCatalog(
               },
             }
           : {}),
-        execution: {
-          bindingsField: record.execution.bindingsField,
-          operationRef: record.execution.operationRef,
-          operationEntity: record.execution.operationEntity,
-          operationTable: compatibilityEntity(
-            plugin,
-            record.execution.operationEntity,
-          ).table,
-          providerRef: record.execution.providerRef,
-          providerEntity: record.execution.providerEntity,
-          providerTable: compatibilityEntity(
-            plugin,
-            record.execution.providerEntity,
-          ).table,
-          connectionEntity: record.execution.connectionEntity,
-          connectionTable: compatibilityEntity(
-            plugin,
-            record.execution.connectionEntity,
-          ).table,
-          connectionProviderRef: record.execution.connectionProviderRef,
-          connectionValuesField: record.execution.connectionValuesField,
-        },
+        execution: resolveDerivedExecution(
+          inputs,
+          entity,
+          record.execution,
+          `Plugin "${plugin}" execution compatibility`,
+        ),
         compatibility: {
           plugin,
           providerId: record.providerId,

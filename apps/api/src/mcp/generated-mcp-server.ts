@@ -71,9 +71,9 @@ import {
   resourcePathOf,
 } from "./protected-resource-metadata.js";
 import {
-  isOrganizationAlias,
   MCP_MOUNT_PATH,
-  ORGANIZATION_MCP_PATH_PREFIX,
+  ORGANIZATION_MCP_ROUTES,
+  organizationAliasFromPath,
 } from "./organization-resource.js";
 import {
   assertBearerCredential,
@@ -401,7 +401,7 @@ import {
 } from "../operations/runtime.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
-export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
+export { MCP_MOUNT_PATH } from "./organization-resource.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -7802,22 +7802,25 @@ export function registerGeneratedMcpServer(
 
   /**
    * The resource a request is addressed to. `/api/mcp` resolves the tenant
-   * from the token alone (legacy). `/api/mcp/organizations/<alias>` binds the
-   * session to that organization: the token must be a member of it, carry
-   * this resource's URL in `aud` and link to a tenant through the registry
-   * (auth/organization-binding.ts). A refusal there is a 403 with the same
-   * body for every cause, so the path cannot enumerate organizations.
+   * from the token alone. `/<alias>` binds the session to that organization:
+   * the token must be a member of it, carry this resource's URL in `aud` and
+   * link to a tenant through the registry (auth/organization-binding.ts). A
+   * refusal there is a 403 with the same body for every cause, so the path
+   * cannot enumerate organizations.
    */
   async function requireMcpSession(request: FastifyRequest): Promise<{
     db: OpenShapeForgeDatabase;
     session: TrustedSessionContext;
     resource: string;
   }> {
-    const alias = (request.params as { alias?: unknown } | undefined)?.alias;
-    if (usesHostOrganizationContext() && alias !== undefined) {
+    const routed = (request.params as { alias?: unknown } | undefined)?.alias;
+    if (usesHostOrganizationContext() && routed !== undefined) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
-    if (alias !== undefined && !isOrganizationAlias(alias)) {
+    // The parametric route also matches a reserved first segment and a
+    // malformed alias; the one path parser decides, not the route table.
+    const alias = routed === undefined ? undefined : organizationAliasFromPath(request.url);
+    if (routed !== undefined && (alias === null || alias !== routed)) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
     const resource = resourcePathOf(request, alias ?? null);
@@ -8652,18 +8655,16 @@ export function registerGeneratedMcpServer(
       handler: handleMcpRequest,
     });
     // One resource per Keycloak Organization, same server, same handler;
-    // what differs is how the session is admitted (requireMcpSession).
-    instance.route({
-      url: `${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
-      method: ["GET", "POST", "DELETE"],
-      handler: handleMcpRequest,
-    });
-    // The short spellings `/<alias>` and `/<alias>/mcp` arrive here already
-    // rewritten to the long URL (roles/api.ts, rewriteUrl), so there is one
-    // handler, one set of routes and one parser for the alias. What a client
-    // is TOLD the resource is called comes from organizationMcpPath, which is
-    // the short form — the long URL is now an internal spelling that also
-    // happens to still be reachable from outside.
+    // what differs is how the session is admitted (requireMcpSession). Both
+    // spellings of the resource are routed as spelled; what a client is TOLD
+    // the resource is called comes from organizationMcpPath.
+    for (const url of ORGANIZATION_MCP_ROUTES) {
+      instance.route({
+        url,
+        method: ["GET", "POST", "DELETE"],
+        handler: handleMcpRequest,
+      });
+    }
   });
 }
 

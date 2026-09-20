@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * `/api/mcp/organizations/<alias>` admission, in-process against the real app
+ * `/<alias>` (organization MCP resource) admission, in-process against the real app
  * with tokens signed by a throwaway key served as a JWKS. No database: the
  * registry read is stubbed, and a request that passes admission is recognised
  * by the 503 the handler answers when it then reaches for the database — the
@@ -148,7 +148,7 @@ async function call(path: string, token?: string, extraHeaders: Record<string, s
 
 describe("per-organization MCP resource admission", () => {
   test("an unauthenticated request is challenged with the per-path metadata and its scopes", async () => {
-    const response = await call("/api/mcp/organizations/zerocopter-dev");
+    const response = await call("/zerocopter-dev");
     expect(response.statusCode).toBe(401);
     const challenge = String(response.headers["www-authenticate"]);
     expect(challenge).toContain(
@@ -160,7 +160,7 @@ describe("per-organization MCP resource admission", () => {
 
   test("a bound Zerocopter token is admitted on Zerocopter's resource (and only then needs the database)", async () => {
     const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
-    const response = await call("/api/mcp/organizations/zerocopter-dev", token);
+    const response = await call("/zerocopter-dev", token);
     // Bound, and then refused as a person no membership record can be read
     // for: this app has no database, and a person is never admitted from the
     // token alone (503, not a session).
@@ -170,8 +170,8 @@ describe("per-organization MCP resource admission", () => {
 
   test("the same Zerocopter token on Hubble's resource is refused like an unknown alias", async () => {
     const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
-    const onHubble = await call("/api/mcp/organizations/hubble", token);
-    const onUnknown = await call("/api/mcp/organizations/no-such-org", token);
+    const onHubble = await call("/hubble", token);
+    const onUnknown = await call("/no-such-org", token);
     expect(onHubble.statusCode).toBe(403);
     expect(onUnknown.statusCode).toBe(403);
     const hubbleBody = JSON.parse(onHubble.body);
@@ -196,7 +196,7 @@ describe("per-organization MCP resource admission", () => {
       organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
       scope: "openid",
     });
-    const response = await call("/api/mcp/organizations/zerocopter-dev", token);
+    const response = await call("/zerocopter-dev", token);
     expect(response.statusCode).toBe(403);
     const body = JSON.parse(response.body);
     expect(body.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
@@ -215,7 +215,7 @@ describe("per-organization MCP resource admission", () => {
       organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
       scope: "openid mcp-resource:hubble",
     });
-    const response = await call("/api/mcp/organizations/hubble", token);
+    const response = await call("/hubble", token);
     expect(response.statusCode).toBe(403);
   });
 
@@ -225,7 +225,7 @@ describe("per-organization MCP resource admission", () => {
       organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
       scope: "openid organization:zerocopter-dev mcp-resource:zerocopter-dev",
     });
-    const response = await call("/api/mcp/organizations/zerocopter-dev", token);
+    const response = await call("/zerocopter-dev", token);
     expect(response.statusCode).toBe(403);
   });
 
@@ -235,14 +235,14 @@ describe("per-organization MCP resource admission", () => {
       organization: { orphan: { id: "00000000-0000-4000-8000-000000000000" } },
       scope: "openid organization:orphan mcp-resource:orphan",
     });
-    const response = await call("/api/mcp/organizations/orphan", token);
+    const response = await call("/orphan", token);
     expect(response.statusCode).toBe(403);
     expect(JSON.parse(response.body).error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
   });
 
   test("a malformed alias is not a resource", async () => {
     const token = await boundToken("zerocopter-dev", ZEROCOPTER_ORG);
-    const response = await call("/api/mcp/organizations/-not-an-alias", token);
+    const response = await call("/-not-an-alias", token);
     expect(response.statusCode).toBe(404);
   });
 
@@ -258,7 +258,7 @@ describe("per-organization MCP resource admission", () => {
         { secret: "organization-resource-test-secret" },
       );
       const response = await call(
-        "/api/mcp/organizations/hubble",
+        "/hubble",
         undefined,
         Object.fromEntries(headers.entries()),
       );

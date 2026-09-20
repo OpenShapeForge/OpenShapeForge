@@ -61,7 +61,7 @@ export type ResolveSessionOptions = {
    */
   requiredAudience?: string;
   /**
-   * Set by the per-organization MCP resource (`/api/mcp/organizations/<alias>`).
+   * Set by the per-organization MCP resource (`/<alias>`).
    * The session is then only produced from a bearer JWT that is bound to that
    * resource — membership of the organization, the resource URL in `aud`, a
    * tenant linked to the organization — and is pinned to that tenant. Any

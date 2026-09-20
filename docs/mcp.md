@@ -144,7 +144,8 @@ request-rate boundary applies.
 Beside `/api/mcp` the same server answers on one resource per Keycloak
 Organization:
 
-    POST|GET|DELETE /api/mcp/organizations/<alias>
+    POST|GET|DELETE /<alias>
+    POST|GET|DELETE /<alias>/mcp
 
 `<alias>` is the Organization's Keycloak alias — the key of the `organization`
 claim and the name the built-in `organization:<alias>` scope selects — not the
@@ -175,14 +176,14 @@ replayed here. Only a bearer JWT is accepted on these paths; API keys and
 trusted-context headers name a tenant, not a membership, and are refused.
 
 Each resource has its own metadata document,
-`/.well-known/oauth-protected-resource/api/mcp/organizations/<alias>`, whose
+`/.well-known/oauth-protected-resource/<alias>`, whose
 `resource` is that exact URL and whose `scopes_supported` lists the two scopes
 a client must request:
 
 - `organization:<alias>` — Keycloak's built-in dynamic scope; selects the
   membership and emits `organization.<alias>.id`;
 - `mcp-resource:<alias>` — a client scope with one `oidc-audience-mapper` per
-  public origin, value `<origin>/api/mcp/organizations/<alias>`. It
+  public origin, value `<origin>/<alias>`. It
   deliberately does not share the `organization:` prefix: a static client
   scope named `organization:<alias>` shadows the dynamic one, and the token
   then carries the audience but no membership claim.
@@ -206,7 +207,7 @@ environment:
 
 | variable | meaning |
 | --- | --- |
-| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/api/mcp/organizations/<alias>`; the same variable the MCP server reads for its callback URL |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/<alias>`; the same variable the MCP server reads for its callback URL |
 | `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` | optional comma-separated *additional* origins (a second ingress, a local port beside the public one); each gets its own mapper, and an origin removed from the list is removed from Keycloak on the next re-apply |
 | `OPENSHAPEFORGE_MCP_CLIENTS` | optional comma-separated `clientId`s the scope is attached to; default `codex,openshapeforge-gateway,openshapeforge-inspector`; a listed client the realm does not have is skipped |
 
@@ -333,7 +334,7 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
 - `groups` are the Keycloak Organization memberships the token carries, with
   the one the session acts for marked `active`. On a per-organization endpoint
-  (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
+  (`/<alias>`) that is the bound organization, whatever
   `organization:<alias>` scope the token also carries. Only the active group
   can be named from the registry; other memberships show their alias (naming
   them would take a registry read outside the session's own row, which

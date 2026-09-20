@@ -52,7 +52,7 @@ export type SessionIdentity = {
   organizations: Array<{ alias: string; active: boolean }>;
   /**
    * Alias of the organization whose per-organization endpoint
-   * (`/api/mcp/organizations/<alias>`) the session was opened on; null on the
+   * (`/<alias>`) the session was opened on; null on the
    * shared `/api/mcp` path. When set it is the active membership, whatever
    * scope the token also carries: the binding pinned the tenant.
    */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The three checks that admit a token to `/api/mcp/organizations/<alias>`,
+ * The three checks that admit a token to `/<alias>`,
  * exercised without a verifier or a database: membership, audience, registry.
  */
 import { describe, expect, test } from "bun:test";
@@ -12,7 +12,6 @@ import {
 } from "../organization-binding.js";
 import {
   isOrganizationAlias,
-  legacyOrganizationMcpPath,
   organizationAliasFromPath,
   organizationMcpExplicitPath,
   organizationMcpPath,
@@ -21,8 +20,8 @@ import {
   organizationResourceScopes,
 } from "../../mcp/organization-resource.js";
 
-const HUBBLE = "http://127.0.0.1:3161/api/mcp/organizations/hubble";
-const ZEROCOPTER = "http://127.0.0.1:3161/api/mcp/organizations/zerocopter-dev";
+const HUBBLE = "http://127.0.0.1:3161/hubble";
+const ZEROCOPTER = "http://127.0.0.1:3161/zerocopter-dev";
 const ZEROCOPTER_ORG = "8ba94fb8-08d3-4907-9af3-5bd1e2018f46";
 const HUBBLE_ORG = "2e45b405-2acc-4199-b1e3-9a9dc1236ec3";
 
@@ -72,7 +71,7 @@ describe("selectBoundOrganization (membership + audience)", () => {
     const onUnknown = refusal(() =>
       selectBoundOrganization(zerocopterIdentity, zerocopterClaims, {
         alias: "no-such-org",
-        resource: "http://127.0.0.1:3161/api/mcp/organizations/no-such-org",
+        resource: "http://127.0.0.1:3161/no-such-org",
       }),
     );
     expect(onHubble.status).toBe(403);
@@ -122,10 +121,10 @@ describe("selectBoundOrganization (membership + audience)", () => {
 
   test("audience must name THIS resource: another origin or another alias is not it", () => {
     for (const aud of [
-      "http://127.0.0.1:3121/api/mcp/organizations/zerocopter-dev", // other origin
+      "http://127.0.0.1:3121/zerocopter-dev", // other origin
       HUBBLE, // other organization
       "http://127.0.0.1:3161/api/mcp", // legacy resource
-      "http://127.0.0.1:3161/api/mcp/organizations/zerocopter-dev/", // trailing slash
+      "http://127.0.0.1:3161/zerocopter-dev/", // trailing slash
     ]) {
       const error = refusal(() =>
         selectBoundOrganization(
@@ -197,7 +196,7 @@ describe("bindOrganizationResource (+ registry)", () => {
       tenantId: null,
       organizations: { orphan: membership("00000000-0000-4000-8000-000000000000") },
     };
-    const resource = "http://127.0.0.1:3161/api/mcp/organizations/orphan";
+    const resource = "http://127.0.0.1:3161/orphan";
     await expect(
       bindOrganizationResource(orphan, { aud: [resource] }, { alias: "orphan", resource }, "openshapeforge", registry),
     ).rejects.toBeInstanceOf(OrganizationBindingError);
@@ -267,13 +266,10 @@ describe("organization resource paths", () => {
   });
 
   test("reads the alias off a resource URL, ignoring the query string", () => {
-    expect(organizationAliasFromPath("/api/mcp/organizations/hubble")).toBe("hubble");
-    expect(organizationAliasFromPath("/api/mcp/organizations/hubble?org=zerocopter")).toBe("hubble");
     expect(organizationAliasFromPath("/api/mcp")).toBeNull();
-    expect(organizationAliasFromPath("/api/mcp/organizations/")).toBeNull();
-    expect(organizationAliasFromPath("/api/mcp/organizations/a/b")).toBeNull();
-    expect(organizationAliasFromPath("/api/mcp/organizations")).toBeNull();
-    // The short spelling, which is the canonical one: the alias IS the path.
+    // The pre-rename spelling is no longer a resource; `api` is reserved.
+    expect(organizationAliasFromPath("/api/mcp/organizations/hubble")).toBeNull();
+    // The alias IS the path.
     expect(organizationAliasFromPath("/hubble")).toBe("hubble");
     expect(organizationAliasFromPath("/hubble/mcp")).toBe("hubble");
     expect(organizationAliasFromPath("/hubble/api/rest/v1/quotes")).toBe("hubble");
@@ -286,10 +282,10 @@ describe("organization resource paths", () => {
     }
     expect(organizationMcpPath("hubble")).toBe("/hubble");
     expect(organizationMcpExplicitPath("hubble")).toBe("/hubble/mcp");
-    expect(legacyOrganizationMcpPath("hubble")).toBe("/api/mcp/organizations/hubble");
-    // The rewrite: one function, and the only place that knows both spellings.
-    expect(rewriteShortAddress("/hubble")).toBe("/api/mcp/organizations/hubble");
-    expect(rewriteShortAddress("/hubble/mcp")).toBe("/api/mcp/organizations/hubble");
+    // The rewrite: the MCP resource is routed as spelled, the other surfaces
+    // are mapped onto the routes the server already has.
+    expect(rewriteShortAddress("/hubble")).toBe("/hubble");
+    expect(rewriteShortAddress("/hubble/mcp")).toBe("/hubble/mcp");
     expect(rewriteShortAddress("/hubble/api/rest/v1/quotes?a=1")).toBe("/api/rest/v1/quotes?a=1");
     expect(rewriteShortAddress("/hubble/graphql")).toBe("/api/graphql");
     expect(rewriteShortAddress("/admin/mcp")).toBe("/api/control/mcp");

@@ -11,6 +11,7 @@ import {
   DATA_ACQUISITION_TOOL_FOOTER,
   advertisedEntityTool,
   advertisedToolBytes,
+  schemaInLanguage,
 } from "@openshapeforge/operations";
 import {
   advertisedToolSizes,
@@ -1191,11 +1192,14 @@ describe("buildMcpCatalog", () => {
         description: { en: create.description.split(".")[0] + ".", nl: "Maakt één widget aan na validatie van de canonieke velden, uitgebreid." },
       }]]),
     });
-    // The bare compiled entry, plus what the listing adds: the reminder on a
-    // write tool, the title in the annotations and the app link.
+    // The bare compiled entry in one language, plus what the listing adds:
+    // the reminder on a write tool, the title in the annotations and the app
+    // link. (The compiled entry carries every language; the listing one.)
     const bare = advertisedToolBytes({
       name: create.name, title: create.title, description: create.description,
-      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+      inputSchema: schemaInLanguage(create.inputSchema, "en"),
+      outputSchema: schemaInLanguage(create.outputSchema, "en"),
+      annotations: create.annotations,
     });
     const listed = advertisedToolBytes(advertisedEntityTool({
       name: create.name, operation: "create", title: create.title, description: create.description,

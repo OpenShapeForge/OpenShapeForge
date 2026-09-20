@@ -7,10 +7,11 @@
  * read from the manifest or the database — never from an entity's name.
  */
 import { expect } from "bun:test";
+import { sql } from "kysely";
 import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
-import { fieldName, referencingRows } from "./entity-factory.js";
-import { foreignKeyTargets } from "./entity-factory.js";
-import type { GeneratedTable, Identity } from "./harness.js";
+import { fieldName, foreignKeyTargets, referencingRows } from "./entity-factory.js";
+import { isEntityBackedCreate } from "./operations.js";
+import { getSeedRuntime, type GeneratedTable, type Identity } from "./harness.js";
 
 type Column = GeneratedTable["columns"][number];
 
@@ -30,16 +31,24 @@ export function unavailableOnFreshRecord(table: GeneratedTable): ReadonlySet<str
   return ids;
 }
 
-/** Every offer on a fresh record is available, except the permitted INVALID_STATE transitions. */
+/**
+ * The offers on a fresh record: every transition that cannot fire yet is
+ * listed, unavailable with INVALID_STATE — an offer that hid it or called
+ * it available would be a finding — and every other offer is available.
+ */
 export function expectFreshRecordOffers(
   table: GeneratedTable,
   offers: ReadonlyArray<{ operation: { id: string }; available: boolean; error?: { code?: string } }>,
 ): void {
-  const permitted = unavailableOnFreshRecord(table);
+  const expectedUnavailable = unavailableOnFreshRecord(table);
+  for (const id of expectedUnavailable) {
+    const offer = offers.find((candidate) => candidate.operation.id === id);
+    expect(offer).toBeDefined();
+    expect(offer).toMatchObject({ available: false, error: { code: "INVALID_STATE" } });
+  }
   for (const offer of offers) {
-    if (offer.available) continue;
-    expect(permitted.has(offer.operation.id)).toBe(true);
-    expect(offer.error?.code).toBe("INVALID_STATE");
+    if (expectedUnavailable.has(offer.operation.id)) continue;
+    expect(offer.available).toBe(true);
   }
 }
 
@@ -73,6 +82,28 @@ export function expectWriterRefusal(refusal: { code?: string | undefined; messag
 }
 
 /**
+ * The refusal of a create naming an operation-written field. An entity-backed
+ * create refuses it the way an update does: BAD_USER_INPUT naming the field
+ * and every writer. A plugin-backed create has a closed authored contract of
+ * its own, so the field is refused as not part of that contract — VALIDATION
+ * with a violation on the field — unless the transport checks the write
+ * policy first and answers with the writer refusal (MCP does). Either names
+ * the field; only the entity-backed answer must name the writers.
+ */
+export function expectCreateWriteRefusal(
+  table: GeneratedTable,
+  refusal: { code?: string | undefined; message?: string | undefined; text?: string | undefined; violations?: Array<{ field?: string }> | undefined },
+  field: string,
+  writers: readonly string[],
+): void {
+  if (isEntityBackedCreate(table)) return expectWriterRefusal(refusal, field, writers);
+  const text = refusal.text ?? `${refusal.code ?? ""} ${refusal.message ?? ""} ${JSON.stringify(refusal.violations ?? [])}`;
+  if (text.includes("BAD_USER_INPUT")) return expectWriterRefusal(refusal, field, writers);
+  expect(text).toContain("VALIDATION");
+  expect(text).toContain(field);
+}
+
+/**
  * What a delete must do, decided before it runs from what the create left
  * behind: rows that reference the record through the schema's foreign keys
  * mean the delete must be refused (REFERENCE_IN_USE) and the record must
@@ -87,4 +118,15 @@ export async function expectedDeleteOutcome(
 ): Promise<{ refused: boolean; referencing: string[] }> {
   const referencing = await referencingRows(table, id, identity);
   return { refused: referencing.length > 0, referencing };
+}
+
+/**
+ * Set an operation-written reference on a row the way its writer would —
+ * directly in storage, past the write policy every transport enforces — so
+ * a sweep can prove the filter finds a row that carries the value. The
+ * writer Operation's own behaviour is that Operation's suite, not the
+ * sweep's; this is a fixture, and it says so.
+ */
+export async function plantReference(table: GeneratedTable, id: string, column: Column, value: string): Promise<void> {
+  await sql`update ${sql.id(table.schema, table.table)} set ${sql.id(column.name)} = ${value}::uuid where id = ${id}::uuid`.execute(getSeedRuntime().db);
 }

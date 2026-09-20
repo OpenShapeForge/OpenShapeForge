@@ -23,7 +23,6 @@ import {
   tablesByName,
 } from "../../../graphql/__tests__/e2e/entity-factory.js";
 import {
-  acknowledgementRequired,
   isCanonical,
   isEntityBackedCreate,
   leaseRequired,

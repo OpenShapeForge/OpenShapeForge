@@ -18,14 +18,11 @@ import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import catalog from "../../generated/mcp/tools.json" with { type: "json" };
 import {
-  createRow,
   eligibleTables,
   fieldName,
   foreignKeyTargets,
-  isMutableColumn,
   nextMarker,
   contractSample,
-  schemaSample,
   tables,
   tablesByName,
   untrackRow,
@@ -33,11 +30,9 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
-  isCanonical,
   isEntityBackedCreate,
   leaseRequired,
   operationIdFor,
-  versionRequired,
 } from "../../graphql/__tests__/e2e/operations.js";
 import { expectedDeleteOutcome, expectFreshRecordOffers, operationWrittenReferences } from "../../graphql/__tests__/e2e/reference-policy.js";
 import {
@@ -75,10 +70,8 @@ import {
   toolError,
   toolNameFor,
   toolPayload,
-  withoutPluginOffers,
   workflowOperator,
   type CrudOperation,
-  type McpTable,
 } from "./e2e/mcp-sweep.js";
 
 registerSuiteLifecycle();

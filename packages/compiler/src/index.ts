@@ -15,8 +15,10 @@ import {
 } from "./authoring/generate-keycloak-artifacts.js";
 import {
   buildRoleComposites,
+  realmRoleNames,
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
+  tenantRealmName,
 } from "./authoring/role-composites.js";
 import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
 import {
@@ -489,6 +491,11 @@ export async function collectAllArtifacts(
           operationToolProjection,
           // The connector tools share the listing, so they share its byte budget.
           connectorMcpTools(connectors),
+          // An execution compatibility record's audience must name roles the
+          // TENANT realm knows — the realm the tenant API and its derived
+          // tools serve; a control-realm role is no audience for them. The
+          // realm export is what Keycloak will import.
+          realmRoleNames(keycloakArtifacts, tenantRealmName(loadAuthorizationConfigs(authoringDir))),
         ),
       },
     ],

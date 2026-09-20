@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { assertV2Authoring, v2GraphqlOperationActions } from "../entity-v2.js";
+import { graphqlOperationActions } from "../entity-model.js";
+import { assertEntityAuthoring } from "../entity-authoring.js";
 import { buildEntityOperations } from "./entity-operations.js";
 
 function relationSource(): Parameters<typeof buildEntityOperations>[0] {
@@ -188,7 +189,7 @@ describe("canonical entity operations", () => {
       delete: true,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
     const remove = source.coreEntity.operations!.remove!;
     expect(buildEntityOperations(source).delete).toMatchObject({
       id: "Relation.remove",
@@ -217,9 +218,9 @@ describe("canonical entity operations", () => {
     remove.effects.data = "write";
     remove.auth = { mode: "session", roleGroups: [["Relations.Delete"], ["Relations.Read"]] };
     remove.tenancy = { mode: "required" };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
     remove.auth.roleGroups![1] = ["Relations.Hidden"];
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /operation role\(s\) that cannot read it: "Relations.Hidden"/,
     );
     implementation.action = "delete";
@@ -229,13 +230,13 @@ describe("canonical entity operations", () => {
     remove.effects.data = "delete";
 
     remove.effects.data = "write";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must declare delete data effects/,
     );
     remove.effects.data = "delete";
     (remove.output!.schema.properties as Record<string, { type: string }>).deleted!.type =
       "string";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /required boolean deleted result/,
     );
     (remove.output!.schema.properties as Record<string, { type: string }>).deleted!.type =
@@ -243,7 +244,7 @@ describe("canonical entity operations", () => {
     const rest = source.coreEntity.interfaces!.rest!.operations!.remove;
     if (!rest) throw new Error("Expected a REST projection");
     rest.method = "PATCH";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /use DELETE/,
     );
   });
@@ -341,7 +342,7 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "connection.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "connection.yaml")).not.toThrow();
     expect(buildEntityOperations(source).create?.interaction).toEqual({
       confirmation: { mode: "none" },
       secureInput: {
@@ -356,7 +357,7 @@ describe("canonical entity operations", () => {
     const createImplementation = source.coreEntity.operations!.create!.implementation;
     if (createImplementation.type !== "entity") throw new Error("Expected entity implementation");
     createImplementation.action = "update";
-    expect(() => assertV2Authoring(source.coreEntity!, "connection.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "connection.yaml")).toThrow(
       /secureInput.*supported only on create/,
     );
   });
@@ -396,7 +397,7 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "adapter.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "adapter.yaml")).not.toThrow();
     expect(buildEntityOperations(source).create?.prerequisites).toEqual([{
       operation: "osf-integration.provider.setup-guide",
       receipt: { binding: "loginSession" },
@@ -405,7 +406,7 @@ describe("canonical entity operations", () => {
     const implementation = source.coreEntity.operations!.create!.implementation;
     if (implementation.type !== "entity") throw new Error("Expected entity implementation");
     implementation.action = "update";
-    expect(() => assertV2Authoring(source.coreEntity!, "adapter.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "adapter.yaml")).toThrow(
       /prerequisites.*supported only.*create Operations/,
     );
   });
@@ -479,7 +480,7 @@ describe("canonical entity operations", () => {
     expect(buildEntityOperations(source).delete?.concurrency).toEqual({
       version: { mode: "required", field: "updatedAt" },
     });
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
   });
 
   test("allows bounded challenges for existing update targets only", () => {
@@ -550,48 +551,48 @@ describe("canonical entity operations", () => {
       throw new Error("Expected challenge fixture.");
     }
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
 
     updateConfirmation.challenge.expiresAfter = "PT16M";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /between PT30S and PT15M/,
     );
 
     updateConfirmation.challenge.expiresAfter = "P1M";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /fixed ISO-8601 duration/,
     );
 
     updateConfirmation.challenge.expiresAfter = "PT5M";
     const displayName = source.coreEntity.fields[0]!;
     Object.assign(displayName, { osfType: "object", baseType: "object" });
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must be a single scalar field/,
     );
 
     Object.assign(displayName, { osfType: "string", baseType: "string" });
     displayName.cardinality = "collection";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must be a single scalar field/,
     );
 
     displayName.cardinality = "single";
     source.coreEntity.authorization!.roles.update = ["Relations.UpdateOnly"];
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /operation role\(s\) that cannot read it: "Relations.UpdateOnly"/,
     );
 
     source.coreEntity.authorization!.roles.read.push("Relations.UpdateOnly");
     displayName.authorization = { roles: { read: ["Relations.Read"] } };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /operation role\(s\) that cannot read it: "Relations.UpdateOnly"/,
     );
 
     displayName.authorization.roles.read!.push("Relations.UpdateOnly");
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
 
     delete displayName.persisted;
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /challenge field "displayName" must resolve to a persisted runtime column/,
     );
     displayName.persisted = { column: "display_name", storageClass: "core" };
@@ -600,7 +601,7 @@ describe("canonical entity operations", () => {
     const challengedImplementation = source.coreEntity.operations!.update!.implementation;
     if (challengedImplementation.type !== "entity") throw new Error("Expected entity implementation");
     challengedImplementation.action = "create";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /challenges require a mutable record target/,
     );
   });
@@ -642,7 +643,7 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /read operations cannot require mutation controls/,
     );
 
@@ -658,7 +659,7 @@ describe("canonical entity operations", () => {
       },
     };
     source.coreEntity.interfaces = { rest: { operations: { create: {} } } };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /version concurrency requires a mutable record target/,
     );
 
@@ -666,7 +667,7 @@ describe("canonical entity operations", () => {
     source.coreEntity.operations.create!.confirmation = {
       mode: "acknowledgement",
     };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
   });
 
   test("reserves canonical mutation-control names from v2 entity fields", () => {
@@ -700,7 +701,7 @@ describe("canonical entity operations", () => {
       "confirmationAnswer",
     ]) {
       source.coreEntity.fields = [{ key, osfType: "string", baseType: "string" }];
-      expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
         new RegExp(`field "${key}" uses a reserved platform mutation-control name`),
       );
     }
@@ -736,8 +737,8 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
-    expect(v2GraphqlOperationActions(source.coreEntity!)).toEqual({
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(graphqlOperationActions(source.coreEntity!)).toEqual({
       list: true,
       get: false,
       create: false,
@@ -746,7 +747,7 @@ describe("canonical entity operations", () => {
     });
 
     source.coreEntity.interfaces = { graphql: { operations: { list: false } } };
-    expect(v2GraphqlOperationActions(source.coreEntity!)).toEqual({
+    expect(graphqlOperationActions(source.coreEntity!)).toEqual({
       list: false,
       get: false,
       create: false,
@@ -796,7 +797,7 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
     expect(buildEntityOperations(source).update?.concurrency).toEqual({
       version: { mode: "required", field: "updatedAt" },
       editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
@@ -805,7 +806,7 @@ describe("canonical entity operations", () => {
     source.coreEntity.operations!.update!.concurrency = {
       editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
     };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /editLease without required version concurrency/,
     );
 
@@ -813,13 +814,13 @@ describe("canonical entity operations", () => {
       version: { mode: "required", field: "updatedAt" },
     };
     source.coreEntity.fields[0]!.readOnly = false;
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /must be a readOnly datetime field/,
     );
 
     source.coreEntity.fields[0]!.readOnly = true;
     delete source.coreEntity.fields[0]!.persisted;
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /version field "updatedAt".*persisted runtime column/,
     );
     source.coreEntity.fields[0]!.persisted = {
@@ -834,7 +835,7 @@ describe("canonical entity operations", () => {
       version: { mode: "required", field: "updatedAt" },
       editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
     };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /version concurrency requires a mutable record target/,
     );
 
@@ -843,13 +844,13 @@ describe("canonical entity operations", () => {
       version: { mode: "required", field: "updatedAt" },
       editLease: { mode: "required", expiresAfterInactivity: "P1M" },
     };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /fixed ISO-8601 duration between PT30S and P1D/,
     );
 
     source.coreEntity.operations!.update!.concurrency.editLease!.expiresAfterInactivity =
       "PT5S";
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /fixed ISO-8601 duration between PT30S and P1D/,
     );
   });
@@ -915,23 +916,23 @@ describe("canonical entity operations", () => {
       },
       interfaces: { rest: { operations: { archive: {} } } },
     };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
 
     const auth = source.coreEntity.operations!.archive!.auth;
     if (auth?.mode !== "session") throw new Error("Expected session auth");
     delete auth.roles;
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
     auth.roles = [];
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).not.toThrow();
 
     source.coreEntity.operations!.archive!.target = { scope: "collection" };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /recordPermission requires a record target/,
     );
 
     source.coreEntity.operations!.archive!.target = { scope: "record", inputField: "id" };
     delete source.coreEntity.authorization!.rowAccess!.recordPermissions;
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /entity has no authorization\.rowAccess\.recordPermissions policy/,
     );
   });
@@ -961,7 +962,7 @@ describe("canonical entity operations", () => {
       },
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity!, "relation.yaml")).toThrow(
       /server-side key enforcement must land/,
     );
   });

@@ -30,7 +30,7 @@ import type {
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
-import { v2McpConfig, v2OperationByAction } from "../entity-v2.js";
+import { mcpConfig, operationByAction } from "../entity-model.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -79,7 +79,7 @@ export function buildMcp(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): McpSection | undefined {
-  return buildMcpSection(coreEntity, v2McpConfig(coreEntity), crud);
+  return buildMcpSection(coreEntity, mcpConfig(coreEntity), crud);
 }
 
 /** Compile a resolved MCP configuration; absent or disabled means no tools (fail closed). */
@@ -116,7 +116,7 @@ export function buildMcpSection(
     : requestedOperations;
   const operationInstructions = Object.fromEntries(
     MCP_OPERATION_KEYS.flatMap((action) => {
-      const operationKey = v2OperationByAction(coreEntity)[action]?.[0];
+      const operationKey = operationByAction(coreEntity)[action]?.[0];
       const projection = operationKey
         ? coreEntity.interfaces?.mcp?.operations?.[operationKey]
         : undefined;

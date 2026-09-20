@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { deriveEntityOsfTypes, normalizeEntityFields } from "./entity-fields.js";
-import { assertV2Authoring, v2WebOperationActions } from "./entity-v2.js";
+import { webOperationActions } from "./entity-model.js";
+import { assertEntityAuthoring } from "./entity-authoring.js";
 import { createAuthoringValidator } from "./schema-validation.js";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import { generateArtifacts } from "../generate.js";
@@ -21,21 +22,21 @@ test("identity-bearing v3 storage entities have no implicit CRUD; v2 and identit
   const internal = entity("Internal", [{ key: "name", osfType: "string" }]);
   const validator = createAuthoringValidator();
   expect(() => validator.validate(internal, "internal.yaml")).not.toThrow();
-  expect(() => assertV2Authoring(internal, "internal.yaml")).not.toThrow();
+  expect(() => assertEntityAuthoring(internal, "internal.yaml")).not.toThrow();
   expect(buildCrud(internal).operations).toEqual({ list: false, get: false, create: false, update: false, delete: false });
   expect(() => validator.validate({ ...internal, schemaVersion: 2 }, "legacy.yaml")).toThrow();
-  expect(() => assertV2Authoring({ ...internal, schemaVersion: 2 }, "legacy.yaml")).toThrow();
-  expect(() => assertV2Authoring({ ...internal, baseEntity: false }, "value.yaml")).toThrow();
+  expect(() => assertEntityAuthoring({ ...internal, schemaVersion: 2 }, "legacy.yaml")).toThrow();
+  expect(() => assertEntityAuthoring({ ...internal, baseEntity: false }, "value.yaml")).toThrow();
 });
 
 test("presentation-only Web fields do not expose standalone Web operations", () => {
   const internal = entity("Internal", [{ key: "title", osfType: "string" }]);
   internal.interfaces = { web: { fields: { title: { render: { component: "Input" } } } } };
   expect(() => createAuthoringValidator().validate(internal, "internal.yaml")).not.toThrow();
-  expect(() => assertV2Authoring(internal, "internal.yaml")).not.toThrow();
-  expect(v2WebOperationActions(internal)).toBeUndefined();
+  expect(() => assertEntityAuthoring(internal, "internal.yaml")).not.toThrow();
+  expect(webOperationActions(internal)).toBeUndefined();
   internal.interfaces.web!.fields!.missing = { render: { component: "Input" } };
-  expect(() => assertV2Authoring(internal, "internal.yaml")).toThrow("missing");
+  expect(() => assertEntityAuthoring(internal, "internal.yaml")).toThrow("missing");
 });
 
 const source = () => entity("Route", [

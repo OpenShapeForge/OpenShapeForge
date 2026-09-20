@@ -14,7 +14,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
-import { assertV2Authoring } from "./entity-v2.js";
+import { assertEntityAuthoring } from "./entity-authoring.js";
 import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { loadOperationCatalogs } from "./operation-catalog.js";
 import type {
@@ -301,7 +301,7 @@ export function loadEntity(
   // v2 authoring checks below read.
   const osfTypes = loadOsfTypes(authoringDir);
   coreEntity = normalizeEntityFields(coreEntity, osfTypes);
-  assertV2Authoring(coreEntity, corePath);
+  assertEntityAuthoring(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];

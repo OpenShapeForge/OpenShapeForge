@@ -35,11 +35,7 @@ import { buildBlueprint } from "./blueprint.js";
 import { buildEntityOperations } from "./entity-operations.js";
 import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import { withStatusTransitions } from "./transitions.js";
-import {
-  v2PluginOperations,
-  v2WebOperationActions,
-  v2WebUi,
-} from "../entity-v2.js";
+import { pluginOperations, webOperationActions, webUi } from "../entity-model.js";
 
 function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntity): import("../types.js").CoreEntity {
   const versioning = entity.versioning;
@@ -171,7 +167,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
-  const viewEntity = { ...coreEntity, ui: v2WebUi(coreEntity), fields: coreEntity.fields.map((field) => ({
+  const viewEntity = { ...coreEntity, ui: webUi(coreEntity), fields: coreEntity.fields.map((field) => ({
     ...field,
     ...(coreEntity.interfaces?.web?.fields?.[field.key] ?? {}),
   })) };
@@ -242,7 +238,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     } : {}),
     crud,
     entityOperations,
-    pluginOperations: v2PluginOperations(coreEntity),
+    pluginOperations: pluginOperations(coreEntity),
     interfaces: {
       ...(coreEntity.interfaces?.web
         ? {
@@ -250,7 +246,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }
                 : {}),
-              operations: v2WebOperationActions(coreEntity) ?? {},
+              operations: webOperationActions(coreEntity) ?? {},
               ...(coreEntity.interfaces.web.views?.record?.layout.context
                 ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
                 : {}),

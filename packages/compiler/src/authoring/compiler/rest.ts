@@ -15,7 +15,7 @@ import type { CrudSection, RestConfig, RestOperationKey, RestSection } from "../
 import type { LoadedArtifacts } from "../loader.js";
 import { deriveTableName } from "./helpers.js";
 import { limitCrudOperations } from "./crud.js";
-import { v2RestConfig } from "../entity-v2.js";
+import { restConfig } from "../entity-model.js";
 
 export const REST_OPERATION_KEYS: readonly RestOperationKey[] = [
   "list",
@@ -35,7 +35,7 @@ export function buildRest(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): RestSection | undefined {
-  return buildRestSection(coreEntity, v2RestConfig(coreEntity), crud);
+  return buildRestSection(coreEntity, restConfig(coreEntity), crud);
 }
 
 /** Compile a resolved REST configuration; absent or disabled means no routes (fail closed). */

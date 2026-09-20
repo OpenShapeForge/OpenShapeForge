@@ -8,7 +8,7 @@
  */
 import type { CrudOperationKey, CrudSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
-import { v2OperationByAction } from "../entity-v2.js";
+import { operationByAction } from "../entity-model.js";
 
 export const CRUD_OPERATION_KEYS: readonly CrudOperationKey[] = [
   "list",
@@ -21,7 +21,7 @@ export const CRUD_OPERATION_KEYS: readonly CrudOperationKey[] = [
 export function buildCrud(
   coreEntity: LoadedArtifacts["coreEntity"],
 ): CrudSection {
-  const operations = v2OperationByAction(coreEntity);
+  const operations = operationByAction(coreEntity);
   return {
     operations: Object.fromEntries(
       CRUD_OPERATION_KEYS.map((operation) => [operation, Boolean(operations[operation])]),

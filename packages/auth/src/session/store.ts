@@ -211,14 +211,20 @@ export function createSessionStore<Extra extends object = {}>(
       sessionCache.delete(sessionId);
     },
 
-    /** An owner token when the lock was acquired, null when another process holds it. */
+    /**
+     * An owner token when the lock was acquired, null when another process
+     * holds it. Holding the lock means the next read must see what the
+     * previous holder wrote, so the local cache entry is dropped with it.
+     */
     async acquireRefreshLock(sessionId) {
       const key = `${refreshLockPrefix}${sessionId}`;
       const ownerToken = randomUUID();
       const result = await withRedis((redis) =>
         redis.set(key, ownerToken, "PX", REFRESH_LOCK_TTL_MS, "NX"),
       );
-      return result === "OK" ? ownerToken : null;
+      if (result !== "OK") return null;
+      sessionCache.delete(sessionId);
+      return ownerToken;
     },
 
     async releaseRefreshLock(sessionId, ownerToken) {

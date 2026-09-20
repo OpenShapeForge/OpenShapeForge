@@ -180,6 +180,36 @@ describe("refreshSessionInRedis", () => {
     expect(store.locks.size).toBe(0);
   });
 
+  test("a lock held by another pod past the wait leaves the cookie alone", async () => {
+    console.error = () => {};
+    const store = fakeStore({ "s1": stored });
+    store.locks.set("s1", "held-elsewhere");
+    const calls = keycloakResponses({ status: 500 });
+
+    const result = await refresher(store).refreshSessionInRedis("s1", stored);
+
+    expect(result.error).toBeUndefined();
+    expect(calls).toHaveLength(0);
+    expect(store.records.get("s1")).toBe(stored);
+  }, 10_000);
+
+  test("after taking the lock it refreshes the record another pod just wrote", async () => {
+    console.error = () => {};
+    const rotated: StoredSession<Fields> = { ...stored, refreshToken: "refresh-rotated" };
+    const store = fakeStore({ "s1": rotated });
+    const calls = keycloakResponses({
+      status: 200,
+      body: {
+        access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["r"] } }),
+        expires_in: 300,
+      },
+    });
+
+    await refresher(store).refreshSessionInRedis("s1", stored);
+
+    expect(calls[0]!.body).toContain("refresh_token=refresh-rotated");
+  });
+
   test("concurrent callers in one process share a single refresh", async () => {
     console.error = () => {};
     const store = fakeStore({ "s1": stored });

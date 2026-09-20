@@ -287,16 +287,21 @@ export function createTokenRefresh<Extra extends object>(
 
         lockOwnerToken = await store.acquireRefreshLock(sessionId);
         if (!lockOwnerToken) {
-          return { ...(updated ?? stored), error: "RefreshTokenError" };
+          // Another pod is still refreshing. Its result, good or bad, lands in
+          // Redis; the next request reads it. Stamping an error on this cookie
+          // now would sign the browser out of a session that may be fine.
+          return updated ?? stored;
         }
       }
 
       try {
-        const refreshed = await doRefreshAccessToken(stored);
+        // Refresh from what Redis holds now, not the pre-lock snapshot: a
+        // holder that just finished may have rotated the refresh token, and a
+        // consumed token would turn a good session into RefreshTokenError.
         const current = await store.getSession(sessionId);
-        if (current && !current.error && hasUsableAccessWindow(current)) {
-          return current;
-        }
+        if (current?.error) return current;
+        if (current && hasUsableAccessWindow(current)) return current;
+        const refreshed = await doRefreshAccessToken(current ?? stored);
         await store.setSession(sessionId, refreshed);
         return refreshed;
       } finally {

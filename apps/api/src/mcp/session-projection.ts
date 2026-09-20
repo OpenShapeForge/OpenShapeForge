@@ -68,8 +68,24 @@ export function invocableCrudToolsNamed(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
 ): CatalogTool[] {
-  return crudToolsNamed(name).filter((tool) =>
-    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+  return crudToolsNamed(name).filter((tool) => crudToolAvailable(tool, session, tables));
+}
+
+/**
+ * The one availability rule the listing, osf_describe and the call path
+ * share: the session holds the role AND the generic path can succeed at all
+ * (crudToolCanSucceed). A call resolved by a weaker rule than the listing
+ * would reach a tool the listing withheld and die later with the collection
+ * policy's refusal.
+ */
+export function crudToolAvailable(
+  tool: CatalogTool,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): boolean {
+  return (
+    sessionMayInvoke(tables.get(tool.table), tool.operation, session) &&
+    crudToolCanSucceed(tool, tables)
   );
 }
 
@@ -215,10 +231,7 @@ export function toolsForSession(
     catalog.entities.map((entity) => [entity.entity, entity]),
   );
   return catalog.tools
-    .filter((tool) =>
-      sessionMayInvoke(tables.get(tool.table), tool.operation, session),
-    )
-    .filter((tool) => crudToolCanSucceed(tool, tables))
+    .filter((tool) => crudToolAvailable(tool, session, tables))
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 

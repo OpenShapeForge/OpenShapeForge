@@ -11,6 +11,7 @@
  * The compiler stamps this on the entity, not on the tool: a tool entry is
  * per-entity either way, and only the entity knows which style it opted into.
  */
+import { crudToolAvailable } from "./session-projection.js";
 import { entityResourceUri } from "./entity-resources.js";
 import {
   GENERIC_DESCRIBE_TOOL_NAME,
@@ -34,7 +35,7 @@ import {
 } from "./catalog.js";
 import { describeTool, entityTitle } from "./entity-tool-projection.js";
 import { ENTITY_CONFIGURATION_APP_URI, publicOriginIsHttps } from "./handoff-config.js";
-import { sessionMayInvoke, toolsForSession } from "./session-projection.js";
+import { toolsForSession } from "./session-projection.js";
 export function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
   return entity?.tools === "generic";
 }
@@ -245,9 +246,7 @@ export function resolveCrudTool(
     entityIsGeneric(catalog.entities.find((item) => item.entity === tool.entity)),
   );
   if (generic.length === 0) return candidates[0];
-  const allowed = generic.filter((tool) =>
-    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
-  );
+  const allowed = generic.filter((tool) => crudToolAvailable(tool, session, tables));
   // Nothing allowed reads as an unknown tool, exactly like an unauthorized
   // dedicated tool: the listing omitted it, so saying more would leak which
   // entities exist.

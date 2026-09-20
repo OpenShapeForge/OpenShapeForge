@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { crudToolAvailable } from "./session-projection.js";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import { HttpError } from "../rest/http-error.js";
 import { type CatalogTool, catalog, catalogGuideTools } from "./catalog.js";
-import { guideToolsForSession, sessionMayInvoke } from "./session-projection.js";
+import { guideToolsForSession } from "./session-projection.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import { describeGenericEntity, resolveCrudTool } from "./generic-tool-projection.js";
 import { failed, ok } from "./tool-results.js";
@@ -81,7 +82,7 @@ export async function entityToolCall(
   if (
     !match ||
     !table ||
-    !sessionMayInvoke(table, match.operation, session)
+    !crudToolAvailable(match, session, tables)
   ) {
     // Not a static tool — a derived (row-defined) tool may own the name.
     // Execution of derived tools is a later slice: the definition names an

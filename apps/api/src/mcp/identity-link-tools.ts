@@ -9,10 +9,13 @@
  *                          path recorded for them. No arguments: it can only
  *                          ever link the caller's own identity to its own
  *                          candidate.
- *   list_pending_members — an organization administrator lists identities
- *                          whose very first (just-in-time-created) session is
- *                          still running on the hardcoded minimal role set
- *                          (`platform.identity_relations.needs_role_assignment`).
+ *   list_pending_members — an organization administrator lists two kinds of
+ *                          identity: `pending`, linked members still waiting
+ *                          for a role (`needs_role_assignment`), and
+ *                          `unlinked`, identities recorded on their first
+ *                          session (a login the web host forwarded, an API
+ *                          key) that have no record and no candidate yet —
+ *                          the input for link_identity.
  *   set_member_role      — an organization administrator records the roles an
  *                          identity holds IN THIS ORGANIZATION (`org_admin` or
  *                          `org_employee`) on its membership row and clears

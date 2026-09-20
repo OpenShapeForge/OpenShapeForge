@@ -552,7 +552,10 @@ describe("identity from the credential", () => {
     expect(
       readSessionIdentity(session({ credential: "trusted-context" }), headers),
     ).toEqual(identityFromSession(session({ credential: "trusted-context" })));
-    expect(readSessionIdentity(session({ credential: "api-key" }), headers).name).toBeNull();
+    expect(
+      readSessionIdentity(session({ credential: "api-key", userDisplayName: "Jira sync" }), headers)
+        .name,
+    ).toBe("Jira sync");
   });
 
   it("degrades to the credential floor on an unreadable token", () => {

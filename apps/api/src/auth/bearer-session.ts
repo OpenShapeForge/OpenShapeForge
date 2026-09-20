@@ -27,7 +27,8 @@ import {
   resolveTenantFromOrganization,
 } from "./tenant-resolution.js";
 import type { TrustedSessionContext } from "./trusted-context.js";
-import { EMPTY_SESSION, hostOrganizationContext, resolveScope, type ResolveSessionOptions } from "./session-resolver.js";
+import type { ResolveSessionOptions } from "./session-resolver.js";
+import { EMPTY_SESSION, hostOrganizationContext, resolveScope } from "./session-scope.js";
 
 /**
  * Test-only: stand in for the membership read (`resolveIdentityLink`) so the

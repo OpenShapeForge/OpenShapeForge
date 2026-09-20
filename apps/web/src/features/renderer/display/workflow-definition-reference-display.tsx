@@ -31,7 +31,7 @@ function workflowLookupField(field: Field): Field {
       ? field.options.remoteUrl
       : osfType?.options?.type === "remote"
         ? osfType.options.remoteUrl
-        : osfType?.listUrl;
+        : undefined;
 
   return remoteUrl
     ? {

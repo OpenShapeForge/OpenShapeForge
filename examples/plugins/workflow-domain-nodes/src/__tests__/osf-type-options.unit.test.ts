@@ -32,8 +32,9 @@ import { enrichFieldsWithEntityIdOptions } from "../osf-type-options.js";
 import { enrichFieldsWithEntityIdRemoteOptions } from "../../../workflow/src/workflow-entity-nodes/catalog.js";
 
 /**
- * One entity-ID type with a list URL, one without, and one that is not an
- * entity ID at all — the three branches the enricher distinguishes.
+ * One entity-ID type whose entity can be enumerated, one without a source,
+ * and one that is not an entity ID at all — the three branches the enricher
+ * distinguishes.
  */
 const osfTypeEntries: [string, OsfTypeDefinition][] = [
   [
@@ -42,14 +43,15 @@ const osfTypeEntries: [string, OsfTypeDefinition][] = [
       kind: "entityId",
       label: { en: "Relation", nl: "Relatie" },
       baseType: "string",
-      listUrl: "/api/options/relations",
+      listUrl: "/relations",
+      optionSource: { type: "entity", source: "Relation", valueField: "id" },
     },
   ],
-  // An entity ID with nowhere to fetch from: `kind` alone must not be enough
-  // to attach a remote source.
+  // An entity ID whose entity has no list Operation: `kind` alone must not
+  // be enough to attach a source, and its web route never is one.
   [
     "orphanId",
-    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string" },
+    { kind: "entityId", label: { en: "Orphan", nl: "Wees" }, baseType: "string", listUrl: "/orphans" },
   ],
   // Not an entity reference at all — the enricher must leave it untouched.
   [
@@ -62,7 +64,7 @@ const osfTypes = new Map<string, OsfTypeDefinition>(osfTypeEntries);
 
 /**
  * Deliberately exercises every path: a bare entity ID, one that already
- * authored its own `options`, one whose semantic type has no `listUrl`, a
+ * authored its own `options`, one whose semantic type has no `optionSource`, a
  * non-entity field, nested `children`, and an array `item`.
  */
 const fields = [
@@ -112,7 +114,7 @@ describe("entity-ID enrichment", () => {
       enrichFieldsWithEntityIdOptions(fields, osfTypes) as any[];
 
     // The picker, sourced from the semantic type rather than the node YAML.
-    expect(relation.options).toEqual({ type: "remote", remoteUrl: "/api/options/relations" });
+    expect(relation.options).toEqual({ type: "entity", source: "Relation", valueField: "id" });
     expect(relation.render.component).toBe("OptionVariablePicker");
 
     // An authored source wins; the render still becomes the picker, because an
@@ -120,7 +122,7 @@ describe("entity-ID enrichment", () => {
     expect(preAuthored.options).toEqual({ type: "static", items: [{ value: "a" }] });
     expect(preAuthored.render.component).toBe("OptionVariablePicker");
 
-    // An entity ID with nowhere to fetch from gets neither.
+    // An entity ID with nothing to enumerate gets neither; its listUrl is a page.
     expect(orphan.options).toBeUndefined();
     expect(orphan.render).toBeUndefined();
 

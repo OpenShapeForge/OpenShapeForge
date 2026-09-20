@@ -256,7 +256,8 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
     return definition;
   }
 
-  const listUrl = typeof record.listUrl === "string" ? record.listUrl.trim() : "";
+  // `listUrl` is web navigation; the records a picker offers come from the
+  // alias's `optionSource` (the entity's list Operation), never from a route.
   return {
     ...record,
     render: {
@@ -266,14 +267,7 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
         ? record.render
         : {}),
     },
-    ...(listUrl && !record.options
-      ? {
-          options: {
-            type: "remote",
-            remoteUrl: listUrl,
-          },
-        }
-      : {}),
+    ...(record.optionSource && !record.options ? { options: record.optionSource } : {}),
   };
 }
 
@@ -493,15 +487,9 @@ function buildOsfTypeLookupManifest(
       continue;
     }
 
-    if (definition.kind === "entityId" && definition.entity && definition.listUrl) {
-      lookups[osfType] = {
-        osfType,
-        provider: "generatedEntity",
-        entity: definition.entity,
-        remoteUrl: definition.listUrl,
-        searchParam: "search",
-      };
-    }
+    // An identity alias has no remote lookup endpoint: its records are
+    // enumerated through `optionSource` (the entity's list Operation), and
+    // `listUrl` is a web page, not JSON.
   }
 
   return lookups;

@@ -27,6 +27,13 @@ describe("one relational field contract", () => {
       kind: "entityId", entity: "Page", baseType: "string", validation: { format: "uuid" }, listUrl: "/pages",
       render: { input: "EntityReferenceSelect", display: "EntityReferenceDisplay" },
     });
+    // listUrl is navigation; a picker enumerates records through the list Operation, when there is one.
+    expect(catalog().pageId!.optionSource).toBeUndefined();
+    const listable = { ...page, operations: { list: { implementation: { type: "entity", action: "list" } } } } as unknown as CoreEntity;
+    expect(deriveEntityOsfTypes([listable], {}).pageId!.optionSource).toEqual({ type: "entity", source: "Page", valueField: "id" });
+    expect(JSON.stringify(deriveEntityOsfTypes([listable], {}).pageId)).not.toContain("remoteUrl");
+    // No classification: `internal` restricts nothing and nothing reads a category.
+    expect(catalog().pageId!.classification).toBeUndefined();
     expect(catalog().Page!.entity).toBe(catalog().pageId!.entity);
     expect(() => deriveEntityOsfTypes([page], {
       pageId: { kind: "scalar", label: { en: "Page ID" }, baseType: "string" },

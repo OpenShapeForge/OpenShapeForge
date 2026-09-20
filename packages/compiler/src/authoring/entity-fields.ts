@@ -99,13 +99,21 @@ export function deriveEntityOsfTypes(
     }
     if (result[identityKey]) throw new Error(`Osf type ${identityKey} duplicates the identity alias of entity ${entity.entity}.`);
     const route = entity.interfaces?.web?.views?.collection?.route;
+    // Enumerating the records is the entity's own list Operation; there is no
+    // separate options endpoint to point at, and the web route is navigation.
+    const enumerable = Object.values(entity.operations ?? {}).some((operation) =>
+      operation.implementation.type !== "collection" && operation.implementation.action === "list");
     // The identity alias is distinct from a relationship to that entity: an
-    // entity's own primary key must never acquire a self-referencing FK.
+    // entity's own primary key must never acquire a self-referencing FK. It
+    // carries no classification: `internal` restricts nothing (only
+    // confidential/pii/bsn do) and no consumer reads a category, so the
+    // authored `{ sensitivity: internal, category: workflow }` was noise.
     result[identityKey] = {
       kind: "entityId", entity: entity.entity, baseType: "string",
       label: entity.labels ?? { en: entity.title ?? entity.entity },
       validation: { format: "uuid" },
       listUrl: (typeof route === "string" ? route : route?.en ?? route?.nl) ?? `/${deriveTableName(entity.entity).replaceAll("_", "-")}`,
+      ...(enumerable ? { optionSource: { type: "entity", source: entity.entity, valueField: "id" } } : {}),
       displayTemplate: entity.displayTemplate ?? "{{id}}",
       filterField: entity.filterField ?? "id",
       icon: "file",

@@ -40,7 +40,7 @@ function withBaseType(field: Field, osfTypes: Record<string, OsfTypeDefinition>)
  * Workflow-only field expansion. Sets `render` from the osf-type catalog,
  * recurses into nested shapes, and — for entity-ID semantic types — overrides
  * the render with the workflow-designer `OptionVariablePicker` and attaches
- * the catalog's `listUrl` as a remote-options source. This last branch is
+ * the alias's `optionSource` (the entity's records) as the options. This last branch is
  * what lets authored fields (e.g. `contact-detail.relationId`) become picker
  * fields inside the workflow inspector without authoring YAML restating it.
  *
@@ -58,14 +58,12 @@ function expandSemanticFieldShape(
   const item = field.item ?? osfType?.item;
   const hasStructuredShape = Boolean(children || item);
   const expanded = withBaseType(cloneField(field), osfTypes);
-  const isEntityId = osfType?.kind === "entityId";
+  // An alias whose entity has no list Operation has nothing to pick from.
+  const isEntityId = osfType?.kind === "entityId" && osfType.optionSource !== undefined;
 
   if (isEntityId) {
-    if (!expanded.options && osfType.listUrl) {
-      expanded.options = {
-        type: "remote" as const,
-        remoteUrl: osfType.listUrl,
-      };
+    if (!expanded.options) {
+      expanded.options = { ...osfType.optionSource! };
     }
     expanded.render = {
       component: "OptionVariablePicker",
@@ -271,7 +269,7 @@ export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
  * to enrich authored `Field`s with the same entity-ID picker metadata the
  * CoreEntity generator applies. Walks the field tree, derives every field's
  * `baseType` and, for any field whose `osfType` resolves to a `kind: entityId` catalog entry, attaches the
- * catalog's `listUrl` as a remote-options source and forces the render to
+ * alias's `optionSource` (the entity's records) as the options and forces the render to
  * `OptionVariablePicker`. Authoring-supplied `options` win over the catalog.
  */
 export function enrichFieldsWithEntityIdRemoteOptions(
@@ -288,12 +286,9 @@ function enrichFieldWithEntityIdRemoteOptions(
   const cloned = withBaseType(cloneField(field), osfTypes);
   const osfType = osfTypeDefinitionOf(cloned.osfType, osfTypes);
 
-  if (osfType?.kind === "entityId" && osfType.listUrl) {
+  if (osfType?.kind === "entityId" && osfType.optionSource) {
     if (!cloned.options) {
-      cloned.options = {
-        type: "remote" as const,
-        remoteUrl: osfType.listUrl,
-      };
+      cloned.options = { ...osfType.optionSource };
     }
     cloned.render = {
       component: "OptionVariablePicker",

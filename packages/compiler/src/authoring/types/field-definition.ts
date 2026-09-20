@@ -338,6 +338,7 @@ export interface FieldDefinitionOsfType {
   hints?: ContextHints;
   entity?: string;
   listUrl?: string;
+  optionSource?: FieldOptions;
   displayTemplate?: string;
   filterField?: string;
   shape?: FieldDefinition[];

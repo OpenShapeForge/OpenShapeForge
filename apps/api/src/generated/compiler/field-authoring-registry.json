@@ -1121,6 +1121,11 @@
         "format": "uuid"
       },
       "listUrl": "/accounts",
+      "optionSource": {
+        "type": "entity",
+        "source": "Account",
+        "valueField": "id"
+      },
       "displayTemplate": "{{username}}",
       "filterField": "username",
       "icon": "file",
@@ -1428,6 +1433,11 @@
         "format": "uuid"
       },
       "listUrl": "/addresses",
+      "optionSource": {
+        "type": "entity",
+        "source": "Address",
+        "valueField": "id"
+      },
       "displayTemplate": "{{street}} {{houseNumber}}",
       "filterField": "street",
       "icon": "file",
@@ -1621,6 +1631,11 @@
         "format": "uuid"
       },
       "listUrl": "/address-assignments",
+      "optionSource": {
+        "type": "entity",
+        "source": "AddressAssignment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{role}}",
       "filterField": "role",
       "icon": "file",
@@ -1816,6 +1831,11 @@
         "format": "uuid"
       },
       "listUrl": "/admin-regions",
+      "optionSource": {
+        "type": "entity",
+        "source": "AdminRegion",
+        "valueField": "id"
+      },
       "displayTemplate": "{{regionLevel}}: {{code}}",
       "filterField": "code",
       "icon": "file",
@@ -2443,6 +2463,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreements",
+      "optionSource": {
+        "type": "entity",
+        "source": "Agreement",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -2797,6 +2822,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-components",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementComponent",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -3117,6 +3147,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-component-cumulatives",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementComponentCumulative",
+        "valueField": "id"
+      },
       "displayTemplate": "{{postedAt}}",
       "filterField": "id",
       "icon": "file",
@@ -3356,6 +3391,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-component-types",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementComponentType",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -3486,6 +3526,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-links",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementLink",
+        "valueField": "id"
+      },
       "displayTemplate": "{{linkType}}",
       "filterField": "linkType",
       "icon": "file",
@@ -3808,6 +3853,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-milestones",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementMilestone",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -4183,6 +4233,11 @@
         "format": "uuid"
       },
       "listUrl": "/agreement-parties",
+      "optionSource": {
+        "type": "entity",
+        "source": "AgreementParty",
+        "valueField": "id"
+      },
       "displayTemplate": "{{partyRole}}",
       "filterField": "partyRole",
       "icon": "file",
@@ -4473,6 +4528,11 @@
         "format": "uuid"
       },
       "listUrl": "/alerts",
+      "optionSource": {
+        "type": "entity",
+        "source": "Alert",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{title}}",
       "filterField": "code",
       "icon": "file",
@@ -4692,6 +4752,11 @@
         "format": "uuid"
       },
       "listUrl": "/appointments",
+      "optionSource": {
+        "type": "entity",
+        "source": "Appointment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{subject}}",
       "filterField": "subject",
       "icon": "file",
@@ -4869,6 +4934,11 @@
         "format": "uuid"
       },
       "listUrl": "/appointment-options",
+      "optionSource": {
+        "type": "entity",
+        "source": "AppointmentOption",
+        "valueField": "id"
+      },
       "displayTemplate": "#{{optionNumber}} {{startsAt}}",
       "filterField": "id",
       "icon": "file",
@@ -5133,6 +5203,11 @@
         "format": "uuid"
       },
       "listUrl": "/appointment-requests",
+      "optionSource": {
+        "type": "entity",
+        "source": "AppointmentRequest",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{title}}",
       "filterField": "code",
       "icon": "file",
@@ -5317,6 +5392,11 @@
         "format": "uuid"
       },
       "listUrl": "/areas",
+      "optionSource": {
+        "type": "entity",
+        "source": "Area",
+        "valueField": "id"
+      },
       "displayTemplate": "{{value}} {{unitId}}",
       "filterField": "id",
       "icon": "file",
@@ -5733,6 +5813,11 @@
         "format": "uuid"
       },
       "listUrl": "/assets",
+      "optionSource": {
+        "type": "entity",
+        "source": "Asset",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -5901,6 +5986,11 @@
         "format": "uuid"
       },
       "listUrl": "/asset-conditions",
+      "optionSource": {
+        "type": "entity",
+        "source": "AssetCondition",
+        "valueField": "id"
+      },
       "displayTemplate": "{{assessedAt}}",
       "filterField": "id",
       "icon": "file",
@@ -6074,6 +6164,11 @@
         "format": "uuid"
       },
       "listUrl": "/asset-groups",
+      "optionSource": {
+        "type": "entity",
+        "source": "AssetGroup",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -6283,6 +6378,11 @@
         "format": "uuid"
       },
       "listUrl": "/assignments",
+      "optionSource": {
+        "type": "entity",
+        "source": "Assignment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{reason}}",
       "filterField": "reason",
       "icon": "file",
@@ -6442,6 +6542,11 @@
         "format": "uuid"
       },
       "listUrl": "/attachments",
+      "optionSource": {
+        "type": "entity",
+        "source": "Attachment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{fileName}}",
       "filterField": "fileName",
       "icon": "file",
@@ -6567,6 +6672,11 @@
         "format": "uuid"
       },
       "listUrl": "/bank-reconciliations",
+      "optionSource": {
+        "type": "entity",
+        "source": "BankReconciliation",
+        "valueField": "id"
+      },
       "displayTemplate": "{{matchedAt}}",
       "filterField": "id",
       "icon": "file",
@@ -6753,6 +6863,11 @@
         "format": "uuid"
       },
       "listUrl": "/bank-statements",
+      "optionSource": {
+        "type": "entity",
+        "source": "BankStatement",
+        "valueField": "id"
+      },
       "displayTemplate": "{{accountIban}} #{{statementNumber}}",
       "filterField": "statementNumber",
       "icon": "file",
@@ -6993,6 +7108,11 @@
         "format": "uuid"
       },
       "listUrl": "/bank-statement-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "BankStatementLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{counterpartyName}}: {{amount}}",
       "filterField": "counterpartyName",
       "icon": "file",
@@ -7323,6 +7443,11 @@
         "format": "uuid"
       },
       "listUrl": "/billing-runs",
+      "optionSource": {
+        "type": "entity",
+        "source": "BillingRun",
+        "valueField": "id"
+      },
       "displayTemplate": "{{mode}} @ {{billUpToDate}}",
       "filterField": "idempotencyKey",
       "icon": "file",
@@ -7649,6 +7774,11 @@
         "format": "uuid"
       },
       "listUrl": "/billing-run-items",
+      "optionSource": {
+        "type": "entity",
+        "source": "BillingRunItem",
+        "valueField": "id"
+      },
       "displayTemplate": "{{periodStart}} → {{periodEnd}}",
       "filterField": "idempotencyKey",
       "icon": "file",
@@ -7877,6 +8007,11 @@
         "format": "uuid"
       },
       "listUrl": "/billing-schedules",
+      "optionSource": {
+        "type": "entity",
+        "source": "BillingSchedule",
+        "valueField": "id"
+      },
       "displayTemplate": "{{period}}",
       "filterField": "period",
       "icon": "file",
@@ -8125,6 +8260,11 @@
         "format": "uuid"
       },
       "listUrl": "/blocks",
+      "optionSource": {
+        "type": "entity",
+        "source": "Block",
+        "valueField": "id"
+      },
       "displayTemplate": "{{definitionKey}}",
       "filterField": "id",
       "icon": "file",
@@ -8299,6 +8439,11 @@
         "format": "uuid"
       },
       "listUrl": "/budgets",
+      "optionSource": {
+        "type": "entity",
+        "source": "Budget",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -8459,6 +8604,11 @@
         "format": "uuid"
       },
       "listUrl": "/budget-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "BudgetLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -8685,6 +8835,11 @@
         "format": "uuid"
       },
       "listUrl": "/buildings",
+      "optionSource": {
+        "type": "entity",
+        "source": "Building",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -8856,6 +9011,11 @@
         "format": "uuid"
       },
       "listUrl": "/building-parts",
+      "optionSource": {
+        "type": "entity",
+        "source": "BuildingPart",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -9715,6 +9875,11 @@
         "format": "uuid"
       },
       "listUrl": "/cases",
+      "optionSource": {
+        "type": "entity",
+        "source": "Case",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -10050,6 +10215,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-files",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseFile",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -10189,6 +10359,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-file-types",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseFileType",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -10333,6 +10508,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-object-links",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseObjectLink",
+        "valueField": "id"
+      },
       "displayTemplate": "{{objectLabel}}",
       "filterField": "objectLabel",
       "icon": "file",
@@ -10517,6 +10697,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-parties",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseParty",
+        "valueField": "id"
+      },
       "displayTemplate": "{{displayName}}",
       "filterField": "displayName",
       "icon": "file",
@@ -10722,6 +10907,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-status-events",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseStatusEvent",
+        "valueField": "id"
+      },
       "displayTemplate": "{{actorType}}",
       "filterField": "actorId",
       "icon": "file",
@@ -11656,6 +11846,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-step-templates",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseStepTemplate",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -11962,6 +12157,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-templates",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseTemplate",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -12148,6 +12348,11 @@
         "format": "uuid"
       },
       "listUrl": "/case-types",
+      "optionSource": {
+        "type": "entity",
+        "source": "CaseType",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -12313,6 +12518,11 @@
         "format": "uuid"
       },
       "listUrl": "/chips",
+      "optionSource": {
+        "type": "entity",
+        "source": "Chip",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -12434,6 +12644,11 @@
         "format": "uuid"
       },
       "listUrl": "/comments",
+      "optionSource": {
+        "type": "entity",
+        "source": "Comment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{body}}",
       "filterField": "body",
       "icon": "file",
@@ -12698,6 +12913,11 @@
         "format": "uuid"
       },
       "listUrl": "/communication-preferences",
+      "optionSource": {
+        "type": "entity",
+        "source": "CommunicationPreference",
+        "valueField": "id"
+      },
       "displayTemplate": "{{type}}",
       "filterField": "type",
       "icon": "file",
@@ -12881,6 +13101,11 @@
         "format": "uuid"
       },
       "listUrl": "/condition-assessments",
+      "optionSource": {
+        "type": "entity",
+        "source": "ConditionAssessment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{assessedAt}}",
       "filterField": "id",
       "icon": "file",
@@ -13211,6 +13436,11 @@
         "format": "uuid"
       },
       "listUrl": "/contact-details",
+      "optionSource": {
+        "type": "entity",
+        "source": "ContactDetail",
+        "valueField": "id"
+      },
       "displayTemplate": "{{value}}",
       "filterField": "value",
       "icon": "file",
@@ -13471,6 +13701,11 @@
         "format": "uuid"
       },
       "listUrl": "/contact-moments",
+      "optionSource": {
+        "type": "entity",
+        "source": "ContactMoment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{subject}}",
       "filterField": "subject",
       "icon": "file",
@@ -13702,6 +13937,11 @@
         "format": "uuid"
       },
       "listUrl": "/cost-dimensions",
+      "optionSource": {
+        "type": "entity",
+        "source": "CostDimension",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -14041,6 +14281,11 @@
         "format": "uuid"
       },
       "listUrl": "/creditors",
+      "optionSource": {
+        "type": "entity",
+        "source": "Creditor",
+        "valueField": "id"
+      },
       "displayTemplate": "{{creditorNumber}}",
       "filterField": "creditorNumber",
       "icon": "file",
@@ -14376,6 +14621,11 @@
         "format": "uuid"
       },
       "listUrl": "/debtors",
+      "optionSource": {
+        "type": "entity",
+        "source": "Debtor",
+        "valueField": "id"
+      },
       "displayTemplate": "{{debtorNumber}}",
       "filterField": "debtorNumber",
       "icon": "file",
@@ -14639,6 +14889,11 @@
         "format": "uuid"
       },
       "listUrl": "/direct-debit-mandates",
+      "optionSource": {
+        "type": "entity",
+        "source": "DirectDebitMandate",
+        "valueField": "id"
+      },
       "displayTemplate": "{{mandateReference}}",
       "filterField": "mandateReference",
       "icon": "file",
@@ -14848,6 +15103,11 @@
         "format": "uuid"
       },
       "listUrl": "/direct-debit-orders",
+      "optionSource": {
+        "type": "entity",
+        "source": "DirectDebitOrder",
+        "valueField": "id"
+      },
       "displayTemplate": "{{endToEndId}}",
       "filterField": "endToEndId",
       "icon": "file",
@@ -15367,6 +15627,11 @@
         "format": "uuid"
       },
       "listUrl": "/documents",
+      "optionSource": {
+        "type": "entity",
+        "source": "Document",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -15505,6 +15770,11 @@
         "format": "uuid"
       },
       "listUrl": "/document-types",
+      "optionSource": {
+        "type": "entity",
+        "source": "DocumentType",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -15647,6 +15917,11 @@
         "format": "uuid"
       },
       "listUrl": "/document-variants",
+      "optionSource": {
+        "type": "entity",
+        "source": "DocumentVariant",
+        "valueField": "id"
+      },
       "displayTemplate": "{{channel}} · {{locale}}",
       "filterField": "id",
       "icon": "file",
@@ -16063,6 +16338,11 @@
         "format": "uuid"
       },
       "listUrl": "/document-versions",
+      "optionSource": {
+        "type": "entity",
+        "source": "DocumentVersion",
+        "valueField": "id"
+      },
       "displayTemplate": "{{versionLabel}}",
       "filterField": "versionLabel",
       "icon": "file",
@@ -16309,6 +16589,11 @@
         "format": "uuid"
       },
       "listUrl": "/employees",
+      "optionSource": {
+        "type": "entity",
+        "source": "Employee",
+        "valueField": "id"
+      },
       "displayTemplate": "{{employeeNumber}}",
       "filterField": "employeeNumber",
       "icon": "file",
@@ -16520,6 +16805,11 @@
         "format": "uuid"
       },
       "listUrl": "/employee-budgets",
+      "optionSource": {
+        "type": "entity",
+        "source": "EmployeeBudget",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -16800,6 +17090,11 @@
         "format": "uuid"
       },
       "listUrl": "/employee-roles",
+      "optionSource": {
+        "type": "entity",
+        "source": "EmployeeRole",
+        "valueField": "id"
+      },
       "displayTemplate": "{{roleKind}}",
       "filterField": "roleKind",
       "icon": "file",
@@ -17028,6 +17323,11 @@
         "format": "uuid"
       },
       "listUrl": "/encumbrances",
+      "optionSource": {
+        "type": "entity",
+        "source": "Encumbrance",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -17211,6 +17511,11 @@
         "format": "uuid"
       },
       "listUrl": "/energy-performances",
+      "optionSource": {
+        "type": "entity",
+        "source": "EnergyPerformance",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -17343,6 +17648,11 @@
         "format": "uuid"
       },
       "listUrl": "/energy-performance-measurements",
+      "optionSource": {
+        "type": "entity",
+        "source": "EnergyPerformanceMeasurement",
+        "valueField": "id"
+      },
       "displayTemplate": "{{measuredAt}}: {{value}}",
       "filterField": "id",
       "icon": "file",
@@ -17609,6 +17919,11 @@
         "format": "uuid"
       },
       "listUrl": "/fiscal-periods",
+      "optionSource": {
+        "type": "entity",
+        "source": "FiscalPeriod",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -17774,6 +18089,11 @@
         "format": "uuid"
       },
       "listUrl": "/fiscal-years",
+      "optionSource": {
+        "type": "entity",
+        "source": "FiscalYear",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -17938,6 +18258,11 @@
         "format": "uuid"
       },
       "listUrl": "/inspection-reports",
+      "optionSource": {
+        "type": "entity",
+        "source": "InspectionReport",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -18502,6 +18827,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoices",
+      "optionSource": {
+        "type": "entity",
+        "source": "Invoice",
+        "valueField": "id"
+      },
       "displayTemplate": "{{invoiceKind}} {{invoiceNumber}}",
       "filterField": "invoiceNumber",
       "icon": "file",
@@ -18663,6 +18993,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoice-collection-items",
+      "optionSource": {
+        "type": "entity",
+        "source": "InvoiceCollectionItem",
+        "valueField": "id"
+      },
       "displayTemplate": "{{amount}}",
       "filterField": "id",
       "icon": "file",
@@ -18976,6 +19311,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoice-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "InvoiceLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -19125,6 +19465,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoice-payments",
+      "optionSource": {
+        "type": "entity",
+        "source": "InvoicePayment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{amount}} @ {{paidAt}}",
       "filterField": "id",
       "icon": "file",
@@ -19309,6 +19654,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoice-sequences",
+      "optionSource": {
+        "type": "entity",
+        "source": "InvoiceSequence",
+        "valueField": "id"
+      },
       "displayTemplate": "{{kind}} {{fiscalYearCode}}: {{lastNumber}}",
       "filterField": "kind",
       "icon": "file",
@@ -19416,6 +19766,11 @@
         "format": "uuid"
       },
       "listUrl": "/invoice-vat-buckets",
+      "optionSource": {
+        "type": "entity",
+        "source": "InvoiceVatBucket",
+        "valueField": "id"
+      },
       "displayTemplate": "{{vatRate.code}}",
       "filterField": "id",
       "icon": "file",
@@ -19756,6 +20111,11 @@
         "format": "uuid"
       },
       "listUrl": "/label-rules",
+      "optionSource": {
+        "type": "entity",
+        "source": "LabelRule",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "id",
       "icon": "file",
@@ -20158,6 +20518,11 @@
         "format": "uuid"
       },
       "listUrl": "/ledger-accounts",
+      "optionSource": {
+        "type": "entity",
+        "source": "LedgerAccount",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -20376,6 +20741,11 @@
         "format": "uuid"
       },
       "listUrl": "/ledger-postings",
+      "optionSource": {
+        "type": "entity",
+        "source": "LedgerPosting",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -20618,6 +20988,11 @@
         "format": "uuid"
       },
       "listUrl": "/ledger-posting-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "LedgerPostingLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{lineNumber}}: {{amount}}",
       "filterField": "description",
       "icon": "file",
@@ -20808,6 +21183,11 @@
         "format": "uuid"
       },
       "listUrl": "/legal-entities",
+      "optionSource": {
+        "type": "entity",
+        "source": "LegalEntity",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -21179,6 +21559,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-orders",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceOrder",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{title}}",
       "filterField": "code",
       "icon": "file",
@@ -21456,6 +21841,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-order-parties",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceOrderParty",
+        "valueField": "id"
+      },
       "displayTemplate": "{{roleType}}",
       "filterField": "roleType",
       "icon": "file",
@@ -21697,6 +22087,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-requests",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceRequest",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{title}}",
       "filterField": "code",
       "icon": "file",
@@ -21839,6 +22234,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-request-settlements",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceRequestSettlement",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}: {{amount}}",
       "filterField": "description",
       "icon": "file",
@@ -22001,6 +22401,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-spendings",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceSpending",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}: {{amount}}",
       "filterField": "description",
       "icon": "file",
@@ -22205,6 +22610,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-tasks",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceTask",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -22369,6 +22779,11 @@
         "format": "uuid"
       },
       "listUrl": "/maintenance-task-calculations",
+      "optionSource": {
+        "type": "entity",
+        "source": "MaintenanceTaskCalculation",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -22605,6 +23020,11 @@
         "format": "uuid"
       },
       "listUrl": "/milestones",
+      "optionSource": {
+        "type": "entity",
+        "source": "Milestone",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -22722,6 +23142,11 @@
         "format": "uuid"
       },
       "listUrl": "/monitor-intervals",
+      "optionSource": {
+        "type": "entity",
+        "source": "MonitorInterval",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -22902,6 +23327,11 @@
         "format": "uuid"
       },
       "listUrl": "/monitor-logs",
+      "optionSource": {
+        "type": "entity",
+        "source": "MonitorLog",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -23018,6 +23448,11 @@
         "format": "uuid"
       },
       "listUrl": "/monitor-log-entries",
+      "optionSource": {
+        "type": "entity",
+        "source": "MonitorLogEntry",
+        "valueField": "id"
+      },
       "displayTemplate": "{{loggedAt}}: {{message}}",
       "filterField": "message",
       "icon": "file",
@@ -23158,6 +23593,11 @@
         "format": "uuid"
       },
       "listUrl": "/monitor-measurements",
+      "optionSource": {
+        "type": "entity",
+        "source": "MonitorMeasurement",
+        "valueField": "id"
+      },
       "displayTemplate": "{{measuredAt}}",
       "filterField": "id",
       "icon": "file",
@@ -23270,6 +23710,11 @@
         "format": "uuid"
       },
       "listUrl": "/monitor-readings",
+      "optionSource": {
+        "type": "entity",
+        "source": "MonitorReading",
+        "valueField": "id"
+      },
       "displayTemplate": "{{readAt}}: {{value}}",
       "filterField": "id",
       "icon": "file",
@@ -23628,6 +24073,11 @@
         "format": "uuid"
       },
       "listUrl": "/natural-persons",
+      "optionSource": {
+        "type": "entity",
+        "source": "NaturalPerson",
+        "valueField": "id"
+      },
       "displayTemplate": "{{firstName}} {{lastName}}",
       "filterField": "lastName",
       "icon": "file",
@@ -23713,6 +24163,11 @@
         "format": "uuid"
       },
       "listUrl": "/notebooks",
+      "optionSource": {
+        "type": "entity",
+        "source": "Notebook",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -23875,6 +24330,11 @@
         "format": "uuid"
       },
       "listUrl": "/notebook-versions",
+      "optionSource": {
+        "type": "entity",
+        "source": "NotebookVersion",
+        "valueField": "id"
+      },
       "displayTemplate": "{{versionNumber}}",
       "filterField": "id",
       "icon": "file",
@@ -24123,6 +24583,11 @@
         "format": "uuid"
       },
       "listUrl": "/org-units",
+      "optionSource": {
+        "type": "entity",
+        "source": "OrgUnit",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -24300,6 +24765,11 @@
         "format": "uuid"
       },
       "listUrl": "/organization-permissions",
+      "optionSource": {
+        "type": "entity",
+        "source": "OrganizationPermission",
+        "valueField": "id"
+      },
       "displayTemplate": "{{clientId}} {{permissionName}}",
       "filterField": "permissionName",
       "icon": "file",
@@ -24555,6 +25025,11 @@
         "format": "uuid"
       },
       "listUrl": "/payment-details",
+      "optionSource": {
+        "type": "entity",
+        "source": "PaymentDetail",
+        "valueField": "id"
+      },
       "displayTemplate": "{{iban}}",
       "filterField": "iban",
       "icon": "file",
@@ -24802,6 +25277,11 @@
         "format": "uuid"
       },
       "listUrl": "/payment-methods",
+      "optionSource": {
+        "type": "entity",
+        "source": "PaymentMethod",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -24985,6 +25465,11 @@
         "format": "uuid"
       },
       "listUrl": "/payment-orders",
+      "optionSource": {
+        "type": "entity",
+        "source": "PaymentOrder",
+        "valueField": "id"
+      },
       "displayTemplate": "{{referenceNumber}}",
       "filterField": "referenceNumber",
       "icon": "file",
@@ -25189,6 +25674,11 @@
         "format": "uuid"
       },
       "listUrl": "/payment-plans",
+      "optionSource": {
+        "type": "entity",
+        "source": "PaymentPlan",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -25334,6 +25824,11 @@
         "format": "uuid"
       },
       "listUrl": "/payment-plan-instalments",
+      "optionSource": {
+        "type": "entity",
+        "source": "PaymentPlanInstalment",
+        "valueField": "id"
+      },
       "displayTemplate": "#{{instalmentNumber}}: {{amount}}",
       "filterField": "instalmentNumber",
       "icon": "file",
@@ -25478,6 +25973,11 @@
         "format": "uuid"
       },
       "listUrl": "/period-balances",
+      "optionSource": {
+        "type": "entity",
+        "source": "PeriodBalance",
+        "valueField": "id"
+      },
       "displayTemplate": "{{ledgerAccount.code}}",
       "filterField": "dimensionsHash",
       "icon": "file",
@@ -25591,6 +26091,11 @@
         "format": "uuid"
       },
       "listUrl": "/preferences",
+      "optionSource": {
+        "type": "entity",
+        "source": "PersonalPreference",
+        "valueField": "id"
+      },
       "displayTemplate": "{{key}}",
       "filterField": "key",
       "icon": "file",
@@ -25743,6 +26248,11 @@
         "format": "uuid"
       },
       "listUrl": "/points",
+      "optionSource": {
+        "type": "entity",
+        "source": "Point",
+        "valueField": "id"
+      },
       "displayTemplate": "{{latitude}}, {{longitude}}",
       "filterField": "id",
       "icon": "file",
@@ -25963,6 +26473,11 @@
         "format": "uuid"
       },
       "listUrl": "/positions",
+      "optionSource": {
+        "type": "entity",
+        "source": "Position",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -26137,6 +26652,11 @@
         "format": "uuid"
       },
       "listUrl": "/preferences",
+      "optionSource": {
+        "type": "entity",
+        "source": "Preference",
+        "valueField": "id"
+      },
       "displayTemplate": "{{key}}",
       "filterField": "key",
       "icon": "file",
@@ -26317,6 +26837,11 @@
         "format": "uuid"
       },
       "listUrl": "/price-adjustments",
+      "optionSource": {
+        "type": "entity",
+        "source": "PriceAdjustment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -26799,6 +27324,11 @@
         "format": "uuid"
       },
       "listUrl": "/processes",
+      "optionSource": {
+        "type": "entity",
+        "source": "Process",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -27008,6 +27538,11 @@
         "format": "uuid"
       },
       "listUrl": "/process-roles",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProcessRole",
+        "valueField": "id"
+      },
       "displayTemplate": "{{roleType}}",
       "filterField": "roleType",
       "icon": "file",
@@ -27567,6 +28102,11 @@
         "format": "uuid"
       },
       "listUrl": "/process-steps",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProcessStep",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -27920,6 +28460,11 @@
         "format": "uuid"
       },
       "listUrl": "/projects",
+      "optionSource": {
+        "type": "entity",
+        "source": "Project",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -28080,6 +28625,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-budget-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectBudgetLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}: {{amount}}",
       "filterField": "description",
       "icon": "file",
@@ -28254,6 +28804,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-objectives",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectObjective",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{description}}",
       "filterField": "code",
       "icon": "file",
@@ -28458,6 +29013,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-orders",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectOrder",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -28679,6 +29239,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-phases",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectPhase",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -28831,6 +29396,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-phase-decisions",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectPhaseDecision",
+        "valueField": "id"
+      },
       "displayTemplate": "{{outcome}}",
       "filterField": "outcome",
       "icon": "file",
@@ -29078,6 +29648,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-roles",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectRole",
+        "valueField": "id"
+      },
       "displayTemplate": "{{roleType}}",
       "filterField": "roleType",
       "icon": "file",
@@ -29235,6 +29810,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-spendings",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectSpending",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}: {{amount}}",
       "filterField": "description",
       "icon": "file",
@@ -29508,6 +30088,11 @@
         "format": "uuid"
       },
       "listUrl": "/project-tasks",
+      "optionSource": {
+        "type": "entity",
+        "source": "ProjectTask",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -29796,6 +30381,11 @@
         "format": "uuid"
       },
       "listUrl": "/purchase-orders",
+      "optionSource": {
+        "type": "entity",
+        "source": "PurchaseOrder",
+        "valueField": "id"
+      },
       "displayTemplate": "{{purchaseOrderNumber}}",
       "filterField": "purchaseOrderNumber",
       "icon": "file",
@@ -30109,6 +30699,11 @@
         "format": "uuid"
       },
       "listUrl": "/purchase-order-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "PurchaseOrderLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -30388,6 +30983,11 @@
         "format": "uuid"
       },
       "listUrl": "/quality-measurement-requests",
+      "optionSource": {
+        "type": "entity",
+        "source": "QualityMeasurementRequest",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -30633,6 +31233,11 @@
         "format": "uuid"
       },
       "listUrl": "/quality-measurement-results",
+      "optionSource": {
+        "type": "entity",
+        "source": "QualityMeasurementResult",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -30927,6 +31532,11 @@
         "format": "uuid"
       },
       "listUrl": "/quotes",
+      "optionSource": {
+        "type": "entity",
+        "source": "Quote",
+        "valueField": "id"
+      },
       "displayTemplate": "{{quoteNumber}}",
       "filterField": "quoteNumber",
       "icon": "file",
@@ -31240,6 +31850,11 @@
         "format": "uuid"
       },
       "listUrl": "/quote-lines",
+      "optionSource": {
+        "type": "entity",
+        "source": "QuoteLine",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -32240,6 +32855,11 @@
         "format": "uuid"
       },
       "listUrl": "/relations",
+      "optionSource": {
+        "type": "entity",
+        "source": "Relation",
+        "valueField": "id"
+      },
       "displayTemplate": "{{displayName}}",
       "filterField": "displayName",
       "icon": "file",
@@ -32461,6 +33081,11 @@
         "format": "uuid"
       },
       "listUrl": "/relation-associations",
+      "optionSource": {
+        "type": "entity",
+        "source": "RelationAssociation",
+        "valueField": "id"
+      },
       "displayTemplate": "{{associationKind}}",
       "filterField": "associationKind",
       "icon": "file",
@@ -32703,6 +33328,11 @@
         "format": "uuid"
       },
       "listUrl": "/relation-groups",
+      "optionSource": {
+        "type": "entity",
+        "source": "RelationGroup",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -32930,6 +33560,11 @@
         "format": "uuid"
       },
       "listUrl": "/relation-group-memberships",
+      "optionSource": {
+        "type": "entity",
+        "source": "RelationGroupMembership",
+        "valueField": "id"
+      },
       "displayTemplate": "{{relationId}} - {{relationGroupId}}",
       "filterField": "status",
       "icon": "file",
@@ -33202,6 +33837,11 @@
         "format": "uuid"
       },
       "listUrl": "/relation-roles",
+      "optionSource": {
+        "type": "entity",
+        "source": "RelationRole",
+        "valueField": "id"
+      },
       "displayTemplate": "{{type}}",
       "filterField": "type",
       "icon": "file",
@@ -33491,6 +34131,11 @@
         "format": "uuid"
       },
       "listUrl": "/research-assignments",
+      "optionSource": {
+        "type": "entity",
+        "source": "ResearchAssignment",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -33632,6 +34277,11 @@
         "format": "uuid"
       },
       "listUrl": "/research-results",
+      "optionSource": {
+        "type": "entity",
+        "source": "ResearchResult",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -33910,6 +34560,11 @@
         "format": "uuid"
       },
       "listUrl": "/sla-policies",
+      "optionSource": {
+        "type": "entity",
+        "source": "SlaPolicy",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -34128,6 +34783,11 @@
         "format": "uuid"
       },
       "listUrl": "/spaces",
+      "optionSource": {
+        "type": "entity",
+        "source": "Space",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -34337,6 +34997,11 @@
         "format": "uuid"
       },
       "listUrl": "/standard-prices",
+      "optionSource": {
+        "type": "entity",
+        "source": "StandardPrice",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
@@ -34695,6 +35360,11 @@
         "format": "uuid"
       },
       "listUrl": "/supplier-roles",
+      "optionSource": {
+        "type": "entity",
+        "source": "SupplierRole",
+        "valueField": "id"
+      },
       "displayTemplate": "{{supplierNumber}}",
       "filterField": "supplierNumber",
       "icon": "file",
@@ -35052,6 +35722,11 @@
         "format": "uuid"
       },
       "listUrl": "/support-issues",
+      "optionSource": {
+        "type": "entity",
+        "source": "SupportIssue",
+        "valueField": "id"
+      },
       "displayTemplate": "{{subject}}",
       "filterField": "subject",
       "icon": "file",
@@ -35245,6 +35920,11 @@
         "format": "uuid"
       },
       "listUrl": "/surveys",
+      "optionSource": {
+        "type": "entity",
+        "source": "Survey",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -35444,6 +36124,11 @@
         "format": "uuid"
       },
       "listUrl": "/survey-answers",
+      "optionSource": {
+        "type": "entity",
+        "source": "SurveyAnswer",
+        "valueField": "id"
+      },
       "displayTemplate": "{{answer}}",
       "filterField": "answer",
       "icon": "file",
@@ -35721,6 +36406,11 @@
         "format": "uuid"
       },
       "listUrl": "/survey-questions",
+      "optionSource": {
+        "type": "entity",
+        "source": "SurveyQuestion",
+        "valueField": "id"
+      },
       "displayTemplate": "{{description}}",
       "filterField": "description",
       "icon": "file",
@@ -36732,6 +37422,11 @@
         "format": "uuid"
       },
       "listUrl": "/tasks",
+      "optionSource": {
+        "type": "entity",
+        "source": "Task",
+        "valueField": "id"
+      },
       "displayTemplate": "{{title}}",
       "filterField": "title",
       "icon": "file",
@@ -36865,6 +37560,11 @@
         "format": "uuid"
       },
       "listUrl": "/templates",
+      "optionSource": {
+        "type": "entity",
+        "source": "Template",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",
@@ -37058,6 +37758,11 @@
         "format": "uuid"
       },
       "listUrl": "/template-variants",
+      "optionSource": {
+        "type": "entity",
+        "source": "TemplateVariant",
+        "valueField": "id"
+      },
       "displayTemplate": "{{channel}} · {{locale}}",
       "filterField": "id",
       "icon": "file",
@@ -37233,6 +37938,11 @@
         "format": "uuid"
       },
       "listUrl": "/template-versions",
+      "optionSource": {
+        "type": "entity",
+        "source": "TemplateVersion",
+        "valueField": "id"
+      },
       "displayTemplate": "{{versionNumber}}",
       "filterField": "id",
       "icon": "file",
@@ -37466,6 +38176,11 @@
         "format": "uuid"
       },
       "listUrl": "/tenants",
+      "optionSource": {
+        "type": "entity",
+        "source": "Tenant",
+        "valueField": "id"
+      },
       "displayTemplate": "{{slug}}",
       "filterField": "slug",
       "icon": "file",
@@ -37892,6 +38607,11 @@
         "format": "uuid"
       },
       "listUrl": "/time-entries",
+      "optionSource": {
+        "type": "entity",
+        "source": "TimeEntry",
+        "valueField": "id"
+      },
       "displayTemplate": "{{workedAt}}: {{hours}}h",
       "filterField": "id",
       "icon": "file",
@@ -38091,6 +38811,11 @@
         "format": "uuid"
       },
       "listUrl": "/user-organization-permissions",
+      "optionSource": {
+        "type": "entity",
+        "source": "UserOrganizationPermission",
+        "valueField": "id"
+      },
       "displayTemplate": "{{clientId}} {{permissionName}}",
       "filterField": "permissionName",
       "icon": "file",
@@ -38301,6 +39026,11 @@
         "format": "uuid"
       },
       "listUrl": "/vacancies",
+      "optionSource": {
+        "type": "entity",
+        "source": "Vacancy",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}} {{title}}",
       "filterField": "code",
       "icon": "file",
@@ -38491,6 +39221,11 @@
         "format": "uuid"
       },
       "listUrl": "/valuations",
+      "optionSource": {
+        "type": "entity",
+        "source": "Valuation",
+        "valueField": "id"
+      },
       "displayTemplate": "{{valuationKind}}: {{amount}} @ {{valuedAt}}",
       "filterField": "id",
       "icon": "file",
@@ -38779,6 +39514,11 @@
         "format": "uuid"
       },
       "listUrl": "/vat-rates",
+      "optionSource": {
+        "type": "entity",
+        "source": "VatRate",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -38949,6 +39689,11 @@
         "format": "uuid"
       },
       "listUrl": "/vat-returns",
+      "optionSource": {
+        "type": "entity",
+        "source": "VatReturn",
+        "valueField": "id"
+      },
       "displayTemplate": "{{referenceNumber}}",
       "filterField": "referenceNumber",
       "icon": "file",
@@ -39117,6 +39862,11 @@
         "format": "uuid"
       },
       "listUrl": "/warranties",
+      "optionSource": {
+        "type": "entity",
+        "source": "Warranty",
+        "valueField": "id"
+      },
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
@@ -39566,6 +40316,11 @@
         "format": "uuid"
       },
       "listUrl": "/work-queues",
+      "optionSource": {
+        "type": "entity",
+        "source": "WorkQueue",
+        "valueField": "id"
+      },
       "displayTemplate": "{{name}}",
       "filterField": "name",
       "icon": "file",

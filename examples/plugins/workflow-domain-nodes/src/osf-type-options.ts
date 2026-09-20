@@ -50,9 +50,9 @@ function enrichField(field: Field, osfTypes: Map<string, OsfTypeDefinition>): Fi
   enriched.baseType = baseType;
   const osfType = osfTypeDefinitionOf(enriched.osfType, catalog);
 
-  if (osfType?.kind === "entityId" && osfType.listUrl) {
+  if (osfType?.kind === "entityId" && osfType.optionSource) {
     if (!enriched.options) {
-      enriched.options = { type: "remote", remoteUrl: osfType.listUrl };
+      enriched.options = { ...osfType.optionSource };
     }
     enriched.render = {
       component: "OptionVariablePicker",

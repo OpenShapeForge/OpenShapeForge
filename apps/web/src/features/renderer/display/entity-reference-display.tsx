@@ -29,12 +29,13 @@ function displayValue(value: unknown) {
 
 function entityReferenceField(field: Field): Field {
   const osfType = getFieldOsfTypeDefinition(field);
+  // `listUrl` is a web page; only a declared remote endpoint serves options.
   const remoteUrl =
     field.options?.type === "remote"
       ? field.options.remoteUrl
       : osfType?.options?.type === "remote"
         ? osfType.options.remoteUrl
-        : osfType?.listUrl;
+        : undefined;
 
   return remoteUrl
     ? {

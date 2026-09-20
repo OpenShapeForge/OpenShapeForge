@@ -74,6 +74,35 @@ export function isEntityBackedCreate(table: GeneratedTable): boolean {
   return contract === undefined || contract.implementation?.type !== "plugin";
 }
 
+/**
+ * Whether a plugin-backed create also creates records of other entities —
+ * a document with its first version, say. The contract says so: such a
+ * create promises, in its required output, a reference to a record that did
+ * not exist before the call (`currentVersionId`). The entity delete then
+ * refuses while those companions exist, and removing them is the plugin's
+ * contract, not the generic delete's. A plugin create that only computes
+ * its own columns (a milestone's frozen amount) deletes like any record.
+ */
+export function createsCompanionRecords(table: GeneratedTable): boolean {
+  const contract = operationContractFor(table, "create");
+  if (contract?.implementation?.type !== "plugin") return false;
+  const required = (contract.output as { schema?: { required?: string[] } } | undefined)?.schema?.required ?? [];
+  const references = new Set(
+    (table.source?.graphql?.relationships ?? [])
+      .filter((relationship) => relationship.resolve === "belongsTo" && relationship.fieldKey)
+      .map((relationship) => relationship.fieldKey!),
+  );
+  return required.some((field) => references.has(field));
+}
+
+/** Whether the create's contract lets the caller supply `field` at the top level. */
+export function createOffersField(table: GeneratedTable, field: string): boolean {
+  if (isEntityBackedCreate(table)) return true;
+  const contract = operationContractFor(table, "create");
+  const schema = (contract?.input as { schema?: { properties?: Record<string, unknown> } } | undefined)?.schema;
+  return field in (schema?.properties ?? {});
+}
+
 export function versionRequired(table: GeneratedTable, intent: MutationIntent): boolean {
   return operationContractFor(table, intent)?.concurrency?.version !== undefined;
 }

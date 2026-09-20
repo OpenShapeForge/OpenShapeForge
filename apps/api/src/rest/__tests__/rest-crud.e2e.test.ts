@@ -49,6 +49,8 @@ import {
 import {
   acknowledgementRequired,
   challengeAnswerFor,
+  createOffersField,
+  createsCompanionRecords,
   isCanonical,
   isEntityBackedCreate,
   leaseRequired,
@@ -373,7 +375,10 @@ for (const table of restTables) {
       expect(createdRecord.createdAt).toBeTruthy();
       expect(Object.keys(createdRecord).some((key) => key.includes("_"))).toBe(false);
       if (isCanonical(table)) {
-        expect(created.body.operations.every((offer: any) => offer.available)).toBe(true);
+        // A fresh record offers every Operation, except a status transition
+        // whose `from` the initial state is not: that one is listed as
+        // unavailable with INVALID_STATE, which is the offer doing its job.
+        expect(created.body.operations.every((offer: any) => offer.available || offer.error?.code === "INVALID_STATE")).toBe(true);
       } else {
         expect(created.body.operations).toBeUndefined();
       }
@@ -540,7 +545,7 @@ for (const table of restTables) {
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
 
-    if (isEntityBackedCreate(table)) {
+    if (!createsCompanionRecords(table)) {
       test("DELETE preserves v1 status and uses the v2 result envelope", async () => {
         const id = await createRestRow(table, tenantA);
         const deleted = isCanonical(table)
@@ -918,10 +923,11 @@ for (const table of restTables) {
     if (!fkTarget) return contractSample(table, immutable, nextMarker());
     return createForeignKeyTarget(fkTarget, identity);
   };
-  // Only an entity-backed create offers the column as input; a plugin create
-  // owns the value (a document's current version). PATCH refuses it either
-  // way, and the schema says so.
-  const offeredOnCreate = isEntityBackedCreate(table);
+  // An entity-backed create offers the column as input; a plugin create only
+  // where its authored contract names the field (a milestone's basis amount),
+  // and otherwise owns the value (a document's current version). PATCH
+  // refuses it either way, and the schema says so.
+  const offeredOnCreate = createOffersField(table, field);
 
   describe(`${rest_.basePath} immutable fields`, () => {
     test(`${offeredOnCreate ? `POST accepts ${field}; ` : ""}PATCH rejects ${field} with 400 and the value stands`, async () => {

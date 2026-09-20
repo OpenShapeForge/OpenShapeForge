@@ -352,13 +352,17 @@ export async function pluginCreateInput(
 
   const build = async (node: FieldSchema): Promise<Record<string, unknown>> => {
     const input: Record<string, unknown> = {};
+    // A contract that offers alternatives ("a fixed amount, or a basis with a
+    // percentage") states them as an anyOf of required lists; the first
+    // alternative is the one the factory satisfies.
+    const alternative = (node as { anyOf?: Array<{ required?: string[] }> }).anyOf?.[0]?.required ?? [];
     for (const [key, property] of Object.entries(node.properties ?? {})) {
       if (key in pending) {
         input[key] = pending[key];
         delete pending[key];
         continue;
       }
-      const required = node.required?.includes(key) === true;
+      const required = node.required?.includes(key) === true || alternative.includes(key);
       if (property.type === "object" && property.properties) {
         // An optional block (an artifact handle, say) is left out entirely:
         // its own required members only apply once the block is present.

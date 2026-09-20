@@ -20,6 +20,7 @@ import {
   test,
 } from "./e2e/harness.js";
 import {
+  contractSample,
   createRow,
   eligibleTablesByName,
   fieldName,
@@ -43,6 +44,8 @@ import {
   updateRecord,
 } from "./e2e/gql-shapes.js";
 import {
+  createOffersField,
+  createsCompanionRecords,
   isEntityBackedCreate,
   leaseRequired,
   placeholderControls,
@@ -177,7 +180,7 @@ for (const table of tables) {
       });
     }
 
-    if (isEntityBackedCreate(table)) {
+    if (!createsCompanionRecords(table)) {
       test("delete removes the row", async () => {
         const id = await createRow(table, tenantA);
         await expectDeleted(tenantA, table, id);
@@ -228,12 +231,15 @@ for (const table of tables) {
     if (immutable) {
       const immutableField = fieldName(immutable);
       const fkTarget = foreignKeyTargets(table).get(immutable.name);
+      // A value the column will accept: a real parent row for an FK, else a
+      // sample of the column's own contract (a number for an amount).
       const valueFor = async () =>
-        fkTarget ? createRow(eligibleTablesByName.get(fkTarget)!, tenantA) : randomUUID();
-      // Only an entity-backed create offers the column as input; a plugin
-      // create owns the value (a document's current version). The update
-      // refusal is the schema's and holds either way.
-      const offeredOnCreate = isEntityBackedCreate(table);
+        fkTarget ? createRow(eligibleTablesByName.get(fkTarget)!, tenantA) : contractSample(table, immutable, `e2e-${seed}-${immutableField}`);
+      // An entity-backed create offers the column as input; a plugin create
+      // only where its authored contract names the field (a milestone's
+      // basis amount), and otherwise owns the value (a document's current
+      // version). The update refusal is the schema's and holds either way.
+      const offeredOnCreate = createOffersField(table, immutableField);
       const relationshipField = table.source?.graphql?.relationships?.some(
         (relationship) => relationship.fieldKey === immutableField,
       ) === true;

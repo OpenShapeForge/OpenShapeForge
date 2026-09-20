@@ -22,13 +22,16 @@ domains:
   - contracts
 # Creation computes and freezes `amount` from basisAmount/percentOfBasis
 # (when a percentage is used) — logic the generic entity-CRUD create path
-# does not, and should not, know about. The generic `create` mutation is
-# withheld the same way DocumentVersion's is; POST /api/agreement-milestones
-# (apps/api/src/billing/rest-routes.ts) is the only creation path. Generic
-# `update`/`delete` stay enabled so the `immutable: true` fields below are
-# still refused on update by the ordinary generated transports. The status
-# lifecycle is a declared state machine on `status` (see `transitions`), so
-# triggering is the Operation AgreementMilestone.trigger on every interface.
+# does not, and should not, know about. `create` is therefore the canonical
+# Operation AgreementMilestone.create implemented by the core `osf-billing`
+# module (apps/api/src/operations/billing), projected on every interface
+# like any other create. Generic `update`/`delete` stay enabled so the
+# `immutable: true` fields below are still refused on update by the ordinary
+# generated transports. The status lifecycle is a declared state machine on
+# `status` (see `transitions`): trigger, cancel and invoice are Operations on
+# every interface, and the milestone billing run (BillingRun.execute) moves a
+# milestone to invoiced through the `invoice` rule, never by writing the
+# column itself.
 fields:
   - key: description
     required: true
@@ -119,12 +122,13 @@ fields:
         - { value: triggered, label: { en: Triggered, nl: Getriggerd } }
         - { value: invoiced, label: { en: Invoiced, nl: Gefactureerd } }
         - { value: cancelled, label: { en: Cancelled, nl: Geannuleerd } }
-    # The lifecycle as a state machine: `trigger` and `cancel` are the only
-    # writers of `status`; `trigger` stamps triggeredAt/triggeredBy from the
-    # server, so a milestone cannot be marked triggered through a generic
-    # update nor backdated. `invoiced` deliberately has no rule here: the
-    # milestone billing run (apps/api/src/billing/milestone-billing-run.ts)
-    # writes it in raw SQL until that run becomes a described Operation (A8).
+    # The lifecycle as a state machine: `trigger`, `cancel` and `invoice` are
+    # the only writers of `status`; `trigger` stamps triggeredAt/triggeredBy
+    # from the server, so a milestone cannot be marked triggered through a
+    # generic update nor backdated. `invoice` is what the milestone billing
+    # run (BillingRun.execute) calls for every milestone it invoices, naming
+    # the Invoice it produced; nothing leaves `invoiced`, so a milestone is
+    # invoiced at most once by construction.
     transitions:
       initial: pending
       rules:
@@ -145,6 +149,19 @@ fields:
           description:
             en: Withdraw this milestone so no billing run will invoice it
             nl: Trek deze mijlpaal in zodat geen facturatierun hem factureert
+        - key: invoice
+          from: [triggered]
+          to: invoiced
+          label: { en: Invoice, nl: Factureren }
+          description:
+            en: Record that this milestone has been invoiced, naming the invoice; the milestone billing run does this for every milestone it invoices
+            nl: Leg vast dat deze mijlpaal gefactureerd is, met de factuur erbij; de mijlpaalfacturatie doet dit voor elke mijlpaal die zij factureert
+          auth: { roles: [Finance.All.ReadWrite] }
+          # The invoice is required, and it must be an invoice of this
+          # milestone's agreement: a milestone is never invoiced against
+          # nothing, nor against another agreement's invoice.
+          writes:
+            - { field: producedInvoiceId, required: true, agreesOn: [agreementId] }
   - key: expectedAt
     osfType: date
     required: false
@@ -191,7 +208,10 @@ fields:
     persisted:
       column: triggered_by
       storageClass: core
+  # A milestone belongs to one agreement for life: the amount was computed
+  # against that agreement, and the invoice a run produces names it.
   - key: agreementId
+    immutable: true
     label:
       en: Agreement
       nl: Overeenkomst
@@ -226,6 +246,73 @@ authorization:
     enabled: true
     empty: public
 operations:
+  create:
+    name: { en: Create agreement milestone, nl: Overeenkomstmijlpaal aanmaken }
+    description:
+      en: Creates one agreement milestone. Give either a fixed amount, or basisAmount with percentOfBasis; the amount is then computed once and frozen.
+      nl: Maakt één overeenkomstmijlpaal aan. Geef óf een vast bedrag, óf basisAmount met percentOfBasis; het bedrag wordt dan eenmalig berekend en bevroren.
+    implementation: { type: plugin, plugin: osf-billing, handler: createAgreementMilestone, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [agreementId, description]
+        # Either a fixed amount, or a percentage of a basis: the schema says
+        # so, and every interface refuses an input that gives neither. The
+        # branches restate the property names because strict JSON Schema
+        # wants a required name defined where it is required.
+        anyOf:
+          - { required: [amount], properties: { amount: true } }
+          - { required: [basisAmount, percentOfBasis], properties: { basisAmount: true, percentOfBasis: true } }
+        properties:
+          agreementId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Agreement }
+            x-osf-i18n: { title: { en: Agreement, nl: Overeenkomst } }
+          description:
+            type: string
+            minLength: 1
+            maxLength: 2000
+            x-osf-i18n: { title: { en: Description, nl: Omschrijving } }
+          basisAmount:
+            type: number
+            exclusiveMinimum: 0
+            x-osf-i18n:
+              title: { en: Basis amount, nl: Basisbedrag }
+              description: { en: The positive value a percentage is computed against., nl: De positieve waarde waartegen een percentage wordt berekend. }
+          percentOfBasis:
+            type: number
+            exclusiveMinimum: 0
+            maximum: 100
+            x-osf-i18n:
+              title: { en: Percent of basis, nl: Percentage van basis }
+              description: { en: More than 0 and at most 100; a milestone that bills nothing is not a milestone., nl: Meer dan 0 en ten hoogste 100; een mijlpaal die niets factureert is geen mijlpaal. }
+          amount:
+            type: number
+            exclusiveMinimum: 0
+            x-osf-i18n: { title: { en: Amount, nl: Bedrag } }
+          expectedAt:
+            type: [string, "null"]
+            format: date
+            x-osf-i18n: { title: { en: Expected on, nl: Verwacht op } }
+    output:
+      schema:
+        type: object
+        additionalProperties: true
+        required: [id, status, amount]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Record, nl: Record } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          amount: { type: number, x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 422, code: VALIDATION, description: "The milestone input is invalid: give either a fixed amount or basisAmount with percentOfBasis." }
+      - { status: 403, code: FORBIDDEN, description: The caller may not create agreement milestones. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
   list:
     name: { en: List agreement milestones, nl: Overeenkomstmijlpalen tonen }
     description:

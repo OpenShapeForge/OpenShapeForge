@@ -19,7 +19,7 @@ import type {
   LocalizedText,
   OsfTypeDefinition,
 } from "../types.js";
-import type { FieldDefinitionTransitionRule } from "../types/field-definition.js";
+import type { FieldDefinitionTransitionRule, FieldDefinitionTransitionWrite } from "../types/field-definition.js";
 import type { CompiledTransitionField } from "../types/compiled.js";
 import { compiledFieldSchemaWithoutDefinitions } from "../../field-json-schema.js";
 import { resolveModelFields } from "./model.js";
@@ -42,6 +42,11 @@ function text(value: LocalizedText | string | undefined, fallback: string): Loca
 
 function fail(entity: CoreEntity, field: Field, message: string): never {
   throw new Error(`[${entity.entity}] transitions on "${field.key}": ${message}`);
+}
+
+/** Every write in its object form: a bare key is optional input with no constraint. */
+export function ruleWrites(rule: Pick<FieldDefinitionTransitionRule, "writes">): FieldDefinitionTransitionWrite[] {
+  return (rule.writes ?? []).map((write) => (typeof write === "string" ? { field: write } : write));
 }
 
 function optionValues(entity: CoreEntity, field: Field): string[] {
@@ -109,11 +114,11 @@ function assertRule(
   if (permission && permission !== "edit") {
     fail(entity, field, `${where} names auth.recordPermission ${permission}; a transition writes the record and requires edit.`);
   }
-  const written: Array<{ key: string; how: "writes" | "stamps"; value?: "now" | "actor" }> = [
-    ...(rule.writes ?? []).map((key) => ({ key, how: "writes" as const })),
+  const written: Array<{ key: string; how: "writes" | "stamps"; value?: "now" | "actor"; agreesOn?: string[] }> = [
+    ...ruleWrites(rule).map((write) => ({ key: write.field, how: "writes" as const, ...(write.agreesOn ? { agreesOn: write.agreesOn } : {}) })),
     ...(rule.stamps ?? []).map((stamp) => ({ key: stamp.field, how: "stamps" as const, value: stamp.value })),
   ];
-  for (const { key, how, value } of written) {
+  for (const { key, how, value, agreesOn } of written) {
     const target = fields.get(key);
     if (!target?.persisted || key === field.key || fieldCardinality(target) !== "single") {
       fail(entity, field, `${where} ${how} "${key}", which is not a persisted single field other than the status.`);
@@ -132,12 +137,80 @@ function assertRule(
     if (value === "actor" && !stampActor(target)) {
       fail(entity, field, `${where} stamps "${key}" with actor, but it is neither a Relation reference nor a string field.`);
     }
+    if (agreesOn) assertAgreesOn(entity, field, where, target, agreesOn, fields);
     assertNotInForms(entity, field, key, `${where} ${how} it`);
     const writer = seen.get(`writes:${key}`);
     if (writer) fail(entity, field, `${where} ${how} "${key}", which rule "${writer}" already writes.`);
     seen.set(`writes:${key}`, rule.key);
   }
   seen.set(rule.key, rule.key);
+}
+
+/** Base types a database can compare exactly; an object has no equality worth a refusal. */
+const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
+
+/**
+ * `agreesOn` names fields the referenced record must share with this one:
+ * the written field must be a single entity reference, and every named field
+ * must be a persisted single scalar here. That the target entity carries the
+ * same field with the same base type is checked across the corpus by
+ * `assertTransitionAgreements`, and bound to typed columns by the runtime.
+ */
+function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target: Field, agreesOn: string[], fields: Map<string, Field>): void {
+  if (!target.relationship || fieldCardinality(target) !== "single") {
+    fail(entity, field, `${where} constrains "${target.key}" with agreesOn, but it is not a single entity reference.`);
+  }
+  for (const key of agreesOn) {
+    const local = fields.get(key);
+    if (!local?.persisted || fieldCardinality(local) !== "single" || !COMPARABLE_BASE_TYPES.has(local.baseType ?? "")) {
+      fail(entity, field, `${where} agreesOn "${key}", which is not a persisted single comparable field of ${entity.entity}.`);
+    }
+  }
+}
+
+/**
+ * The corpus-wide half of `agreesOn`, run by collectAllArtifacts over every
+ * compiled entity, core and plugin alike: the referenced entity must carry
+ * every named field as a persisted single field of the same base type and
+ * column type, so the comparison the runtime issues in SQL is between
+ * columns of one type. A rule whose reference no compiled entity answers to
+ * is refused, never skipped.
+ */
+type AgreementContract = {
+  transitions?: CompiledTransitionField[];
+  model: { fields: ReadonlyArray<{ key: string; osfType: string; baseType: string; cardinality: string }> };
+  storage: { columns: ReadonlyArray<{ field: string; type: string }> };
+  entity: { name: string };
+};
+
+export function assertTransitionAgreements(entities: ReadonlyArray<AgreementContract>): void {
+  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
+  const describe = (contract: AgreementContract, key: string) => {
+    const field = contract.model.fields.find((candidate) => candidate.key === key);
+    const column = contract.storage.columns.find((candidate) => candidate.field === key);
+    return field && column && field.cardinality === "single" ? `${field.baseType} ${column.type}` : undefined;
+  };
+  for (const contract of entities) {
+    for (const status of contract.transitions ?? []) {
+      for (const rule of status.rules) {
+        for (const write of rule.writes ?? []) {
+          if (!write.agreesOn?.length) continue;
+          const reference = contract.model.fields.find((candidate) => candidate.key === write.field);
+          const target = reference && byName.get(reference.osfType);
+          if (!target) throw new Error(`[${contract.entity.name}] ${rule.operation} constrains "${write.field}" with agreesOn, but it references no compiled entity.`);
+          for (const key of write.agreesOn) {
+            const local = describe(contract, key);
+            const remote = describe(target, key);
+            if (!local || !remote || local !== remote) {
+              throw new Error(
+                `[${contract.entity.name}] ${rule.operation} agreesOn "${key}", but ${target.entity.name}.${key} (${remote ?? "absent"}) is not a persisted single field of the same type as ${contract.entity.name}.${key} (${local ?? "absent"}).`,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 /** How `actor` lands in a field: the session's linked Relation for a Relation reference, else the user id. */
@@ -181,7 +254,8 @@ function ruleOperation(
   writes: Record<string, Record<string, unknown>>,
 ): EntityOperationDefinition {
   const recordPermission = ruleRecordPermission(entity, rule);
-  const required = ["id", ...Object.keys(writes).filter((key) => entity.fields.find((entry) => entry.key === key)?.required)];
+  const requiredWrites = new Set(ruleWrites(rule).filter((write) => write.required).map((write) => write.field));
+  const required = ["id", ...Object.keys(writes).filter((key) => requiredWrites.has(key) || entity.fields.find((entry) => entry.key === key)?.required)];
   const label = text(rule.label, rule.key);
   const summary = text(rule.description, "");
   const path = `${field.key}: ${rule.from.join(" | ")} -> ${rule.to}`;
@@ -262,12 +336,13 @@ export function withStatusTransitions(
     writtenBy.set(field.key, rules.map((rule) => `${entity.entity}.${rule.key}`));
     for (const rule of rules) {
       const id = `${entity.entity}.${rule.key}`;
-      const writeFields = entity.fields.filter((entry) => rule.writes?.includes(entry.key));
+      const writeKeys = ruleWrites(rule).map((write) => write.field);
+      const writeFields = entity.fields.filter((entry) => writeKeys.includes(entry.key));
       const writes = Object.fromEntries(
         resolveModelFields(writeFields, catalogs.componentCatalog, catalogs.osfTypes)
           .map((compiledField) => [compiledField.key, compiledFieldSchemaWithoutDefinitions(compiledField)]),
       );
-      for (const key of rule.writes ?? []) writtenBy.set(key, [id]);
+      for (const key of writeKeys) writtenBy.set(key, [id]);
       for (const stamp of rule.stamps ?? []) writtenBy.set(stamp.field, [id]);
       operations[rule.key] = ruleOperation(entity, field, rule, values, writes);
       rest[rule.key] = { method: "POST", path: `/api/rest/v1/${basePath}/:id/${kebab(rule.key)}` };
@@ -283,7 +358,13 @@ export function withStatusTransitions(
         label: text(rule.label, rule.key),
         ...(() => { const permission = ruleRecordPermission(entity, rule); return permission ? { recordPermission: permission } : {}; })(),
         ...(rule.preconditions?.length ? { preconditions: rule.preconditions.map((entry) => ({ ...entry })) } : {}),
-        ...(rule.writes?.length ? { writes: [...rule.writes] } : {}),
+        ...(rule.writes?.length
+          ? { writes: ruleWrites(rule).map((write) => ({
+              field: write.field,
+              required: write.required === true,
+              ...(write.agreesOn?.length ? { agreesOn: [...write.agreesOn] } : {}),
+            })) }
+          : {}),
         ...(rule.stamps?.length
           ? { stamps: rule.stamps.map((stamp) => ({
               field: stamp.field,

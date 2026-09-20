@@ -301,7 +301,7 @@ export type WebStatusTransitions = {
     label: LocalizedText;
     recordPermission?: "edit";
     preconditions?: Array<{ field: string; present: boolean }>;
-    writes?: string[];
+    writes?: Array<{ field: string; required: boolean; agreesOn?: string[] }>;
     stamps?: Array<{ field: string; value: "now" | "actor"; actor?: "relation" | "user" }>;
   }>;
 };

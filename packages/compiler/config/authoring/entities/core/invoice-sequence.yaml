@@ -3,8 +3,9 @@ kind: coreEntity
 module: core
 entity: InvoiceSequence
 title: Invoice Sequence
-description: Atomic counter for invoice numbering, keyed by (tenant, kind, fiscal year). Provisioned, not user-facing —
-  incremented in the same transaction as the invoice insert.
+description: Atomic counter for invoice numbering, keyed by (tenant, kind, fiscal year). Not user-facing — the row is
+  created and incremented only by the billing run (BillingRun.execute), in the same transaction as the invoice
+  insert; no interface creates, edits or deletes a counter.
 language: en
 displayTemplate: "{{kind}} {{fiscalYearCode}}: {{lastNumber}}"
 filterField: kind
@@ -16,8 +17,21 @@ pluralLabels:
   nl: Factuurreeksen
 domains:
   - finance
+# One counter per (tenant, kind, fiscal year): the unique index is what lets
+# the billing run allocate a number with a single `insert ... on conflict`
+# increment, so two concurrent first-of-year runs serialise on the row
+# instead of both seeding it at 1.
+indexes:
+  - name: invoice_sequences_tenant_kind_fiscal_year_uidx
+    fields:
+      - tenantId
+      - kind
+      - fiscalYearCode
+    unique: true
 fields:
   - key: kind
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     required: true
     label:
       en: Kind
@@ -33,6 +47,8 @@ fields:
       referentieGroep: INVOICEKIND
     osfType: referenceDataCode
   - key: fiscalYearCode
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: string
     required: true
     label:
@@ -50,6 +66,8 @@ fields:
       column: fiscal_year_code
       storageClass: core
   - key: lastNumber
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: true
     label:
@@ -65,6 +83,8 @@ fields:
       column: last_number
       storageClass: core
   - key: lastIssuedAt
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: datetime
     required: false
     label:
@@ -126,12 +146,9 @@ authorization:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
-    create:
-      - Finance.All.ReadWrite
-    update:
-      - Finance.All.ReadWrite
-    delete:
-      - Finance.All.ReadWrite
+    create: []
+    update: []
+    delete: []
   rowAccess:
     enabled: true
     empty: public
@@ -164,65 +181,14 @@ operations:
         mode: natural
     confirmation:
       mode: none
-  create:
-    name: Create Invoice Sequence
-    description: Create InvoiceSequence records.
-    implementation:
-      type: entity
-      action: create
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  update:
-    name:
-      en: Edit
-      nl: Bewerken
-    description: Update InvoiceSequence records.
-    implementation:
-      type: entity
-      action: update
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  delete:
-    name:
-      en: Delete
-      nl: Verwijderen
-    description:
-      en: Are you sure?
-      nl: Weet je het zeker?
-    implementation:
-      type: entity
-      action: delete
-    effects:
-      data: delete
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: acknowledgement
 interfaces:
   rest: {}
   graphql: {}
   workflow:
     nodes:
       actions:
-        create: true
         getOne: true
         list: true
-        update: true
-        delete: true
   web:
     views:
       collection:
@@ -249,16 +215,10 @@ interfaces:
           read:
             en: /invoice-sequences/:id
             nl: /factuurreeksen/:id
-          create:
-            en: /invoice-sequences/create
-            nl: /factuurreeksen/aanmaken
         title: "{{kind}} {{fiscalYearCode}}"
         subtitle: "{{lastNumber}}"
         badges:
           - kind
-        actions:
-          - update
-          - delete
         layout:
           tabs:
             - id: overview
@@ -285,35 +245,6 @@ interfaces:
                     - sourceAuthority
                     - sourceOrganization
                     - sourceAdministration
-        modes:
-          create:
-            title:
-              en: Create invoice sequence
-              nl: Factuurreeks aanmaken
-            groups:
-              - title:
-                  en: Sequence details
-                  nl: Reeksgegevens
-                fields:
-                  - kind
-                  - fiscalYearCode
-                  - lastNumber
-                  - lastIssuedAt
-                  - format
-                  - resetPolicy
-              - title:
-                  en: Source
-                  nl: Herkomst
-                fields:
-                  - externalId
-                  - externalCode
-                  - sourceAuthority
-                  - sourceOrganization
-                  - sourceAdministration
-          update:
-            title:
-              en: Edit invoice sequence
-              nl: Factuurreeks bewerken
     fields:
       kind:
         render:

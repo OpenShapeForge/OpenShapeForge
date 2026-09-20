@@ -114,7 +114,9 @@ fields:
           label: { en: Submit, nl: Indienen }
           auth: { roles: [Cases.All.ReadWrite] }        # default: the entity's update roles
           preconditions: [ { field: reviewerId, present: true } ]
-          writes: [comment]                             # input fields only this rule may set
+          writes:                                       # input fields only this rule may set
+            - comment                                   # optional input
+            - { field: reviewerId, required: true, agreesOn: [teamId] }  # required, and the Relation it names must share this record's teamId
           stamps:                                       # server-derived, never input
             - { field: submittedAt, value: now }
             - { field: submittedBy, value: actor }      # linked Relation, or the user id for a string
@@ -134,7 +136,16 @@ What the compiler makes of it:
 - The status field and every `writes` and `stamps` field become `writtenBy`
   the rule's Operation: generic create admits no value (the column defaults to
   `initial`), generic update refuses them with a message naming the Operation
-  and its REST route, and the option set is a database `CHECK`. A `stamps`
+  and its REST route, and the option set is a database `CHECK`. A write in
+  its object form can be `required` (the rule refuses to run without it, and
+  the input schema says so) and, on a single entity reference, can carry
+  `agreesOn`: field keys on which the referenced record must equal this one.
+  The generic handler compares in SQL, column against column with `IS
+  DISTINCT FROM` in the query that share-locks the referenced record inside
+  the transition's transaction — typed and null-aware, a null agrees with a
+  null and with nothing else — and refuses with `VALIDATION` when the record
+  is absent from the tenant or disagrees. The constraint is declared once in
+  the YAML and enforced for every interface. A `stamps`
   field is filled by the server at execution — `now` is the transaction time
   on a datetime field, `actor` the session's linked Relation on a Relation
   reference or the user id on a string field — and is refused as input.
@@ -159,7 +170,14 @@ option values and `defaultValue` must equal `initial`; rule keys are unique
 and do not collide with the entity's other operations; a `writes` or `stamps`
 field must be a persisted single field that nothing else writes and, when
 required, must carry a `defaultValue` (it leaves the create input, so without
-one no record could ever be created); and neither the status field nor a
+one no record could ever be created); an `agreesOn` write must be a single
+entity reference and name persisted single comparable (non-object) fields
+that the referenced entity carries with the same base type and column type
+— checked across every compiled entity, core and plugin alike, when the
+artifacts are collected (a reference no compiled entity answers to is
+refused, never skipped), and again against the manifest's columns when the
+runtime binds the rule at boot; and
+neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
 present (not null) or absent (null); an empty string is a present value — and
@@ -168,5 +186,105 @@ richer checks belong in an authored plugin Operation.
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
 `pending` to `triggered` and stamps `triggeredAt` with the transaction time
 and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
-`cancelled`. `invoiced` is still written by the milestone billing run until
-that run is a described Operation.
+`cancelled`; `invoice` moves `triggered` to `invoiced` under the finance role
+and requires `producedInvoiceId`, an Invoice that agrees with the milestone
+on `agreementId` — no milestone is invoiced against nothing or against
+another agreement's invoice. Nothing leaves `invoiced`, so a milestone is
+invoiced at most once by construction.
+
+## Billing
+
+The milestone billing run is the first core behaviour that is neither a
+CRUD intent nor a transition: `BillingRun.execute`, authored on the
+BillingRun entity and implemented by the core `osf-billing` runtime
+(`apps/api/src/operations/billing`), which binds in every process like the
+transition, jobs and grants handlers. The YAML is the whole contract:
+
+```yaml
+operations:
+  execute:
+    name: { en: Run milestone billing, nl: Mijlpaalfacturatie draaien }
+    implementation: { type: plugin, plugin: osf-billing, handler: executeBillingRun }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [idempotencyKey]
+        properties:
+          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          agreementId: { type: string, format: uuid, x-osf-reference: { entity: Agreement } }
+          dryRun: { type: boolean, default: false }
+    auth: { mode: session, roles: [Finance.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    errors:
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
+      - { status: 409, code: ALREADY_EXISTS, description: Another caller already ran billing under this idempotency key. }
+interfaces:
+  rest:
+    operations:
+      execute: { method: POST, path: /api/rest/v1/billing-runs/execute }
+```
+
+What one call does, in one transaction: create the BillingRun (the record
+of the run), lock every AgreementMilestone at `triggered` — of the tenant,
+or of the one agreement named — and for each of them allocate a number from
+the tenant's sales InvoiceSequence for the fiscal year, create one Invoice
+with one InvoiceLine, create a BillingRunItem recording the decision, and
+move the milestone through `AgreementMilestone.invoice`. The rows go
+through the generic entity create, so declared validation, the tenant
+column and the `created` journal events are the ones a hand-made record
+gets; the milestone goes through the transition handler, so the status
+column has no other writer.
+
+The number is identity, frozen at issue: `Invoice.invoiceNumber` and
+`Invoice.fiscalYearCode` are `immutable` and `writtenBy: [BillingRun.execute]`,
+so no generic create or update on any interface sets or changes them (a
+draft made by hand has no number until a run issues it), and the unique
+index over Invoice `(tenantId, invoiceKind, fiscalYearCode, invoiceNumber)`
+— partial, `where: { field: invoiceNumber, present: true }`, so drafts stay
+out of the numbering scope — is the guarantee that no two invoices of a
+tenant share a number within a kind and fiscal year; `invoiceNumber`
+carries `validation.requires: [fiscalYearCode]`, a row `CHECK` that no
+number is ever stored without the year that scopes it. The fiscal year is
+stored on the invoice rather than derived from its issue date, because the
+counter is scoped by it: a later change of the issue date must not move an
+invoice out of the sequence that numbered it. Both the issue date and the
+fiscal year are the calendar date on the **tenant's own clock**
+(`platform.tenants.time_zone`, an IANA zone, `Europe/Amsterdam` by
+default), never UTC: half past midnight on 1 January in Amsterdam would
+otherwise number the year's first invoice into last year's sequence.
+InvoiceSequence and BillingRun have no create, update or delete on any
+interface; the counter columns and every run field are `writtenBy` the run
+and only the run touches those rows. Should an invoice nonetheless hold the
+number the counter would issue next — a counter reset by hand, a row
+planted past the run, even between the allocation and the insert — the
+insert runs under a savepoint: a unique violation on the number is
+"taken", the attempt is rolled back to the savepoint and the run allocates
+the next number in the same transaction (a gap is cheaper than a run that
+cannot finish), giving up after a thousand taken numbers rather than scan.
+`AgreementMilestone.agreementId` is `immutable`: a milestone belongs to one
+agreement for life, and the invoice a run produces names that agreement.
+
+Idempotency is the core receipt, keyed on the caller's `Idempotency-Key`:
+a replay by the same actor returns the first result without running again,
+a different input under the same key is `IDEMPOTENCY_KEY_REUSED`, and a
+different actor reusing the key is refused as `ALREADY_EXISTS` by name
+rather than as a database error. Numbering relies on the unique index over
+InvoiceSequence `(tenantId, kind, fiscalYearCode)`: one `insert ... on
+conflict ... do update` seeds a fiscal year at 1 or increments it, so two
+runs racing on the first number of a year serialise on the row instead of
+both taking 1. `dryRun` plans and counts, records the run, and invoices
+nothing.
+
+`AgreementMilestone.create` is authored the same way (`implementation:
+{ type: plugin, plugin: osf-billing, handler: createAgreementMilestone,
+action: create }`): the one create rule the generic path does not know —
+with `percentOfBasis` (more than 0, at most 100: a milestone that bills
+nothing is not a milestone) the amount is computed from a positive
+`basisAmount` once and frozen, otherwise a positive `amount` is required —
+lives in the module,
+and the Operation is projected as the entity's ordinary create on REST,
+MCP and GraphQL.

@@ -86,6 +86,17 @@ describe("billing Operations", () => {
       name: "invoices_tenant_kind_fiscal_year_number_uidx",
       fields: ["tenantId", "invoiceKind", "fiscalYearCode", "invoiceNumber"],
       unique: true,
+      where: { field: "invoiceNumber", present: true },
     });
+    expect(invoice.model.fields.find((candidate) => candidate.key === "invoiceNumber")!.validation).toMatchObject({ requires: ["fiscalYearCode"] });
+    expect(invoice.model.fields.find((candidate) => candidate.key === "agreementId")).toBeDefined();
+  });
+
+  test("a milestone belongs to one agreement for life, and a run's fields are the run's alone", () => {
+    expect(milestone.model.fields.find((field) => field.key === "agreementId")).toMatchObject({ immutable: true });
+    expect(Object.keys(run.entityOperations)).toEqual(["list", "get"]);
+    for (const key of ["idempotencyKey", "status", "mode", "agreementsPlanned", "invoicesProduced", "totalAmount", "completedAt"]) {
+      expect(run.model.fields.find((field) => field.key === key)!.writtenBy).toEqual(["BillingRun.execute"]);
+    }
   });
 });

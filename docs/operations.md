@@ -173,8 +173,10 @@ required, must carry a `defaultValue` (it leaves the create input, so without
 one no record could ever be created); an `agreesOn` write must be a single
 entity reference and name persisted single comparable (non-object) fields
 that the referenced entity carries with the same base type and column type
-— checked across the whole corpus when the catalogue is built, and again
-against the manifest's columns when the runtime binds the rule at boot; and
+— checked across every compiled entity, core and plugin alike, when the
+artifacts are collected (a reference no compiled entity answers to is
+refused, never skipped), and again against the manifest's columns when the
+runtime binds the rule at boot; and
 neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
@@ -242,16 +244,29 @@ The number is identity, frozen at issue: `Invoice.invoiceNumber` and
 so no generic create or update on any interface sets or changes them (a
 draft made by hand has no number until a run issues it), and the unique
 index over Invoice `(tenantId, invoiceKind, fiscalYearCode, invoiceNumber)`
-is the guarantee that no two invoices of a tenant share a number within a
-kind and fiscal year. The fiscal year is stored on the invoice rather than
-derived from its issue date, because the counter is scoped by it: a later
-change of the issue date must not move an invoice out of the sequence that
-numbered it. InvoiceSequence has no create, update or delete on any
-interface; its counter columns are `writtenBy` the run and only the run
-touches the row. Should an invoice nonetheless hold the number the counter
-would issue next — a counter reset by hand, a row planted past the run —
-the run allocates past it (a gap is cheaper than a run that cannot finish)
-and gives up after a thousand taken numbers rather than scan.
+— partial, `where: { field: invoiceNumber, present: true }`, so drafts stay
+out of the numbering scope — is the guarantee that no two invoices of a
+tenant share a number within a kind and fiscal year; `invoiceNumber`
+carries `validation.requires: [fiscalYearCode]`, a row `CHECK` that no
+number is ever stored without the year that scopes it. The fiscal year is
+stored on the invoice rather than derived from its issue date, because the
+counter is scoped by it: a later change of the issue date must not move an
+invoice out of the sequence that numbered it. Both the issue date and the
+fiscal year are the calendar date on the **tenant's own clock**
+(`platform.tenants.time_zone`, an IANA zone, `Europe/Amsterdam` by
+default), never UTC: half past midnight on 1 January in Amsterdam would
+otherwise number the year's first invoice into last year's sequence.
+InvoiceSequence and BillingRun have no create, update or delete on any
+interface; the counter columns and every run field are `writtenBy` the run
+and only the run touches those rows. Should an invoice nonetheless hold the
+number the counter would issue next — a counter reset by hand, a row
+planted past the run, even between the allocation and the insert — the
+insert runs under a savepoint: a unique violation on the number is
+"taken", the attempt is rolled back to the savepoint and the run allocates
+the next number in the same transaction (a gap is cheaper than a run that
+cannot finish), giving up after a thousand taken numbers rather than scan.
+`AgreementMilestone.agreementId` is `immutable`: a milestone belongs to one
+agreement for life, and the invoice a run produces names that agreement.
 
 Idempotency is the core receipt, keyed on the caller's `Idempotency-Key`:
 a replay by the same actor returns the first result without running again,
@@ -267,7 +282,9 @@ nothing.
 `AgreementMilestone.create` is authored the same way (`implementation:
 { type: plugin, plugin: osf-billing, handler: createAgreementMilestone,
 action: create }`): the one create rule the generic path does not know —
-with `percentOfBasis` the amount is computed from `basisAmount` once and
-frozen, otherwise a positive `amount` is required — lives in the module,
+with `percentOfBasis` (more than 0, at most 100: a milestone that bills
+nothing is not a milestone) the amount is computed from a positive
+`basisAmount` once and frozen, otherwise a positive `amount` is required —
+lives in the module,
 and the Operation is projected as the entity's ordinary create on REST,
 MCP and GraphQL.

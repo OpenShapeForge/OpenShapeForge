@@ -21,6 +21,7 @@ import {
 } from "./e2e/harness.js";
 import {
   contractSample,
+  createInput,
   createRow,
   referencingRows,
   eligibleTablesByName,
@@ -32,6 +33,7 @@ import {
 } from "./e2e/entity-factory.js";
 import {
   collectionOf,
+  createDoc,
   deleteDoc,
   deletedOf,
   deleteRecord,
@@ -251,6 +253,15 @@ for (const table of tables) {
       );
 
       test(`${offeredOnCreate ? `create accepts ${immutableField}; ` : ""}update naming ${immutableField} is refused`, async () => {
+        // A column an Operation writes is not the caller's at create either:
+        // the entity-backed create refuses it by name, as the update does below.
+        if (!offeredOnCreate && isEntityBackedCreate(table)) {
+          const refusedCreate = await gql(tenantA, createDoc(table), {
+            input: { ...(await createInput(table, tenantA)), [immutableField]: await valueFor() },
+          });
+          expect(refusedCreate.data ?? null).toBeNull();
+          expect(JSON.stringify(refusedCreate.errors)).toContain(immutableField);
+        }
         const id = offeredOnCreate
           ? await createRow(table, tenantA, { [immutableField]: await valueFor() })
           : await createRow(table, tenantA);

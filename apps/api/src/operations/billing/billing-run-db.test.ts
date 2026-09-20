@@ -12,6 +12,7 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
+import { withDbSession } from "../../db/session.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../../db/migrations/app-role.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
@@ -20,7 +21,9 @@ import type { OperationContract } from "../runtime.js";
 import { createGeneratedEntityForTable } from "../entity/mutations.js";
 import { executeTransition, transitionBinding, transitionOperationHandler } from "../entity/transitions.js";
 import { billingTable, createAgreementMilestone } from "./agreement-milestone.js";
-import { executeBillingRun, runMilestoneBilling, type BillingRunInput, type BillingRunResult } from "./execute-billing-run.js";
+import { executeBillingRun, runMilestoneBilling, tenantCivilDate, type BillingRunInput, type BillingRunResult } from "./execute-billing-run.js";
+import { issueNumberedInvoice } from "./invoice-numbering.js";
+import { updateGeneratedEntity } from "../entity/mutations.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const scratchName = `billing_run_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -70,7 +73,7 @@ async function milestoneRow(id: string) {
 }
 
 /** The run the way the runtime invokes it: under the core receipt of the caller's key. */
-function keyed(session: TrustedSessionContext, input: BillingRunInput): Promise<BillingRunResult> {
+function keyed(session: TrustedSessionContext, input: BillingRunInput, options: { at?: Date } = {}): Promise<BillingRunResult> {
   return executeKeyedOperation<BillingRunResult>(restricted.db, session, {
     operation: { id: "BillingRun.execute", intent: "invoke" },
     idempotencyKey: input.idempotencyKey,
@@ -78,7 +81,7 @@ function keyed(session: TrustedSessionContext, input: BillingRunInput): Promise<
     idempotencyInputField: "idempotencyKey",
     contractFingerprint: `sha256:${createHash("sha256").update("billing-run-db-test").digest("hex")}`,
     externalWrite: false,
-    execute: () => runMilestoneBilling(restricted.db, session, input),
+    execute: () => runMilestoneBilling(restricted.db, session, input, options),
     encode: (value) => value,
     decode: (value) => value as BillingRunResult,
   });
@@ -245,5 +248,62 @@ describe("the milestone billing run against PostgreSQL", () => {
     expect(numbers).toEqual([1, 2, 3]);
     const sequence = (await sql<{ last_number: number }>`select last_number from erp.invoice_sequences where tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows;
     expect(sequence).toEqual([{ last_number: 3 }]);
+  }, 60_000);
+
+  test("a number taken between its allocation and the insert is skipped under a savepoint, in the same transaction", async () => {
+    const tenantId = await tenant();
+    const session = sessionFor(tenantId);
+    const fiscalYearCode = "2031";
+    const plant = (number: number) => sql`insert into erp.invoices (tenant_id, invoice_kind, invoice_status, invoice_number, fiscal_year_code, issue_date, currency_code)
+      values (${tenantId}::uuid, 'sales', 'issued', ${number}, ${fiscalYearCode}, current_date, 'EUR')`.execute(privileged.db);
+    const attempts: number[] = [];
+    const issued = await withDbSession(restricted.db, session, (trx) =>
+      issueNumberedInvoice(trx, { tenantId, kind: "sales", fiscalYearCode }, async (number) => {
+        attempts.push(number);
+        // Another writer commits the very number this attempt was handed, after the allocation and before the insert.
+        if (attempts.length === 1) await plant(number);
+        return createGeneratedEntityForTable(restricted.db, session, billingTable("Invoice"), {
+          invoiceKind: "sales", invoiceStatus: "issued", invoiceNumber: number, fiscalYearCode, issueDate: "2031-01-01", currencyCode: "EUR",
+        });
+      }));
+    expect(attempts).toEqual([1, 2]);
+    expect(issued.invoiceNumber).toBe(2);
+    const numbers = (await sql<{ invoice_number: number }>`select invoice_number from erp.invoices where tenant_id = ${tenantId}::uuid order by invoice_number`.execute(privileged.db)).rows.map((row) => row.invoice_number);
+    expect(numbers).toEqual([1, 2]);
+    // A failure that is not the number being taken is the caller's, rethrown after the rollback.
+    await expect(withDbSession(restricted.db, session, (trx) =>
+      issueNumberedInvoice(trx, { tenantId, kind: "sales", fiscalYearCode }, async () => { throw new Error("not a number problem"); }))).rejects.toThrow("not a number problem");
+  }, 60_000);
+
+  test("the issue date and fiscal year come from the tenant's own clock, not UTC", async () => {
+    const tenantId = await tenant();
+    const session = sessionFor(tenantId);
+    // Half past midnight on 1 January in Amsterdam is still 31 December in UTC.
+    const boundary = new Date("2030-12-31T23:30:00Z");
+    expect(await withDbSession(restricted.db, session, (trx) => tenantCivilDate(trx, tenantId, boundary))).toBe("2031-01-01");
+    await sql`update platform.tenants set time_zone = 'UTC' where id = ${tenantId}::uuid`.execute(privileged.db);
+    expect(await withDbSession(restricted.db, session, (trx) => tenantCivilDate(trx, tenantId, boundary))).toBe("2030-12-31");
+    await sql`update platform.tenants set time_zone = 'Pacific/Kiritimati' where id = ${tenantId}::uuid`.execute(privileged.db);
+    const { agreementId } = await agreement(tenantId);
+    await milestone(session, agreementId, 12);
+    const run = await keyed(session, { idempotencyKey: "boundary" }, { at: boundary });
+    const invoice = (await sql<{ fiscal_year_code: string; issue_date: string }>`select fiscal_year_code, issue_date::text as issue_date from erp.invoices where id = ${run.items[0]!.invoiceId}::uuid`.execute(privileged.db)).rows[0]!;
+    expect(invoice).toEqual({ fiscal_year_code: "2031", issue_date: "2031-01-01" });
+    expect((await sql<{ fiscal_year_code: string }>`select fiscal_year_code from erp.invoice_sequences where tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows).toEqual([{ fiscal_year_code: "2031" }]);
+  }, 60_000);
+
+  test("a milestone belongs to one agreement for life", async () => {
+    const tenantId = await tenant();
+    const session = sessionFor(tenantId);
+    const { agreementId } = await agreement(tenantId);
+    const other = await agreement(tenantId);
+    const id = await milestone(session, agreementId, 9, "pending");
+    // The column is immutable: the write policy never lets an update carry it (the caller-facing
+    // transports refuse it by name — see the REST suite), so the agreement stays what it was.
+    const table = billingTable("AgreementMilestone");
+    expect(table.columns.find((column) => column.name === "agreement_id")).toMatchObject({ immutable: true });
+    await updateGeneratedEntity(restricted.db, session, { table: table.name, id, values: { agreementId: other.agreementId, description: "Moved?" } });
+    expect((await sql<{ agreement_id: string; description: string }>`select agreement_id::text as agreement_id, description from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0])
+      .toEqual({ agreement_id: agreementId, description: "Moved?" });
   }, 60_000);
 });

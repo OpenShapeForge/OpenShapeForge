@@ -937,6 +937,14 @@ for (const table of restTables) {
       const body = offeredOnCreate
         ? await buildCreateBody(table, tenantA, { [field]: await valueFor(tenantA) })
         : await buildCreateBody(table, tenantA);
+      // A column an Operation writes is not the caller's at create either: the
+      // entity-backed create refuses it by name, as the update does below.
+      if (!offeredOnCreate && isEntityBackedCreate(table)) {
+        const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: await valueFor(tenantA) });
+        expect(refusedCreate.status).toBe(400);
+        expect(refusedCreate.body.error.code).toBe("BAD_USER_INPUT");
+        expect(refusedCreate.body.error.message).toContain(field);
+      }
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
       const id = recordPayload(table, created).id as string;

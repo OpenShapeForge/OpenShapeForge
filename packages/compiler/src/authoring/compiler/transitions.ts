@@ -169,9 +169,12 @@ function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target:
 }
 
 /**
- * The corpus-wide half of `agreesOn`: the referenced entity must carry every
- * named field as a persisted single field of the same base type, so the
- * comparison the runtime issues in SQL is between columns of one type.
+ * The corpus-wide half of `agreesOn`, run by collectAllArtifacts over every
+ * compiled entity, core and plugin alike: the referenced entity must carry
+ * every named field as a persisted single field of the same base type and
+ * column type, so the comparison the runtime issues in SQL is between
+ * columns of one type. A rule whose reference no compiled entity answers to
+ * is refused, never skipped.
  */
 type AgreementContract = {
   transitions?: CompiledTransitionField[];
@@ -181,15 +184,13 @@ type AgreementContract = {
 };
 
 export function assertTransitionAgreements(entities: ReadonlyArray<AgreementContract>): void {
-  // Test fixtures hand this collector bare operation lists; a contract with
-  // no entity identity has no transitions to check either.
-  const byName = new Map(entities.filter((contract) => contract?.entity?.name).map((contract) => [contract.entity.name, contract]));
+  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
   const describe = (contract: AgreementContract, key: string) => {
     const field = contract.model.fields.find((candidate) => candidate.key === key);
     const column = contract.storage.columns.find((candidate) => candidate.field === key);
     return field && column && field.cardinality === "single" ? `${field.baseType} ${column.type}` : undefined;
   };
-  for (const contract of byName.values()) {
+  for (const contract of entities) {
     for (const status of contract.transitions ?? []) {
       for (const rule of status.rules) {
         for (const write of rule.writes ?? []) {

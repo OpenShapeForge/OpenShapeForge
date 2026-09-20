@@ -38,6 +38,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
+import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
@@ -335,6 +336,9 @@ export async function collectAllArtifacts(
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
+  // Every compiled entity, core and plugin alike: a transition's agreesOn
+  // reaches across entities, so it is checked here where all of them are.
+  assertTransitionAgreements(entities.map((entity) => entity.contract));
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A

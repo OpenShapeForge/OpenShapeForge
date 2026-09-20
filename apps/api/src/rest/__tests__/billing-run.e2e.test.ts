@@ -142,5 +142,9 @@ describe("the milestone billing run on REST", () => {
     const patched = await call(finance, "PATCH", `${milestones}/${pending.id}`, { status: "invoiced", expectedVersion: pending.updatedAt });
     expect(patched.status).toBe(400);
     expect(JSON.stringify(patched.body)).toContain("AgreementMilestone.invoice");
+    // Nor to another agreement: a milestone belongs to one agreement for life.
+    const moved = await call(finance, "PATCH", `${milestones}/${pending.id}`, { agreementId: randomUUID(), expectedVersion: pending.updatedAt });
+    expect(moved.status).toBe(400);
+    expect(JSON.stringify(moved.body)).toContain("agreementId");
   });
 });

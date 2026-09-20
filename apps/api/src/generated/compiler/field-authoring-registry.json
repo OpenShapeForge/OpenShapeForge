@@ -6548,6 +6548,7 @@
         },
         {
           "key": "agreementId",
+          "immutable": true,
           "label": {
             "en": "Agreement",
             "nl": "Overeenkomst"
@@ -9519,6 +9520,10 @@
       "shape": [
         {
           "key": "idempotencyKey",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "string",
           "required": true,
           "label": {
@@ -9540,6 +9545,10 @@
         },
         {
           "key": "status",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "required": true,
           "label": {
             "en": "Status",
@@ -9562,6 +9571,10 @@
         },
         {
           "key": "mode",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "required": true,
           "label": {
             "en": "Mode",
@@ -9584,6 +9597,10 @@
         },
         {
           "key": "billUpToDate",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "date",
           "required": true,
           "label": {
@@ -9601,6 +9618,10 @@
         },
         {
           "key": "agreementFilter",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "object",
           "required": false,
           "label": {
@@ -9618,6 +9639,10 @@
         },
         {
           "key": "dryRun",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "boolean",
           "required": false,
           "label": {
@@ -9636,6 +9661,10 @@
         },
         {
           "key": "maxAgreementsPerWorker",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": false,
           "label": {
@@ -9657,6 +9686,10 @@
         },
         {
           "key": "agreementsPlanned",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": false,
           "label": {
@@ -9674,6 +9707,10 @@
         },
         {
           "key": "agreementsCompleted",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": false,
           "label": {
@@ -9687,6 +9724,10 @@
         },
         {
           "key": "agreementsFailed",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": false,
           "label": {
@@ -9700,6 +9741,10 @@
         },
         {
           "key": "invoicesProduced",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": false,
           "label": {
@@ -9713,6 +9758,10 @@
         },
         {
           "key": "totalAmount",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "required": false,
           "label": {
             "en": "Total amount",
@@ -9730,6 +9779,10 @@
         },
         {
           "key": "failures",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "object",
           "required": false,
           "label": {
@@ -9747,6 +9800,10 @@
         },
         {
           "key": "startedAt",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "datetime",
           "required": false,
           "label": {
@@ -9760,6 +9817,10 @@
         },
         {
           "key": "completedAt",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "datetime",
           "required": false,
           "label": {
@@ -9773,6 +9834,10 @@
         },
         {
           "key": "triggeredBy",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "string",
           "required": false,
           "label": {
@@ -19762,7 +19827,10 @@
             "nl": "Volgnummer van de factuur, uitgegeven door de facturatierun, uniek binnen (factuursoort, boekjaar). Leeg op een concept dat nog geen run heeft uitgegeven."
           },
           "validation": {
-            "min": 1
+            "min": 1,
+            "requires": [
+              "fiscalYearCode"
+            ]
           },
           "persisted": {
             "column": "invoice_number",

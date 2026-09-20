@@ -342,6 +342,7 @@ describe("explicit service credentials in host mode", () => {
       auth: { mode: "session", roles: ["Records.Read"] },
       tenancy: { mode: "required" },
       idempotency: { mode: "none" },
+      effects: { data: "write", external: "none" },
       transports: {
         rest: { method: "GET", path: "/api/records", response: { status: 200, kind: "json" } },
         mcp: { enabled: false, reason: "REST discovery test." },

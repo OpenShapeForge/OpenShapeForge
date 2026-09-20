@@ -128,7 +128,7 @@ export type OperationContract = {
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
-  effects?: {
+  effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };
@@ -380,7 +380,6 @@ function operationIntent(
 }
 
 function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
-  const method = entry.operation.transports.rest.method;
   return {
     id: entry.operation.key,
     key: entry.operation.key,
@@ -393,14 +392,7 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
     ...(entry.operation.target ? { target: entry.operation.target } : {}),
     input: { kind: "json-schema", schema: entry.operation.inputSchema },
     output: { kind: "json-schema", schema: entry.operation.outputSchema },
-    effects: {
-      data: entry.operation.effects?.data ?? (method === "GET"
-        ? "read"
-        : method === "DELETE"
-          ? "delete"
-          : "write"),
-      external: entry.operation.effects?.external ?? (method === "GET" ? "read" : "write"),
-    },
+    effects: entry.operation.effects,
     reliability: {
       idempotency: {
         mode: entry.operation.idempotency.mode === "intrinsic"

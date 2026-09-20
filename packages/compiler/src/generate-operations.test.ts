@@ -44,6 +44,7 @@ const operation: PluginOperationContract = {
   auth: { mode: "session", roles: ["seller"], scopes: ["quotes:write"] },
   tenancy: { mode: "required" },
   idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: { method: "POST", path: "/api/demo/quotes/:quoteId/publish", response: { status: 202, kind: "json" } },
     mcp: { enabled: true, name: "demo_publish_quote" },

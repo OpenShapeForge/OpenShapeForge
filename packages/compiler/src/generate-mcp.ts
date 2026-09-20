@@ -2017,12 +2017,8 @@ export function buildMcpCatalog(
       outputSchema: operation.outputSchema,
       auth: operation.auth,
       annotations: {
-        readOnlyHint:
-          operation.effects?.data === "read" ||
-          (!operation.effects && operation.transports.rest.method === "GET"),
-        destructiveHint:
-          operation.effects?.data === "delete" ||
-          (!operation.effects && operation.transports.rest.method === "DELETE"),
+        readOnlyHint: operation.effects.data === "read",
+        destructiveHint: operation.effects.data === "delete",
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));

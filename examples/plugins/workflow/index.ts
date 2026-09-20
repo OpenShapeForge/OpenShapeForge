@@ -959,6 +959,7 @@ const plugin: CompilerPlugin = {
       auth: { mode: "session", roles: [...WORKFLOW_WRITER_ROLES] },
       tenancy: { mode: "required", description: "Tenant comes from the verified OSF session." },
       idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey", description: "A sender reuses the key for redelivery of the same event." },
+      effects: { data: "write", external: "none" },
       transports: {
         rest: { method: "POST", path: "/api/workflow/triggers/webhook/:definitionId", response: { status: 202, kind: "json" } },
         mcp: { enabled: true, name: "workflow_start_webhook" },

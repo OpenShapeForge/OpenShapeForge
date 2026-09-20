@@ -119,6 +119,7 @@ const staticOperation = (index: number): CompiledPluginOperation => ({
   auth: { mode: "session", roles: ["Demo.Read"] },
   tenancy: { mode: "required" },
   idempotency: { mode: "none" },
+  effects: { data: "write", external: "none" },
   transports: {
     rest: {
       method: "POST",
@@ -1717,6 +1718,7 @@ describe("control-realm Operation tools", () => {
     plugin: "osf-control",
     auth: { mode: "control", roles: ["platform_admin"] },
     tenancy: { mode: "none" },
+    effects: { data: "read", external: "none" },
     transports: {
       ...staticOperation(index).transports,
       rest: {
@@ -1742,7 +1744,6 @@ describe("control-realm Operation tools", () => {
       plugin: "osf-control",
       name: "control_operation_0",
       auth: { mode: "control", roles: ["platform_admin"] },
-      // No authored effects, so the hint follows the GET projection.
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
     });
     // Sixty-one tenant tools would flip the catalog to searchable; these

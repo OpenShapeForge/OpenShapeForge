@@ -11,6 +11,8 @@ import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import {
   __crudToolsForSessionForTests as crudToolsForSession,
   __describeGenericEntityForTests as describeGenericEntity,
+  __describeGenericEntriesForTests as describeGenericEntries,
+  __toolsForSessionForTests as toolsForSession,
 } from "../generated-mcp-server.js";
 
 const catalog = rawCatalog as unknown as {
@@ -98,22 +100,22 @@ describe("the generic osf_* listing", () => {
 
   it.skipIf(generic.length === 0)("withholds a classified field from the describe answer of a read-only session", () => {
     // No generic entity of the reference catalogue classifies a field, so
-    // the classification is stamped on Address for this case and removed
-    // again; the withholding rule is the dedicated tools' (describeTool).
-    const address = (rawCatalog as unknown as { entities: { entity: string; classifiedFields: string[] }[] })
-      .entities.find((entity) => entity.entity === "Address")!;
-    const before = [...address.classifiedFields];
-    address.classifiedFields.push("street");
-    try {
-      const readOnly = describeGenericEntity("Address", "list", session("Relations.All.Read"), tables as never, english) as any;
-      expect(Object.keys(readOnly.operations)).toEqual(["list"]);
-      expect(readOnly.operations.list.inputSchema.properties.filter.properties).not.toHaveProperty("street");
-      expect(readOnly.operations.list.inputSchema.properties.filter.properties).toHaveProperty("city");
-      const writer = describeGenericEntity("Address", "list", session(RELATIONS), tables as never, english) as any;
-      expect(writer.operations.list.inputSchema.properties.filter.properties).toHaveProperty("street");
-    } finally {
-      address.classifiedFields.splice(0, address.classifiedFields.length, ...before);
-    }
+    // the case describes copies of Address's entries with `street`
+    // classified; the imported catalogue is not touched. The withholding
+    // rule is the dedicated tools' (describeTool).
+    const stamped = (roles: string[]) =>
+      toolsForSession(session(...roles), tables as never)
+        .filter(({ tool }) => tool.entity === "Address")
+        .map(({ tool, entity }) => ({
+          tool,
+          entity: entity ? { ...entity, classifiedFields: [...entity.classifiedFields, "street"] } : entity,
+        }));
+    const readOnly = describeGenericEntries(stamped(["Relations.All.Read"]), "Address", "list", session("Relations.All.Read"), tables as never, english) as any;
+    expect(Object.keys(readOnly.operations)).toEqual(["list"]);
+    expect(readOnly.operations.list.inputSchema.properties.filter.properties).not.toHaveProperty("street");
+    expect(readOnly.operations.list.inputSchema.properties.filter.properties).toHaveProperty("city");
+    const writer = describeGenericEntries(stamped([RELATIONS]), "Address", "list", session(RELATIONS), tables as never, english) as any;
+    expect(writer.operations.list.inputSchema.properties.filter.properties).toHaveProperty("street");
   });
 
   it.skipIf(generic.length === 0)("names entities in the session's language", () => {

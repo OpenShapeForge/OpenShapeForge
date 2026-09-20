@@ -102,9 +102,25 @@ export function describeGenericEntity(
   tables: Map<string, GeneratedTable>,
   locale: ResolvedLocale,
 ): Record<string, unknown> {
-  const entries = toolsForSession(session, tables).filter(({ entity }) =>
-    entityIsGeneric(entity),
+  return describeGenericEntries(
+    toolsForSession(session, tables).filter(({ entity }) => entityIsGeneric(entity)),
+    wanted,
+    operation,
+    session,
+    tables,
+    locale,
   );
+}
+
+/** The describe answer over the generic entries a session may address (its own set, or a test's copy). */
+export function describeGenericEntries(
+  entries: { tool: CatalogTool; entity: CatalogEntity | undefined }[],
+  wanted: unknown,
+  operation: unknown,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  locale: ResolvedLocale,
+): Record<string, unknown> {
   const addressable = [...new Set(entries.map(({ tool }) => tool.entity))];
   if (typeof wanted !== "string" || !addressable.includes(wanted)) {
     throw new HttpError(

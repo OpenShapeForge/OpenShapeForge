@@ -275,7 +275,5 @@ export async function platformToolCall(
     }
   }
 
-  // The second step of the generic projection: the exact per-entity schema
-  // the compact `osf_*` listing only summarises.
   return undefined;
 }

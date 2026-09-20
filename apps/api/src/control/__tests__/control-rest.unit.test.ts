@@ -132,8 +132,18 @@ describe("one round trip per page group", () => {
     const who = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
     expect(who.status).toBe(200);
     expect(who.body).toMatchObject({ role: "Platform administrator", scope: "platform", tenants: 0, access: { tools: 24, resources: 1 } });
-    // The default product name; a deployment sets OPENSHAPEFORGE_PRODUCT_NAME.
+    // The default product name, then a configured one; the variable is
+    // restored so no later file inherits it.
     expect(who.body.signedInVia).toBe("OpenShapeForge control plane");
+    const previous = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    process.env.OPENSHAPEFORGE_PRODUCT_NAME = "Atlas";
+    try {
+      const named = await call("GET", "/api/control/v1/whoami", token([PLATFORM_ADMIN_ROLE]));
+      expect(named.body.signedInVia).toBe("Atlas control plane");
+    } finally {
+      if (previous === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+      else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previous;
+    }
     const operator = await call("GET", "/api/control/v1/whoami", token([PLATFORM_OPERATOR_ROLE]));
     expect(operator.body.role).toBe("Platform operator");
   });

@@ -88,11 +88,16 @@ import {
   crudToolCanSucceed,
   resourcesForSession,
   sessionMayInvoke,
+  toolsForSession,
   withholdClassified,
 } from "./session-projection.js";
 import { assertWritableValues } from "./entity-tool-guards.js";
 import { describeTool } from "./entity-tool-projection.js";
-import { crudToolsForSession, describeGenericEntity } from "./generic-tool-projection.js";
+import {
+  crudToolsForSession,
+  describeGenericEntity,
+  describeGenericEntries,
+} from "./generic-tool-projection.js";
 import {
   ENTITY_CONFIGURATION_APP_URI,
   ENTITY_CONFIGURATION_PATH,
@@ -127,8 +132,10 @@ export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
 export const __resourcesForSessionForTests = resourcesForSession;
 export const __crudToolCanSucceedForTests = crudToolCanSucceed;
+export const __toolsForSessionForTests = toolsForSession;
 export const __crudToolsForSessionForTests = crudToolsForSession;
 export const __describeGenericEntityForTests = describeGenericEntity;
+export const __describeGenericEntriesForTests = describeGenericEntries;
 
 
 export { __resetEmployeeInvitationKeycloakClientForTests } from "./employee-invitation-keycloak.js";

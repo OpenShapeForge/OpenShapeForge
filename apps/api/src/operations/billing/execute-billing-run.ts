@@ -27,7 +27,7 @@ import type { ModuleOperationHandler } from "../../modules/contract.js";
 import { createGeneratedEntityForTable, updateGeneratedEntityForTable } from "../entity/mutations.js";
 import { executeTransition, transitionBinding } from "../entity/transitions.js";
 import { billingTable, roundCurrency } from "./agreement-milestone.js";
-import { allocateInvoiceNumber } from "./invoice-numbering.js";
+import { issueNumberedInvoice } from "./invoice-numbering.js";
 
 export type BillingRunItemResult = {
   agreementMilestoneId: string;
@@ -57,16 +57,31 @@ const DESCRIPTION_LINE_LENGTH = 200;
 
 type EligibleMilestone = { id: string; agreement_id: string; description: string; amount: string | number };
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * The calendar date on the tenant's own clock (platform.tenants.time_zone),
+ * from which the issue date and the fiscal year that scopes the numbers are
+ * taken. Never the process clock or UTC: half past midnight on 1 January in
+ * Amsterdam is still 31 December in UTC, and would number the year's first
+ * invoice into last year's sequence. `at` exists for tests that put the
+ * boundary under the run; the run itself asks for the transaction's now().
+ */
+export async function tenantCivilDate(trx: Transaction<DB>, tenantId: string, at?: Date): Promise<string> {
+  const instant = at ? sql`${at.toISOString()}::timestamptz` : sql`now()`;
+  const result = await sql<{ civil_date: string }>`
+    select to_char(${instant} at time zone time_zone, 'YYYY-MM-DD') as civil_date
+    from platform.tenants where id = ${tenantId}::uuid
+  `.execute(trx);
+  const date = result.rows[0]?.civil_date;
+  if (!date) throw new Error("The tenant has no registry row to take a civil date from.");
+  return date;
 }
 
-/** The triggered milestones, locked for this transaction; the row policy scopes them to the tenant. */
-async function lockEligibleMilestones(trx: Transaction<DB>, agreementId: string | undefined): Promise<EligibleMilestone[]> {
+/** The triggered milestones of this tenant, locked for this transaction. */
+async function lockEligibleMilestones(trx: Transaction<DB>, tenantId: string, agreementId: string | undefined): Promise<EligibleMilestone[]> {
   const result = await sql<EligibleMilestone>`
     select id::text as id, agreement_id::text as agreement_id, description, amount
     from erp.agreement_milestones
-    where status = 'triggered'
+    where tenant_id = ${tenantId}::uuid and status = 'triggered'
       ${agreementId ? sql`and agreement_id = ${agreementId}::uuid` : sql``}
     order by created_at, id
     for update
@@ -74,15 +89,15 @@ async function lockEligibleMilestones(trx: Transaction<DB>, agreementId: string 
   return result.rows;
 }
 
-async function agreementRelation(trx: Transaction<DB>, agreementId: string): Promise<string | null> {
+async function agreementRelation(trx: Transaction<DB>, tenantId: string, agreementId: string): Promise<string | null> {
   const result = await sql<{ relation_id: string | null }>`
-    select relation_id::text as relation_id from erp.agreements where id = ${agreementId}::uuid
+    select relation_id::text as relation_id from erp.agreements where tenant_id = ${tenantId}::uuid and id = ${agreementId}::uuid
   `.execute(trx);
   return result.rows[0]?.relation_id ?? null;
 }
 
-async function assertAgreementVisible(trx: Transaction<DB>, agreementId: string): Promise<void> {
-  const result = await sql<{ id: string }>`select id::text as id from erp.agreements where id = ${agreementId}::uuid`.execute(trx);
+async function assertAgreementVisible(trx: Transaction<DB>, tenantId: string, agreementId: string): Promise<void> {
+  const result = await sql<{ id: string }>`select id::text as id from erp.agreements where tenant_id = ${tenantId}::uuid and id = ${agreementId}::uuid`.execute(trx);
   if (result.rows.length === 0) {
     throw operationFailure({ code: "REFERENCE_NOT_FOUND", message: "The agreement does not exist in this tenant.", retryable: false });
   }
@@ -93,19 +108,22 @@ async function assertAgreementVisible(trx: Transaction<DB>, agreementId: string)
  * the key would otherwise hit the run's own unique index as a raw database
  * error, so it is refused by name first.
  */
-async function assertKeyUnused(trx: Transaction<DB>, idempotencyKey: string): Promise<void> {
-  const result = await sql<{ id: string }>`select id::text as id from erp.billing_runs where idempotency_key = ${idempotencyKey}`.execute(trx);
+async function assertKeyUnused(trx: Transaction<DB>, tenantId: string, idempotencyKey: string): Promise<void> {
+  const result = await sql<{ id: string }>`select id::text as id from erp.billing_runs where tenant_id = ${tenantId}::uuid and idempotency_key = ${idempotencyKey}`.execute(trx);
   if (result.rows.length > 0) {
     throw operationFailure({ code: "ALREADY_EXISTS", message: "Another caller already ran billing under this idempotency key.", retryable: false });
   }
 }
 
 export type BillingRunInput = { idempotencyKey: string; agreementId?: string; dryRun?: boolean };
+/** `at` is for tests that put the fiscal-year boundary under the run; the handler never sets it. */
+export type BillingRunOptions = { at?: Date };
 
 export async function runMilestoneBilling(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   input: BillingRunInput,
+  options: BillingRunOptions = {},
 ): Promise<BillingRunResult> {
   const runs = billingTable("BillingRun");
   const items = billingTable("BillingRunItem");
@@ -113,13 +131,14 @@ export async function runMilestoneBilling(
   const lines = billingTable("InvoiceLine");
   const invoice = transitionBinding({ key: "AgreementMilestone.invoice", target: { entityName: "AgreementMilestone" } });
   const dryRun = input.dryRun === true;
-  const issueDate = today();
-  // The fiscal year that scopes the numbers, frozen on every invoice with its number.
-  const fiscalYearCode = issueDate.slice(0, 4);
 
   return withDbSession(db, session, async (trx, dbSession) => {
-    await assertKeyUnused(trx, input.idempotencyKey);
-    if (input.agreementId) await assertAgreementVisible(trx, input.agreementId);
+    const tenantId = dbSession.tenantId;
+    const issueDate = await tenantCivilDate(trx, tenantId, options.at);
+    // The fiscal year that scopes the numbers, frozen on every invoice with its number.
+    const fiscalYearCode = issueDate.slice(0, 4);
+    await assertKeyUnused(trx, tenantId, input.idempotencyKey);
+    if (input.agreementId) await assertAgreementVisible(trx, tenantId, input.agreementId);
     const run = await createGeneratedEntityForTable(db, session, runs, {
       idempotencyKey: input.idempotencyKey,
       status: "running",
@@ -131,7 +150,7 @@ export async function runMilestoneBilling(
       startedAt: sql`now()`,
     });
     const runId = String(run.id);
-    const eligible = await lockEligibleMilestones(trx, input.agreementId);
+    const eligible = await lockEligibleMilestones(trx, tenantId, input.agreementId);
     // The run's agreement counts are agreements, as the fields say; the
     // milestone count is what invoicesProduced and the items carry.
     const agreementsPlanned = new Set(eligible.map((milestone) => milestone.agreement_id)).size;
@@ -147,24 +166,27 @@ export async function runMilestoneBilling(
         results.push({ agreementMilestoneId: milestone.id, agreementId: milestone.agreement_id, invoiceId: null, invoiceNumber: null, amount });
         continue;
       }
-      const relationId = await agreementRelation(trx, milestone.agreement_id);
-      const invoiceNumber = await allocateInvoiceNumber(trx, dbSession.tenantId, INVOICE_KIND, fiscalYearCode);
+      const relationId = await agreementRelation(trx, tenantId, milestone.agreement_id);
       const description = milestone.description;
-      const produced = await createGeneratedEntityForTable(db, session, invoices, {
-        invoiceKind: INVOICE_KIND,
-        invoiceStatus: INVOICE_STATUS,
-        invoiceNumber,
-        fiscalYearCode,
-        issueDate,
-        currencyCode: CURRENCY,
-        amountBase: amount,
-        amountVat: 0,
-        amountTotal: amount,
-        balance: amount,
-        descriptionLine1: description.slice(0, DESCRIPTION_LINE_LENGTH),
-        relationId,
-        agreementId: milestone.agreement_id,
-      });
+      const { invoiceNumber, invoice: produced } = await issueNumberedInvoice(
+        trx,
+        { tenantId, kind: INVOICE_KIND, fiscalYearCode },
+        (number) => createGeneratedEntityForTable(db, session, invoices, {
+          invoiceKind: INVOICE_KIND,
+          invoiceStatus: INVOICE_STATUS,
+          invoiceNumber: number,
+          fiscalYearCode,
+          issueDate,
+          currencyCode: CURRENCY,
+          amountBase: amount,
+          amountVat: 0,
+          amountTotal: amount,
+          balance: amount,
+          descriptionLine1: description.slice(0, DESCRIPTION_LINE_LENGTH),
+          relationId,
+          agreementId: milestone.agreement_id,
+        }),
+      );
       const invoiceId = String(produced.id);
       await createGeneratedEntityForTable(db, session, lines, {
         lineNumber: 1,

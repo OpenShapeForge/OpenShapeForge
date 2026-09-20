@@ -86,6 +86,12 @@ tables:
       # half-provisioned tenant is representable rather than un-insertable.
       - { name: keycloak_organization_id, type: text }
       - { name: keycloak_realm, type: text }
+      # The tenant's civil clock, an IANA zone name. Anything that turns an
+      # instant into a calendar date that is identity — the fiscal year an
+      # invoice number belongs to, the issue date on it — asks this column,
+      # never the process clock or UTC: at half past midnight on 1 January in
+      # Amsterdam, a UTC date would still hand out last year's numbers.
+      - { name: time_zone, type: text, required: true, default: "'Europe/Amsterdam'" }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
       # The tenant's own organization Relation (auth/organization-relation.ts),

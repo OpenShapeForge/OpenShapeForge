@@ -16,6 +16,7 @@ import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import {
   apiApp, describe, getSeedRuntime, registerSuiteLifecycle, remoteUrl, tenantA, test, type Identity,
 } from "../../graphql/__tests__/e2e/harness.js";
+import { REST_OPENAPI_PATH } from "../rest-paths.js";
 
 registerSuiteLifecycle();
 
@@ -24,11 +25,14 @@ const writer: Identity = { tenantId: tenantA.tenantId, userId: randomUUID(), rol
 const reader: Identity = { ...writer, userId: randomUUID(), roles: ["Agreements.All.Read"] };
 const base = "/api/rest/v1/agreement-milestones";
 const ids: string[] = [];
+const agreementIds: string[] = [];
 let app: Awaited<ReturnType<typeof apiApp>> | null = null;
 
 beforeAll(async () => { app = await apiApp(); });
 afterAll(async () => {
-  if (ids.length) await sql`delete from erp.agreement_milestones where id in (${sql.join(ids)})`.execute(getSeedRuntime().db);
+  const db = getSeedRuntime().db;
+  if (ids.length) await sql`delete from erp.agreement_milestones where id in (${sql.join(ids)})`.execute(db);
+  if (agreementIds.length) await sql`delete from erp.agreements where id in (${sql.join(agreementIds)})`.execute(db);
 });
 
 async function call(identity: Identity, method: "GET" | "POST" | "PATCH", url: string, payload?: unknown): Promise<{ status: number; body: any }> {
@@ -45,9 +49,18 @@ async function call(identity: Identity, method: "GET" | "POST" | "PATCH", url: s
   return { status: response.statusCode, body: response.body ? JSON.parse(response.body) : undefined };
 }
 
-async function milestone(): Promise<string> {
+async function agreement(tenantId = writer.tenantId, code = "AGR-1"): Promise<string> {
   const id = randomUUID();
-  await sql`insert into erp.agreement_milestones (id, tenant_id, description, amount) values (${id}::uuid, ${writer.tenantId}::uuid, 'Go-live', 100)`
+  await sql`insert into erp.agreements (id, tenant_id, code, agreement_type) values (${id}::uuid, ${tenantId}::uuid, ${code}, 'service')`
+    .execute(getSeedRuntime().db);
+  agreementIds.push(id);
+  return id;
+}
+
+async function milestone(agreementId?: string): Promise<string> {
+  const id = randomUUID();
+  const linked = agreementId ?? await agreement();
+  await sql`insert into erp.agreement_milestones (id, tenant_id, description, amount, agreement_id) values (${id}::uuid, ${writer.tenantId}::uuid, 'Go-live', 100, ${linked}::uuid)`
     .execute(getSeedRuntime().db);
   ids.push(id);
   return id;
@@ -97,5 +110,19 @@ describe("status transitions on REST", () => {
     expect(patched.status).toBe(400);
     expect(JSON.stringify(patched.body)).toContain("AgreementMilestone.trigger");
     expect((await call(writer, "GET", `${base}/${id}`)).body.data.status).toBe("pending");
+  });
+
+  test("OpenAPI describes the referenced precondition; trigger is offered only while it holds", async () => {
+    const spec = await call(writer, "GET", REST_OPENAPI_PATH);
+    expect(spec.status).toBe(200);
+    expect(spec.body.paths["/api/rest/v1/agreement-milestones/{id}/trigger"].post.description)
+      .toContain("agreementId.code is set");
+
+    const id = await milestone();
+    const pending = await call(writer, "GET", `${base}/${id}`);
+    expect(trigger(pending.body.operations)).toMatchObject({ available: true });
+    const triggered = await call(writer, "POST", `${base}/${id}/trigger`, { expectedVersion: pending.body.data.updatedAt });
+    expect(triggered.status).toBe(200);
+    expect(triggered.body.status).toBe("triggered");
   });
 });

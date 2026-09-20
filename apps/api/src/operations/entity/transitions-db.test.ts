@@ -13,12 +13,11 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
-import { createAgreementMilestone } from "../../billing/agreement-milestone-service.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { bindOperationHandlers, type OperationContract } from "../runtime.js";
 import { registerEntityOperationAvailability } from "./availability.js";
 import { getGeneratedCrudTables } from "./catalog.js";
-import { updateGeneratedEntity } from "./mutations.js";
+import { createGeneratedEntityForTable, updateGeneratedEntity } from "./mutations.js";
 import { currentRecordOffers, offerTarget } from "./runtime.js";
 import { executeTransition, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
 import { recordPermissionsAllowRow } from "./record-permissions.js";
@@ -74,9 +73,10 @@ function protectedBinding(): TransitionBinding {
   return { ...base, table, statusColumn: table.columns.find((column) => column.name === "status")!, rule: { ...base.rule, recordPermission: "edit" } };
 }
 async function milestone(status = "pending", tenantId = tenant) {
-  const record = await createAgreementMilestone(privileged!.db, { ...session, tenantId }, { agreementId: randomUUID(), description: "Go-live", amount: 100 });
-  if (status !== "pending") await sql`update erp.agreement_milestones set status = ${status} where id = ${record.id}::uuid`.execute(privileged!.db);
-  return record.id;
+  const record = await createGeneratedEntityForTable(privileged!.db, { ...session, tenantId }, table, { agreementId: randomUUID(), description: "Go-live", amount: 100 });
+  const id = String(record.id);
+  if (status !== "pending") await sql`update erp.agreement_milestones set status = ${status} where id = ${id}::uuid`.execute(privileged!.db);
+  return id;
 }
 async function row(id: string) {
   return (await sql<{ row: Record<string, unknown> }>`select to_jsonb(m.*) as row from erp.agreement_milestones m where id = ${id}::uuid`.execute(privileged!.db)).rows[0]?.row;
@@ -174,7 +174,7 @@ describe("status transitions against PostgreSQL", () => {
     await fails(transitionOperationHandler(cancel)({ id: pending }, context()), "INVALID_STATE");
     await fails(transitionOperationHandler(operation)({ id: pending }, context()), "INVALID_STATE");
     expect(table.columns.find((column) => column.name === "status")!.writtenBy!.map((writer) => writer.operation))
-      .toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel"]);
+      .toEqual(["AgreementMilestone.trigger", "AgreementMilestone.cancel", "AgreementMilestone.invoice"]);
   });
 
   test("a record of another tenant or none at all is NOT_FOUND", async () => {

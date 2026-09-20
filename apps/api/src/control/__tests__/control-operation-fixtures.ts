@@ -107,7 +107,7 @@ const AUTHORED: readonly Authored[] = [
   },
   {
     id: "control.create-tenant", handler: "createTenant", title: "Create tenant",
-    description: "Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization. Use a stable kebab-case slug and a human display name. A replay returns the existing tenant and repairs an incomplete Keycloak projection; it never deletes or replaces a tenant.",
+    description: "Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization, then installs the current runtime catalog. Use a stable kebab-case slug and a human display name. A replay returns the existing tenant, repairs an incomplete Keycloak projection and installs missing catalog entries; it never deletes or replaces a tenant.",
     roles: [OPERATOR], effects: WRITE_EXTERNAL, idempotency: "natural",
     input: { properties: { slug, name: { type: "string", minLength: 1, description: "Human display name." } }, required: ["slug", "name"] },
     rest: { method: "POST", path: "/api/control/v1/tenants", status: 201 }, mcp: "create_tenant",

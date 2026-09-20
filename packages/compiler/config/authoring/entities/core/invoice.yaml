@@ -15,6 +15,18 @@ pluralLabels:
   nl: Facturen
 domains:
   - finance
+indexes:
+  # Only issued invoices take part: a draft has no number and is not in the
+  # numbering scope at all. A number without its fiscal year is refused by
+  # the `requires` on the field.
+  - name: invoices_tenant_kind_fiscal_year_number_uidx
+    fields:
+      - tenantId
+      - invoiceKind
+      - fiscalYearCode
+      - invoiceNumber
+    unique: true
+    where: { field: invoiceNumber, present: true }
 fields:
   - key: invoiceKind
     required: true
@@ -46,19 +58,46 @@ fields:
       type: referentiedata
       referentieGroep: INVOICESTATUS
     osfType: referenceDataCode
+  # The number and the fiscal year it was issued in are identity, frozen at
+  # issue: the billing run allocates them from InvoiceSequence and nothing
+  # else writes them. A draft made by hand carries no number until a run
+  # issues it. The unique index below is the guarantee that no two invoices
+  # of a tenant share a number within a kind and fiscal year.
   - key: invoiceNumber
     osfType: integer
-    required: true
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [BillingRun.execute]
     label:
       en: Invoice number
       nl: Factuurnummer
     description:
-      en: Sequential invoice number, unique within (invoice kind, fiscal period).
-      nl: Volgnummer van de factuur, uniek binnen (factuursoort, boekjaarperiode).
+      en: Sequential invoice number issued by the billing run, unique within (invoice kind, fiscal year). Absent on a draft that no run has issued.
+      nl: Volgnummer van de factuur, uitgegeven door de facturatierun, uniek binnen (factuursoort, boekjaar). Leeg op een concept dat nog geen run heeft uitgegeven.
     validation:
       min: 1
+      requires: [fiscalYearCode]
     persisted:
       column: invoice_number
+      storageClass: core
+  - key: fiscalYearCode
+    osfType: string
+    required: false
+    readOnly: true
+    immutable: true
+    writtenBy: [BillingRun.execute]
+    label:
+      en: Fiscal year code
+      nl: Boekjaarcode
+    description:
+      en: The fiscal year whose sequence issued the invoice number, frozen with it; a later change of the issue date does not move the invoice out of its numbering scope.
+      nl: Het boekjaar waarvan de reeks het factuurnummer heeft uitgegeven, samen met dat nummer bevroren; een latere wijziging van de factuurdatum haalt de factuur niet uit zijn nummerreeks.
+    validation:
+      minLength: 1
+      maxLength: 20
+    persisted:
+      column: fiscal_year_code
       storageClass: core
   - key: issueDate
     osfType: date
@@ -512,7 +551,6 @@ interfaces:
                 fields:
                   - invoiceKind
                   - invoiceStatus
-                  - invoiceNumber
                   - issueDate
                   - dueDate
                   - currencyCode

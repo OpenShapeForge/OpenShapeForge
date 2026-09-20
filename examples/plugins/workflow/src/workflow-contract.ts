@@ -80,6 +80,7 @@ const CONTRACT_DECLARATIONS = [
   { kind: "interface", name: "FieldDefinitionInverseCollection" },
   { kind: "interface", name: "FieldDefinitionRelationship" },
   { kind: "interface", name: "FieldDefinitionProvider" },
+  { kind: "interface", name: "FieldDefinitionTransitionWrite" },
   { kind: "interface", name: "FieldDefinitionTransitionRule" },
   { kind: "interface", name: "FieldDefinitionTransitions" },
   { kind: "interface", name: "FieldDefinitionDeriveOnCreate" },

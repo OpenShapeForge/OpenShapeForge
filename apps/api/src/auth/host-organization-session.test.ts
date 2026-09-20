@@ -442,9 +442,12 @@ describe("explicit service credentials in host mode", () => {
         role_subset: ["Records.Read"], expires_at: null, revoked_at: null,
       }];
       if (query.sql.includes("from platform.api_key_integrations")) return [{
-        keycloak_client_id: clientId, status: "active", client_secret_ciphertext: secret.ciphertext,
+        keycloak_client_id: clientId, display_name: "Scoped worker", status: "active", client_secret_ciphertext: secret.ciphertext,
         client_secret_key_id: secret.keyId, client_secret_algorithm: secret.algorithm,
       }];
+      // The service account's first session records its own identity row and
+      // an empty pending link (identity-link.ts, ensureServiceIdentityLink).
+      if (query.sql.includes("insert into platform.identities")) return [{ id: "66666666-6666-4666-8666-666666666666" }];
       return undefined;
     };
     const request = new Headers({ authorization: `Bearer ${apiKey.token}` });
@@ -464,6 +467,10 @@ describe("explicit service credentials in host mode", () => {
       if (scenario.allowed) {
         expect(session.tenantId).toBe(TENANT_A);
         expect(session.roles).toEqual(["Records.Read"]);
+        // The session names its identity and recorded it; nothing links it yet.
+        expect(session).toMatchObject({ issuer, userDisplayName: "Scoped worker", relation: null });
+        expect(queries.some((q) => q.sql.includes("insert into platform.identities") && q.parameters.includes(issuer))).toBe(true);
+        expect(queries.some((q) => q.sql.includes("insert into platform.identity_relations"))).toBe(true);
         // Let the fire-and-forget use-timestamp write settle before counting,
         // so the refusal below is measured on its own.
         await new Promise((resolve) => setImmediate(resolve));

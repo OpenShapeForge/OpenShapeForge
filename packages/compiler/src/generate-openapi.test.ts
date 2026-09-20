@@ -1186,7 +1186,8 @@ describe("rich generated REST OpenAPI", () => {
     expect(byName.has("tenantIdIn")).toBe(false);
     expect(byName.has("privateMarker")).toBe(false);
     expect(byName.has("privateMarkerIn")).toBe(false);
-    expect(byName.get("sequenceNumber")?.schema).toEqual({ type: "integer" });
+    // A bigint filter value is the decimal text the column holds, exact.
+    expect(byName.get("sequenceNumber")?.schema).toMatchObject({ type: "string", pattern: "^-?(?:0|[1-9][0-9]*)$" });
   });
 
   it("avoids transport and explicit-IN parameter name collisions", () => {

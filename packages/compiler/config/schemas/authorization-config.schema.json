@@ -336,14 +336,16 @@
         "actingParty": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["entity", "nameField", "typeField", "personType", "statusField", "activeStatus"],
+          "required": ["entity", "nameField", "typeField", "personType", "organizationType", "statusField", "activeStatus", "profileField"],
           "properties": {
             "entity": { "type": "string", "minLength": 1 },
             "nameField": { "type": "string", "minLength": 1 },
             "typeField": { "type": "string", "minLength": 1 },
             "personType": { "type": "string", "minLength": 1 },
+            "organizationType": { "type": "string", "minLength": 1 },
             "statusField": { "type": "string", "minLength": 1 },
-            "activeStatus": { "type": "string", "minLength": 1 }
+            "activeStatus": { "type": "string", "minLength": 1 },
+            "profileField": { "type": "string", "minLength": 1 }
           }
         },
         "person": {

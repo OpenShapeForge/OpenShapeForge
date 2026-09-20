@@ -380,15 +380,21 @@ corporate (OIDC/SAML) providers, emitted exactly as written. Neither shipped
 realm does; see [identity-providers.md](identity-providers.md).
 
 The tenant realm also declares `identity:` — who a login is, in entity terms:
-the party a login acts as (`actingParty`: the Relation, its name, type and
-status fields, and which type value is a person), the person record created
-beside it (`person`), where a party's e-mail addresses live (`loginContact`),
-the role that administers an organization (`administratorRole`) and the roles
-a just-in-time member holds until an administrator assigns some
-(`memberRoles`). Exactly one authorization file declares it; the compiler
-checks every named entity and field against the compiled entities and emits
-`apps/api/src/generated/compiler/identity.json`, which is the only place the
-API's auth layer learns those names from.
+the party a login acts as (`actingParty`: the Relation, its name, type,
+status and profile fields, and which type values are a person and an
+organization), the person record created beside it (`person`), where a
+party's e-mail addresses live (`loginContact`), the role that administers an
+organization (`administratorRole`) and the roles a just-in-time member holds
+until an administrator assigns some (`memberRoles`). Exactly one
+authorization file declares it; the compiler checks every named field's
+shape against the compiled entities (single string or boolean scalars, the
+relation fields as `belongsTo` references to the acting party), every role
+against the realm's declared and entity-derived roles, and the platform
+schema's own references to the acting party (`platform.tenants.relation_id`,
+`platform.identity_relations.*`, authored in `platform-schema.yaml` because
+that file is loaded before the entities compile) against the party's table.
+It emits `apps/api/src/generated/compiler/identity.json`, which is the only
+place the API's auth layer learns those names from.
 
 ### Overlaying a realm: `kind: authorizationPatch`
 

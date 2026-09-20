@@ -566,8 +566,10 @@ identity:
     nameField: displayName
     typeField: relationType
     personType: person
+    organizationType: organization
     statusField: status
     activeStatus: active
+    profileField: businessContext
   person:
     entity: NaturalPerson
     relationField: relationId

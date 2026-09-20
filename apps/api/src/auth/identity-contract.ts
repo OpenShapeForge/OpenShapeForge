@@ -27,8 +27,10 @@ export type IdentityContract = {
     nameField: string;
     typeField: string;
     personType: string;
+    organizationType: string;
     statusField: string;
     activeStatus: string;
+    profileField: string;
   };
   /** The person record hanging off a party of `personType`. */
   person: { entity: string; relationField: string; firstNameField: string; lastNameField: string };
@@ -55,12 +57,13 @@ export const actingPartyTable = (): string => entityTableName(IDENTITY_CONTRACT.
 
 /** Physical columns of the acting-party entity's contract fields. */
 export function actingPartyColumns() {
-  const { entity, nameField, typeField, statusField } = IDENTITY_CONTRACT.actingParty;
+  const { entity, nameField, typeField, statusField, profileField } = IDENTITY_CONTRACT.actingParty;
   return {
     ...FIXED_COLUMNS,
     name: entityColumnName(entity, nameField),
     type: entityColumnName(entity, typeField),
     status: entityColumnName(entity, statusField),
+    profile: entityColumnName(entity, profileField),
   };
 }
 

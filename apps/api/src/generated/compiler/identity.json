@@ -8,8 +8,10 @@
     "nameField": "displayName",
     "typeField": "relationType",
     "personType": "person",
+    "organizationType": "organization",
     "statusField": "status",
-    "activeStatus": "active"
+    "activeStatus": "active",
+    "profileField": "businessContext"
   },
   "person": {
     "entity": "NaturalPerson",

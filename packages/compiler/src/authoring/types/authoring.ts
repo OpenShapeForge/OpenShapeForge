@@ -1236,8 +1236,11 @@ export interface AuthorizationConfigFile {
       nameField: string;
       typeField: string;
       personType: string;
+      organizationType: string;
       statusField: string;
       activeStatus: string;
+      /** The field the organization resource shows as its profile text. */
+      profileField: string;
     };
     person: {
       entity: string;

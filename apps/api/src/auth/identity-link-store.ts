@@ -138,6 +138,13 @@ export async function insertLinkRow(
   return readLinkRow(trx, row.identityId, row.tenantId);
 }
 
+/**
+ * The active parties an e-mail address belongs to, through an active contact
+ * detail. Both status fields are optional in the authored contract, so a
+ * record that states no status is taken as the active one it would default
+ * to; only a record that states another status is left out. Type and value
+ * are compared case-insensitively on both sides.
+ */
 export async function relationsWithEmail(
   trx: Transaction<DB>,
   tenantId: string,
@@ -152,7 +159,11 @@ export async function relationsWithEmail(
         on cd.${sql.id(contact.relation)} = r.${sql.id(party.id)}
        and cd.${sql.id(contact.tenantId)} = r.${sql.id(party.tenantId)}
      where r.${sql.id(party.tenantId)} = ${tenantId}
-       and lower(cd.${sql.id(contact.type)}) = ${sql.lit(IDENTITY_CONTRACT.loginContact.emailType)}
+       and coalesce(r.${sql.id(party.status)}, ${IDENTITY_CONTRACT.actingParty.activeStatus})
+           = ${IDENTITY_CONTRACT.actingParty.activeStatus}
+       and coalesce(cd.${sql.id(contact.status)}, ${IDENTITY_CONTRACT.loginContact.activeStatus})
+           = ${IDENTITY_CONTRACT.loginContact.activeStatus}
+       and lower(cd.${sql.id(contact.type)}) = lower(${IDENTITY_CONTRACT.loginContact.emailType})
        and lower(cd.${sql.id(contact.value)}) = lower(${email})
   `.execute(trx);
   return result.rows;

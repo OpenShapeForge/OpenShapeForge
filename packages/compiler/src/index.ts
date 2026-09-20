@@ -562,6 +562,18 @@ export async function collectAllArtifacts(
           buildIdentityContract(
             loadAuthorizationConfigs(authoringDir),
             entities.map((entity) => entity.contract),
+            {
+              // The platform schema's own references to the acting party:
+              // authored there because it is loaded before the entities are
+              // compiled, and held to the contract here.
+              platformPartyReferences: (manifest.relationshipRegister ?? [])
+                .filter((entry) => entry.from.schema === "platform")
+                .map((entry) => ({
+                  from: `${entry.from.schema}.${entry.from.table}.${entry.from.column}`,
+                  to: `${entry.to.schema}.${entry.to.table}`,
+                })),
+              schemaByModule: { core: "erp" },
+            },
           ),
         ),
       },

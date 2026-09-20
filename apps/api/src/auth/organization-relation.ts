@@ -17,7 +17,7 @@
  * this company is).
  */
 import { sql } from "kysely";
-import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
+import { actingPartyColumns, actingPartyTable, IDENTITY_CONTRACT } from "./identity-contract.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "./identity-link.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
@@ -68,11 +68,12 @@ export async function setOrganizationRelation(
       throw new HttpError(404, "RELATION_NOT_FOUND", "No such Relation in this organization.");
     }
     const found = relation.rows[0]!;
-    if (found.relation_type !== "organization") {
+    const { typeField, organizationType } = IDENTITY_CONTRACT.actingParty;
+    if (found.relation_type !== organizationType) {
       throw new HttpError(
         422,
         "NOT_AN_ORGANIZATION",
-        `Relation ${found.id} has relationType "${found.relation_type}", not "organization".`,
+        `Relation ${found.id} has ${typeField} "${found.relation_type}", not "${organizationType}".`,
       );
     }
 
@@ -109,14 +110,15 @@ export async function getOrganizationProfile(
         configured: false,
         message:
           "No organization Relation is configured yet. An organization administrator can run " +
-          "set_organization_relation with the id of the Relation (relationType: organization) " +
+          `set_organization_relation with the id of the ${IDENTITY_CONTRACT.actingParty.entity} ` +
+          `(${IDENTITY_CONTRACT.actingParty.typeField}: ${IDENTITY_CONTRACT.actingParty.organizationType}) ` +
           "that represents this company.",
       };
     }
 
     const party = actingPartyColumns();
     const relation = await sql<{ display_name: string; business_context: string | null }>`
-      select ${sql.id(party.name)} as display_name, business_context
+      select ${sql.id(party.name)} as display_name, ${sql.id(party.profile)} as business_context
         from ${sql.table(actingPartyTable())}
        where ${sql.id(party.id)} = ${relationId} and ${sql.id(party.tenantId)} = ${session.tenantId}
     `.execute(trx);

@@ -4,7 +4,7 @@ import {
   buildOperationSchemas,
   connectorFieldSchema,
 } from "./connector-schemas.js";
-import { constraintsForField } from "../../field-json-schema.js";
+import { constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition } from "../types/field-definition.js";
 
 describe("connector field schemas", () => {
@@ -203,10 +203,10 @@ describe("operation schemas", () => {
   });
 });
 
-// The reason field-json-schema.ts exists: if the two surfaces mapped
-// constraints differently, a value could be advertised as acceptable on one and
-// rejected on the other. This asserts they share the mapping rather than
-// happening to agree today.
+// If the connector surface and the MCP catalog mapped constraints differently,
+// a value could be advertised as acceptable on one and rejected on the other.
+// This asserts they share the mapping in @openshapeforge/operations rather
+// than happening to agree today.
 describe("shared constraint mapping", () => {
   it("derives connector constraints from the same core the MCP catalog uses", () => {
     const field = {
@@ -215,7 +215,7 @@ describe("shared constraint mapping", () => {
       validation: { min: 1, max: 10, format: "int64" },
     } as FieldDefinition;
 
-    const shared = constraintsForField(field);
+    const shared = constrainedType({ baseType: "integer", validation: field.validation! });
     const connectorSchema = connectorFieldSchema(field);
 
     for (const [key, value] of Object.entries(shared)) {

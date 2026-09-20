@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 /**
- * Transport-neutral FieldDefinition to JSON Schema projection.
+ * The one FieldDefinition to JSON Schema projection.
  *
- * The compiler and runtime plugin host both call this implementation. The
- * host supplies the resolved osf-type and reference-data registries; a
- * plugin supplies only authored FieldDefinitions and can never replace those
- * registries with a private interpretation.
+ * The compiler projects its resolved entity fields through `fieldSchema` and
+ * `objectSchema`; the runtime plugin host resolves a stored definition through
+ * the host registries (`resolveFields`) and projects it through the same two
+ * functions. A plugin supplies only authored FieldDefinitions and can never
+ * replace those registries with a private interpretation.
+ *
+ * Key order is part of the contract: generated artifacts are compared byte
+ * for byte, so a schema is assembled in one fixed order — structural
+ * constraints, `x-osf-i18n`, `title`, `enum`, `x-osf-reference`,
+ * `description`, `default`, then the collection wrapper and its bounds.
  */
 
 import type {
   OperationFieldBaseType,
+  OperationFieldCardinality,
   OperationFieldDefinition,
   OperationFieldOptions,
+  OperationFieldOsfType,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldOsfType,
   OperationJsonSchema,
   OperationLocalizedText,
   ResolvedOperationField,
@@ -23,17 +30,24 @@ import type {
 
 export type {
   OperationFieldBaseType,
+  OperationFieldCardinality,
   OperationFieldDefinition,
   OperationFieldOptions,
+  OperationFieldOsfType,
+  OperationFieldRelationship,
   OperationFieldSchemaOptions,
   OperationFieldSchemaRegistry,
-  OperationFieldOsfType,
   OperationFieldValidation,
   OperationJsonSchema,
   OperationLocalizedText,
+  OperationReferenceConstraints,
+  ResolvedOperationField,
 } from "./field-schema-types.js";
 
-function localizedText(value: OperationLocalizedText | undefined): string | undefined {
+export const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
+export const FIELD_DEFINITION_SCHEMA_REF = "#/$defs/fieldDefinition";
+
+export function localizedText(value: OperationLocalizedText | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.trim() || undefined;
   // An empty English string is absent, not a translation that hides the Dutch one.
@@ -48,18 +62,18 @@ function localizedText(value: OperationLocalizedText | undefined): string | unde
  * an integer) is an authoring error, never a string smuggled into a typed
  * enumeration.
  */
-export function typedEnumValues(values: readonly string[], valueType: string | undefined): (string | number | boolean)[] {
+export function typedEnumValues(values: readonly string[], baseType: string | undefined): (string | number | boolean)[] {
   return values.map((value) => {
     const text = value.trim();
-    if (valueType === "integer") {
+    if (baseType === "integer") {
       if (!/^-?\d+$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a safe integer.`);
       return Number(text);
     }
-    if (valueType === "number") {
+    if (baseType === "number") {
       if (text === "" || !Number.isFinite(Number(text))) throw new Error(`Enumeration value ${JSON.stringify(value)} is not a finite number.`);
       return Number(text);
     }
-    if (valueType === "boolean") {
+    if (baseType === "boolean") {
       if (text !== "true" && text !== "false") throw new Error(`Enumeration value ${JSON.stringify(value)} is not a boolean.`);
       return text === "true";
     }
@@ -67,7 +81,8 @@ export function typedEnumValues(values: readonly string[], valueType: string | u
   });
 }
 
-function ruleValue(rule: unknown): number | string | boolean | undefined {
+/** Unwrap `x` or `{ value: x }` — validation rules carry either. */
+export function ruleValue(rule: unknown): number | string | boolean | undefined {
   if (rule === undefined || rule === null) return undefined;
   if (typeof rule === "object" && "value" in (rule as OperationJsonSchema)) {
     const value = (rule as { value: unknown }).value;
@@ -80,94 +95,143 @@ function ruleValue(rule: unknown): number | string | boolean | undefined {
     : undefined;
 }
 
-function numericRule(rule: unknown): number | undefined {
+export function numericRule(rule: unknown): number | undefined {
   const value = ruleValue(rule);
   return typeof value === "number" ? value : undefined;
 }
 
-function stringRule(rule: unknown): string | undefined {
+export function stringRule(rule: unknown): string | undefined {
   const value = ruleValue(rule);
   return typeof value === "string" ? value : undefined;
 }
 
-function cardinalityOf(
-  value: OperationFieldDefinition["cardinality"],
-): "single" | "collection" {
-  if (value === "collection") return "collection";
-  if (value && typeof value === "object" &&
-    (value.max === "unbounded" || (typeof value.max === "number" && value.max > 1))) {
-    return "collection";
-  }
-  return "single";
-}
+export type ResolvedCardinality = {
+  cardinality: "single" | "collection";
+  /** The exact authored bounds; only a collection keeps them. */
+  bounds?: { min?: number; max?: number | "unbounded" };
+  /** A lower bound of one or more means the value cannot be omitted. */
+  required: boolean;
+};
 
-function resolveOptions(field: OperationFieldDefinition): OperationFieldOptions | undefined {
-  if (field.options) return field.options;
-  const group = field.reference?.kind === "referentiedata" && field.reference.group
-    ? field.reference.group
-    : typeof field.render?.props?.referentieGroep === "string"
-      ? field.render.props.referentieGroep
-      : undefined;
-  return group ? { type: "referentiedata", referentieGroep: group } : undefined;
+/**
+ * The one reading of `cardinality`, shared by the compiler, the runtime
+ * projector and the documents engine: `single`, `collection`, or exact
+ * bounds. Bounds are integers, `min` is at least zero, `max` is `unbounded`
+ * or at least `max(1, min)`; `max` above one is a collection; `min >= 1`
+ * makes the field required. Invalid bounds are an authoring error.
+ */
+export function cardinalityOf(value: OperationFieldCardinality | undefined, path = "cardinality"): ResolvedCardinality {
+  if (value === undefined || value === "single") return { cardinality: "single", required: false };
+  if (value === "collection") return { cardinality: "collection", required: false };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${path}: invalid cardinality bounds.`);
+  }
+  const min = value.min ?? 0;
+  const max = value.max ?? 1;
+  if (
+    !Number.isSafeInteger(min) || min < 0 ||
+    (max !== "unbounded" && (!Number.isSafeInteger(max) || max < Math.max(1, min)))
+  ) {
+    throw new Error(`${path}: invalid cardinality bounds.`);
+  }
+  const collection = max === "unbounded" || max > 1;
+  return {
+    cardinality: collection ? "collection" : "single",
+    ...(collection ? { bounds: { ...value } } : {}),
+    required: min >= 1,
+  };
 }
 
 const BASE_TYPES: readonly OperationFieldBaseType[] = ["string", "integer", "number", "boolean", "date", "datetime", "object"];
 
-function isBaseType(value: string | undefined): value is OperationFieldBaseType {
+export function isBaseType(value: string | undefined): value is OperationFieldBaseType {
   return (BASE_TYPES as readonly string[]).includes(value ?? "");
 }
 
-/** A base osfType is its own base; a catalog key resolves through the registry. */
-function resolveBaseType(osfType: string, semantic: OperationFieldOsfType | undefined): OperationFieldBaseType {
-  return isBaseType(osfType) ? osfType : semantic?.valueType ?? "string";
+/**
+ * A base osfType is its own base; a catalog key resolves through the
+ * registry. Anything else is unknown — refused, never projected as a string.
+ */
+export function resolveFieldBaseType(
+  field: { key: string; osfType: string },
+  osfTypes: OperationFieldSchemaRegistry["osfTypes"] = {},
+): OperationFieldBaseType {
+  if (isBaseType(field.osfType)) return field.osfType;
+  const semantic = Object.hasOwn(osfTypes, field.osfType) ? osfTypes[field.osfType] : undefined;
+  if (!semantic || !isBaseType(semantic.valueType)) {
+    throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
+  }
+  return semantic.valueType;
 }
 
-function resolveFields(
+function slug(entity: string): string {
+  return entity.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+/**
+ * The two authoring spellings in the corpus: `options` is canonical;
+ * `render.props.referentieGroep` remains a compatibility fallback until those
+ * fields are normalized without changing unrelated generated UI.
+ */
+function resolveOptions(field: OperationFieldDefinition, semantic: OperationFieldOsfType | undefined): OperationFieldOptions | undefined {
+  if (field.options) return field.options;
+  if (field.reference?.kind === "referentiedata" && field.reference.group) {
+    return { type: "referentiedata", referentieGroep: field.reference.group };
+  }
+  return semantic?.options;
+}
+
+/** Resolve stored or plugin-authored definitions against the host registries. */
+export function resolveFields(
   fields: readonly OperationFieldDefinition[],
   registry: OperationFieldSchemaRegistry,
+  ancestry: readonly string[] = [],
 ): ResolvedOperationField[] {
   return fields.map((field) => {
-    const semantic = isBaseType(field.osfType)
+    const semantic = isBaseType(field.osfType) || !registry.osfTypes || !Object.hasOwn(registry.osfTypes, field.osfType)
       ? undefined
-      : registry.osfTypes?.[field.osfType];
-    const authoredCardinality = field.cardinality ?? semantic?.cardinality;
+      : registry.osfTypes[field.osfType];
+    const baseType = resolveFieldBaseType(field, registry.osfTypes);
+    const path = [...ancestry, field.key].join(".");
+    const { cardinality, bounds, required } = cardinalityOf(field.cardinality ?? semantic?.cardinality, path);
     // An identity reference does not inline the target record (which may refer back).
     const nested = field.shape ?? field.children ?? (semantic?.kind === "entity" && semantic.entity
       ? undefined : semantic?.shape ?? semantic?.children);
     const item = field.item ?? semantic?.item;
-    const options = resolveOptions(field);
+    const options = resolveOptions(field, semantic);
+    const validation = semantic?.validation || field.validation
+      ? { ...semantic?.validation, ...field.validation }
+      : undefined;
+    const target = semantic?.kind === "entity" ? semantic.entity : undefined;
     return {
       key: field.key,
-      valueType: resolveBaseType(field.osfType, semantic),
-      cardinality: cardinalityOf(authoredCardinality),
-      ...(authoredCardinality && typeof authoredCardinality === "object"
-        ? { cardinalityBounds: { ...authoredCardinality } }
-        : {}),
-      required: field.required ?? false,
+      osfType: field.osfType,
+      baseType,
+      cardinality,
+      ...(bounds ? { cardinalityBounds: bounds } : {}),
+      required: field.required === true || required,
       label: field.label ?? semantic?.label ?? { en: field.key, nl: field.key },
       ...(field.description !== undefined ? { description: field.description } : {}),
       ...(field.help !== undefined ? { help: field.help } : {}),
-      osfType: field.osfType,
       ...(field.unit !== undefined ? { unit: field.unit } : {}),
       ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
-      ...(field.validation ?? semantic?.validation
-        ? { validation: field.validation ?? semantic!.validation! }
-        : {}),
+      ...(validation ? { validation } : {}),
       ...(options ? { options } : {}),
-      ...(semantic?.kind === "entity" && semantic.entity
-        ? { relationship: { entity: semantic.entity } }
+      ...(field.render ? { render: field.render } : {}),
+      ...(target
+        ? { relationship: { kind: cardinality === "collection" ? "hasMany" : "belongsTo", entity: slug(target), target, ...(field.relationship?.constraints ? { constraints: field.relationship.constraints } : {}) } }
         : field.relationship
           ? { relationship: field.relationship }
           : {}),
       ...(field.computed ? { computed: field.computed } : {}),
-      ...(nested ? { children: resolveFields(nested, registry) } : {}),
-      ...(item ? { item: resolveFields([item], registry)[0] } : {}),
+      ...(nested ? { children: resolveFields(nested, registry, [...ancestry, field.key]) } : {}),
+      ...(item ? { item: resolveFields([item], registry, [...ancestry, field.key])[0] } : {}),
     };
   });
 }
 
-function baseType(field: ResolvedOperationField): OperationJsonSchema {
-  switch (field.valueType) {
+function baseTypeSchema(field: Pick<ResolvedOperationField, "baseType">): OperationJsonSchema {
+  switch (field.baseType) {
     case "boolean": return { type: "boolean" };
     case "integer": return { type: "integer" };
     case "number": return { type: "number" };
@@ -178,8 +242,12 @@ function baseType(field: ResolvedOperationField): OperationJsonSchema {
   }
 }
 
-function constrainedType(field: ResolvedOperationField): OperationJsonSchema {
-  const schema = baseType(field);
+/**
+ * Base type plus every authored validation bound. Deliberately does NOT add
+ * `enum`, `description` or `default` — see the file header on key order.
+ */
+export function constrainedType(field: Pick<ResolvedOperationField, "baseType" | "validation">): OperationJsonSchema {
+  const schema = baseTypeSchema(field);
   const validation = field.validation;
   if (!validation) return schema;
   const minLength = numericRule(validation.minLength);
@@ -192,13 +260,15 @@ function constrainedType(field: ResolvedOperationField): OperationJsonSchema {
   if (minimum !== undefined) schema.minimum = minimum;
   if (maximum !== undefined) schema.maximum = maximum;
   if (pattern !== undefined) schema.pattern = pattern;
+  // `format: uuid` is both a JSON Schema format and the signal the storage
+  // layer uses to pick a uuid column, so it carries through unchanged.
   if (validation.format !== undefined) schema.format = validation.format;
   return schema;
 }
 
-function collectionBounds(
-  schema: OperationJsonSchema,
-  field: ResolvedOperationField,
+export function collectionBounds(
+  array: OperationJsonSchema,
+  field: Pick<ResolvedOperationField, "validation" | "cardinalityBounds">,
 ): OperationJsonSchema {
   const minItems = numericRule(field.validation?.minItems);
   const cardinalityMin = field.cardinalityBounds?.min;
@@ -207,22 +277,50 @@ function collectionBounds(
     : cardinalityMin === undefined
       ? minItems
       : Math.max(minItems, cardinalityMin);
-  if (effectiveMin !== undefined) schema.minItems = effectiveMin;
+  if (effectiveMin !== undefined) array.minItems = effectiveMin;
   if (typeof field.cardinalityBounds?.max === "number") {
-    schema.maxItems = field.cardinalityBounds.max;
+    array.maxItems = field.cardinalityBounds.max;
   }
-  return schema;
+  return array;
 }
 
-function enumeration(
-  field: ResolvedOperationField,
-  registry: OperationFieldSchemaRegistry,
-): { values: string[]; labels: Map<string, string> } | undefined {
+/**
+ * Wrap a finished scalar schema as an array. The scalar shape becomes the item
+ * shape; a description on the array itself is more useful than one buried in
+ * `items`.
+ */
+export function collectionShape(
+  scalar: OperationJsonSchema,
+  field: Pick<ResolvedOperationField, "validation" | "cardinalityBounds">,
+): OperationJsonSchema {
+  const { description, ...items } = scalar;
+  const array: OperationJsonSchema = { type: "array", items };
+  if (description !== undefined) array.description = description;
+  return collectionBounds(array, field);
+}
+
+export type FieldEnumeration = {
+  values: string[];
+  labels: Map<string, string>;
+  /** Authored labels kept per language for `x-osf-i18n`. */
+  uiLabels: Record<string, Exclude<OperationLocalizedText, string>>;
+};
+
+export function fieldEnumeration(
+  field: Pick<ResolvedOperationField, "options" | "render">,
+  registry: Pick<OperationFieldSchemaRegistry, "referentiedata">,
+): FieldEnumeration | undefined {
   const options = field.options;
+  const renderGroep = field.render?.props?.referentieGroep;
+  const groep = options?.type === "referentiedata" && options.referentieGroep
+    ? options.referentieGroep
+    : typeof renderGroep === "string"
+      ? renderGroep
+      : undefined;
   const items = options?.type === "static" && options.items?.length
     ? options.items
-    : options?.type === "referentiedata" && options.referentieGroep
-      ? registry.referentiedata?.[options.referentieGroep]
+    : groep
+      ? registry.referentiedata?.[groep]
       : undefined;
   if (!items?.length) return undefined;
   return {
@@ -231,23 +329,142 @@ function enumeration(
       const label = localizedText(item.label);
       return label ? [[item.value, label] as const] : [];
     })),
+    uiLabels: Object.fromEntries(items.flatMap((item) =>
+      item.label && typeof item.label === "object" ? [[item.value, item.label] as const] : [],
+    )),
   };
 }
 
-function objectSchema(
-  fields: readonly ResolvedOperationField[],
+export type DescribeFieldOptions = {
+  relationshipInstruction?: string;
+};
+
+/**
+ * The stable, human-facing description shared by generated transport
+ * schemas. Transport-specific instructions are deliberately added by the
+ * consumer instead of leaking into every projection.
+ */
+export function describeField(
+  field: Pick<ResolvedOperationField, "label" | "description" | "help" | "unit" | "relationship" | "computed">,
+  options: DescribeFieldOptions = {},
+): string | undefined {
+  const parts: string[] = [];
+  const label = localizedText(field.label);
+  const description = localizedText(field.description);
+  const help = localizedText(field.help);
+  if (description) parts.push(description);
+  else if (label) parts.push(label);
+  if (help) parts.push(help);
+  if (field.unit) parts.push(`Unit: ${field.unit}.`);
+  if (field.relationship?.entity) {
+    const reference = `References the ${field.relationship.entity} entity`;
+    parts.push(options.relationshipInstruction ? `${reference} — ${options.relationshipInstruction}` : `${reference}.`);
+  }
+  if (field.computed?.expression) parts.push("Derived server-side; any supplied value is ignored.");
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function valueSchema(
+  field: ResolvedOperationField,
   registry: OperationFieldSchemaRegistry,
+  options: OperationFieldSchemaOptions,
+): OperationJsonSchema {
+  if (field.osfType === FIELD_DEFINITION_OSF_TYPE) return { $ref: FIELD_DEFINITION_SCHEMA_REF };
+  if (field.baseType === "object" && field.children?.length) {
+    return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
+  }
+  return constrainedType(field);
+}
+
+function withFieldMetadata(
+  schema: OperationJsonSchema,
+  field: ResolvedOperationField,
+  enumeration: FieldEnumeration | undefined,
+  options: OperationFieldSchemaOptions,
+): OperationJsonSchema {
+  const title = localizedText(field.label);
+  // Authored UI copy stays apart from transport documentation and validation.
+  const copy: OperationJsonSchema = {};
+  if (field.label && typeof field.label === "object") copy.title = field.label;
+  if (enumeration) copy.enum = enumeration.uiLabels;
+  const help = field.help ?? field.description;
+  if (help && typeof help === "object") copy.description = help;
+  if (Object.keys(copy).length) schema["x-osf-i18n"] = copy;
+  if (title) schema.title = title;
+  if (enumeration) schema.enum = typedEnumValues(enumeration.values, field.baseType);
+  if (field.options?.type === "entity") {
+    if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
+    schema["x-osf-reference"] = { entity: field.options.source, valueField: field.options.valueField ?? "id" };
+  }
+  if (field.relationship?.target) {
+    schema["x-osf-reference"] = {
+      entity: field.relationship.target,
+      valueField: "id",
+      ...(field.relationship.constraints ? { constraints: structuredClone(field.relationship.constraints) } : {}),
+    };
+  }
+  const descriptionParts: string[] = [];
+  const fieldDescription = (options.describeField ?? describeField)(field);
+  if (fieldDescription) descriptionParts.push(fieldDescription);
+  if (enumeration && enumeration.labels.size > 0) {
+    const rendered = enumeration.values.map((value) => {
+      const label = enumeration.labels.get(value);
+      return label ? `${value} (${label})` : value;
+    }).join(", ");
+    descriptionParts.push(`Allowed values: ${rendered}.`);
+  }
+  if (descriptionParts.length > 0) schema.description = descriptionParts.join(" ");
+  if (field.defaultValue !== undefined && options.includeDefault !== false) schema.default = field.defaultValue;
+  return schema;
+}
+
+/** Project one resolved field into deterministic JSON Schema, without bundled definitions. */
+export function fieldSchema(
+  field: ResolvedOperationField,
+  registry: OperationFieldSchemaRegistry = {},
+  options: OperationFieldSchemaOptions = {},
+): OperationJsonSchema {
+  const schema = withFieldMetadata(valueSchema(field, registry, options), field, fieldEnumeration(field, registry), options);
+  if (field.cardinality !== "collection") return schema;
+  const { title, description, "x-osf-i18n": uiCopy, default: defaultValue, ...outerItemSchema } = schema;
+  let items: OperationJsonSchema = field.item
+    ? { allOf: [outerItemSchema, fieldSchema(field.item, registry, options)] }
+    : outerItemSchema;
+  const array: OperationJsonSchema = { type: "array", items };
+  if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
+  if (title !== undefined) array.title = title;
+  if (description !== undefined) array.description = description;
+  if (defaultValue !== undefined) {
+    if (Array.isArray(defaultValue)) {
+      array.default = defaultValue;
+    } else {
+      items = { ...items, default: defaultValue };
+      array.items = items;
+    }
+  }
+  return collectionBounds(array, field);
+}
+
+/**
+ * Assemble an object schema from per-field schemas. `additionalProperties` is
+ * always false: an unknown property is a caller error worth surfacing, not
+ * something to drop silently.
+ */
+export function objectSchema(
+  fields: readonly ResolvedOperationField[],
+  registry: OperationFieldSchemaRegistry = {},
   options: OperationFieldSchemaOptions & { requireRequired: boolean },
 ): OperationJsonSchema {
-  const properties: OperationJsonSchema = Object.create(null) as OperationJsonSchema;
+  const properties: OperationJsonSchema = {};
   const required: string[] = [];
   const keys = new Set<string>();
   for (const field of fields) {
-    if (keys.has(field.key)) {
-      throw new Error(`FieldDefinition key ${JSON.stringify(field.key)} is duplicated.`);
-    }
+    if (keys.has(field.key)) throw new Error(`FieldDefinition key ${JSON.stringify(field.key)} is duplicated.`);
     keys.add(field.key);
     properties[field.key] = fieldSchema(field, registry, options);
+    // A default makes a required field omittable only on transports that
+    // actually materialize it. Connector contract validators deliberately do
+    // not, so their callers keep the stricter boundary.
     if (
       options.requireRequired && field.required &&
       (!options.defaultsAreMaterialized || field.defaultValue === undefined)
@@ -261,70 +478,24 @@ function objectSchema(
   };
 }
 
-function fieldSchema(
-  field: ResolvedOperationField,
-  registry: OperationFieldSchemaRegistry,
-  options: OperationFieldSchemaOptions,
-): OperationJsonSchema {
-  let schema = field.osfType === "fieldDefinition"
-    ? { $ref: "#/$defs/fieldDefinition" }
-    : field.valueType === "object" && field.children?.length
-      ? objectSchema(field.children, registry, {
-          ...options,
-          requireRequired: options.requireNestedRequired ?? true,
-        })
-      : constrainedType(field);
-  const title = localizedText(field.label);
-  if (field.relationship?.entity) {
-    schema["x-osf-reference"] = { entity: field.relationship.entity };
-  }
-  if (title) schema.title = title;
-  const values = enumeration(field, registry);
-  if (values) schema.enum = typedEnumValues(values.values, field.valueType);
-  const descriptionParts = [
-    localizedText(field.description) ?? title,
-    localizedText(field.help),
-    field.unit ? `Unit: ${field.unit}.` : undefined,
-    field.relationship?.entity
-      ? `References the ${field.relationship.entity} entity.`
-      : undefined,
-    field.computed?.expression
-      ? "Derived server-side; any supplied value is ignored."
-      : undefined,
-    values && values.labels.size > 0
-      ? `Allowed values: ${values.values.map((value) => {
-          const label = values.labels.get(value);
-          return label ? `${value} (${label})` : value;
-        }).join(", ")}.`
-      : undefined,
-  ].filter((part): part is string => Boolean(part));
-  if (descriptionParts.length > 0) schema.description = descriptionParts.join(" ");
-  if (field.defaultValue !== undefined && options.includeDefault !== false) {
-    schema.default = field.defaultValue;
-  }
-  if (field.cardinality !== "collection") return schema;
-  const { title: itemTitle, description, default: defaultValue, ...itemSchema } = schema;
-  const item = field.item
-    ? { allOf: [itemSchema, fieldSchema(field.item, registry, options)] }
-    : itemSchema;
-  const collection = collectionBounds({ type: "array", items: item }, field);
-  if (itemTitle !== undefined) collection.title = itemTitle;
-  if (description !== undefined) collection.description = description;
-  if (defaultValue !== undefined) {
-    if (Array.isArray(defaultValue)) collection.default = defaultValue;
-    else (collection.items as OperationJsonSchema).default = defaultValue;
-  }
-  return collection;
+function referencesFieldDefinitionSchema(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(referencesFieldDefinitionSchema);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as OperationJsonSchema).some(
+    ([key, entry]) => (key === "$ref" && entry === FIELD_DEFINITION_SCHEMA_REF) || referencesFieldDefinitionSchema(entry),
+  );
 }
 
-function bundleDefinitions(
+/** Bundle the recursive fieldDefinition definitions at the root of a schema that refers to them. */
+export function bundleDefinitions(
   schema: OperationJsonSchema,
-  registry: OperationFieldSchemaRegistry,
+  registry: Pick<OperationFieldSchemaRegistry, "fieldDefinitionDefinitions">,
 ): OperationJsonSchema {
-  const usesFieldDefinition = JSON.stringify(schema).includes('"#/$defs/fieldDefinition"');
-  return usesFieldDefinition && registry.fieldDefinitionDefinitions
-    ? { ...schema, $defs: structuredClone(registry.fieldDefinitionDefinitions) }
-    : schema;
+  if (!registry.fieldDefinitionDefinitions || !referencesFieldDefinitionSchema(schema)) return schema;
+  const existing = schema.$defs && typeof schema.$defs === "object" && !Array.isArray(schema.$defs)
+    ? (schema.$defs as OperationJsonSchema)
+    : {};
+  return { ...schema, $defs: { ...existing, ...structuredClone(registry.fieldDefinitionDefinitions) } };
 }
 
 export function operationFieldSchema(

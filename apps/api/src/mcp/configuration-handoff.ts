@@ -50,7 +50,7 @@ import {
   readHandoff,
   readLatestHandoffForSession,
 } from "./handoff-store.js";
-import { storedFieldBaseType } from "./stored-field-base-type.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 type JsonRecord = Record<string, unknown>;
 

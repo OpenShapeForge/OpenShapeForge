@@ -46,9 +46,14 @@ export const operationReferenceKeyword = {
   },
 };
 
-const bilingualText = {
-  type: "object", required: ["en", "nl"], additionalProperties: false,
-  properties: { en: { type: "string", minLength: 1 }, nl: { type: "string", minLength: 1 } },
+/**
+ * Authored copy in any of the supported languages. Completeness (both `en`
+ * and `nl`) is a build-time lint (`missingUiTranslations` in interface-web);
+ * a stored definition with one language must still validate at runtime.
+ */
+const localizedText = {
+  type: "object", minProperties: 1, additionalProperties: false,
+  properties: { en: { type: "string", minLength: 1 }, nl: { type: "string", minLength: 1 }, fr: { type: "string", minLength: 1 } },
 };
 /** Translation metadata never changes accepted values or authorization. */
 export const operationI18nKeyword = {
@@ -56,8 +61,8 @@ export const operationI18nKeyword = {
   metaSchema: {
     type: "object", additionalProperties: false,
     properties: {
-      title: bilingualText, description: bilingualText,
-      enum: { type: "object", additionalProperties: bilingualText },
+      title: localizedText, description: localizedText,
+      enum: { type: "object", additionalProperties: localizedText },
     },
   },
 };

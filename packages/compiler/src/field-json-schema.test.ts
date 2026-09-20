@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { operationReferenceKeyword } from "@openshapeforge/operations";
+import { operationI18nKeyword, operationReferenceKeyword } from "@openshapeforge/operations";
 import type { CompiledField } from "./authoring/types.js";
 import {
   compiledFieldSchema,
@@ -110,6 +110,19 @@ describe("compiled field JSON Schema projection", () => {
     // A constraint the runtime does not evaluate stays refused.
     expect(compile({ type: "string", "x-osf-reference": { entity: "Relation", constraints: { relationType: { in: ["organization"] } } } })).toThrow(/x-osf-reference/);
   });
+  it("what the projector emits into x-osf-i18n is what the runtime keyword accepts", () => {
+    // Stored definitions reach the same Ajv validators as compiled schemas. A
+    // label authored in one language is incomplete copy (a build-time lint),
+    // not an invalid schema that fails a form closed at runtime.
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationI18nKeyword);
+    const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { code: schema } });
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { en: "Code" } })))).not.toThrow();
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { nl: "Code", fr: "Code" }, help: { en: "Help", nl: "Hulp" } })))).not.toThrow();
+    expect(compile({ type: "string", "x-osf-i18n": { title: {} } })).toThrow(/x-osf-i18n/);
+    expect(compile({ type: "string", "x-osf-i18n": { title: { de: "Code" } } })).toThrow(/x-osf-i18n/);
+  });
+
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
       $ref: "https://example.test/schema#/$defs/value",

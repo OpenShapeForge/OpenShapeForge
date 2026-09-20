@@ -34,7 +34,7 @@ import {
 // One policy, one source: the same set decides what is encrypted at rest
 // (here) and what is barred from URL positions (declarative-execution).
 import { SECRET_SENSITIVITY } from "./declarative-execution.js";
-import { storedFieldBaseType } from "./stored-field-base-type.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type ElicitOnCreateEntry = {
   sourceField: string;

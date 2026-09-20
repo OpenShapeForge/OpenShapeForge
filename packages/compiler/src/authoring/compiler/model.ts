@@ -25,6 +25,7 @@ import type {
 } from "../types.js";
 import { fieldCardinality } from "./helpers.js";
 import { resolveBaseType, osfTypeDefinitionOf } from "../entity-fields.js";
+import { cardinalityOf } from "@openshapeforge/operations";
 
 export function resolveModelFields(
   coreFields: Field[],
@@ -35,18 +36,14 @@ export function resolveModelFields(
     const semType = osfTypeDefinitionOf(field.osfType, osfTypes ?? {});
     const baseType = field.baseType ?? resolveBaseType(field.osfType, osfTypes ?? {});
     if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
-    const authoredCardinality = field.cardinality ?? semType?.cardinality;
-    const cardinality = fieldCardinality({ cardinality: authoredCardinality });
+    const { cardinality, bounds, required } = cardinalityOf(field.cardinality ?? semType?.cardinality, field.key);
 
     const compiled: CompiledField = {
       key: field.key,
       baseType,
       cardinality,
-      ...(authoredCardinality && typeof authoredCardinality === "object" &&
-        cardinality === "collection"
-        ? { cardinalityBounds: { ...authoredCardinality } }
-        : {}),
-      required: field.required ?? false,
+      ...(bounds ? { cardinalityBounds: bounds } : {}),
+      required: field.required === true || required,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
       osfType: field.osfType,

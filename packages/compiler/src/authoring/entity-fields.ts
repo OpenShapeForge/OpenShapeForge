@@ -2,6 +2,7 @@
 import type { CoreEntity, Field, OperationCatalogDefinition, OsfTypeDefinition } from "./types.js";
 import type { FieldDefinitionValueType } from "./types/field-definition.js";
 import { deriveTableName, fieldCardinality } from "./compiler/helpers.js";
+import { cardinalityOf } from "@openshapeforge/operations";
 import { type InverseCollectionSource, defaultInverseLabel, deriveInverseCollections, withInverseCollections } from "./inverse-collections.js";
 
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
@@ -201,14 +202,7 @@ export function normalizeEntityFields(
     }
     const cardinality = field.cardinality ?? semantic?.cardinality;
     if (cardinality) result.cardinality = cardinality;
-    if (typeof cardinality === "object") {
-      const min = cardinality.min ?? 0;
-      const max = cardinality.max ?? 1;
-      if (!Number.isInteger(min) || min < 0 || (max !== "unbounded" && (!Number.isInteger(max) || max < min))) {
-        throw new Error(`${path}: invalid cardinality bounds.`);
-      }
-      if (min > 0) result.required = true;
-    }
+    if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
     if (field.entityValue || field.allowedDefinitions) {
       if (entity.schemaVersion !== 3 || nested) throw new Error(`${path}: entityValue and allowedDefinitions require a top-level schemaVersion 3 field.`);

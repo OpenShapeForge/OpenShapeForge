@@ -19,21 +19,39 @@ export type OperationFieldValidation = {
 };
 
 export type OperationFieldOptions = {
-  type: "static" | "referentiedata" | "remote" | "dynamic";
+  type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
   items?: readonly {
     value: string;
-    label: OperationLocalizedText;
+    label?: OperationLocalizedText;
   }[];
   referentieGroep?: string;
+  /** `type: entity` — the entity whose records are the choices. */
+  source?: string;
+  valueField?: string;
 };
 
 export type OperationFieldBaseType = "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+
+/** `single`, `collection`, or exact bounds; `max` above one (or unbounded) makes a collection. */
+export type OperationFieldCardinality = "single" | "collection" | { min?: number; max?: number | "unbounded" };
+
+/** Bounded validity rules for a referenced record: per target field an equality, or `any` over a related collection. */
+export type OperationReferenceConstraints = Readonly<Record<string, unknown>>;
+
+export type OperationFieldRelationship = {
+  kind?: "belongsTo" | "hasMany";
+  /** Kebab-case slug of the target, the spelling the compiler derives. */
+  entity?: string;
+  /** The target entity name. */
+  target?: string;
+  constraints?: OperationReferenceConstraints;
+};
 
 export type OperationFieldDefinition = {
   key: string;
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
-  cardinality?: "single" | "collection" | { min?: number; max?: number | "unbounded" };
+  cardinality?: OperationFieldCardinality;
   required?: boolean;
   label?: OperationLocalizedText;
   description?: OperationLocalizedText;
@@ -44,7 +62,7 @@ export type OperationFieldDefinition = {
   options?: OperationFieldOptions;
   reference?: { kind?: string; group?: string };
   render?: { props?: Readonly<Record<string, unknown>> };
-  relationship?: { entity?: string };
+  relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
   shape?: readonly OperationFieldDefinition[];
   children?: readonly OperationFieldDefinition[];
@@ -55,9 +73,10 @@ export type OperationFieldOsfType = {
   kind?: string;
   entity?: string;
   valueType: OperationFieldBaseType;
-  cardinality?: OperationFieldDefinition["cardinality"];
+  cardinality?: OperationFieldCardinality;
   label?: OperationLocalizedText;
   validation?: OperationFieldValidation;
+  options?: OperationFieldOptions;
   shape?: readonly OperationFieldDefinition[];
   children?: readonly OperationFieldDefinition[];
   item?: OperationFieldDefinition;
@@ -67,34 +86,47 @@ export type OperationFieldSchemaRegistry = {
   osfTypes?: Readonly<Record<string, OperationFieldOsfType>>;
   referentiedata?: Readonly<Record<string, readonly {
     value: string;
-    label: OperationLocalizedText;
+    label?: OperationLocalizedText;
   }[]>>;
   /** Self-contained definitions used by the recursive fieldDefinition type. */
   fieldDefinitionDefinitions?: OperationJsonSchema;
 };
 
 export type OperationFieldSchemaOptions = {
+  /** PATCH and filter schemas must never materialize authored defaults. */
   includeDefault?: boolean;
+  /** Whether required children are structural inside nested object values. */
   requireNestedRequired?: boolean;
+  /** Whether this transport applies defaults when the caller omits a value. */
   defaultsAreMaterialized?: boolean;
+  /** Transport-specific prose; the default is `describeField`. */
+  describeField?: (field: ResolvedOperationField) => string | undefined;
 };
 
+/**
+ * A field with its type axis resolved: the base type every transport maps
+ * to, the normalized cardinality, and every catalog default merged in. The
+ * compiler's `CompiledField` satisfies it structurally; the runtime resolves
+ * a stored definition into it through the host registry.
+ */
 export type ResolvedOperationField = {
   key: string;
-  valueType: OperationFieldBaseType;
+  osfType: string;
+  baseType: OperationFieldBaseType;
   cardinality: "single" | "collection";
+  /** Exact authored collection bounds retained after cardinality normalization. */
   cardinalityBounds?: { min?: number; max?: number | "unbounded" };
   required: boolean;
   label: OperationLocalizedText;
   description?: OperationLocalizedText;
   help?: OperationLocalizedText;
-  osfType: string;
   unit?: string;
   defaultValue?: unknown;
   validation?: OperationFieldValidation;
   options?: OperationFieldOptions;
-  relationship?: { entity?: string };
+  render?: { props?: Readonly<Record<string, unknown>> };
+  relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
-  children?: ResolvedOperationField[];
+  children?: readonly ResolvedOperationField[];
   item?: ResolvedOperationField;
 };

@@ -64,20 +64,22 @@
  * would have applied in organization B too.
  *
  * Every session kind links through the same row. A trusted-context session
- * names a person whose bearer login already made the identity row: it reads
- * the link by its issuer (the realm this deployment trusts) and its user id,
- * which is the identity subject. An API-key session is a service account
- * that never signs in interactively: its first session records its own
- * identity row and an empty pending link (`ensureServiceIdentityLink`), so
- * an administrator's `link_identity` can make the integration act as a
- * Relation like anyone else. `sessionRelation()` is the one accessor for
+ * names a person whose bearer login made the identity row and admitted them
+ * (the web host forwards the person's token for exactly that): it only
+ * reads the link, by its issuer (the realm this deployment trusts) and its
+ * user id, which is the identity subject. An API-key session is a service
+ * account that never signs in interactively: its first session records its
+ * own identity row and an empty pending link, so an administrator's
+ * `link_identity` can make the integration act as a Relation like anyone
+ * else, and an invitation can claim that row. Both live in
+ * ./identity-link-session.ts. `sessionRelation()` is the one accessor for
  * all of them, and answers null until a link is made.
  */
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
-import { __resetIdentityLinkCacheForTests, cachedLinkState, invalidateIdentityLink, linkCacheKey, recordLinkWrite, type SessionInput } from "./identity-link-session.js";
+import { __resetIdentityLinkCacheForTests, cachedLinkState, invalidateIdentityLink, linkCacheKey, linkGeneration, storeLinkState, type SessionInput } from "./identity-link-session.js";
 import { HttpError } from "../rest/http-error.js";
 import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
 // This module and ./employee-invitations.ts import each other: an invitation
@@ -185,52 +187,10 @@ export function sessionRelation(
   return { relationId: link.relationId, displayName: link.displayName };
 }
 
-/** Flatten the claims a verified token carries about the person. */
-export function identityClaimsFromToken(
-  claims: Record<string, unknown>,
-): IdentityClaims | null {
-  const issuer = stringClaim(claims.iss);
-  const subject = stringClaim(claims.sub);
-  if (!issuer || !subject) return null;
-  return {
-    issuer,
-    subject,
-    email: stringClaim(claims.email),
-    name: stringClaim(claims.name),
-    givenName: stringClaim(claims.given_name),
-    familyName: stringClaim(claims.family_name),
-    preferredUsername: stringClaim(claims.preferred_username),
-  };
-}
-
-function stringClaim(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-/** The person's display name, in the order the token is trusted for it. */
-export function displayNameFromClaims(claims: IdentityClaims): string {
-  const combined = [claims.givenName, claims.familyName].filter(Boolean).join(" ").trim();
-  return claims.name ?? (combined || undefined) ?? claims.preferredUsername ?? claims.subject;
-}
-
-/**
- * First/last name for the NaturalPerson row, or null when the token does not
- * say. Both are required on NaturalPerson and neither is guessed: a person
- * with only a username gets a Relation, not a person record with an invented
- * family name.
- */
-export function personNameFromClaims(
-  claims: IdentityClaims,
-): { firstName: string; lastName: string } | null {
-  if (claims.givenName && claims.familyName) {
-    return { firstName: claims.givenName, lastName: claims.familyName };
-  }
-  const parts = (claims.name ?? "").split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return { firstName: parts[0]!, lastName: parts.slice(1).join(" ") };
-  }
-  return null;
-}
+// The token's claims about the person (issuer, subject, e-mail, name) are
+// read in ./identity-claims.ts; re-exported so every importer keeps one address.
+export { displayNameFromClaims, identityClaimsFromToken, personNameFromClaims } from "./identity-claims.js";
+import { displayNameFromClaims } from "./identity-claims.js";
 
 // ---------------------------------------------------------------------------
 // Single-flight
@@ -268,21 +228,22 @@ export async function resolveIdentityLink(
   claims: IdentityClaims,
 ): Promise<IdentityLinkState | null> {
   const key = linkCacheKey(claims.issuer, claims.subject, session.tenantId);
-  // A cached "no row" is a session-side answer; the bearer path is the one
-  // that makes rows, so only a state that exists short-circuits it.
+  // Only a linked state is settled; anything else (pending, a candidate, a
+  // session-side "no row") is an admission question this path must ask again.
   const cached = cachedLinkState(key);
-  if (cached?.state) return cached.state;
+  if (cached?.state?.status === "linked") return cached.state;
 
   const pending = inFlight.get(key);
   if (pending) return pending;
 
   const work = (async () => {
+    // Snapshotted before the read: an administrator's link_identity that
+    // lands while this runs bumps the generation, and this result is then
+    // not stored over it.
+    const generation = linkGeneration(key);
     try {
       const state = await ensureIdentityLink(db, session, claims);
-      // This path may have written the row (created, admitted, linked): a
-      // write bumps the generation, so a session-side read in flight cannot
-      // store what it saw before.
-      if (state) recordLinkWrite(key, state);
+      if (state) storeLinkState(key, generation, state);
       return state;
     } catch (error) {
       if (error instanceof NotInvitedError) throw error;
@@ -347,20 +308,17 @@ async function ensureIdentityLink(
     return { identityId, state: null, knownToTenant: false };
   });
 
-  if (found.state) {
-    // A pending row that names no Relation AND no candidate is not a person
-    // waiting to confirm something — it is the empty session this module now
-    // refuses to hand out. It happens for a token with no e-mail claim: the
-    // row is kept so `link_identity` can find the identity, but until an
-    // administrator links it, this is a no.
-    if (
-      found.state.status === "pending_confirmation" &&
-      !found.state.relationId &&
-      !found.state.candidateRelationId &&
-      !found.knownToTenant
-    ) {
-      throw notInvited(session, claims);
-    }
+  // A pending row that names no Relation AND no candidate is not a person
+  // waiting to confirm something: it is what a session that could not be
+  // admitted by an e-mail recorded (an API key's, a token without one), kept
+  // so `link_identity` can find the identity. It settles nothing — phase 2
+  // asks the invitation question for it exactly as for no row at all.
+  const emptyPending = found.state !== null &&
+    found.state.status === "pending_confirmation" &&
+    !found.state.relationId &&
+    !found.state.candidateRelationId &&
+    !found.knownToTenant;
+  if (found.state && !emptyPending) {
     // A linked member with no roles here and a still-pending invitation: the
     // acceptance did not land when the link was made (a 503 on the way), or an
     // administrator linked them by hand while an invitation was open. Accept
@@ -379,10 +337,11 @@ async function ensureIdentityLink(
     return found.state;
   }
 
-  // Phase 2: nobody in this tenant carries this e-mail. Being able to sign in
-  // to the realm is NOT admission — see this module's header. An organization
-  // administrator must have invited this address, and that invitation is what
-  // gets created and linked below.
+  // Phase 2: nobody in this tenant carries this e-mail, and any row there is
+  // is empty. Being able to sign in to the realm is NOT admission — see this
+  // module's header. An organization administrator must have invited this
+  // address, and that invitation is what gets created and linked below (an
+  // empty pending row is claimed by it).
   const invitation = claims.email
     ? await withDbSession(db, session, (trx) =>
         findPendingInvitation(trx, session.tenantId, claims.email!),
@@ -399,7 +358,7 @@ async function ensureIdentityLink(
 // administration half in ./identity-link-admin.ts; both re-exported so every
 // importer keeps one address.
 export { readLinkRow, toState, writeMembershipRoles, type LinkRow } from "./identity-link-store.js";
-export { ensureSessionIdentityLink, readSessionLink, type SessionIdentity } from "./identity-link-session.js";
+export { ensureServiceIdentityLink, readSessionLink, withSessionRelation, type SessionIdentity } from "./identity-link-session.js";
 // The explicit-linking and administration half lives in
 // ./identity-link-admin.ts; re-exported so every importer keeps one address.
 export {

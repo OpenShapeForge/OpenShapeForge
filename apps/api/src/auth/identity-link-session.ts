@@ -8,12 +8,13 @@
  * the token's claims and admits the person; a session without token claims
  * — trusted-context, an API key — names its identity by its issuer and its
  * user id (which IS the identity subject: the identities visibility policy
- * says so) and comes here. Such a session cannot be admitted by an e-mail
- * it does not carry, so it records what it can: its own identity row and,
- * in this tenant, an empty pending link — under its own session, which is
- * the one the identities policy lets write that subject. A person's later
- * bearer login finds that row and admits them through it; an integration's
- * service account is linked by an administrator's `link_identity`.
+ * says so) and comes here. A trusted-context session only reads: it stands
+ * for a person the bearer path admits, and the web host forwards the
+ * person's token whenever it has one. An API-key session is a service
+ * account nothing else would ever record, so on first use it writes what
+ * it can — its own identity row and an empty pending link, under its own
+ * session — and an administrator's `link_identity` or an invitation claims
+ * that row.
  *
  * One cache, keyed (issuer, subject, tenant), TTL a minute, versioned: every
  * write and every invalidation bumps the key's generation, and a read stores
@@ -25,6 +26,7 @@ import { UUID_PATTERN, withDbSession, type DbSessionInput } from "../db/session.
 import { insertLinkRow, readLinkRow, readLinkRowByIdentity, toState, upsertIdentity } from "./identity-link-store.js";
 import type { IdentityLinkState } from "./identity-link.js";
 import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
+import type { TrustedSessionContext } from "./trusted-context.js";
 
 export type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 export type SessionIdentity = { issuer: string; subject: string };
@@ -56,12 +58,6 @@ export function cachedLinkState(key: string): { state: IdentityLinkState | null 
 /** Store a state read or written under `generation`; a newer generation wins and the store is skipped. */
 export function storeLinkState(key: string, generation: number, state: IdentityLinkState | null): void {
   if (linkGeneration(key) !== generation) return;
-  cache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
-}
-
-/** A write through either path: the row changed, so every reader restarts from the database. */
-export function recordLinkWrite(key: string, state: IdentityLinkState | null): void {
-  bump(key);
   cache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
 }
 
@@ -121,23 +117,25 @@ export async function readSessionLink(
 }
 
 /**
- * The link state of a session that carries no token claims, its identity
- * row and an empty pending link made on first use when absent (see the
- * module header). `displayName` names a new identity row; null leaves a
- * name a bearer login recorded untouched.
+ * The link state of a service account (an API key's session): read first,
+ * and only when nothing is there, its identity row and an empty pending
+ * link are made — under its own session, which is the one the identities
+ * policy lets write that subject. A service account never signs in
+ * interactively, so nothing else would ever record it; an administrator's
+ * `link_identity` or an invitation then claims the row.
  */
-export async function ensureSessionIdentityLink(
+export async function ensureServiceIdentityLink(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   identity: SessionIdentity,
-  displayName: string | null,
+  displayName: string,
 ): Promise<IdentityLinkState | null> {
   if (!canHoldLink(session)) return null;
   return cachedRead(linkCacheKey(identity.issuer, identity.subject, session.tenantId), () =>
     withDbSession(db, session, async (trx) => {
-      const identityId = await upsertIdentity(trx, { ...identity, ...(displayName ? { name: displayName } : {}) }, displayName);
-      const existing = await readLinkRow(trx, identityId, session.tenantId);
+      const existing = await readLinkRowByIdentity(trx, identity, session.tenantId);
       if (existing) return toState(existing, identity);
+      const identityId = await upsertIdentity(trx, { ...identity, name: displayName }, displayName);
       const inserted = await insertLinkRow(trx, {
         identityId,
         tenantId: session.tenantId,
@@ -148,5 +146,44 @@ export async function ensureSessionIdentityLink(
       });
       const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
       return row ? toState(row, identity) : null;
-    }), "Recording the session's identity");
+    }), "Recording the service account's identity");
+}
+
+/**
+ * The acting Relation for a session that carries no token claims, filled
+ * onto the session the resolver built so `sessionRelation(session)` answers
+ * for every credential kind. A trusted-context session names a person whose
+ * bearer login admitted them — the web host forwards the person's token for
+ * exactly that — and only reads; an API-key session records its service
+ * account on first use. A session that could be linked but names no realm
+ * is a deployment that cannot say who acts: unavailable, never nobody.
+ */
+export async function withSessionRelation(
+  session: TrustedSessionContext,
+  options: { db?: OpenShapeForgeDatabase | undefined },
+): Promise<TrustedSessionContext> {
+  if (session.credential !== "trusted-context" && session.credential !== "api-key") return session;
+  if (!options.db || !session.tenantId || !session.userId) return session;
+  const link: SessionInput = {
+    tenantId: session.tenantId,
+    userId: session.userId,
+    roles: [...session.roles],
+    groups: [...session.groups],
+    scope: session.scope,
+  };
+  if (!canHoldLink(link)) return session;
+  if (!session.issuer) {
+    throw new SessionAuthenticationUnavailableError(
+      "The session names no issuer, so its identity cannot be resolved; set OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER.",
+    );
+  }
+  const identity = { issuer: session.issuer, subject: session.userId };
+  const relation = session.credential === "api-key"
+    ? await ensureServiceIdentityLink(options.db, link, identity, session.userDisplayName ?? session.userId)
+    : await readSessionLink(options.db, link, identity);
+  return {
+    ...session,
+    relation,
+    ...(relation?.displayName && !session.userDisplayName ? { userDisplayName: relation.displayName } : {}),
+  };
 }

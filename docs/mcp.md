@@ -406,12 +406,11 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   record), "Pending confirmation" (a Relation carrying the person's e-mail
   exists; `name`/`kind` describe that candidate and the summary says "A record
   with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
-  (no record yet). A login that reached the organization without a bearer
-  token — a web session, an API key — has recorded its identity and an
-  empty pending link, and the summary says how it gets linked: a person by
-  e-mail or identity id, an integration by the identity id it names, both
-  through an administrator's `link_identity`. `explanation` is one fixed line
-  saying what a Relation is. Beyond that identity id, no ids leave the answer.
+  (no record yet). An API key that reached the organization has recorded its
+  identity and an empty pending link, and the summary names the identity id
+  an administrator passes to `link_identity`; a person's summary says their
+  e-mail or identity id works. `explanation` is one fixed line saying what a
+  Relation is. Beyond that identity id, no ids leave the answer.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
@@ -586,20 +585,23 @@ const party = sessionRelation(session); // { relationId, displayName } | null
 
 `null` means "not linked": pending, or no link yet. Every credential kind
 resolves through the same row: a bearer session with its token's claims and
-the admission that goes with them; a trusted-context session (the web host)
-or an API-key session by the realm this deployment trusts
-(`OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER`, which such a deployment must set:
-a session that could be linked but names no realm is refused as
+the admission that goes with them (the invitation, the e-mail candidate, the
+just-in-time Relation) — which is why the web host forwards the person's
+own token whenever the session holds one; a trusted-context session (a
+token-less server call) or an API-key session by the realm this deployment
+trusts (`OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER`, which such a deployment
+must set: a session that could be linked but names no realm is refused as
 unavailable, never treated as nobody) and its user id, the identity subject.
-Both record, on first use, their own identity row and an empty pending link
-under their own session, so a person's later bearer login admits them
-through it and an administrator's `link_identity` can name an integration's
-service account — or a web-only login — by the identity id
-`list_pending_members` lists under `unlinked`. One cache, keyed (issuer,
-subject, tenant), serves both paths for a minute inside a process; every
-write and every invalidation moves its generation on, so neither path can
-store a stale state over what the other just wrote, and a link shows up on
-other replicas within the TTL.
+A trusted-context session only reads. An API-key session — a service account
+nothing else would ever record — writes, on first use, its own identity row
+and an empty pending link under its own session, so an administrator's
+`link_identity` can name it by the identity id `list_pending_members` lists
+under `unlinked`, and an invitation for its e-mail claims that row. One
+cache, keyed (issuer, subject, tenant), serves both paths for a minute
+inside a process; only a linked state settles the bearer path, every
+invalidation moves the key's generation on and a read stores only under the
+generation it started with, so a link an administrator makes during a read
+is never overwritten, and a link shows up on other replicas within the TTL.
 
 Not part of this: Keycloak user attributes as a data source, relation ids in
 tokens, and RelationRoles — the administrator assigns those.

@@ -16,11 +16,10 @@ import { sql } from "kysely";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { resolveApiKeySession } from "../../auth/api-key/resolve.js";
 import { mintApiKey } from "../../auth/api-key/format.js";
-import { resolveSessionContext, withSessionRelation } from "../../auth/identity.js";
-import { __resetIdentityLinkForTests, invalidateIdentityLink, sessionRelation, toState } from "../../auth/identity-link.js";
-import { linkCacheKey, linkGeneration, recordLinkWrite } from "../../auth/identity-link-session.js";
-import { readLinkRowByIdentity } from "../../auth/identity-link-store.js";
-import { withDbSession } from "../../db/session.js";
+import { resolveSessionContext } from "../../auth/identity.js";
+import { withSessionRelation } from "../../auth/identity-link-session.js";
+import { __resetIdentityLinkForTests, IDENTITY_LINK_ADMIN_ROLE, invalidateIdentityLink, listUnlinkedIdentities, resolveIdentityLink, sessionRelation } from "../../auth/identity-link.js";
+import { linkCacheKey, linkGeneration, storeLinkState } from "../../auth/identity-link-session.js";
 import { createGraphqlContext } from "../../graphql/context.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
@@ -186,23 +185,23 @@ describe("actor: relation stamps under a trusted-context session", () => {
     expect(stored.triggered_by).toBe(relationId);
   }, 60_000);
 
-  test("a first web session records its identity and a pending link, is refused the stamp, and is linked from there", async () => {
+  test("a first web session only reads: no identity row is made, the stamp is refused, the bearer login admits", async () => {
     const tenantId = await tenant();
     const userId = randomUUID();
     const session = await trustedSession(tenantId, userId);
     expect(sessionRelation(session)).toBeNull();
-    // Nothing else could have made these rows: no bearer login ran for this person.
-    expect(session.relation).toMatchObject({ status: "pending_confirmation", relationId: null, issuer: ISSUER, subject: userId });
-    const rows = (await sql<{ display_name: string | null; email: string | null }>`select i.display_name, i.email from platform.identities i
-      join platform.identity_relations ir on ir.identity_id = i.id where i.issuer = ${ISSUER} and i.subject = ${userId} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows;
-    expect(rows).toEqual([{ display_name: null, email: null }]);
+    expect(session.relation).toBeNull();
+    // Nothing was written for this person: admission is the bearer path's, which the web host forwards the token for.
+    expect((await sql<{ n: string }>`select count(*)::text as n from platform.identities where issuer = ${ISSUER} and subject = ${userId}`.execute(privileged.db)).rows[0]!.n).toBe("0");
     const id = await milestone(session);
     await fails(executeTransition(restricted.db, session, relationStampedBinding(), { id }), "FORBIDDEN");
     expect((await sql<{ status: string }>`select status from erp.agreement_milestones where id = ${id}::uuid`.execute(privileged.db)).rows[0]!.status).toBe("pending");
-    // An administrator links the recorded identity by its id; the next session acts as that Relation.
-    const relationId = await relation(tenantId);
-    await linkExisting(ISSUER, userId, tenantId, relationId);
-    expect(sessionRelation(await trustedSession(tenantId, userId))).toEqual({ relationId, displayName: "Reviewer" });
+    // The person's bearer login (invited) admits them; the next web session acts as that Relation.
+    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${`${userId}@example.test`}, 'org_employee', 'admin')`.execute(privileged.db);
+    const admitted = await resolveIdentityLink(restricted.db, { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" },
+      { issuer: ISSUER, subject: userId, email: `${userId}@example.test`, givenName: "Web", familyName: "Person" });
+    expect(admitted).toMatchObject({ status: "linked" });
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(admitted!.relationId!);
   }, 60_000);
 
   test("a session that could be linked but names no realm is unavailable, not nobody", async () => {
@@ -251,13 +250,11 @@ describe("actor: relation stamps under a trusted-context session", () => {
     const ours = await relation(tenantId);
     const theirs = await relation(tenantId);
     await linkedUser(tenantId, theirs, OTHER_ISSUER, subject);
-    // Only the other realm knows this subject: the session, issued by ours, is not linked —
-    // it recorded its own identity under our issuer, which is a different row.
+    // Only the other realm knows this subject: the session, issued by ours, is not linked.
     expect(sessionRelation(await trustedSession(tenantId, subject))).toBeNull();
-    await linkExisting(ISSUER, subject, tenantId, ours);
+    await linkedUser(tenantId, ours, ISSUER, subject);
+    invalidateIdentityLink(ISSUER, subject, tenantId);
     expect(sessionRelation(await trustedSession(tenantId, subject))?.relationId).toBe(ours);
-    const identities = (await sql<{ issuer: string }>`select issuer from platform.identities where subject = ${subject} order by issuer`.execute(privileged.db)).rows.map((row) => row.issuer);
-    expect(identities).toEqual([ISSUER, OTHER_ISSUER].sort());
   }, 60_000);
 
   test("an API-key session records its service account's identity on first use and acts as the Relation an administrator links it to", async () => {
@@ -298,20 +295,78 @@ describe("actor: relation stamps under a trusted-context session", () => {
     expect(result).toMatchObject({ status: "triggered", triggeredBy: relationId });
   }, 60_000);
 
-  test("one cache for both paths: a link the bearer path makes is seen by the next trusted-context read", async () => {
+  test("one cache for both paths: a link the bearer path makes is seen by the next trusted-context read, and a linked state is the only one it settles", async () => {
     const tenantId = await tenant();
     const userId = randomUUID();
-    // The trusted-context read caches "pending, unlinked" for this key.
+    const email = `${userId}@example.test`;
+    const claims = { issuer: ISSUER, subject: userId, email, givenName: "Cached", familyName: "Person" };
+    const bearer = { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" as const };
+    // Not invited yet: the bearer path refuses, and the trusted-context read caches "no row".
+    await expect(resolveIdentityLink(restricted.db, bearer, claims)).rejects.toMatchObject({ code: "NOT_INVITED" });
     expect(sessionRelation(await trustedSession(tenantId, userId))).toBeNull();
     const key = linkCacheKey(ISSUER, userId, tenantId);
+    // The cached "no row" does not settle the bearer path: invited now, it admits.
+    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${email}, 'org_employee', 'admin')`.execute(privileged.db);
     const before = linkGeneration(key);
-    // The bearer path links (a write through resolveIdentityLink records it the same way): the generation moves on.
-    const relationId = await relation(tenantId);
-    await sql`update platform.identity_relations ir set relation_id = ${relationId}::uuid, status = 'linked', linked_at = now(), linked_by = 'bearer'
-      from platform.identities i where i.id = ir.identity_id and i.issuer = ${ISSUER} and i.subject = ${userId} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db);
-    recordLinkWrite(key, (await withDbSession(restricted.db, { tenantId, userId, roles: ROLES, scope: "tenant" }, (trx) => readLinkRowByIdentity(trx, { issuer: ISSUER, subject: userId }, tenantId)).then((row) => row && toState(row, { issuer: ISSUER, subject: userId }))));
+    const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
+    expect(admitted?.status).toBe("linked");
+    // Admission invalidated the key: the trusted-context read sees the link at once.
     expect(linkGeneration(key)).toBeGreaterThan(before);
-    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(relationId);
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(admitted!.relationId!);
+  }, 60_000);
+
+  test("an API-key identity recorded as empty pending is claimed by a later invitation", async () => {
+    const tenantId = await tenant();
+    const serviceAccount = randomUUID();
+    const first = await apiKeySession(tenantId, serviceAccount);
+    expect(first.relation).toMatchObject({ status: "pending_confirmation", relationId: null, candidateRelationId: null });
+    // The bearer path for this identity, uninvited: the empty row settles nothing, so NOT_INVITED.
+    const claims = { issuer: ISSUER, subject: serviceAccount, email: `${serviceAccount}@example.test`, name: "Billing robot" };
+    const bearer = { tenantId, userId: serviceAccount, roles: ROLES, groups: [], scope: "tenant" as const };
+    await expect(resolveIdentityLink(restricted.db, bearer, claims)).rejects.toMatchObject({ code: "NOT_INVITED" });
+    // Invited: phase 2 claims the empty pending row instead of losing to it.
+    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${claims.email}, 'org_employee', 'admin')`.execute(privileged.db);
+    const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
+    expect(admitted).toMatchObject({ status: "linked", roles: expect.arrayContaining(["org_employee"]) });
+    const rows = (await sql<{ n: string }>`select count(*)::text as n from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id where i.subject = ${serviceAccount} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows[0]!.n;
+    expect(rows).toBe("1");
+    expect(sessionRelation(await apiKeySession(tenantId, serviceAccount))?.relationId).toBe(admitted!.relationId!);
+  }, 60_000);
+
+  test("a bearer read stores under the generation it started with: an administrator's link during it wins", async () => {
+    const tenantId = await tenant();
+    const userId = randomUUID();
+    const email = `${userId}@example.test`;
+    const claims = { issuer: ISSUER, subject: userId, email, givenName: "Raced", familyName: "Person" };
+    const bearer = { tenantId, userId, roles: ROLES, groups: [], scope: "tenant" as const };
+    await sql`insert into platform.employee_invitations (tenant_id, email, role, invited_by) values (${tenantId}::uuid, ${email}, 'org_employee', 'admin')`.execute(privileged.db);
+    const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
+    const key = linkCacheKey(ISSUER, userId, tenantId);
+    // Bump the generation as an administrator's link_identity would, then read again as the bearer path.
+    invalidateIdentityLink(ISSUER, userId, tenantId);
+    const other = await relation(tenantId);
+    const generation = linkGeneration(key);
+    await linkExisting(ISSUER, userId, tenantId, other); // bumps again while "the read" is out
+    const stale = admitted; // what the read would have stored
+    storeLinkState(key, generation, stale);
+    // The store was skipped: a fresh read reflects the administrator's link.
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(other);
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).not.toBe(admitted!.relationId);
+  }, 60_000);
+
+  test("list_pending_members shows an unlinked API-key identity by id and not a person with a candidate", async () => {
+    const tenantId = await tenant();
+    const serviceAccount = randomUUID();
+    await apiKeySession(tenantId, serviceAccount);
+    // A person with a candidate is theirs to confirm, not an administrator's to pick up.
+    const person = randomUUID();
+    const identity = randomUUID();
+    await sql`insert into platform.identities (id, issuer, subject, email) values (${identity}::uuid, ${ISSUER}, ${person}, ${`${person}@example.test`})`.execute(privileged.db);
+    await sql`insert into platform.identity_relations (identity_id, tenant_id, status, candidate_relation_id) values (${identity}::uuid, ${tenantId}::uuid, 'pending_confirmation', ${await relation(tenantId)}::uuid)`.execute(privileged.db);
+    const admin = { tenantId, userId: randomUUID(), roles: [IDENTITY_LINK_ADMIN_ROLE], groups: [], scope: "tenant" as const };
+    const unlinked = await listUnlinkedIdentities(restricted.db, admin);
+    expect(unlinked).toEqual([{ identityId: expect.any(String), displayName: "Billing robot", email: null }]);
+    expect(unlinked[0]!.identityId).not.toBe(identity);
   }, 60_000);
 
   test("an invalidation during a read wins: the read's result is not stored over it", async () => {

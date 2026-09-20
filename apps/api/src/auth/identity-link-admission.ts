@@ -48,7 +48,7 @@ import {
   type IdentityClaims,
   type IdentityLinkState,
 } from "./identity-link.js";
-import { insertLinkRow, readLinkRow, toState, writeMembershipRoles } from "./identity-link-store.js";
+import { insertLinkRow, linkEmptyPendingRow, readLinkRow, toState, writeMembershipRoles } from "./identity-link-store.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "./organization-roles.js";
 import { SessionAuthenticationUnavailableError } from "./session-unavailable.js";
 
@@ -92,7 +92,14 @@ export async function admitInvitedPerson(
       candidateRelationId: null,
       linkedBy: "jit",
       roles,
-    });
+    }) ?? (
+      // The row may already exist, empty and pending: a session that could
+      // not be admitted by an e-mail (an API key's, a token without one)
+      // recorded it. The invitation claims that row rather than losing to it.
+      await linkEmptyPendingRow(trx, { identityId, tenantId: session.tenantId, relationId, linkedBy: "jit", roles })
+        ? await readLinkRow(trx, identityId, session.tenantId)
+        : null
+    );
     if (inserted) {
       console.info(
         `[auth] Linked identity ${identityId} (${claims.subject}) to new Relation ` +

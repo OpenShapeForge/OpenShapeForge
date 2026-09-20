@@ -126,6 +126,35 @@ export async function writeMembershipRoles(
   return result.rows.length > 0;
 }
 
+/**
+ * Turn an existing EMPTY pending row (no Relation, no candidate — what a
+ * session that could not be admitted by an e-mail recorded) into the linked
+ * row admission would have inserted. Returns whether a row was claimed; a
+ * row that meanwhile got a Relation or a candidate is left alone.
+ */
+export async function linkEmptyPendingRow(
+  trx: Transaction<DB>,
+  row: { identityId: string; tenantId: string; relationId: string; linkedBy: string; roles: readonly string[] },
+): Promise<boolean> {
+  const result = await sql<{ identity_id: string }>`
+    update platform.identity_relations
+       set status = 'linked',
+           relation_id = ${row.relationId},
+           linked_at = now(),
+           linked_by = ${row.linkedBy},
+           roles = ${rolesArray(row.roles)},
+           needs_role_assignment = false,
+           updated_at = now()
+     where identity_id = ${row.identityId}
+       and tenant_id = ${row.tenantId}
+       and status = 'pending_confirmation'
+       and relation_id is null
+       and candidate_relation_id is null
+    returning identity_id
+  `.execute(trx);
+  return result.rows.length > 0;
+}
+
 export async function insertLinkRow(
   trx: Transaction<DB>,
   row: {

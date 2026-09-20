@@ -11,12 +11,11 @@ import { looksLikeApiKey } from "./api-key/format.js";
 import {
   NotInvitedError,
   identityClaimsFromToken,
-  ensureSessionIdentityLink,
   resolveIdentityLink,
+  withSessionRelation,
   type IdentityClaims,
   type IdentityLinkState,
 } from "./identity-link.js";
-import { canHoldLink } from "./identity-link-session.js";
 // ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
@@ -219,56 +218,6 @@ function sessionIdentityRoles(identity: AuthIdentity): string[] {
   const audience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
   const clientRoles = audience ? identity.clientRoles?.[audience] : undefined;
   return [...new Set([...identity.roles, ...(clientRoles ?? [])])].sort();
-}
-
-/**
- * The acting Relation for a session that carries no token claims: a
- * trusted-context or API-key session is linked through the same
- * platform.identity_relations row a person's bearer session is, read here
- * by its user id so `sessionRelation(session)` answers for every credential
- * kind — a transition's `actor` stamp, a document's author, whatever acts as
- * a Relation asks that one function and nothing else.
- */
-export async function withSessionRelation(
-  session: TrustedSessionContext,
-  options: ResolveSessionOptions,
-): Promise<TrustedSessionContext> {
-  if (session.credential !== "trusted-context" && session.credential !== "api-key") return session;
-  if (!options.db || !session.tenantId || !session.userId) return session;
-  const link = {
-    tenantId: session.tenantId,
-    userId: session.userId,
-    roles: [...session.roles],
-    groups: [...session.groups],
-    scope: session.scope,
-  };
-  if (!canHoldLink(link)) return session;
-  if (!session.issuer) {
-    // A session that could be linked but names no realm is a deployment
-    // that cannot say who acts: not "nobody", unavailable. An API-key
-    // session always carries its issuer; a trusted-context bundle needs
-    // OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER.
-    throw new SessionAuthenticationUnavailableError(
-      "The session names no issuer, so its identity cannot be resolved; set OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER.",
-    );
-  }
-  // Neither kind carries token claims to be admitted by, so both record
-  // what they can on first use — their identity row and an empty pending
-  // link, under their own session — and are linked from there: a person by
-  // the bearer login or invitation that admits them, a service account by
-  // an administrator's link_identity. A trusted-context session brings no
-  // name; the row keeps whatever a bearer login recorded.
-  const relation = await ensureSessionIdentityLink(
-    options.db,
-    link,
-    { issuer: session.issuer, subject: session.userId },
-    session.credential === "api-key" ? session.userDisplayName ?? session.userId : null,
-  );
-  return {
-    ...session,
-    relation,
-    ...(relation?.displayName && !session.userDisplayName ? { userDisplayName: relation.displayName } : {}),
-  };
 }
 
 /**

@@ -25,9 +25,13 @@ describe("resolveMilestoneAmounts", () => {
     expect(resolveMilestoneAmounts({ basisAmount: 1000, percentOfBasis: 10, amount: 999999 })).toEqual({ basisAmount: 1000, percentOfBasis: 10, amount: 100 });
   });
 
-  test("requires basisAmount with a percentage, and a percentage within 0-100", () => {
+  test("requires a positive basisAmount with a percentage, and a percentage above 0 and at most 100", () => {
     fails(() => resolveMilestoneAmounts({ percentOfBasis: 20 }), "basisAmount", /basisAmount is required/);
-    fails(() => resolveMilestoneAmounts({ basisAmount: 100, percentOfBasis: 101 }), "percentOfBasis", /between 0 and 100/);
+    fails(() => resolveMilestoneAmounts({ basisAmount: 100, percentOfBasis: 101 }), "percentOfBasis", /more than 0 and at most 100/);
+    // Zero bills nothing, so it is no milestone; a non-positive basis is no basis.
+    fails(() => resolveMilestoneAmounts({ basisAmount: 100, percentOfBasis: 0 }), "percentOfBasis", /more than 0/);
+    fails(() => resolveMilestoneAmounts({ basisAmount: 0, percentOfBasis: 10 }), "basisAmount", /positive number/);
+    fails(() => resolveMilestoneAmounts({ basisAmount: -5, amount: 10 }), "basisAmount", /positive number/);
   });
 
   test("accepts a plain fixed amount, with an informational basisAmount, and refuses a non-positive one", () => {

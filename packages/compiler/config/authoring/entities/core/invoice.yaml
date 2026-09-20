@@ -16,6 +16,9 @@ pluralLabels:
 domains:
   - finance
 indexes:
+  # Only issued invoices take part: a draft has no number and is not in the
+  # numbering scope at all. A number without its fiscal year is refused by
+  # the `requires` on the field.
   - name: invoices_tenant_kind_fiscal_year_number_uidx
     fields:
       - tenantId
@@ -23,6 +26,7 @@ indexes:
       - fiscalYearCode
       - invoiceNumber
     unique: true
+    where: { field: invoiceNumber, present: true }
 fields:
   - key: invoiceKind
     required: true
@@ -73,6 +77,7 @@ fields:
       nl: Volgnummer van de factuur, uitgegeven door de facturatierun, uniek binnen (factuursoort, boekjaar). Leeg op een concept dat nog geen run heeft uitgegeven.
     validation:
       min: 1
+      requires: [fiscalYearCode]
     persisted:
       column: invoice_number
       storageClass: core

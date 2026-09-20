@@ -48,6 +48,13 @@
           "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/validationRule" }]
         },
         "format": { "type": "string", "minLength": 1 },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Persisted single fields of this entity that must hold a value whenever this field does; a database CHECK on the row."
+        },
         "custom": {
           "type": "array",
           "items": {

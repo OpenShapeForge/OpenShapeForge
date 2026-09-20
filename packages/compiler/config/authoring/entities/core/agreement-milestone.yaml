@@ -208,7 +208,10 @@ fields:
     persisted:
       column: triggered_by
       storageClass: core
+  # A milestone belongs to one agreement for life: the amount was computed
+  # against that agreement, and the invoice a run produces names it.
   - key: agreementId
+    immutable: true
     label:
       en: Agreement
       nl: Overeenkomst
@@ -275,12 +278,17 @@ operations:
             x-osf-i18n: { title: { en: Description, nl: Omschrijving } }
           basisAmount:
             type: number
-            x-osf-i18n: { title: { en: Basis amount, nl: Basisbedrag } }
+            exclusiveMinimum: 0
+            x-osf-i18n:
+              title: { en: Basis amount, nl: Basisbedrag }
+              description: { en: The positive value a percentage is computed against., nl: De positieve waarde waartegen een percentage wordt berekend. }
           percentOfBasis:
             type: number
-            minimum: 0
+            exclusiveMinimum: 0
             maximum: 100
-            x-osf-i18n: { title: { en: Percent of basis, nl: Percentage van basis } }
+            x-osf-i18n:
+              title: { en: Percent of basis, nl: Percentage van basis }
+              description: { en: More than 0 and at most 100; a milestone that bills nothing is not a milestone., nl: Meer dan 0 en ten hoogste 100; een mijlpaal die niets factureert is geen mijlpaal. }
           amount:
             type: number
             exclusiveMinimum: 0

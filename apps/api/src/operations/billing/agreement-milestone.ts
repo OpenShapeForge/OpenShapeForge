@@ -43,25 +43,28 @@ function invalid(field: string, message: string): never {
 export function resolveMilestoneAmounts(
   input: Readonly<{ basisAmount?: unknown; percentOfBasis?: unknown; amount?: unknown }>,
 ): ResolvedMilestoneAmounts {
+  const basisAmount = input.basisAmount;
+  if (basisAmount !== undefined && basisAmount !== null && (typeof basisAmount !== "number" || !Number.isFinite(basisAmount) || basisAmount <= 0)) {
+    invalid("basisAmount", "basisAmount must be a positive number.");
+  }
   if (input.percentOfBasis !== undefined && input.percentOfBasis !== null) {
     const percent = input.percentOfBasis;
-    if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 100) {
-      invalid("percentOfBasis", "percentOfBasis must be a number between 0 and 100.");
+    // Zero is refused on purpose: a milestone that bills nothing is not a milestone.
+    if (typeof percent !== "number" || !Number.isFinite(percent) || percent <= 0 || percent > 100) {
+      invalid("percentOfBasis", "percentOfBasis must be more than 0 and at most 100.");
     }
-    const basis = input.basisAmount;
-    if (typeof basis !== "number" || !Number.isFinite(basis)) {
+    if (typeof basisAmount !== "number") {
       invalid("basisAmount", "basisAmount is required when percentOfBasis is set.");
     }
     // Computed once here and never again: a later change to the agreement's
     // value must not retroactively change an already-created milestone.
-    return { basisAmount: basis, percentOfBasis: percent, amount: roundCurrency((basis * percent) / 100) };
+    return { basisAmount, percentOfBasis: percent, amount: roundCurrency((basisAmount * percent) / 100) };
   }
   const amount = input.amount;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
     invalid("amount", "amount must be a positive number when percentOfBasis is not set.");
   }
-  const basisAmount = typeof input.basisAmount === "number" ? input.basisAmount : null;
-  return { basisAmount, percentOfBasis: null, amount };
+  return { basisAmount: typeof basisAmount === "number" ? basisAmount : null, percentOfBasis: null, amount };
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

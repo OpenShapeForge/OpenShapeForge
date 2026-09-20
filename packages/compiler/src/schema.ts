@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-export type ScalarType =
-  | "uuid"
-  | "text"
-  | "boolean"
-  | "integer"
-  | "bigint"
-  | "numeric"
-  | "date"
-  | "timestamptz"
-  | "jsonb"
-  /**
-   * A text array, spelled the way Postgres spells it because the manifest
-   * type doubles as the SQL type token in the generated schema.sql. Platform
-   * bookkeeping only: no authoring field maps onto it, so no generated CRUD,
-   * GraphQL or MCP surface has to render one — the runtime tables that hold a
-   * role list or a read-guides list are the reason it exists.
-   */
-  | "text[]";
+/**
+ * The storage scalars a manifest column may carry; every projection of one
+ * (DDL, Kysely, GraphQL, JSON Schema) is a row of SCALAR_PROJECTION in
+ * @openshapeforge/operations. `text[]` is platform bookkeeping only: no
+ * authoring field maps onto it.
+ */
+import type { ScalarType } from "@openshapeforge/operations";
+export type { ScalarType };
 
 export type ReferenceDefinition = {
   schema: string;

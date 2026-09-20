@@ -37,6 +37,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { scalarJsonSchema } from "@openshapeforge/operations";
 import {
   CAPABILITY_GRANT_SECURITY_SCHEME,
   operationOpenApiPaths,
@@ -133,30 +134,7 @@ function fieldNameForColumn(
   );
 }
 
-function schemaForScalar(type: ScalarType): JsonObject {
-  switch (type) {
-    case "uuid":
-      return { type: "string", format: "uuid" };
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-      return { type: "integer" };
-    case "bigint":
-    case "numeric":
-      return { type: "number" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "timestamptz":
-      return { type: "string", format: "date-time" };
-    case "jsonb":
-      return {};
-    case "text[]":
-      return { type: "array", items: { type: "string" } };
-    case "text":
-    default:
-      return { type: "string" };
-  }
-}
+const schemaForScalar = (type: ScalarType): JsonObject => scalarJsonSchema(type) as JsonObject;
 
 // Mirrors the storage-writable predicate of generated CRUD. Request schema
 // construction additionally removes the secure elicitation target, matching
@@ -311,31 +289,17 @@ function entityDescription(
   return localizedText(contract?.entity.description);
 }
 
-/** Only constraints the REST query parser actually validates. */
+/**
+ * Only constraints the REST query parser actually validates: the scalar's
+ * own shape. Authored enum/length/pattern rules are not validated by
+ * coerceFilterValue; publishing them would overstate the request contract.
+ */
 function filterSchemaForColumn(
   column: TableDefinition["columns"][number],
 ): JsonObject {
-  switch (column.type) {
-    case "uuid":
-      return { type: "string", format: "uuid" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "timestamptz":
-      return { type: "string", format: "date-time" };
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-      return { type: "integer" };
-    case "bigint":
-      return { type: "integer" };
-    case "numeric":
-      return { type: "number" };
-    default:
-      // Authored enum/length/pattern rules are not validated by
-      // coerceFilterValue; publishing them would overstate the request
-      // contract. UUID/date/date-time have explicit runtime validation above.
-      return { type: "string" };
-  }
+  return column.type === "text[]" || column.type === "jsonb"
+    ? { type: "string" }
+    : (scalarJsonSchema(column.type) as JsonObject);
 }
 
 function listParameters(
@@ -586,11 +550,19 @@ export function renderOpenApiSpec(
       entity.contract,
     ]),
   );
+  // Entity routes are projected from the compiled contracts; a render without
+  // contracts documents only the transports every host has. A REST table whose
+  // contract is missing from a non-empty set is a mismatch, not an omission.
   const restTables = manifest.tables
     .filter(
       (table) =>
         isGeneratedCrudEligible(table) && table.source?.rest !== undefined,
     )
+    .filter((table) => {
+      if (options.entities === undefined) return false;
+      if (contractsByEntityName.has(entitySchemaName(table))) return true;
+      throw new Error(`REST table "${table.name}" has no compiled entity contract.`);
+    })
     .sort((a, b) =>
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
@@ -1031,10 +1003,7 @@ export function renderOpenApiSpec(
   for (const table of restTables) {
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
-    const contract = contractsByEntityName.get(name);
-    if (!contract) {
-      throw new Error(`REST table "${table.name}" has no compiled entity contract.`);
-    }
+    const contract = contractsByEntityName.get(name)!;
     const canonicalOperationId = (
       intent: "list" | "get" | "create" | "update" | "delete",
     ): string => {

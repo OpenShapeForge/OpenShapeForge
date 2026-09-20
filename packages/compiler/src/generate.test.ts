@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { loadManifest } from "./load-manifest.js";
 import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import type { CompiledEntityContract } from "./authoring/types.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 
 const manifest: PlatformSchemaManifest = {
   version: 1,
@@ -1892,8 +1894,40 @@ describe("generated REST OpenAPI artifact", () => {
     ],
   };
 
+  /** The compiled contract a REST table always has beside its manifest row. */
+  function contractFor(table: TableDefinition): CompiledEntityContract {
+    const name = table.source!.authoringEntityName!;
+    const crud = { operations: { list: true, get: true, create: true, update: true, delete: true } };
+    const authorization = {
+      entitySlug: name.toLowerCase(),
+      roles: { read: [], create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    };
+    const contract = {
+      authoringVersion: 3,
+      contractVersion: 2,
+      kind: "compiledEntityContract",
+      entity: { id: `core.${name}`, name, module: "core", title: name, labels: { en: name }, domains: [] },
+      storage: { table: table.name, columns: [] },
+      model: { fields: [], relationships: [] },
+      crud,
+      graphql: {},
+      authorization,
+      views: {},
+      profiles: {},
+      entityOperations: {},
+    } as unknown as CompiledEntityContract;
+    contract.entityOperations = buildEntityOperations({ entity: contract.entity, crud, authorization: contract.authorization });
+    return contract;
+  }
+
   function openApiFor(input: PlatformSchemaManifest) {
-    const artifact = generateArtifacts(input).find((item) =>
+    const entities = input.tables
+      .filter((table) => table.source?.rest && table.source.authoringEntityName)
+      .map((table) => ({ contract: contractFor(table) }));
+    const artifact = generateArtifacts(input, { openApi: { entities } }).find((item) =>
       item.path.endsWith("rest/openapi.json"),
     );
     expect(artifact?.path).toBe("apps/api/src/generated/rest/openapi.json");
@@ -1944,9 +1978,7 @@ describe("generated REST OpenAPI artifact", () => {
   });
 
   it("is deterministic: two renders are byte-identical", () => {
-    const render = () =>
-      generateArtifacts(restManifest).find((item) => item.path.endsWith("rest/openapi.json"))!
-        .contents;
+    const render = () => JSON.stringify(openApiFor(restManifest));
     expect(render()).toBe(render());
   });
 });

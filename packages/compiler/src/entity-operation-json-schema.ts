@@ -15,6 +15,7 @@ import {
   splitBundledDefinitions,
 } from "./field-json-schema.js";
 import type { JsonSchema } from "./plugins.js";
+import { isScalarType, scalarJsonSchema } from "@openshapeforge/operations";
 
 type JsonObject = Record<string, unknown>;
 
@@ -40,27 +41,8 @@ function entityLabel(contract: CompiledEntityContract): string {
     contract.entity.name;
 }
 
-function storageValueSchema(type: CompiledColumn["type"]): JsonObject {
-  switch (type) {
-    case "uuid":
-      return { type: "string", format: "uuid" };
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-    case "bigint":
-      return { type: "integer" };
-    case "numeric":
-      return { type: "number" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "timestamptz":
-      return { type: "string", format: "date-time" };
-    case "jsonb":
-      return {};
-    default:
-      return { type: "string" };
-  }
-}
+const storageValueSchema = (type: CompiledColumn["type"]): JsonObject =>
+  isScalarType(type) ? (scalarJsonSchema(type) as JsonObject) : { type: "string" };
 
 function nullableSchema(schema: JsonObject): JsonObject {
   return { anyOf: [schema, { type: "null" }] };

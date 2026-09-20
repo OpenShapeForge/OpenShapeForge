@@ -11,6 +11,7 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { SCALAR_PROJECTION } from "@openshapeforge/operations";
 import { assertTenantBoundReferences, renderOnDeleteSql, renderTenantRegistryWritePolicies } from "./tenant-bound-references.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
@@ -110,54 +111,8 @@ function stableIdentifier(value: string): string {
   return `${value.slice(0, 54)}_${hash}`;
 }
 
-function sqlType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-      return "uuid";
-    case "text":
-      return "text";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "integer";
-    case "bigint":
-      return "bigint";
-    case "numeric":
-      return "numeric";
-    case "date":
-      return "date";
-    case "timestamptz":
-      return "timestamptz";
-    case "jsonb":
-      return "jsonb";
-    case "text[]":
-      return "text[]";
-  }
-}
-
-function tsType(type: ScalarType): string {
-  switch (type) {
-    case "uuid":
-    case "text":
-      return "string";
-    case "boolean":
-      return "boolean";
-    case "integer":
-      return "number";
-    case "bigint":
-      return "string";
-    case "numeric":
-      return "Numeric";
-    case "date":
-      return "DateOnly";
-    case "timestamptz":
-      return "Timestamp";
-    case "jsonb":
-      return "Json";
-    case "text[]":
-      return "string[]";
-  }
-}
+const sqlType = (type: ScalarType): string => SCALAR_PROJECTION[type].sql;
+const tsType = (type: ScalarType): string => SCALAR_PROJECTION[type].ts;
 
 function generatedTsType(column: ColumnDefinition): string {
   if (column.type === "timestamptz") {

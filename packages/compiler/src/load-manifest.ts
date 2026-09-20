@@ -15,19 +15,8 @@ import type {
   RowScopePolicy,
   ScalarType,
 } from "./schema.js";
+import { isScalarType } from "@openshapeforge/operations";
 
-const scalarTypes = new Set<ScalarType>([
-  "uuid",
-  "text",
-  "boolean",
-  "integer",
-  "bigint",
-  "numeric",
-  "date",
-  "timestamptz",
-  "jsonb",
-  "text[]",
-]);
 
 const retentionActions = new Set<RetentionAction>([
   "retain",
@@ -540,10 +529,10 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       if (column.name === "tenant_id") {
         hasTenantId = true;
       }
-      if (typeof column.type !== "string" || !scalarTypes.has(column.type as ScalarType)) {
+      if (typeof column.type !== "string" || !isScalarType(column.type)) {
         throw new Error(`${currentTableKey}.${column.name} has unsupported type.`);
       }
-      columnsByName.set(column.name, column.type as ScalarType);
+      columnsByName.set(column.name, column.type);
       if (column.primaryKey === true) {
         primaryKeys += 1;
       }

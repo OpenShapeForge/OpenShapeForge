@@ -39,3 +39,5 @@ export {
   operationFieldObjectSchema,
   operationFieldSchema,
 } from "./field-schema.js";
+export type { ScalarJsonSchema, ScalarProjection, ScalarType } from "./scalar-projection.js";
+export { isScalarType, SCALAR_PROJECTION, SCALAR_TYPES, scalarJsonSchema } from "./scalar-projection.js";

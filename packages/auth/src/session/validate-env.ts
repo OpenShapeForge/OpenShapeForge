@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Production startup validation for dev-default secrets.
- * Throws a fatal error if dev-default values are detected in production.
+ *
+ * A known dev secret is refused OUTSIDE loopback, and only outside loopback.
+ * That is what makes `NODE_ENV=production next start` on a developer machine
+ * usable while still failing closed the moment anything about the deployment
+ * stops being local.
  */
-import { DEV_REDIS_URL } from "./redis-config";
+import { DEV_REDIS_URL } from "./redis-config.js";
 
-const DEV_DEFAULTS: Record<string, string[]> = {
-  AUTH_SECRET: ["dev-auth-secret-change-in-production", "dev-auth-secret-change-me"],
-  NEXTAUTH_SECRET: ["dev-auth-secret-change-in-production", "dev-auth-secret-change-me"],
-  AUTH_KEYCLOAK_SECRET: ["dev-secret"],
-  REDIS_URL: [DEV_REDIS_URL],
+export type ProductionEnvRules = {
+  /** The app's default issuer, to recognise a local production preview. */
+  defaultIssuer: string;
+  /** Per env var, the dev-default values that must not reach production. */
+  devDefaults: Record<string, readonly string[]>;
+  /** Env vars that must not be set in production at all. */
+  forbiddenEnvVars?: readonly string[];
 };
 
 const REQUIRED_ENV_VARS = [
@@ -21,17 +27,10 @@ const REQUIRED_ENV_VARS = [
   "REDIS_URL",
 ] as const;
 
-const FORBIDDEN_PRODUCTION_ENV_VARS = [
-  "OPENSHAPEFORGE_DEV_TENANT_ID",
-  "OPENSHAPEFORGE_DEV_USER_ID",
-  "OPENSHAPEFORGE_DEV_USER_ROLES",
-] as const;
-
 function assertConfigured(envVar: string, value: string | undefined): string {
   if (!value?.trim()) {
     throw new Error(`FATAL: ${envVar} is not configured for production.`);
   }
-
   return value.trim();
 }
 
@@ -50,10 +49,7 @@ function assertValidUrl(envVar: string, value: string): void {
 }
 
 function tryParseUrl(value: string | undefined): URL | undefined {
-  if (!value?.trim()) {
-    return undefined;
-  }
-
+  if (!value?.trim()) return undefined;
   try {
     return new URL(value);
   } catch {
@@ -65,10 +61,8 @@ function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-function isLocalProductionPreview(): boolean {
-  const issuerUrl = tryParseUrl(
-    process.env.AUTH_KEYCLOAK_ISSUER ?? "http://localhost:8181/realms/openshapeforge",
-  );
+function isLocalProductionPreview(defaultIssuer: string): boolean {
+  const issuerUrl = tryParseUrl(process.env.AUTH_KEYCLOAK_ISSUER ?? defaultIssuer);
   if (!issuerUrl || !isLoopbackHostname(issuerUrl.hostname)) {
     return false;
   }
@@ -86,18 +80,19 @@ function isLocalProductionPreview(): boolean {
   return !process.env.AUTH_COOKIE_DOMAIN && process.env.AUTH_COOKIE_SECURE !== "true";
 }
 
-export function validateProductionEnv(): void {
+/** Throws a fatal error when dev-default values are detected in production. */
+export function validateProductionEnv(rules: ProductionEnvRules): void {
   if (process.env.NODE_ENV !== "production") {
     return;
   }
 
-  // Skip during Next.js build phase — secrets are not needed at build time,
-  // only at runtime. NEXT_PHASE is set by Next.js during `next build`.
+  // Skip during the Next.js build phase — secrets are needed at runtime, not
+  // at build time. NEXT_PHASE is set by Next.js during `next build`.
   if (process.env.NEXT_PHASE === "phase-production-build") {
     return;
   }
 
-  if (isLocalProductionPreview()) {
+  if (isLocalProductionPreview(rules.defaultIssuer)) {
     return;
   }
 
@@ -106,9 +101,12 @@ export function validateProductionEnv(): void {
     throw new Error("FATAL: AUTH_SECRET or NEXTAUTH_SECRET must be configured for production.");
   }
 
-  for (const [envVar, devValues] of Object.entries(DEV_DEFAULTS)) {
+  const devDefaults: Record<string, readonly string[]> = {
+    ...rules.devDefaults,
+    REDIS_URL: [DEV_REDIS_URL, ...(rules.devDefaults.REDIS_URL ?? [])],
+  };
+  for (const [envVar, devValues] of Object.entries(devDefaults)) {
     const value = process.env[envVar];
-
     if (value && devValues.includes(value)) {
       throw new Error(
         `FATAL: ${envVar} is using a dev-default value in production. Set a secure value.`,
@@ -116,7 +114,7 @@ export function validateProductionEnv(): void {
     }
   }
 
-  for (const envVar of FORBIDDEN_PRODUCTION_ENV_VARS) {
+  for (const envVar of rules.forbiddenEnvVars ?? []) {
     if (process.env[envVar]?.trim()) {
       throw new Error(`FATAL: ${envVar} must not be configured in production.`);
     }
@@ -124,11 +122,9 @@ export function validateProductionEnv(): void {
 
   for (const envVar of REQUIRED_ENV_VARS) {
     const value = assertConfigured(envVar, process.env[envVar]);
-
     if (envVar === "AUTH_KEYCLOAK_ISSUER" || envVar === "REDIS_URL") {
       assertValidUrl(envVar, value);
     }
-
     if (envVar === "AUTH_COOKIE_SECURE") {
       assertBooleanString(envVar, value);
     }

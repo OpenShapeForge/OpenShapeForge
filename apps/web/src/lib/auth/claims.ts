@@ -1,52 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
-import {
-  parseClientRoles,
-  parseGroups,
-  parseRoles,
-  parseTenantContext,
-  readJwtClaims,
-} from "@openshapeforge/auth";
-import type { StoredSession } from "../redis";
+import { parseGroups, parseTenantContext, parseTenantId } from "@openshapeforge/auth";
+import type { JwtClaims, RefreshedClaims, SignInClaims } from "@openshapeforge/auth/session";
 
-export type JwtClaims = Record<string, unknown>;
+export type { JwtClaims };
+export { parseAuthorizationRoles } from "@openshapeforge/auth/session";
 
-/**
- * Realm roles plus every client role, flattened into one list.
- *
- * No client-id allowlist: `apps/api` flattens all client roles when it builds
- * the identity it authorizes against, so filtering here could only ever hide a
- * role the API will honour anyway — making the nav claim less access than the
- * user has. Enforcement stays server-side; this list drives nav filtering.
- */
-export function parseAuthorizationRoles(claims: JwtClaims | undefined): string[] {
-  return [
-    ...new Set([
-      ...parseRoles(claims),
-      ...Object.values(parseClientRoles(claims)).flat(),
-    ]),
-  ];
-}
-
-type StoredUserProfile = Pick<
-  StoredSession,
-  "name" | "givenName" | "familyName" | "preferredUsername" | "email"
->;
-
-export function resolveInitialRoles(
-  accessTokenClaims: JwtClaims | undefined,
-  idTokenClaims: JwtClaims | undefined,
-  profile: JwtClaims | undefined,
-): string[] {
-  return [...new Set([
-    ...parseAuthorizationRoles(accessTokenClaims),
-    ...parseAuthorizationRoles(idTokenClaims),
-    ...parseAuthorizationRoles(profile),
-  ])];
-}
-
-export function claimsIncludeRoleState(claims: JwtClaims | undefined): boolean {
-  return Boolean(claims && ("realm_access" in claims || "resource_access" in claims));
-}
+/** What the tenant app stores beside the common session fields. */
+export type TenantSessionFields = {
+  tenantId?: string | undefined;
+  actorType?: string | undefined;
+  /**
+   * Keycloak group paths the user belongs to, e.g. "/customer/region/editors".
+   * Forwarded to the API in trusted-context headers so app/API gates can
+   * authorize on group membership.
+   */
+  groups?: string[] | undefined;
+};
 
 export function resolveInitialGroups(
   accessTokenClaims: JwtClaims | undefined,
@@ -115,21 +84,39 @@ export function resolveInitialActorType(
     ?? (idTokenClaims?.act as string | undefined);
 }
 
-export function decodeJwtExp(token: string | undefined): number | undefined {
-  const payload = readJwtClaims(token) as { exp?: unknown } | undefined;
-  return typeof payload?.exp === "number" ? payload.exp : undefined;
+export function initialTenantFields({ profile, accessTokenClaims, idTokenClaims }: SignInClaims): TenantSessionFields {
+  const tenantId = resolveInitialTenantId(profile, accessTokenClaims, idTokenClaims);
+  return {
+    tenantId,
+    actorType: resolveInitialActorType(tenantId, profile, accessTokenClaims, idTokenClaims),
+    groups: resolveInitialGroups(accessTokenClaims, idTokenClaims, profile),
+  };
 }
 
-export function mergeUserProfileIntoStoredSession(
-  stored: StoredSession,
-  profile: StoredUserProfile,
-): StoredSession {
+/**
+ * A refreshed token must still belong to the session's tenant: a token with
+ * no `tid`, or another tenant's, would quietly swap the session's authority.
+ */
+export function tenantRefreshInvariant(
+  accessClaims: JwtClaims,
+  stored: TenantSessionFields,
+): string | undefined {
+  const tenantId = parseTenantId(accessClaims);
+  if (!tenantId) return "refreshed token carries no tenant";
+  if (stored.tenantId && tenantId !== stored.tenantId) return "tenant changed mid-session";
+  return undefined;
+}
+
+export function refreshedTenantFields(
+  { accessTokenClaims, idTokenClaims }: RefreshedClaims,
+  stored: TenantSessionFields,
+): TenantSessionFields {
+  const tenantId = (accessTokenClaims?.tid as string | undefined) ?? stored.tenantId;
   return {
-    ...stored,
-    name: profile.name,
-    givenName: profile.givenName,
-    familyName: profile.familyName,
-    preferredUsername: profile.preferredUsername,
-    email: profile.email,
+    tenantId,
+    actorType: parseTenantContext(accessTokenClaims, tenantId)
+      ?? (accessTokenClaims?.act as string | undefined)
+      ?? stored.actorType,
+    groups: resolveRefreshedGroups(accessTokenClaims, idTokenClaims, stored.groups),
   };
 }

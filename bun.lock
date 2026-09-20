@@ -185,6 +185,10 @@
         "@types/node": "^26",
         "typescript": "^5.9.0",
       },
+      "peerDependencies": {
+        "ioredis": "^5.11.1",
+        "next-auth": "5.0.0-beta.32",
+      },
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",

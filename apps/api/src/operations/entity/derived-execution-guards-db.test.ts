@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Reverse-map revalidation on a real write path: collection insert/remove
- * and generic child update against a published owner, plus two sessions
- * racing to delete the last two bindings.
+ * and generic child update against a published owner, two sessions racing
+ * to delete the last two bindings, and REST/GraphQL projection of the same
+ * NOT_PUBLISHABLE refusal.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
+import { GraphQLError } from "graphql";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
+import { projectGraphqlOperation } from "../../graphql/operation-error.js";
 import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
+import { toHttpError } from "../../rest/http-error.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
@@ -477,5 +481,69 @@ const fails = (promise: Promise<unknown>, code: string) =>
     expect(
       (await sql<{ count: number }>`select count(*)::int as count from erp.blocks`.execute(privileged!.db)).rows[0]!.count,
     ).toBe(1);
+  });
+
+  test("REST and GraphQL project a binding mutation as NOT_PUBLISHABLE", async () => {
+    const seeded = await seed(1);
+    const remove: CollectionMutationBinding = { entityName: "TemplateVariant", field: "blocks", action: "remove" };
+    const attempt = () =>
+      seeded.f.execute(restricted!.db, session, remove, {
+        id: seeded.ownerId,
+        expectedVersion: seeded.expectedVersion,
+        childId: seeded.childIds[0]!,
+      });
+    const rest = await attempt().then(
+      () => {
+        throw new Error("expected REST refusal");
+      },
+      (error: unknown) => toHttpError(error),
+    );
+    expect(rest).toMatchObject({
+      status: 400,
+      body: { error: { code: "NOT_PUBLISHABLE" } },
+    });
+    const graphql = await projectGraphqlOperation(attempt).then(
+      () => {
+        throw new Error("expected GraphQL refusal");
+      },
+      (error: unknown) => error,
+    );
+    expect(graphql).toBeInstanceOf(GraphQLError);
+    expect(graphql).toMatchObject({
+      extensions: { code: "NOT_PUBLISHABLE", status: 400 },
+    });
+  });
+
+  test("REST and GraphQL project a referenced-record mutation as NOT_PUBLISHABLE", async () => {
+    const seeded = await seed(1);
+    const attempt = () =>
+      updateGeneratedEntityForTable(
+        restricted!.db,
+        session,
+        seeded.f.operation,
+        seeded.operationId,
+        { providerId: randomUUID() },
+        { tables: seeded.f.catalogTables, derivedTools: [ENTRY] },
+      );
+    const rest = await attempt().then(
+      () => {
+        throw new Error("expected REST refusal");
+      },
+      (error: unknown) => toHttpError(error),
+    );
+    expect(rest).toMatchObject({
+      status: 400,
+      body: { error: { code: "NOT_PUBLISHABLE" } },
+    });
+    const graphql = await projectGraphqlOperation(attempt).then(
+      () => {
+        throw new Error("expected GraphQL refusal");
+      },
+      (error: unknown) => error,
+    );
+    expect(graphql).toBeInstanceOf(GraphQLError);
+    expect(graphql).toMatchObject({
+      extensions: { code: "NOT_PUBLISHABLE", status: 400 },
+    });
   });
 });

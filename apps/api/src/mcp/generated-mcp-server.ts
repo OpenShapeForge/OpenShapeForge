@@ -34,9 +34,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { collectionManagedFields, collectionMutationError, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import {
+  GENERIC_DESCRIBE_TOOL_NAME,
+  GENERIC_TOOL_OPERATIONS,
   OperationFailure,
+  compactGenericInputSchema,
   compareCodeUnits,
+  describeToolDefinition,
+  genericToolText,
   operationErrorOf,
+  type GenericToolBranch,
   type OperationError,
 } from "@openshapeforge/operations";
 import type {
@@ -1017,6 +1023,7 @@ function coreOwnsStaticToolName(
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
+    GENERIC_DESCRIBE_TOOL_NAME, // the second step of the generic osf_* projection
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
     ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
@@ -1815,27 +1822,45 @@ function envelopeSchema(
  */
 const RESOURCE_READ_LIMIT = 200;
 
+/** The entity's authored label in the session's language, when it has one. */
+function entityTitle(
+  entity: CatalogEntity | undefined,
+  locale: ResolvedLocale | undefined,
+): string | undefined {
+  if (!entity) return undefined;
+  return (locale && localizedText(entity.labels, locale)) || entity.title;
+}
+
+function localizedToolText(
+  tool: CatalogTool,
+  _locale: ResolvedLocale | undefined,
+): { title: string | undefined; description: string } {
+  return { title: tool.title, description: tool.description };
+}
+
 function describeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
   table: GeneratedTable | undefined,
   session: DbSessionInput,
+  locale?: ResolvedLocale,
 ) {
   const classified =
     entity && !canReadClassifiedColumns(table?.source?.authorization, session)
       ? entity.classifiedFields
       : [];
+  const text = localizedToolText(tool, locale);
   // Every generated create/update tool carries the same short reminder — see
   // DATA_ACQUISITION_TOOL_FOOTER and DATA_ACQUISITION_GUIDANCE in
   // mcp/server-instructions.ts. Read
   // and delete stay untouched: there is nothing to fill in.
   const description =
     tool.operation === "create" || tool.operation === "update"
-      ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER}`
-      : tool.description;
+      ? `${text.description}${DATA_ACQUISITION_TOOL_FOOTER}`
+      : text.description;
   return {
     name: tool.name,
-    title: tool.title,
+    title: text.title,
     description,
     inputSchema: withholdClassified(
       table && (tool.operation === "create" || tool.operation === "update")
@@ -1853,7 +1878,7 @@ function describeTool(
         }
       : {}),
     annotations: {
-      title: tool.title,
+      title: text.title,
       ...tool.annotations,
     },
     // The MCP App is only advertised where it can render (https origin —
@@ -1874,22 +1899,6 @@ function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
   return entity?.tools === "generic";
 }
 
-const GENERIC_OPERATION_SUMMARY: Record<McpOperation, string> = {
-  list: "Return a page of records of one shared-catalog entity.",
-  get: "Read one record of one shared-catalog entity by id.",
-  create: "Create one record of one shared-catalog entity.",
-  update: "Update one record of one shared-catalog entity by id.",
-  delete: "Delete one record of one shared-catalog entity by id.",
-};
-
-const GENERIC_OPERATION_TITLE: Record<McpOperation, string> = {
-  list: "List records",
-  get: "Read record",
-  create: "Create record",
-  update: "Update record",
-  delete: "Delete record",
-};
-
 /**
  * Project the per-entity catalog entries that share one `osf_*` name into the
  * single tool a session actually sees.
@@ -1900,67 +1909,35 @@ const GENERIC_OPERATION_TITLE: Record<McpOperation, string> = {
  * entry came first and either narrow the surface arbitrarily or advertise an
  * entity this session may not touch.
  *
- * Each entity keeps its own argument schema in an `anyOf` branch discriminated
- * by `entity`, so nothing about the per-entity shape is lost in the merge —
- * and the call path validates against that same per-entity schema.
+ * The advertised schema is the compact two-step projection
+ * (@openshapeforge/operations, mcp-generic-projection.ts): the properties
+ * every entity shares verbatim, a stub for the ones that differ, and the
+ * exact per-entity schema one `osf_describe` call away. The call path still
+ * validates against the per-entity schema.
  */
 function describeGenericTool(
   entries: { tool: CatalogTool; entity: CatalogEntity | undefined }[],
   tables: Map<string, GeneratedTable>,
   session: DbSessionInput,
+  locale: ResolvedLocale,
 ): Tool {
   const first = entries[0]!.tool;
   const operation = first.operation;
-  const branches = entries.map(({ tool, entity }) => {
-    const described = describeTool(tool, entity, tables.get(tool.table), session);
-    const schema = described.inputSchema as Record<string, unknown>;
-    const properties = {
-      entity: { const: tool.entity },
-      ...((schema.properties as Record<string, unknown> | undefined) ?? {}),
-    };
-    const required = [
-      "entity",
-      ...(Array.isArray(schema.required) ? (schema.required as string[]) : []),
-    ];
-    return {
-      ...schema,
-      title: `${tool.entity} arguments`,
-      description: described.description,
-      properties,
-      required,
-    };
-  });
-  const names = entries.map(({ tool }) => tool.entity);
-  const catalogue = entries
-    .map(({ tool, entity }) => `${tool.entity} (${entity?.title ?? tool.entity})`)
-    .join(", ");
+  const branches: GenericToolBranch[] = entries.map(({ tool, entity }) => ({
+    entity: tool.entity,
+    title: entityTitle(entity, locale) ?? tool.entity,
+    inputSchema: describeTool(tool, entity, tables.get(tool.table), session, locale)
+      .inputSchema as Record<string, unknown>,
+  }));
+  const text = genericToolText(operation, branches, ENTITY_CATALOG_URI);
   const elicits = entries.find(
     ({ entity }) => entity?.elicitOnCreate !== undefined,
   );
   return {
     name: first.name,
-    title: GENERIC_OPERATION_TITLE[operation],
-    description:
-      `${GENERIC_OPERATION_SUMMARY[operation]} Set \`entity\` to the record type ` +
-      `you mean; the remaining arguments are that entity's own — the matching ` +
-      `\`anyOf\` branch below carries them, and the entity's ` +
-      `${ENTITY_CATALOG_URI} resource describes its fields. ` +
-      `Available to you here: ${catalogue}.`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        entity: {
-          type: "string",
-          enum: names,
-          title: "Entity",
-          description:
-            "Which record type this call is about. Only the values listed here " +
-            "are addressable by this session; anything else is refused.",
-        },
-      },
-      required: ["entity"],
-      anyOf: branches,
-    } as Tool["inputSchema"],
+    title: text.title,
+    description: text.description,
+    inputSchema: compactGenericInputSchema(operation, branches) as Tool["inputSchema"],
     // A shared generic tool may still contain legacy v1 entities. Do not add a
     // response contract to that legacy surface; only an all-v2 group can
     // advertise the common field-agnostic canonical envelope.
@@ -1968,7 +1945,7 @@ function describeGenericTool(
       ? { outputSchema: first.outputSchema as Tool["outputSchema"] }
       : {}),
     annotations: {
-      title: GENERIC_OPERATION_TITLE[operation],
+      title: text.title,
       ...first.annotations,
     },
     ...(operation === "create" && elicits && publicOriginIsHttps()
@@ -1978,12 +1955,97 @@ function describeGenericTool(
 }
 
 /**
+ * The second step of the generic projection: the exact per-entity schemas of
+ * the operations this session may perform on one entity, described the same
+ * way (withholding, collection policy, locale) the listing would describe a
+ * dedicated tool.
+ */
+function describeGenericEntity(
+  wanted: unknown,
+  operation: unknown,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  locale: ResolvedLocale,
+): Record<string, unknown> {
+  const entries = toolsForSession(session, tables).filter(({ entity }) =>
+    entityIsGeneric(entity),
+  );
+  const addressable = [...new Set(entries.map(({ tool }) => tool.entity))];
+  if (typeof wanted !== "string" || !addressable.includes(wanted)) {
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      typeof wanted === "string" && wanted.length > 0
+        ? `"${wanted}" is not one of the entities the osf_* tools can address ` +
+            `in this session: ${addressable.join(", ")}.`
+        : `${GENERIC_DESCRIBE_TOOL_NAME} needs an "entity" argument naming the ` +
+            `record type. Available here: ${addressable.join(", ")}.`,
+    );
+  }
+  if (
+    operation !== undefined &&
+    !(GENERIC_TOOL_OPERATIONS as readonly unknown[]).includes(operation)
+  ) {
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      `"operation" must be one of ${GENERIC_TOOL_OPERATIONS.join(", ")}.`,
+    );
+  }
+  const own = entries.filter(
+    ({ tool }) => tool.entity === wanted && (operation === undefined || tool.operation === operation),
+  );
+  const entity = own[0]?.entity;
+  return {
+    entity: wanted,
+    ...(entity ? { title: entityTitle(entity, locale) ?? entity.title } : {}),
+    ...(entity ? { description: entity.description } : {}),
+    ...(entity ? { resource: entityResourceUri(entity) } : {}),
+    operations: Object.fromEntries(
+      own.map(({ tool, entity }) => {
+        const described = describeTool(tool, entity, tables.get(tool.table), session, locale);
+        return [
+          tool.operation,
+          {
+            tool: tool.name,
+            description: described.description,
+            inputSchema: described.inputSchema,
+            ...(described.outputSchema ? { outputSchema: described.outputSchema } : {}),
+          },
+        ];
+      }),
+    ),
+  };
+}
+
+/**
+ * The describe tool is listed exactly when the session can address an entity
+ * through the generic tools, with that set as its `entity` enum.
+ */
+function describeToolForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): Tool[] {
+  const addressable = [
+    ...new Set(
+      toolsForSession(session, tables)
+        .filter(({ entity }) => entityIsGeneric(entity))
+        .map(({ tool }) => tool.entity),
+    ),
+  ];
+  return addressable.length > 0
+    ? [describeToolDefinition(addressable) as Tool]
+    : [];
+}
+
+/**
  * The CRUD half of a session's tool list: dedicated entities keep one tool per
  * entity per operation, generic entities collapse into one tool per operation.
  */
 function crudToolsForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
+  locale: ResolvedLocale,
 ): Tool[] {
   const entries = toolsForSession(session, tables);
   const generic = new Map<
@@ -1999,6 +2061,7 @@ function crudToolsForSession(
           entry.entity,
           tables.get(entry.tool.table),
           session,
+          locale,
         ) as unknown as Tool,
       );
       continue;
@@ -2013,11 +2076,14 @@ function crudToolsForSession(
     generic.set(entry.tool.name, [entry]);
     listed.push({ generic: entry.tool.name });
   }
-  return listed.map((item) =>
-    "generic" in item
-      ? describeGenericTool(generic.get(item.generic)!, tables, session)
-      : item,
-  );
+  return [
+    ...listed.map((item) =>
+      "generic" in item
+        ? describeGenericTool(generic.get(item.generic)!, tables, session, locale)
+        : item,
+    ),
+    ...describeToolForSession(session, tables),
+  ];
 }
 
 /**
@@ -2276,6 +2342,8 @@ export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
 export const __resourcesForSessionForTests = resourcesForSession;
 export const __crudToolCanSucceedForTests = crudToolCanSucceed;
+export const __crudToolsForSessionForTests = crudToolsForSession;
+export const __describeGenericEntityForTests = describeGenericEntity;
 
 type ToolResult = {
   content: CallToolResult["content"];
@@ -3429,8 +3497,13 @@ function buildServer(
   });
   const tables = tableOverride ?? tablesByName();
   const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
-  const canUploadArtifacts = hasArtifactStorage && crudToolsForSession(session, tables).some(
-    (tool) => schemaUsesArtifactUpload(tool.inputSchema),
+  // Read on the per-entity schemas, not the compact generic listing, whose
+  // stubs no longer carry the upload marker of an entity's own fields.
+  const canUploadArtifacts = hasArtifactStorage && toolsForSession(session, tables).some(
+    ({ tool, entity }) =>
+      schemaUsesArtifactUpload(
+        describeTool(tool, entity, tables.get(tool.table), session).inputSchema,
+      ),
   );
   // The same rule REST boot applies (roles/api.ts): with no operation module
   // in the process there are the core operation tools and no plugin ones,
@@ -4352,7 +4425,7 @@ function buildServer(
               : {}),
           }]
         : []),
-      ...crudToolsForSession(session, tables),
+      ...crudToolsForSession(session, tables, locale),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
       ...projectedDerivedTools
         .filter(
@@ -5887,6 +5960,19 @@ function buildServer(
       }
     }
 
+    // The second step of the generic projection: the exact per-entity schema
+    // the compact `osf_*` listing only summarises.
+    if (name === GENERIC_DESCRIBE_TOOL_NAME) {
+      try {
+        const args = requireArguments(request.params.arguments ?? {});
+        return ok({
+          data: describeGenericEntity(args.entity, args.operation, session, tables, locale),
+          operations: [],
+        });
+      } catch (error) {
+        return failed(error);
+      }
+    }
     // A generic (`osf_*`) name is carried by one catalog entry per entity, so
     // the `entity` argument is what picks the entry — bounded to the entities
     // this session may invoke the operation on.

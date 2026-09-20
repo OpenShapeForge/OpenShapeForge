@@ -8,7 +8,10 @@ import type {
   CompiledRelationship,
 } from "./authoring/types.js";
 import {
+  advertisedToolSizes,
+  assertAdvertisedToolBytes,
   buildMcpCatalog,
+  MAX_ADVERTISED_TOOL_BYTES,
   MAX_DEDICATED_TOOLS,
   operationMcpServer,
   type McpCatalogInput,
@@ -1049,6 +1052,55 @@ describe("buildMcpCatalog", () => {
         ),
     );
     expect(() => buildMcpCatalog(many, "test")).toThrow(/over the 60 limit/);
+  });
+
+  it("fails the build when the advertised listing would exceed the byte budget, naming the largest tools", () => {
+    // Forty wide dedicated entities: a description per field of a few hundred
+    // bytes puts the listing far over the budget, the way a real catalogue's
+    // record schemas do when every entity keeps its own tools.
+    const wide = Array.from({ length: 12 }, (_unused, index) =>
+      input(
+        contract({
+          name: `Wide${index}`,
+          fields: Array.from({ length: 60 }, (_f, fieldIndex) =>
+            field({
+              key: `wide${index}Field${fieldIndex}`,
+              description: { en: "A field whose description is long enough to weigh. ".repeat(6) },
+            }),
+          ),
+          mcp: {
+            toolPrefix: `wide_${index}`,
+            tools: "dedicated",
+            operations: { list: true, get: true, create: true, update: true, delete: true },
+          },
+        }),
+        `wide-${index}`,
+        `erp.wide_${index}`,
+      ),
+    );
+    expect(() => buildMcpCatalog(wide, "test")).toThrow(
+      /over the 512 KB limit \(MAX_ADVERTISED_TOOL_BYTES\)\. Largest: wide_\d+_\w+ \(\d+ KB\)/,
+    );
+    // The same entities on the generic tools fit: the listing carries the
+    // entity enum and the shared properties, the schemas move to osf_describe.
+    const generic = wide.map((entry) => ({
+      ...entry,
+      contract: { ...entry.contract, mcp: { ...entry.contract.mcp!, tools: "generic" as const } },
+    }));
+    const catalog = buildMcpCatalog(generic, "test");
+    const sizes = advertisedToolSizes(
+      catalog.tools,
+      catalog.entities,
+      catalog.operationTools,
+      catalog.operationToolProjection.mode,
+    );
+    expect(sizes.map((entry) => entry.name)).toEqual([
+      "osf_list", "osf_get", "osf_create", "osf_update", "osf_delete", "osf_describe",
+    ]);
+    expect(sizes.reduce((sum, entry) => sum + entry.bytes, 0)).toBeLessThan(64 * 1024);
+    expect(() => assertAdvertisedToolBytes(sizes)).not.toThrow();
+    expect(() => assertAdvertisedToolBytes(sizes, 1024)).toThrow(/over the 1 KB limit/);
+    expect(MAX_ADVERTISED_TOOL_BYTES).toBe(512 * 1024);
   });
 
   it("retains every static Operation and switches the advertised projection over the limit", () => {

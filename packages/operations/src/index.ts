@@ -40,3 +40,11 @@ export {
   operationFieldSchema,
 } from "./field-schema.js";
 export { compareCodeUnits } from "./ordering.js";
+export {
+  GENERIC_DESCRIBE_TOOL_NAME,
+  GENERIC_TOOL_OPERATIONS,
+  compactGenericInputSchema,
+  describeToolDefinition,
+  genericToolText,
+} from "./mcp-generic-projection.js";
+export type { GenericToolBranch, GenericToolOperation } from "./mcp-generic-projection.js";

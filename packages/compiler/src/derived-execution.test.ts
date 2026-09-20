@@ -7,7 +7,6 @@ import type {
   CompiledRelationship,
 } from "./authoring/types.js";
 import {
-  EXECUTION_BINDING_ROW_FIELDS,
   resolveDerivedExecution,
   type AuthoredDerivedExecution,
   type DerivedExecutionCatalogInput,
@@ -94,11 +93,42 @@ const catalogInput = (
   table,
 });
 
+const JSON_BINDING_ITEM_FIELDS = [
+  field({ key: "order", baseType: "integer", required: true }),
+  field({ key: "optional", baseType: "boolean" }),
+  field({ key: "when", baseType: "object" }),
+  field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
+  field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
+  field({ key: "forEach", baseType: "object" }),
+  field({ key: "capabilityId", required: true }),
+];
+
 const BINDING_FIELDS = [
   field({ key: "serviceId" }),
-  field({ key: "capabilityId" }),
-  ...EXECUTION_BINDING_ROW_FIELDS.map((key) => field({ key })),
+  field({
+    key: "capabilityId",
+    osfType: "Capability",
+    relationship: {
+      kind: "belongsTo",
+      target: "Capability",
+      foreignKey: "capability_id",
+    },
+  }),
+  field({ key: "order", baseType: "integer", required: true }),
+  field({ key: "optional", baseType: "boolean" }),
+  field({ key: "when", baseType: "object" }),
+  field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
+  field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
+  field({ key: "forEach", baseType: "object" }),
 ];
+
+const operationRelationship: CompiledRelationship = {
+  key: "capabilityId",
+  kind: "belongsTo",
+  target: "Capability",
+  ownership: "reference",
+  foreignKey: "capability_id",
+};
 
 const related = (name: string, table: string, fields?: CompiledField[]) =>
   catalogInput(contract({ name, fields: fields ?? [field({ key: "name" })] }), table);
@@ -135,6 +165,12 @@ function ownerInput(
         field({ key: "name" }),
         field({ key: "description" }),
         field({ key: "inputFields", baseType: "object", cardinality: "collection" }),
+        field({
+          key: "steps",
+          baseType: "object",
+          cardinality: "collection",
+          children: JSON_BINDING_ITEM_FIELDS,
+        }),
         field({ key: "version", baseType: "integer" }),
         ...extraFields,
       ],
@@ -170,6 +206,7 @@ function catalogInputs(owner: McpCatalogInput, bindingFields = BINDING_FIELDS) {
       contract({
         name: "ServiceCapabilityBinding",
         fields: bindingFields,
+        relationships: [operationRelationship],
       }),
       "integration.service_capability_bindings",
     ),
@@ -190,7 +227,6 @@ describe("resolveDerivedExecution", () => {
     const owner = ownerInput(
       { ...executionBase, bindingsField: "steps" },
       [],
-      [field({ key: "steps", baseType: "object", cardinality: "collection" })],
     );
     expect(
       resolveDerivedExecution(
@@ -291,7 +327,7 @@ describe("resolveDerivedExecution", () => {
         "derivedTools.execution",
       ),
     ).toThrow(
-      /derivedTools.execution on entity "Service": binding entity "ServiceCapabilityBinding" is missing required field "when"/,
+      /derivedTools.execution on entity "Service": binding row is missing required field "when"/,
     );
   });
 
@@ -309,6 +345,80 @@ describe("resolveDerivedExecution", () => {
       ),
     ).toThrow(
       /bindingsRelation "capabilityBindings" on entity "Service" does not name an owned hasMany collection/,
+    );
+  });
+
+  it("refuses a scalar bindingsField", () => {
+    const owner = ownerInput(
+      { ...executionBase, bindingsField: "key" },
+      [],
+    );
+    expect(() =>
+      resolveDerivedExecution(
+        catalogInputs(owner),
+        owner,
+        { ...executionBase, bindingsField: "key" },
+        "derivedTools.execution",
+      ),
+    ).toThrow(
+      /bindingsField "key" on entity "Service" does not name an object collection/,
+    );
+  });
+
+  it("refuses a binding order that is not a required integer", () => {
+    const owner = ownerInput({
+      ...executionBase,
+      bindingsRelation: "capabilityBindings",
+    });
+    const fields = BINDING_FIELDS.map((entry) =>
+      entry.key === "order" ? field({ key: "order" }) : entry,
+    );
+    expect(() =>
+      resolveDerivedExecution(
+        catalogInputs(owner, fields),
+        owner,
+        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        "derivedTools.execution",
+      ),
+    ).toThrow(/binding field "order" must be integer/);
+  });
+
+  it("refuses an operationRef that is not a belongsTo relationship with a foreign key", () => {
+    const owner = ownerInput({
+      ...executionBase,
+      bindingsRelation: "capabilityBindings",
+    });
+    const fields = BINDING_FIELDS.map((entry) =>
+      entry.key === "capabilityId" ? field({ key: "capabilityId" }) : entry,
+    );
+    expect(() =>
+      resolveDerivedExecution(
+        [
+          owner,
+          catalogInput(
+            contract({
+              name: "ServiceCapabilityBinding",
+              fields,
+              relationships: [],
+            }),
+            "integration.service_capability_bindings",
+          ),
+          related("Capability", "integration.capabilities", [
+            field({ key: "name" }),
+            field({ key: "adapterId" }),
+          ]),
+          related("Adapter", "integration.adapters"),
+          related("Connection", "integration.connections", [
+            field({ key: "adapterId" }),
+            field({ key: "values" }),
+          ]),
+        ],
+        owner,
+        { ...executionBase, bindingsRelation: "capabilityBindings" },
+        "derivedTools.execution",
+      ),
+    ).toThrow(
+      /binding field "capabilityId" must be a belongsTo relationship to "Capability"/,
     );
   });
 });

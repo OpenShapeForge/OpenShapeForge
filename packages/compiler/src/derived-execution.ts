@@ -26,6 +26,7 @@ export const EXECUTION_BINDING_ROW_FIELDS = [
   "when",
   "inputMapping",
   "outputMapping",
+  "forEach",
 ] as const;
 
 export type AuthoredDerivedExecution = {
@@ -84,6 +85,253 @@ function present(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+type ShapeField = {
+  key: string;
+  baseType?: string;
+  osfType?: string;
+  cardinality?: Field["cardinality"];
+  required?: boolean;
+  relationship?: {
+    kind?: string;
+    target?: string;
+    entity?: string;
+    foreignKey?: string;
+  };
+  children?: readonly ShapeField[];
+  item?: ShapeField;
+  shape?: readonly ShapeField[];
+};
+
+function isCollection(field: ShapeField): boolean {
+  const cardinality = field.cardinality;
+  if (cardinality === "collection") return true;
+  return typeof cardinality === "object" && cardinality !== null;
+}
+
+function baseOf(field: ShapeField): string {
+  return field.baseType ?? field.osfType ?? "";
+}
+
+function nestedFields(field: ShapeField): readonly ShapeField[] {
+  if (field.children && field.children.length > 0) return field.children;
+  if (field.shape && field.shape.length > 0) return field.shape;
+  if (field.item) return nestedFields(field.item);
+  return [];
+}
+
+function namedField(
+  fields: readonly ShapeField[],
+  key: string,
+): ShapeField | undefined {
+  return fields.find((field) => field.key === key);
+}
+
+function isJsonObjectCollection(field: ShapeField | undefined): field is ShapeField {
+  if (!field || field.relationship !== undefined) return false;
+  return baseOf(field) === "object" && isCollection(field);
+}
+
+function shapeError(option: string, ownerName: string, detail: string): never {
+  throw new Error(`${option} on entity "${ownerName}": ${detail}`);
+}
+
+function assertTypedField(
+  field: ShapeField | undefined,
+  expected: { base: string; collection?: boolean; required?: boolean },
+  option: string,
+  ownerName: string,
+  label: string,
+): ShapeField {
+  if (!field) {
+    shapeError(option, ownerName, `binding row is missing required field ${JSON.stringify(label)}.`);
+  }
+  if (baseOf(field) !== expected.base) {
+    shapeError(
+      option,
+      ownerName,
+      `binding field ${JSON.stringify(label)} must be ${expected.base}.`,
+    );
+  }
+  if (expected.collection) {
+    if (!isCollection(field)) {
+      shapeError(
+        option,
+        ownerName,
+        `binding field ${JSON.stringify(label)} must be an object collection.`,
+      );
+    }
+  } else if (isCollection(field)) {
+    shapeError(
+      option,
+      ownerName,
+      `binding field ${JSON.stringify(label)} must be a single value.`,
+    );
+  }
+  if (expected.required && field.required !== true) {
+    shapeError(
+      option,
+      ownerName,
+      `binding field ${JSON.stringify(label)} must be required.`,
+    );
+  }
+  return field;
+}
+
+function assertMappingField(
+  field: ShapeField | undefined,
+  option: string,
+  ownerName: string,
+  label: string,
+): void {
+  const mapping = assertTypedField(
+    field,
+    { base: "object", collection: true },
+    option,
+    ownerName,
+    label,
+  );
+  const children = nestedFields(mapping);
+  if (children.length === 0) return;
+  for (const key of ["from", "to"] as const) {
+    const child = namedField(children, key);
+    if (!child || baseOf(child) !== "string" || isCollection(child)) {
+      shapeError(
+        option,
+        ownerName,
+        `binding field ${JSON.stringify(label)} items must include string fields "from" and "to".`,
+      );
+    }
+  }
+}
+
+function assertForEachField(
+  field: ShapeField | undefined,
+  option: string,
+  ownerName: string,
+): void {
+  const forEach = assertTypedField(
+    field,
+    { base: "object" },
+    option,
+    ownerName,
+    "forEach",
+  );
+  const children = nestedFields(forEach);
+  if (children.length === 0) return;
+  for (const key of ["from", "as"] as const) {
+    const child = namedField(children, key);
+    if (!child || baseOf(child) !== "string" || isCollection(child)) {
+      shapeError(
+        option,
+        ownerName,
+        `binding field "forEach" must include string fields "from" and "as".`,
+      );
+    }
+  }
+}
+
+function relationshipOf(
+  field: ShapeField,
+  relationships: readonly CompiledRelationship[] | undefined,
+): { kind?: string; target?: string; foreignKey?: string } {
+  const compiled = relationships?.find((relationship) => relationship.key === field.key);
+  const kind = compiled?.kind ?? field.relationship?.kind;
+  const target = compiled?.target ?? field.relationship?.target ?? field.relationship?.entity;
+  const foreignKey = compiled?.foreignKey ?? field.relationship?.foreignKey;
+  return {
+    ...(kind !== undefined ? { kind } : {}),
+    ...(target !== undefined ? { target } : {}),
+    ...(foreignKey !== undefined ? { foreignKey } : {}),
+  };
+}
+
+function assertBindingRowVocabulary(
+  fields: readonly ShapeField[],
+  execution: AuthoredDerivedExecution,
+  option: string,
+  ownerName: string,
+  form: "json" | "relation",
+  relationships?: readonly CompiledRelationship[],
+): void {
+  assertTypedField(
+    namedField(fields, "order"),
+    { base: "integer", required: true },
+    option,
+    ownerName,
+    "order",
+  );
+  assertTypedField(
+    namedField(fields, "optional"),
+    { base: "boolean" },
+    option,
+    ownerName,
+    "optional",
+  );
+  assertTypedField(
+    namedField(fields, "when"),
+    { base: "object" },
+    option,
+    ownerName,
+    "when",
+  );
+  assertMappingField(
+    namedField(fields, "inputMapping"),
+    option,
+    ownerName,
+    "inputMapping",
+  );
+  assertMappingField(
+    namedField(fields, "outputMapping"),
+    option,
+    ownerName,
+    "outputMapping",
+  );
+  assertForEachField(namedField(fields, "forEach"), option, ownerName);
+
+  const operationField = namedField(fields, execution.operationRef);
+  if (form === "json") {
+    assertTypedField(
+      operationField,
+      { base: "string", required: true },
+      option,
+      ownerName,
+      execution.operationRef,
+    );
+    if (operationField?.relationship) {
+      shapeError(
+        option,
+        ownerName,
+        `binding field ${JSON.stringify(execution.operationRef)} cannot be a relationship inside a JSON collection.`,
+      );
+    }
+    return;
+  }
+  if (!operationField) {
+    shapeError(
+      option,
+      ownerName,
+      `binding entity is missing required field ${JSON.stringify(execution.operationRef)}.`,
+    );
+  }
+  const relationship = relationshipOf(operationField, relationships);
+  if (relationship.kind !== "belongsTo" || relationship.target !== execution.operationEntity) {
+    shapeError(
+      option,
+      ownerName,
+      `binding field ${JSON.stringify(execution.operationRef)} must be a belongsTo relationship ` +
+        `to "${execution.operationEntity}".`,
+    );
+  }
+  if (!present(relationship.foreignKey)) {
+    shapeError(
+      option,
+      ownerName,
+      `binding field ${JSON.stringify(execution.operationRef)} must declare a foreign key ` +
+        `so referential integrity is enforced.`,
+    );
+  }
+}
+
 export function assertExactlyOneBindingsSource(
   execution: AuthoredDerivedExecution,
   entityName: string,
@@ -102,11 +350,6 @@ export function assertExactlyOneBindingsSource(
     : { bindingsField: execution.bindingsField! };
 }
 
-function isJsonBindingsField(field: Field | undefined): boolean {
-  if (!field) return false;
-  return field.relationship === undefined;
-}
-
 /** Owner-side check used while compiling one entity's `mcp.derivedTools`. */
 export function assertAuthoredExecutionBindings(
   coreEntity: { entity: string; fields?: readonly Field[] },
@@ -121,12 +364,26 @@ export function assertAuthoredExecutionBindings(
   const fields = coreEntity.fields ?? [];
   if ("bindingsField" in source) {
     const field = fields.find((candidate) => candidate.key === source.bindingsField);
-    if (!isJsonBindingsField(field)) {
+    if (!isJsonObjectCollection(field)) {
       throw new Error(
         `${option} bindingsField ${JSON.stringify(source.bindingsField)} ` +
-          `on entity "${coreEntity.entity}" does not name an authored field.`,
+          `on entity "${coreEntity.entity}" does not name an object collection.`,
       );
     }
+    const item = nestedFields(field);
+    if (item.length === 0) {
+      throw new Error(
+        `${option} bindingsField ${JSON.stringify(source.bindingsField)} ` +
+          `on entity "${coreEntity.entity}" does not declare the binding row shape.`,
+      );
+    }
+    assertBindingRowVocabulary(
+      item,
+      execution,
+      option,
+      coreEntity.entity,
+      "json",
+    );
     return;
   }
   const relation = ownedCollectionField(fields, source.bindingsRelation);
@@ -184,21 +441,20 @@ function resolveEntityTable(
   return found;
 }
 
-function assertBindingTargetFields(
+function assertBindingTargetShape(
   binding: DerivedExecutionCatalogInput,
-  required: readonly string[],
+  execution: AuthoredDerivedExecution,
   ownerName: string,
   option: string,
 ): void {
-  const keys = new Set(binding.contract.model.fields.map((field) => field.key));
-  for (const field of required) {
-    if (!keys.has(field)) {
-      throw new Error(
-        `${option} on entity "${ownerName}": binding entity ` +
-          `"${binding.contract.entity.name}" is missing required field ${JSON.stringify(field)}.`,
-      );
-    }
-  }
+  assertBindingRowVocabulary(
+    binding.contract.model.fields,
+    execution,
+    option,
+    ownerName,
+    "relation",
+    binding.contract.model.relationships,
+  );
 }
 
 /**
@@ -243,21 +499,23 @@ export function resolveDerivedExecution(
   };
 
   if ("bindingsField" in source) {
-    const fieldKeys = new Set(
-      owner.contract.model.fields.map((field) => field.key),
+    const field = owner.contract.model.fields.find(
+      (candidate) => candidate.key === source.bindingsField,
     );
-    const relationshipKeys = new Set(
-      owner.contract.model.relationships.map((relationship) => relationship.key),
-    );
-    if (
-      !fieldKeys.has(source.bindingsField) ||
-      relationshipKeys.has(source.bindingsField)
-    ) {
+    if (!isJsonObjectCollection(field)) {
       throw new Error(
         `${option} bindingsField ${JSON.stringify(source.bindingsField)} ` +
-          `on entity "${ownerName}" does not name an authored field.`,
+          `on entity "${ownerName}" does not name an object collection.`,
       );
     }
+    const item = nestedFields(field);
+    if (item.length === 0) {
+      throw new Error(
+        `${option} bindingsField ${JSON.stringify(source.bindingsField)} ` +
+          `on entity "${ownerName}" does not declare the binding row shape.`,
+      );
+    }
+    assertBindingRowVocabulary(item, execution, option, ownerName, "json");
     return { bindingsField: source.bindingsField, ...shared };
   }
 
@@ -284,16 +542,13 @@ export function resolveDerivedExecution(
     ownerName,
     `${option}.bindingsRelation`,
   );
-  assertBindingTargetFields(
-    binding,
-    [
-      execution.operationRef,
-      parentRef,
-      ...EXECUTION_BINDING_ROW_FIELDS,
-    ],
-    ownerName,
-    option,
-  );
+  if (!binding.contract.model.fields.some((field) => field.key === parentRef)) {
+    throw new Error(
+      `${option} on entity "${ownerName}": binding entity ` +
+        `"${binding.contract.entity.name}" is missing required field ${JSON.stringify(parentRef)}.`,
+    );
+  }
+  assertBindingTargetShape(binding, execution, ownerName, option);
   return {
     bindingsRelation: relation.key,
     bindingsEntity: relation.target,

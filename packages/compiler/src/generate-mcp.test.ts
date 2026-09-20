@@ -1463,7 +1463,20 @@ describe("derived tools catalog", () => {
       fields: [
         field({ key: "name" }),
         field({ key: "revision", baseType: "integer" }),
-        field({ key: "bindings", baseType: "object", cardinality: "collection" }),
+        field({
+          key: "bindings",
+          baseType: "object",
+          cardinality: "collection",
+          children: [
+            field({ key: "order", baseType: "integer", required: true }),
+            field({ key: "optional", baseType: "boolean" }),
+            field({ key: "when", baseType: "object" }),
+            field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
+            field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
+            field({ key: "forEach", baseType: "object" }),
+            field({ key: "operationId", required: true }),
+          ],
+        }),
       ],
       mcp: {
         toolPrefix: "service",

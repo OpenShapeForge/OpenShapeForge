@@ -127,12 +127,15 @@ an entity `mcp.derivedTools.execution` block) names where the ordered binding
 rows live. Exactly one of these two sources is required; the compiler refuses
 both or neither and names the owner entity:
 
-- **`bindingsField`** — a JSON collection on the owner row. Legitimate when
-  the steps are embedded data, not first-class records.
+- **`bindingsField`** — a JSON object collection on the owner row. Legitimate when
+  the steps are embedded data, not first-class records. The collection's item
+  shape must declare the binding vocabulary.
 - **`bindingsRelation`** — an owned `hasMany` collection on the owner. The
   compiler resolves the collection's target, checks that the target carries
-  the execution vocabulary (`operationRef` plus `order`, `optional`, `when`,
-  `inputMapping`, `outputMapping`), and projects the target table and parent
+  the execution vocabulary (`operationRef` as a `belongsTo` relationship to
+  `operationEntity` with a foreign key, plus required integer `order`,
+  boolean `optional`, object `when`, object-collection `inputMapping` /
+  `outputMapping`, and object `forEach`), and projects the target table and parent
   foreign key into the catalog. The runtime then joins those rows under the
   caller's session (RLS / tenant scope) and orders them by `order`.
 

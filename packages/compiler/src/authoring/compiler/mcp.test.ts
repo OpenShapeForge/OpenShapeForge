@@ -19,6 +19,46 @@ const contactDetail = (entity = "ContactDetail"): CoreEntity =>
 /** A resolved MCP configuration compiled for the fixture entity; `undefined` is no interface. */
 const mcpSection = (mcp: McpConfig | undefined, entity?: string) => buildMcpSection(contactDetail(entity), mcp);
 
+const jsonBindingItem = [
+  { key: "order", osfType: "integer", baseType: "integer" as const, required: true },
+  { key: "optional", osfType: "boolean", baseType: "boolean" as const },
+  { key: "when", osfType: "object", baseType: "object" as const },
+  { key: "inputMapping", osfType: "object", baseType: "object" as const, cardinality: "collection" as const },
+  { key: "outputMapping", osfType: "object", baseType: "object" as const, cardinality: "collection" as const },
+  { key: "forEach", osfType: "object", baseType: "object" as const },
+  { key: "operationId", osfType: "string", baseType: "string" as const, required: true },
+];
+
+function entityWithJsonBindings(): CoreEntity {
+  return {
+    ...contactDetail(),
+    fields: [
+      ...(contactDetail().fields ?? []),
+      {
+        key: "bindings",
+        osfType: "object",
+        baseType: "object",
+        cardinality: "collection",
+        children: jsonBindingItem,
+      },
+    ],
+  } as CoreEntity;
+}
+
+const mcpJson = (mcp: McpConfig | undefined) =>
+  buildMcpSection(entityWithJsonBindings(), mcp);
+
+const jsonExecution = {
+  bindingsField: "bindings",
+  operationRef: "operationId",
+  operationEntity: "Operation",
+  providerRef: "providerId",
+  providerEntity: "Provider",
+  connectionEntity: "Connection",
+  connectionProviderRef: "providerId",
+  connectionValuesField: "values",
+};
+
 const v2Relation = (tools?: "dedicated" | "generic"): CoreEntity => {
   const actions = ["list", "get", "create", "update", "delete"] as const;
   return {
@@ -305,69 +345,76 @@ describe("buildMcp", () => {
       descriptionField: "value",
       inputFieldsField: "value",
       versionField: "version",
-      execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
-      },
+      execution: jsonExecution,
       dryRun: { name: "dry_run_widget", roles: ["author"] },
     };
-    expect(mcpSection({ derivedTools })?.derivedTools?.dryRun).toEqual({
+    expect(mcpJson({ derivedTools })?.derivedTools?.dryRun).toEqual({
       name: "dry_run_widget",
       roles: ["author"],
     });
     const { execution: _execution, ...withoutExecution } = derivedTools;
-    expect(() => mcpSection({ derivedTools: withoutExecution })).toThrow(
+    expect(() => mcpJson({ derivedTools: withoutExecution })).toThrow(
       /requires an execution block/,
     );
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...derivedTools, dryRun: { name: "dry_run_widget", roles: [] } },
         }),
     ).toThrow(/non-empty roles list/);
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...derivedTools, dryRun: { name: "Bad Name", roles: ["author"] } },
         }),
     ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
   });
 
   it("requires an integer version field for every executable definition", () => {
-    const execution = {
-      bindingsField: "value",
-      operationRef: "a",
-      operationEntity: "B",
-      providerRef: "c",
-      providerEntity: "D",
-      connectionEntity: "E",
-      connectionProviderRef: "f",
-      connectionValuesField: "g",
-    };
     const base = {
       roles: ["viewer"],
       keyField: "value",
       descriptionField: "value",
       inputFieldsField: "value",
-      execution,
+      execution: jsonExecution,
     };
-    expect(() => mcpSection({ derivedTools: base })).toThrow(
+    expect(() => mcpJson({ derivedTools: base })).toThrow(
       /versionField.*single-value integer/,
     );
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...base, versionField: "value" },
         }),
     ).toThrow(/versionField.*single-value integer/);
     expect(
-      mcpSection({
+      mcpJson({
           derivedTools: { ...base, versionField: "version" },
         })?.derivedTools?.versionField,
     ).toBe("version");
+  });
+
+  it("refuses a scalar bindingsField", () => {
+    expect(() =>
+      mcpSection({
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "value",
+          descriptionField: "value",
+          inputFieldsField: "value",
+          versionField: "version",
+          execution: {
+            bindingsField: "value",
+            operationRef: "operationId",
+            operationEntity: "Operation",
+            providerRef: "providerId",
+            providerEntity: "Provider",
+            connectionEntity: "Connection",
+            connectionProviderRef: "providerId",
+            connectionValuesField: "values",
+          },
+        },
+      }),
+    ).toThrow(
+      /bindingsField "value" on entity "ContactDetail" does not name an object collection/,
+    );
   });
 
   it("keeps declarative URL selection on the fixed authored row vocabulary", () => {
@@ -378,19 +425,12 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       versionField: "version",
       execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
+        ...jsonExecution,
         baseUrlKeyField: "callerChoice",
       },
     };
     expect(() =>
-      mcpSection({ derivedTools } as McpConfig),
+      mcpJson({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*baseUrlKeyField.*caller-controlled fields/);
   });
 
@@ -402,19 +442,12 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       versionField: "version",
       execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
+        ...jsonExecution,
         requestHeaderNameField: "callerChoice",
       },
     };
     expect(() =>
-      mcpSection({ derivedTools } as McpConfig),
+      mcpJson({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*requestHeaderNameField.*caller-controlled fields/);
   });
 

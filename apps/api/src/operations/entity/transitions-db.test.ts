@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql } from "kysely";
+import { sql, type CompiledQuery } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { withDbSession } from "../../db/session.js";
@@ -19,7 +19,7 @@ import { registerEntityOperationAvailability } from "./availability.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { createGeneratedEntityForTable, updateGeneratedEntity } from "./mutations.js";
 import { currentRecordOffers, offerTarget } from "./runtime.js";
-import { executeTransition, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
+import { executeTransition, transitionAvailabilityFor, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
 import { recordPermissionsAllowRow } from "./record-permissions.js";
 import type { GeneratedCrudTable } from "./types.js";
 import { assertNoOperationWrittenValues } from "./write-policy.js";
@@ -72,8 +72,101 @@ function protectedBinding(): TransitionBinding {
   };
   return { ...base, table, statusColumn: table.columns.find((column) => column.name === "status")!, rule: { ...base.rule, recordPermission: "edit" } };
 }
-async function milestone(status = "pending", tenantId = tenant) {
-  const record = await createGeneratedEntityForTable(privileged!.db, { ...session, tenantId }, table, { agreementId: randomUUID(), description: "Go-live", amount: 100 });
+/** Self-reference on the scratch table so two milestones can name each other. */
+function cyclicBinding(): TransitionBinding {
+  const base = transitionBinding(operation);
+  const relatedColumn = {
+    name: "related_milestone_id", type: "uuid", required: false, primaryKey: false, generated: null, sourceField: "relatedMilestoneId",
+  };
+  const table: GeneratedCrudTable = {
+    ...structuredClone(base.table),
+    columns: [...base.table.columns, relatedColumn],
+    source: {
+      ...structuredClone(base.table.source!),
+      graphql: {
+        ...base.table.source!.graphql!,
+        relationships: [
+          ...(base.table.source!.graphql!.relationships ?? []),
+          {
+            name: "relatedMilestoneId", target: "AgreementMilestone", type: "AgreementMilestone", resolve: "belongsTo",
+            foreignKey: "related_milestone_id", fieldKey: "relatedMilestoneId", kind: "belongsTo", ownership: "reference",
+          },
+        ],
+      },
+    },
+  };
+  return {
+    ...base,
+    table,
+    statusColumn: table.columns.find((column) => column.name === "status")!,
+    referenced: [{
+      via: "relatedMilestoneId",
+      viaColumn: relatedColumn,
+      field: "description",
+      fieldColumn: table.columns.find((column) => column.name === "description")!,
+      target: table,
+      present: true,
+    }],
+  };
+}
+async function relatedMilestones(): Promise<[string, string]> {
+  const first = await milestone();
+  const second = await milestone();
+  await sql`update erp.agreement_milestones set related_milestone_id = ${second}::uuid where id = ${first}::uuid`.execute(privileged!.db);
+  await sql`update erp.agreement_milestones set related_milestone_id = ${first}::uuid where id = ${second}::uuid`.execute(privileged!.db);
+  return first < second ? [first, second] : [second, first];
+}
+/** A second Agreement reference column on the scratch table, distinct from agreement_id. */
+function twoReferencesBinding(): TransitionBinding {
+  const base = transitionBinding(operation);
+  const parentColumn = {
+    name: "parent_agreement_id", type: "uuid", required: false, primaryKey: false, generated: null, sourceField: "parentAgreementId",
+  };
+  const table: GeneratedCrudTable = {
+    ...structuredClone(base.table),
+    columns: [...base.table.columns, parentColumn],
+    source: {
+      ...structuredClone(base.table.source!),
+      graphql: {
+        ...base.table.source!.graphql!,
+        relationships: [
+          ...(base.table.source!.graphql!.relationships ?? []),
+          {
+            name: "parentAgreementId", target: "Agreement", type: "Agreement", resolve: "belongsTo",
+            foreignKey: "parent_agreement_id", fieldKey: "parentAgreementId", kind: "belongsTo", ownership: "reference",
+          },
+        ],
+      },
+    },
+  };
+  const { present: _present, ...via } = base.referenced[0]!;
+  return {
+    ...base,
+    table,
+    statusColumn: table.columns.find((column) => column.name === "status")!,
+    referenced: [
+      { ...via, in: ["approved"] },
+      { ...via, via: "parentAgreementId", viaColumn: parentColumn, in: ["signed"] },
+    ],
+  };
+}
+async function milestoneWithParent(agreementId: string, parentAgreementId: string): Promise<string> {
+  const id = await milestone("pending", tenant, agreementId);
+  await sql`update erp.agreement_milestones set parent_agreement_id = ${parentAgreementId}::uuid where id = ${id}::uuid`.execute(privileged!.db);
+  return id;
+}
+async function agreement(tenantId = tenant, code: string | null = "AGR-1"): Promise<string> {
+  const id = randomUUID();
+  await sql`insert into erp.agreements (id, tenant_id, code) values (${id}::uuid, ${tenantId}::uuid, ${code})`.execute(privileged!.db);
+  return id;
+}
+async function milestone(status = "pending", tenantId = tenant, agreementId?: string) {
+  const record = await createGeneratedEntityForTable(
+    privileged!.db,
+    { ...session, tenantId },
+    table,
+    { agreementId: agreementId ?? await agreement(tenantId), description: "Go-live", amount: 100 },
+  );
   const id = String(record.id);
   if (status !== "pending") await sql`update erp.agreement_milestones set status = ${status} where id = ${id}::uuid`.execute(privileged!.db);
   return id;
@@ -95,24 +188,28 @@ describe("status transitions against PostgreSQL", () => {
     privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 1 });
     await applyAppHelpersMigration(privileged.db);
     await sql.raw(`create schema erp; create schema platform;
-      create table erp.agreement_milestones(${columnDdl()}, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
+      create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, activated_at timestamptz, amount numeric, unique(tenant_id,id));
+      create table erp.agreement_milestones(${columnDdl()}, parent_agreement_id uuid, related_milestone_id uuid, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,
         target_id text not null, operation_id text not null, owner_user_id uuid not null, owner_display_name text, token_hash text not null,
         acquired_version text not null, inactivity_timeout_seconds integer not null, acquired_at timestamptz not null default now(),
         last_activity_at timestamptz not null default now(), expires_at timestamptz not null);
+      alter table erp.agreements enable row level security; alter table erp.agreements force row level security;
+      create policy tenant on erp.agreements using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       alter table erp.agreement_milestones enable row level security; alter table erp.agreement_milestones force row level security;
       create policy tenant on erp.agreement_milestones using(tenant_id=app.current_tenant()) with check(tenant_id=app.current_tenant());
       grant usage on schema app,erp,platform to openshapeforge_app;
       grant select,insert,update,delete on all tables in schema erp,platform to openshapeforge_app;
       grant usage on all sequences in schema platform to openshapeforge_app;
       grant execute on all functions in schema app to openshapeforge_app`).execute(privileged.db);
-    restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 2 });
+    await sql.raw(`alter database "${scratchName}" set deadlock_timeout = '200ms'`).execute(privileged.db);
+    restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 4 });
     registerEntityOperationAvailability(restricted.db, bindOperationHandlers([]));
   }, 30_000);
   beforeEach(async () => {
-    await sql`truncate erp.agreement_milestones, platform.entity_events`.execute(privileged!.db);
+    await sql`truncate erp.agreement_milestones, erp.agreements, platform.entity_events`.execute(privileged!.db);
   });
   afterAll(async () => {
     await restricted?.close(); await privileged?.close();
@@ -209,5 +306,167 @@ describe("status transitions against PostgreSQL", () => {
     };
     expect(await offers(pending)).toMatchObject({ available: true, binding: { input: { id: pending } } });
     expect(await offers(triggered)).toMatchObject({ available: false, error: { code: "INVALID_STATE" } });
+  });
+
+  test("a list of N rows issues one referenced read per target table", async () => {
+    const ids = [await milestone(), await milestone(), await milestone(), await milestone(), await milestone()];
+    const statements: string[] = [];
+    const decisions = await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: CompiledQuery) => {
+        statements.push(query.sql);
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return transitionAvailabilityHandler(operation)(ids, { db: trx, session: session as never });
+    });
+    expect(ids.every((id) => decisions[id]?.available === true)).toBe(true);
+    const targetReads = statements.filter((sql) => /"agreements"/.test(sql) && !/"agreement_milestones"/.test(sql));
+    expect(targetReads).toHaveLength(1);
+  });
+
+  test("a referenced precondition reads the named record in this tenant and refuses a miss, a cross-tenant row, present and in", async () => {
+    const passing = await milestone();
+    expect(await transitionOperationHandler(operation)({ id: passing }, context())).toMatchObject({ value: { status: "triggered" } });
+
+    const missing = await milestone("pending", tenant, randomUUID());
+    await expect(transitionOperationHandler(operation)({ id: missing }, context())).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant." },
+    });
+    expect((await row(missing))!.status).toBe("pending");
+
+    const foreignAgreement = await agreement(otherTenant);
+    const crossTenant = await milestone("pending", tenant, foreignAgreement);
+    await expect(transitionOperationHandler(operation)({ id: crossTenant }, context())).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant." },
+    });
+
+    const emptyCode = await agreement(tenant, null);
+    const empty = await milestone("pending", tenant, emptyCode);
+    const emptyBinding: TransitionBinding = {
+      ...transitionBinding(operation),
+      referenced: [{ ...transitionBinding(operation).referenced[0]!, present: false }],
+    };
+    expect(await executeTransition(restricted!.db, session, emptyBinding, { id: empty })).toMatchObject({ status: "triggered" });
+    const stillSet = await milestone();
+    await expect(executeTransition(restricted!.db, session, emptyBinding, { id: stillSet })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be empty." },
+    });
+
+    const listed = await agreement(tenant, "approved");
+    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
+    const inBinding: TransitionBinding = {
+      ...transitionBinding(operation),
+      referenced: [{ ...via, in: ["approved"] }],
+    };
+    expect(await executeTransition(restricted!.db, session, inBinding, { id: await milestone("pending", tenant, listed) })).toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, inBinding, { id: await milestone() })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
+    });
+  });
+
+  test("in is compared in SQL against the typed column for datetime and numeric", async () => {
+    const { present: _present, ...via } = transitionBinding(operation).referenced[0]!;
+    const column = (name: string, type: string, sourceField: string) => ({
+      name, type, required: false, primaryKey: false, generated: null, sourceField,
+    });
+    const bindingFor = (field: string, fieldColumn: { name: string; type: string; required: boolean; primaryKey: boolean; generated: null; sourceField: string }, allowed: Array<string | number | boolean>): TransitionBinding => ({
+      ...transitionBinding(operation),
+      referenced: [{ ...via, field, fieldColumn, in: allowed }],
+    });
+    const seed = async (values: { activatedAt?: string; amount?: string }) => {
+      const id = randomUUID();
+      await sql`insert into erp.agreements (id, tenant_id, activated_at, amount)
+        values (${id}::uuid, ${tenant}::uuid, ${values.activatedAt ?? null}::timestamptz, ${values.amount ?? null}::numeric)`.execute(privileged!.db);
+      return milestone("pending", tenant, id);
+    };
+
+    const instant = "2026-03-01T09:30:00.000Z";
+    const datetime = bindingFor("activatedAt", column("activated_at", "timestamptz", "activatedAt"), [instant]);
+    expect(await executeTransition(restricted!.db, session, datetime, { id: await seed({ activatedAt: "2026-03-01 09:30:00+00" }) }))
+      .toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, datetime, { id: await seed({ activatedAt: "2026-03-01 09:31:00+00" }) })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.activatedAt to be one of 2026-03-01T09:30:00.000Z." },
+    });
+
+    const numeric = bindingFor("amount", column("amount", "numeric", "amount"), [1.5]);
+    expect(await executeTransition(restricted!.db, session, numeric, { id: await seed({ amount: "1.50" }) }))
+      .toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, numeric, { id: await seed({ amount: "1.51" }) })).rejects.toMatchObject({
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.amount to be one of 1.5." },
+    });
+  });
+
+  test("two references on distinct columns batch per target table and execute against both rows", async () => {
+    const binding = twoReferencesBinding();
+    const approved = await agreement(tenant, "approved");
+    const signed = await agreement(tenant, "signed");
+    const passing = await milestoneWithParent(approved, signed);
+    const onlyApproved = await milestoneWithParent(approved, approved);
+    const onlySigned = await milestoneWithParent(signed, signed);
+    const statements: string[] = [];
+    const decisions = await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: CompiledQuery) => {
+        statements.push(query.sql);
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return transitionAvailabilityFor(binding)([passing, onlyApproved, onlySigned], { db: trx, session: session as never });
+    });
+    expect(decisions[passing]).toEqual({ available: true });
+    // Distinct viaColumns: onlySigned's agreement is signed, but parentAgreementId still names its own row.
+    expect(decisions[onlySigned]).toMatchObject({
+      available: false,
+      error: { code: "INVALID_STATE", message: "trigger requires agreementId.code to be one of approved." },
+    });
+    expect(decisions[onlyApproved]).toMatchObject({
+      available: false,
+      error: { code: "INVALID_STATE", message: "trigger requires parentAgreementId.code to be one of signed." },
+    });
+    const targetReads = statements.filter((sql) => /"agreements"/.test(sql) && !/"agreement_milestones"/.test(sql));
+    expect(targetReads).toHaveLength(1);
+
+    expect(await executeTransition(restricted!.db, session, binding, { id: passing })).toMatchObject({ status: "triggered" });
+    await expect(executeTransition(restricted!.db, session, binding, { id: onlyApproved })).rejects.toMatchObject({
+      operationError: { message: "trigger requires parentAgreementId.code to be one of signed." },
+    });
+    await expect(executeTransition(restricted!.db, session, binding, { id: onlySigned })).rejects.toMatchObject({
+      operationError: { message: "trigger requires agreementId.code to be one of approved." },
+    });
+  });
+
+  test("execution locks participating rows in table-then-pk order", async () => {
+    const [smaller, larger] = await relatedMilestones();
+    const binding = cyclicBinding();
+    const statements: Array<{ sql: string; parameters: readonly unknown[] }> = [];
+    await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: CompiledQuery) => {
+        statements.push({ sql: query.sql, parameters: query.parameters });
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return executeTransition(restricted!.db, session, binding, { id: larger });
+    });
+    const locks = statements.filter((statement) => /for (update|share)/i.test(statement.sql));
+    expect(locks.length).toBeGreaterThanOrEqual(2);
+    expect(locks[0]!.sql).toMatch(/for share/i);
+    expect(locks[0]!.parameters).toContain(smaller);
+    expect(locks[1]!.sql).toMatch(/for update/i);
+    expect(locks[1]!.parameters).toContain(larger);
+    expect((await row(larger))!.status).toBe("triggered");
+  });
+
+  test("concurrent transitions over a cyclic reference do not deadlock", async () => {
+    const binding = cyclicBinding();
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const [first, second] = await relatedMilestones();
+      const results = await Promise.all([
+        executeTransition(restricted!.db, session, binding, { id: first }),
+        executeTransition(restricted!.db, session, binding, { id: second }),
+      ]);
+      expect(results.map((result) => result.status)).toEqual(["triggered", "triggered"]);
+    }
   });
 });

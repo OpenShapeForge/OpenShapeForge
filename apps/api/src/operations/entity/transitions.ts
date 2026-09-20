@@ -14,12 +14,24 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationAvailabilityHandler, ModuleOperationHandler } from "../../modules/contract.js";
 import { sessionRelation } from "../../auth/identity-link.js";
+import { readDatabaseError } from "../../db/database-refusals.js";
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { updateGeneratedEntityForTable } from "./mutations.js";
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import { serializeEntityRow } from "./serialize-result.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import {
+  lockTransitionParticipants,
+  present,
+  referencedInHoldsKey,
+  referencedRecords,
+  referencedRecordsByRow,
+  referencedViaSignature,
+  type TransitionReferencedRow,
+} from "./transitions-referenced.js";
+
+export { referencedInHoldsKey, type TransitionReferencedRow } from "./transitions-referenced.js";
 
 export const TRANSITIONS_PLUGIN = "osf-transitions";
 
@@ -34,12 +46,24 @@ export type TransitionAgreement = {
   pairs: Array<{ field: string; local: GeneratedCrudColumn; remote: GeneratedCrudColumn }>;
 };
 
+/** A precondition that reads a field of the record named by `via`. */
+export type TransitionReferencedPrecondition = {
+  via: string;
+  viaColumn: GeneratedCrudColumn;
+  field: string;
+  fieldColumn: GeneratedCrudColumn;
+  target: GeneratedCrudTable;
+  present?: boolean;
+  in?: Array<string | number | boolean>;
+};
+
 export type TransitionBinding = {
   table: GeneratedCrudTable;
   status: TransitionStatus;
   statusColumn: GeneratedCrudColumn;
   rule: TransitionRule;
   agreements: TransitionAgreement[];
+  referenced: TransitionReferencedPrecondition[];
 };
 
 function columnForField(table: GeneratedCrudTable, field: string): GeneratedCrudColumn {
@@ -78,6 +102,35 @@ function agreementBindings(table: GeneratedCrudTable, rule: TransitionRule): Tra
   });
 }
 
+/**
+ * Bind every referenced precondition against the generated manifest: `via`
+ * must be a single reference whose target entity carries `field`. The
+ * compiler sees one entity at a time, so a field the target does not have
+ * is refused here at boot.
+ */
+function referencedBindings(table: GeneratedCrudTable, rule: TransitionRule): TransitionReferencedPrecondition[] {
+  const tables = getGeneratedCrudTables();
+  return (rule.preconditions ?? []).filter((precondition) => precondition.via).map((precondition) => {
+    const via = precondition.via!;
+    const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.fieldKey === via && candidate.resolve === "belongsTo");
+    const target = relationship && tables.find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
+    if (!target) throw new Error(`Transition ${rule.operation} precondition via "${via}" is not a reference to a generated entity.`);
+    const fieldColumn = target.columns.find((candidate) => fieldNameForColumn(candidate) === precondition.field);
+    if (!fieldColumn) {
+      throw new Error(`Transition ${rule.operation} precondition "${via}.${precondition.field}", which ${target.source?.authoringEntityName ?? target.name} does not have.`);
+    }
+    return {
+      via,
+      viaColumn: columnForField(table, via),
+      field: precondition.field,
+      fieldColumn,
+      target,
+      ...(precondition.present !== undefined ? { present: precondition.present } : {}),
+      ...(precondition.in ? { in: [...precondition.in] } : {}),
+    };
+  });
+}
+
 /** Resolve the rule an Operation key stands for; a key no manifest rule answers to is a build defect. */
 export function transitionBinding(operation: { key: string; target?: { entityName: string } }): TransitionBinding {
   const table = getGeneratedCrudTables().find(
@@ -85,39 +138,63 @@ export function transitionBinding(operation: { key: string; target?: { entityNam
   );
   for (const status of table?.source?.transitions ?? []) {
     const rule = status.rules.find((candidate) => candidate.operation === operation.key);
-    if (rule) return { table: table!, status, statusColumn: columnForField(table!, status.field), rule, agreements: agreementBindings(table!, rule) };
+    if (rule) {
+      return {
+        table: table!,
+        status,
+        statusColumn: columnForField(table!, status.field),
+        rule,
+        agreements: agreementBindings(table!, rule),
+        referenced: referencedBindings(table!, rule),
+      };
+    }
   }
   throw new Error(`Operation "${operation.key}" is not a status transition of a generated entity.`);
 }
 
-/** Strictly nullish: a stored empty string is a present value, as the contract says. */
-function present(value: unknown): boolean {
-  return value !== null && value !== undefined;
+function invalidState(message: string): OperationError {
+  return { code: "INVALID_STATE", message, retryable: false };
 }
 
 /**
  * Why the rule cannot fire on this row, or undefined when it can. The same
  * decision serves the offer list and the execution, so what a caller is
- * shown is what the write checks.
+ * shown is what the write checks. `referenced` is the record each `via`
+ * names in this tenant; a missing entry is a refusal, never a skip. `in`
+ * membership is the SQL result, not a JavaScript `===` against `to_jsonb`.
  */
-export function transitionRefusal(binding: TransitionBinding, row: Readonly<GeneratedEntityRow>): OperationError | undefined {
+export function transitionRefusal(
+  binding: TransitionBinding,
+  row: Readonly<GeneratedEntityRow>,
+  referenced: ReadonlyMap<string, TransitionReferencedRow | undefined> = new Map(),
+): OperationError | undefined {
   const entity = binding.table.source?.authoringEntityName ?? binding.table.name;
   const current = row[binding.statusColumn.name];
   if (!binding.rule.from.includes(String(current))) {
-    return {
-      code: "INVALID_STATE",
-      message: `${entity} is ${String(current)}; ${binding.rule.key} moves ${binding.status.field} from ${binding.rule.from.join(" or ")} to ${binding.rule.to}.`,
-      retryable: false,
-    };
+    return invalidState(
+      `${entity} is ${String(current)}; ${binding.rule.key} moves ${binding.status.field} from ${binding.rule.from.join(" or ")} to ${binding.rule.to}.`,
+    );
   }
   for (const precondition of binding.rule.preconditions ?? []) {
+    if (precondition.via) continue;
     const column = columnForField(binding.table, precondition.field);
-    if (present(row[column.name]) !== precondition.present) {
-      return {
-        code: "INVALID_STATE",
-        message: `${binding.rule.key} requires ${precondition.field} to be ${precondition.present ? "set" : "empty"}.`,
-        retryable: false,
-      };
+    if (precondition.present !== undefined && present(row[column.name]) !== precondition.present) {
+      return invalidState(`${binding.rule.key} requires ${precondition.field} to be ${precondition.present ? "set" : "empty"}.`);
+    }
+  }
+  for (const precondition of binding.referenced) {
+    const remote = referenced.get(precondition.via);
+    const named = `${precondition.via}.${precondition.field}`;
+    if (!remote) {
+      const target = precondition.target.source?.authoringEntityName ?? precondition.target.name;
+      return invalidState(`${binding.rule.key} requires ${named} on the ${target} that ${precondition.via} names in this tenant.`);
+    }
+    const value = remote.row[precondition.fieldColumn.name];
+    if (precondition.present !== undefined && present(value) !== precondition.present) {
+      return invalidState(`${binding.rule.key} requires ${named} to be ${precondition.present ? "set" : "empty"}.`);
+    }
+    if (precondition.in && remote.inHolds.get(referencedInHoldsKey(precondition)) !== true) {
+      return invalidState(`${binding.rule.key} requires ${named} to be one of ${precondition.in.join(", ")}.`);
     }
   }
   return undefined;
@@ -142,20 +219,28 @@ async function lockedRows(
 }
 
 /** Offer policy: a rule is offered only while the row's status is in `from` and its preconditions hold. */
+export function transitionAvailabilityFor(binding: TransitionBinding): ModuleOperationAvailabilityHandler {
+  return async (targetIds, context) => {
+    const rows = await lockedRows(context.db, context.session, binding.table, targetIds, false);
+    const referencedById = await referencedRecordsByRow(context.db, context.session, binding, rows);
+    const decisions: Array<[string, { available: true } | { available: false; error: OperationError }]> = [];
+    for (const id of targetIds) {
+      const row = rows.get(id);
+      if (!row) {
+        decisions.push([id, { available: false, error: { code: "NOT_FOUND", message: "Resource not found.", retryable: false } }]);
+        continue;
+      }
+      const error = transitionRefusal(binding, row, referencedById.get(id) ?? new Map());
+      decisions.push([id, error ? { available: false, error } : { available: true }]);
+    }
+    return Object.fromEntries(decisions);
+  };
+}
+
 export function transitionAvailabilityHandler(
   operation: { key: string; target?: { entityName: string } },
 ): ModuleOperationAvailabilityHandler {
-  const binding = transitionBinding(operation);
-  return async (targetIds, context) => {
-    const rows = await lockedRows(context.db, context.session, binding.table, targetIds, false);
-    return Object.fromEntries(targetIds.map((id) => {
-      const row = rows.get(id);
-      const error: OperationError | undefined = row
-        ? transitionRefusal(binding, row)
-        : { code: "NOT_FOUND", message: "Resource not found.", retryable: false };
-      return [id, error ? { available: false as const, error } : { available: true as const }];
-    }));
-  };
+  return transitionAvailabilityFor(transitionBinding(operation));
 }
 
 /**
@@ -238,10 +323,33 @@ async function writtenValues(
   return values;
 }
 
+const TRANSITION_LOCK_ATTEMPTS = 3;
+
+function sqlstateOf(error: unknown): string | undefined {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const facts = current instanceof Error ? readDatabaseError(current) : undefined;
+    if (facts) return facts.sqlstate;
+    const raw = current as { errno?: unknown; code?: unknown; cause?: unknown };
+    const direct = [raw.errno, raw.code].find(
+      (candidate): candidate is string => typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate),
+    );
+    if (direct) return direct;
+    current = raw.cause;
+  }
+  return undefined;
+}
+
+function isTransitionLockRetry(error: unknown): boolean {
+  return (error instanceof Error && error.name === "TransitionLockRetry") || sqlstateOf(error) === "40P01";
+}
+
 /**
- * Execute one rule: lock the row, check the record permission the rule
- * carries, recheck the decision, write `to`, the caller's `writes` and the
- * server's `stamps`, journal the update.
+ * Execute one rule: lock every participating row in (table, pk) order, check
+ * the record permission the rule carries, recheck the decision, write `to`,
+ * the caller's `writes` and the server's `stamps`, journal the update.
  */
 export async function executeTransition(
   db: OpenShapeForgeDatabase,
@@ -250,23 +358,41 @@ export async function executeTransition(
   input: Readonly<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
   const id = typeof input.id === "string" ? input.id : "";
-  return withDbSession(db, session, async (trx) => {
-    if (binding.rule.recordPermission) {
-      await assertRecordPermissionInTransaction(trx, session, binding.table, id, binding.rule.recordPermission);
+  let last: unknown;
+  for (let attempt = 0; attempt < TRANSITION_LOCK_ATTEMPTS; attempt++) {
+    try {
+      return await withDbSession(db, session, async (trx) => {
+        if (binding.rule.recordPermission) {
+          await assertRecordPermissionInTransaction(trx, session, binding.table, id, binding.rule.recordPermission);
+        }
+        const snapshot = (await lockedRows(trx, session, binding.table, [id], false)).get(id);
+        if (!snapshot) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        await lockTransitionParticipants(trx, session, binding, id, snapshot);
+        const current = (await lockedRows(trx, session, binding.table, [id], false)).get(id);
+        if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        if (referencedViaSignature(binding, current) !== referencedViaSignature(binding, snapshot)) {
+          const retry = new Error("Transition lock set changed; retry the transaction.");
+          retry.name = "TransitionLockRetry";
+          throw retry;
+        }
+        const referenced = await referencedRecords(trx, session, binding, current, false);
+        const refusal = transitionRefusal(binding, current, referenced);
+        if (refusal) throw operationFailure(refusal);
+        const values: Record<string, unknown> = {
+          [binding.status.field]: binding.rule.to,
+          ...(await writtenValues(trx, session, binding, id, input)),
+          ...stampValues(binding, session),
+        };
+        const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
+        if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
+        return serializeEntityRow(binding.table, row);
+      });
+    } catch (error) {
+      last = error;
+      if (attempt === TRANSITION_LOCK_ATTEMPTS - 1 || !isTransitionLockRetry(error)) throw error;
     }
-    const current = (await lockedRows(trx, session, binding.table, [id], true)).get(id);
-    if (!current) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-    const refusal = transitionRefusal(binding, current);
-    if (refusal) throw operationFailure(refusal);
-    const values: Record<string, unknown> = {
-      [binding.status.field]: binding.rule.to,
-      ...(await writtenValues(trx, session, binding, id, input)),
-      ...stampValues(binding, session),
-    };
-    const row = await updateGeneratedEntityForTable(db, session, binding.table, id, values);
-    if (!row) throw operationFailure({ code: "NOT_FOUND", message: "Resource not found.", retryable: false });
-    return serializeEntityRow(binding.table, row);
-  });
+  }
+  throw last;
 }
 
 export function transitionOperationHandler(

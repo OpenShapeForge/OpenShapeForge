@@ -48,7 +48,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
-import { assertTransitionAgreements } from "./authoring/compiler/transitions.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions-corpus.js";
 import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
   auditOperationSurfaceCollisions,
@@ -356,8 +356,19 @@ export async function collectAllArtifacts(
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
   // Every compiled entity, core and plugin alike: a transition's agreesOn
-  // reaches across entities, so it is checked here where all of them are.
-  assertTransitionAgreements(entities.map((entity) => entity.contract));
+  // and referenced preconditions reach across entities, so they are checked
+  // here where all of them are. A reference no compiled entity answers to
+  // is refused, never skipped.
+  const contracts = entities.map((entity) => entity.contract);
+  assertTransitionAgreements(contracts);
+  // Built once, as a value, and shared by everything that needs it. Reading the
+  // emitted snapshot back off disk would see the PREVIOUS run's file, since
+  // artifacts are written only after every generator has produced its contents.
+  // Referenced-precondition `in` values are checked against this snapshot when
+  // the field is a referentiedata field.
+  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
+  assertTransitionReferencedPreconditions(contracts, referentiedata);
   // The member of an owned collection learns it here, where every owner is
   // compiled: its generic writes then declare the collection refusal.
   withOwnedChildErrors(entities.map((entity) => entity.contract));
@@ -368,11 +379,6 @@ export async function collectAllArtifacts(
   // re-enables generation without compiler changes.
   const webPresent = existsSync(join(repoRoot, "apps/web"));
   const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
-  // Built once, as a value, and shared by everything that needs it. Reading the
-  // emitted snapshot back off disk would see the PREVIOUS run's file, since
-  // artifacts are written only after every generator has produced its contents.
-  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
-  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertReferentieGroepsResolve(entities, referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     repoRoot,

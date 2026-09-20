@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { bindOperationHandlers, type OperationContract } from "../runtime.js";
 import { getGeneratedCrudTables } from "./catalog.js";
-import { transitionBinding, transitionRefusal, TRANSITIONS_PLUGIN, type TransitionBinding } from "./transitions.js";
+import { referencedInHoldsKey, transitionBinding, transitionRefusal, TRANSITIONS_PLUGIN, type TransitionBinding, type TransitionReferencedRow } from "./transitions.js";
 
 const trigger = (rawCatalog as { operations: OperationContract[] }).operations
   .find((operation) => operation.key === "AgreementMilestone.trigger")!;
@@ -34,6 +34,7 @@ describe("status transition binding", () => {
     const base = transitionBinding(trigger);
     const binding: TransitionBinding = {
       ...base,
+      referenced: [],
       rule: { ...base.rule, preconditions: [{ field: "expectedAt", present: true }, { field: "producedInvoiceId", present: false }] },
     };
     expect(transitionRefusal(binding, { status: "invoiced", expected_at: "2026-01-01" })).toMatchObject({
@@ -52,5 +53,65 @@ describe("status transition binding", () => {
       message: "trigger requires producedInvoiceId to be empty.",
     });
     expect(table.columns.find((column) => column.name === "status")?.writtenBy?.[0]?.operation).toBe(trigger.key);
+  });
+
+  test("refuses a referenced precondition that fails present, in, or names no record in this tenant", () => {
+    const base = transitionBinding(trigger);
+    expect(base.referenced).toEqual([expect.objectContaining({ via: "agreementId", field: "code", present: true })]);
+    const remote = (row?: Record<string, unknown>, inHolds: Record<string, boolean> = {}) =>
+      new Map<string, TransitionReferencedRow | undefined>([["agreementId", row === undefined ? undefined : {
+        row, inHolds: new Map(Object.entries(inHolds)),
+      }]]);
+    expect(transitionRefusal(base, { status: "pending" }, remote(undefined))).toMatchObject({
+      code: "INVALID_STATE",
+      message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant.",
+    });
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: null }))).toMatchObject({
+      message: "trigger requires agreementId.code to be set.",
+    });
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: "" }))).toBeUndefined();
+    expect(transitionRefusal(base, { status: "pending" }, remote({ code: "AGR-1" }))).toBeUndefined();
+
+    const { present: _present, ...via } = base.referenced[0]!;
+    const allowed = { ...base, referenced: [{ ...via, in: ["approved", "signed"] }] };
+    const allowedKey = referencedInHoldsKey(allowed.referenced[0]!);
+    expect(transitionRefusal(allowed, { status: "pending" }, remote({ code: "draft" }, { [allowedKey]: false }))).toMatchObject({
+      message: "trigger requires agreementId.code to be one of approved, signed.",
+    });
+    expect(transitionRefusal(allowed, { status: "pending" }, remote({ code: "approved" }, { [allowedKey]: true }))).toBeUndefined();
+
+    const empty = { ...base, referenced: [{ ...via, present: false }] };
+    expect(transitionRefusal(empty, { status: "pending" }, remote({ code: "x" }))).toMatchObject({
+      message: "trigger requires agreementId.code to be empty.",
+    });
+    expect(transitionRefusal(empty, { status: "pending" }, remote({ code: null }))).toBeUndefined();
+  });
+
+  test("two in preconditions on the same target field keep separate membership results", () => {
+    const base = transitionBinding(trigger);
+    const { present: _present, ...via } = base.referenced[0]!;
+    const approved = { ...via, in: ["approved"] as Array<string | number | boolean> };
+    const signed = { ...via, via: "parentAgreementId", in: ["signed"] as Array<string | number | boolean> };
+    const binding: TransitionBinding = { ...base, referenced: [approved, signed] };
+    const row = { code: "signed" };
+    const inHolds = new Map([
+      [referencedInHoldsKey(approved), false],
+      [referencedInHoldsKey(signed), true],
+    ]);
+    const referenced = new Map<string, TransitionReferencedRow | undefined>([
+      ["agreementId", { row, inHolds }],
+      ["parentAgreementId", { row, inHolds }],
+    ]);
+    expect(transitionRefusal(binding, { status: "pending" }, referenced)).toMatchObject({
+      message: "trigger requires agreementId.code to be one of approved.",
+    });
+    const bothHold = new Map([
+      [referencedInHoldsKey(approved), true],
+      [referencedInHoldsKey(signed), true],
+    ]);
+    expect(transitionRefusal(binding, { status: "pending" }, new Map([
+      ["agreementId", { row: { code: "approved" }, inHolds: bothHold }],
+      ["parentAgreementId", { row: { code: "signed" }, inHolds: bothHold }],
+    ]))).toBeUndefined();
   });
 });

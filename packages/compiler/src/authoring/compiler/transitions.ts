@@ -16,38 +16,30 @@ import type {
   CoreEntity,
   EntityOperationDefinition,
   Field,
-  LocalizedText,
   OsfTypeDefinition,
 } from "../types.js";
-import type { FieldDefinitionTransitionRule, FieldDefinitionTransitionWrite } from "../types/field-definition.js";
+import type { FieldDefinitionTransitionRule } from "../types/field-definition.js";
 import type { CompiledTransitionField } from "../types/compiled.js";
 import { compiledFieldSchemaWithoutDefinitions } from "../../field-json-schema.js";
 import { resolveModelFields } from "./model.js";
 import { deriveTableName } from "./helpers.js";
 import { fieldCardinality } from "./helpers.js";
+import {
+  assertAgreesOn,
+  assertPrecondition,
+  fail,
+  kebab,
+  ruleOperation,
+  ruleRecordPermission,
+  ruleWrites,
+  stampActor,
+  text,
+} from "./transitions-lowering.js";
 
-export const TRANSITIONS_PLUGIN = "osf-transitions";
+export { TRANSITIONS_PLUGIN, ruleWrites } from "./transitions-lowering.js";
 
 const RULE_KEY = /^[a-z][A-Za-z0-9]*$/;
 const CRUD_KEYS = new Set(["list", "get", "create", "update", "delete"]);
-
-function kebab(value: string): string {
-  return value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-}
-
-function text(value: LocalizedText | string | undefined, fallback: string): LocalizedText {
-  if (typeof value === "string") return { en: value, nl: value };
-  return { en: value?.en ?? fallback, nl: value?.nl ?? value?.en ?? fallback };
-}
-
-function fail(entity: CoreEntity, field: Field, message: string): never {
-  throw new Error(`[${entity.entity}] transitions on "${field.key}": ${message}`);
-}
-
-/** Every write in its object form: a bare key is optional input with no constraint. */
-export function ruleWrites(rule: Pick<FieldDefinitionTransitionRule, "writes">): FieldDefinitionTransitionWrite[] {
-  return (rule.writes ?? []).map((write) => (typeof write === "string" ? { field: write } : write));
-}
 
 function optionValues(entity: CoreEntity, field: Field): string[] {
   const options = field.options;
@@ -102,8 +94,7 @@ function assertRule(
   }
   const fields = new Map(entity.fields.map((entry) => [entry.key, entry]));
   for (const precondition of rule.preconditions ?? []) {
-    const target = fields.get(precondition.field);
-    if (!target?.persisted) fail(entity, field, `${where} precondition names "${precondition.field}", which is not a persisted field.`);
+    assertPrecondition(entity, field, where, precondition, fields);
   }
   const permission = rule.auth?.recordPermission;
   if (permission && !entity.authorization?.rowAccess?.recordPermissions) {
@@ -144,160 +135,6 @@ function assertRule(
     seen.set(`writes:${key}`, rule.key);
   }
   seen.set(rule.key, rule.key);
-}
-
-/** Base types a database can compare exactly; an object has no equality worth a refusal. */
-const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
-
-/**
- * `agreesOn` names fields the referenced record must share with this one:
- * the written field must be a single entity reference, and every named field
- * must be a persisted single scalar here. That the target entity carries the
- * same field with the same base type is checked across the corpus by
- * `assertTransitionAgreements`, and bound to typed columns by the runtime.
- */
-function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target: Field, agreesOn: string[], fields: Map<string, Field>): void {
-  if (!target.relationship || fieldCardinality(target) !== "single") {
-    fail(entity, field, `${where} constrains "${target.key}" with agreesOn, but it is not a single entity reference.`);
-  }
-  for (const key of agreesOn) {
-    const local = fields.get(key);
-    if (!local?.persisted || fieldCardinality(local) !== "single" || !COMPARABLE_BASE_TYPES.has(local.baseType ?? "")) {
-      fail(entity, field, `${where} agreesOn "${key}", which is not a persisted single comparable field of ${entity.entity}.`);
-    }
-  }
-}
-
-/**
- * The corpus-wide half of `agreesOn`, run by collectAllArtifacts over every
- * compiled entity, core and plugin alike: the referenced entity must carry
- * every named field as a persisted single field of the same base type and
- * column type, so the comparison the runtime issues in SQL is between
- * columns of one type. A rule whose reference no compiled entity answers to
- * is refused, never skipped.
- */
-type AgreementContract = {
-  transitions?: CompiledTransitionField[];
-  model: { fields: ReadonlyArray<{ key: string; osfType: string; baseType: string; cardinality: string }> };
-  storage: { columns: ReadonlyArray<{ field: string; type: string }> };
-  entity: { name: string };
-};
-
-export function assertTransitionAgreements(entities: ReadonlyArray<AgreementContract>): void {
-  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
-  const describe = (contract: AgreementContract, key: string) => {
-    const field = contract.model.fields.find((candidate) => candidate.key === key);
-    const column = contract.storage.columns.find((candidate) => candidate.field === key);
-    return field && column && field.cardinality === "single" ? `${field.baseType} ${column.type}` : undefined;
-  };
-  for (const contract of entities) {
-    for (const status of contract.transitions ?? []) {
-      for (const rule of status.rules) {
-        for (const write of rule.writes ?? []) {
-          if (!write.agreesOn?.length) continue;
-          const reference = contract.model.fields.find((candidate) => candidate.key === write.field);
-          const target = reference && byName.get(reference.osfType);
-          if (!target) throw new Error(`[${contract.entity.name}] ${rule.operation} constrains "${write.field}" with agreesOn, but it references no compiled entity.`);
-          for (const key of write.agreesOn) {
-            const local = describe(contract, key);
-            const remote = describe(target, key);
-            if (!local || !remote || local !== remote) {
-              throw new Error(
-                `[${contract.entity.name}] ${rule.operation} agreesOn "${key}", but ${target.entity.name}.${key} (${remote ?? "absent"}) is not a persisted single field of the same type as ${contract.entity.name}.${key} (${local ?? "absent"}).`,
-              );
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/** How `actor` lands in a field: the session's linked Relation for a Relation reference, else the user id. */
-function stampActor(field: Field): "relation" | "user" | undefined {
-  if (field.osfType === "Relation") return "relation";
-  if (field.baseType === "string" && !field.relationship && !field.options) return "user";
-  return undefined;
-}
-
-function idSchema(entity: CoreEntity): Record<string, unknown> {
-  return {
-    type: "string",
-    format: "uuid",
-    "x-osf-reference": { entity: entity.entity },
-    "x-osf-i18n": { title: text(entity.labels, entity.title) },
-  };
-}
-
-function statusSchema(field: Field, values: string[]): Record<string, unknown> {
-  const items = field.options?.type === "static" ? field.options.items ?? [] : [];
-  return {
-    type: "string",
-    enum: values,
-    "x-osf-i18n": {
-      title: text(field.label, field.key),
-      enum: Object.fromEntries(items.map((item) => [item.value, text(item.label, item.value)])),
-    },
-  };
-}
-
-/** `edit` on an entity with record-level permissions; nothing on one without. */
-function ruleRecordPermission(entity: CoreEntity, _rule: FieldDefinitionTransitionRule): "edit" | undefined {
-  return entity.authorization?.rowAccess?.recordPermissions ? "edit" : undefined;
-}
-
-function ruleOperation(
-  entity: CoreEntity,
-  field: Field,
-  rule: FieldDefinitionTransitionRule,
-  values: string[],
-  writes: Record<string, Record<string, unknown>>,
-): EntityOperationDefinition {
-  const recordPermission = ruleRecordPermission(entity, rule);
-  const requiredWrites = new Set(ruleWrites(rule).filter((write) => write.required).map((write) => write.field));
-  const required = ["id", ...Object.keys(writes).filter((key) => requiredWrites.has(key) || entity.fields.find((entry) => entry.key === key)?.required)];
-  const label = text(rule.label, rule.key);
-  const summary = text(rule.description, "");
-  const path = `${field.key}: ${rule.from.join(" | ")} -> ${rule.to}`;
-  return {
-    id: `${entity.entity}.${rule.key}`,
-    name: label,
-    description: {
-      en: `${summary.en || `${label.en} this ${text(entity.labels, entity.title).en!.toLowerCase()}`}. Moves ${path}; offered only while ${field.key} is ${rule.from.join(" or ")}.`,
-      nl: `${summary.nl || label.nl}. Zet ${path}; alleen aangeboden zolang ${field.key} ${rule.from.join(" of ")} is.`,
-    },
-    implementation: { type: "plugin", plugin: TRANSITIONS_PLUGIN, handler: `transition${entity.entity}${rule.key[0]!.toUpperCase()}${rule.key.slice(1)}` },
-    target: { scope: "record", inputField: "id" },
-    input: { schema: { type: "object", additionalProperties: false, required, properties: { id: idSchema(entity), ...writes } } },
-    output: {
-      schema: {
-        type: "object",
-        additionalProperties: true,
-        required: ["id", field.key],
-        properties: {
-          id: idSchema(entity),
-          [field.key]: statusSchema(field, values),
-        },
-      },
-    },
-    errors: [
-      { status: 400, code: "VALIDATION", description: "The transition input is invalid." },
-      { status: 403, code: "FORBIDDEN", description: "The caller may not perform this transition." },
-      { status: 404, code: "NOT_FOUND", description: `The ${entity.entity} does not exist.` },
-      { status: 409, code: "INVALID_STATE", description: `The ${entity.entity} is not ${rule.from.join(" or ")}, or a precondition of ${rule.key} does not hold.` },
-      { status: 409, code: "VERSION_CONFLICT", description: "The record changed since it was loaded." },
-    ],
-    auth: {
-      mode: "session",
-      roles: [...(rule.auth?.roles ?? entity.authorization?.roles?.update ?? [])],
-      ...(recordPermission ? { recordPermission } : {}),
-    },
-    tenancy: { mode: "required" },
-    effects: { data: "write", external: "none" },
-    reliability: { idempotency: { mode: "none" } },
-    concurrency: { version: { mode: "required", field: "updatedAt" } },
-    confirmation: rule.confirmation ?? { mode: "none" },
-  };
 }
 
 export type TransitionCatalogs = {

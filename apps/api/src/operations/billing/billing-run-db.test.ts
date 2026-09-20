@@ -228,7 +228,10 @@ describe("the milestone billing run against PostgreSQL", () => {
 
     // The comparison is the database's: a null agrees with a null and with nothing else.
     const unattached = String((await createGeneratedEntityForTable(restricted.db, session, billingTable("AgreementMilestone"), { description: "Loose", amount: 1 })).id);
-    await executeTransition(restricted.db, session, trigger, { id: unattached });
+    // Forced to triggered: generic update can null agreementId after trigger,
+    // and the referenced precondition is checked only at transition time, so
+    // this state is still reachable. Invoice's agreesOn then compares nulls.
+    await sql`update erp.agreement_milestones set status = 'triggered' where id = ${unattached}::uuid`.execute(privileged.db);
     await fails(invoice({ id: unattached, producedInvoiceId: String(own.id) }, context), "VALIDATION");
     expect(await invoice({ id: unattached, producedInvoiceId: String(orphan.id) }, context)).toMatchObject({ value: { status: "invoiced" } });
   }, 60_000);

@@ -25,23 +25,7 @@
  * The context is everything it gets, and everything it needs.
  */
 
-/**
- * Mirrors `ConnectorContext` in apps/api/src/connectors/executor.ts. Declared
- * structurally rather than imported: a real connector package depends on a
- * published types package, not on the API's source tree.
- */
-type ConnectorContext = {
-  config: Readonly<Record<string, unknown>>;
-  secrets: Readonly<Record<string, string>>;
-  // `string | URL | Request` rather than `RequestInfo`: this context is declared
-  // structurally so the package depends on nothing, and `RequestInfo` is an
-  // ambient global that only exists once a DOM or host lib is loaded. Spelling
-  // it out keeps the file self-sufficient, which is the point of declaring it
-  // here at all.
-  fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-  signal: AbortSignal;
-  log: (message: string, fields?: Record<string, unknown>) => void;
-};
+import type { ConnectorContext } from "@openshapeforge/plugin-runtime/connector";
 
 type ListObjectsInput = { prefix?: string; limit?: number };
 type PutObjectInput = { key: string; requestId?: string };

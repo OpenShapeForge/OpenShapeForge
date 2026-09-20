@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { ConnectorContext, ConnectorPackage } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, it } from "bun:test";
 import { ConnectorContractBoundary } from "../contract-boundary.js";
 import {
@@ -7,9 +8,7 @@ import {
   createBoundFetch,
   hostAllowed,
   invokeOperation,
-  type ConnectorContext,
   type ConnectorExecutionErrorCode,
-  type ConnectorPackage,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
 

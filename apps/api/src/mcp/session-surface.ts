@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import { OperationFailure } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import {
@@ -689,6 +690,10 @@ export function createSessionSurface(scope: ServerScope) {
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
+      // The second step of the generic projection is a core tool over the
+      // CRUD catalogue, not a row-defined one: classified as such here so the
+      // authorization path answers for it as it does for osf_list.
+      if (name === GENERIC_DESCRIBE_TOOL_NAME) return "crud";
       if (EDIT_LEASE_TOOL_NAMES.includes(name as (typeof EDIT_LEASE_TOOL_NAMES)[number])) {
         return "operation";
       }

@@ -52,7 +52,7 @@
  *                               configuration handoff, document upload)
  */
 import { randomUUID } from "node:crypto";
-import { operationErrorOf } from "@openshapeforge/operations";
+import { GENERIC_DESCRIBE_TOOL_NAME, operationErrorOf } from "@openshapeforge/operations";
 import type {
   RuntimeDeclarativeServiceRequest,
   RuntimeHostOperationRequest,
@@ -353,6 +353,7 @@ function buildServer(
           throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
         }
         const collidesWithCore =
+          name === GENERIC_DESCRIBE_TOOL_NAME ||
           catalog.tools.some((tool) => tool.name === name) ||
           catalog.operationTools.some((tool) => tool.name === name) ||
           catalogDerivedTools.some(

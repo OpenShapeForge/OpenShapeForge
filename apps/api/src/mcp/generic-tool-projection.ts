@@ -16,9 +16,8 @@ import { entityResourceUri } from "./entity-resources.js";
 import {
   GENERIC_DESCRIBE_TOOL_NAME,
   GENERIC_TOOL_OPERATIONS,
-  compactGenericInputSchema,
+  advertisedGenericTool,
   describeToolDefinition,
-  genericToolText,
   type GenericToolBranch,
 } from "@openshapeforge/operations";
 import { type Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -34,7 +33,7 @@ import {
   crudToolsNamed,
 } from "./catalog.js";
 import { describeTool, entityTitle } from "./entity-tool-projection.js";
-import { ENTITY_CONFIGURATION_APP_URI, publicOriginIsHttps } from "./handoff-config.js";
+import { publicOriginIsHttps } from "./handoff-config.js";
 import { toolsForSession } from "./session-projection.js";
 export function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
   return entity?.tools === "generic";
@@ -70,29 +69,24 @@ export function describeGenericTool(
     inputSchema: describeTool(tool, entity, tables.get(tool.table), session, locale)
       .inputSchema as Record<string, unknown>,
   }));
-  const text = genericToolText(operation, branches, ENTITY_CATALOG_URI, locale.tag);
-  const elicits = entries.find(
-    ({ entity }) => entity?.elicitOnCreate !== undefined,
-  );
-  return {
+  // The advertised shape is the package's, shared with the compiler's byte
+  // budget. A shared generic tool may still contain legacy v1 entities: no
+  // response contract on that surface, only an all-v2 group advertises the
+  // common canonical envelope. The MCP App is only linked where it can
+  // render (https origin — see publicOriginIsHttps).
+  return advertisedGenericTool({
     name: first.name,
-    title: text.title,
-    description: text.description,
-    inputSchema: compactGenericInputSchema(operation, branches, locale.tag) as Tool["inputSchema"],
-    // A shared generic tool may still contain legacy v1 entities. Do not add a
-    // response contract to that legacy surface; only an all-v2 group can
-    // advertise the common field-agnostic canonical envelope.
-    ...(entries.every(({ tool }) => tool.outputSchema !== undefined)
-      ? { outputSchema: first.outputSchema as Tool["outputSchema"] }
-      : {}),
-    annotations: {
-      title: text.title,
-      ...first.annotations,
-    },
-    ...(operation === "create" && elicits && publicOriginIsHttps()
-      ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
-      : {}),
-  } as Tool;
+    operation,
+    branches,
+    entityCatalogUri: ENTITY_CATALOG_URI,
+    outputSchema: entries.every(({ tool }) => tool.outputSchema !== undefined)
+      ? (first.outputSchema as Record<string, unknown>)
+      : undefined,
+    annotations: first.annotations,
+    linksConfigurationApp:
+      entries.some(({ entity }) => entity?.elicitOnCreate !== undefined) && publicOriginIsHttps(),
+    locale: locale.tag,
+  }) as Tool;
 }
 
 /**

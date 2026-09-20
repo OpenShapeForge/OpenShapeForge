@@ -44,6 +44,7 @@ export {
   GENERIC_DESCRIBE_TOOL_NAME,
   GENERIC_TOOL_NAME_PREFIX,
   GENERIC_TOOL_OPERATIONS,
+  advertisedGenericTool,
   compactGenericInputSchema,
   describeToolDefinition,
   genericTextLanguage,
@@ -78,4 +79,11 @@ export {
   PLATFORM_TOOL_BYTES_ALLOWANCE,
   advertisedToolBytes,
 } from "./mcp-tool-budget.js";
-export type { GenericToolBranch, GenericToolOperation } from "./mcp-generic-projection.js";
+export type { GenericToolAdvertisement, GenericToolBranch, GenericToolOperation } from "./mcp-generic-projection.js";
+export {
+  DATA_ACQUISITION_TOOL_FOOTER,
+  ENTITY_CONFIGURATION_APP_URI,
+  advertisedEntityTool,
+  localizedEntityToolText,
+} from "./mcp-entity-tool-shape.js";
+export type { EntityToolAdvertisement } from "./mcp-entity-tool-shape.js";

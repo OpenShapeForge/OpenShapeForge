@@ -138,7 +138,7 @@ describe("genericToolText and the describe tool", () => {
       "x-osf-i18n": { title: { en: "Values", nl: "Waarden" } },
     });
     expect(schema.properties.values!.properties).toBeUndefined();
-    const describe = describeToolDefinition(["A"]) as { inputSchema: { properties: Record<string, Record<string, unknown>> } };
+    const describe = describeToolDefinition(["A"]) as unknown as { inputSchema: { properties: Record<string, Record<string, unknown>> } };
     expect(describe.inputSchema.properties.entity!["x-osf-type"]).toBe("string");
     expect(describe.inputSchema.properties.operation!["x-osf-type"]).toBe("string");
   });

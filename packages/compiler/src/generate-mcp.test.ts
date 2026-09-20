@@ -8,6 +8,11 @@ import type {
   CompiledRelationship,
 } from "./authoring/types.js";
 import {
+  DATA_ACQUISITION_TOOL_FOOTER,
+  advertisedEntityTool,
+  advertisedToolBytes,
+} from "@openshapeforge/operations";
+import {
   advertisedToolSizes,
   assertAdvertisedToolBytes,
   buildMcpCatalog,
@@ -1149,6 +1154,50 @@ describe("buildMcpCatalog", () => {
       "example_list",
     ]);
     for (const entry of sizes) expect(entry.bytes).toBeGreaterThan(100);
+  });
+
+  it("measures the shape the runtime lists: write reminder, mirrored title, app link, localized text", () => {
+    const elicits = input(
+      contract({
+        fields: [field({ key: "name" }), field({ key: "fields", baseType: "json" } as never), field({ key: "values", baseType: "json" } as never)],
+        mcp: {
+          toolPrefix: "widget",
+          tools: "dedicated",
+          operations: { list: false, get: false, create: true, update: false, delete: false },
+          elicitOnCreate: { sourceEntity: "Widget", sourceField: "id", definitionsField: "fields", into: "values" },
+        } as never,
+      }),
+    );
+    const catalog = buildMcpCatalog([elicits], "test");
+    const create = catalog.tools.find((tool) => tool.name === "widget_create")!;
+    const [measured] = advertisedToolSizes({
+      tools: catalog.tools,
+      entities: catalog.entities,
+      operationTools: [],
+      projection: "dedicated",
+      canonicalTexts: new Map([[create.operationId ?? "", {
+        name: { en: "Create widget", nl: "Widget aanmaken met een langere titel" },
+        description: { en: create.description.split(".")[0] + ".", nl: "Maakt één widget aan na validatie van de canonieke velden, uitgebreid." },
+      }]]),
+    });
+    // The bare compiled entry, plus what the listing adds: the reminder on a
+    // write tool, the title in the annotations and the app link.
+    const bare = advertisedToolBytes({
+      name: create.name, title: create.title, description: create.description,
+      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+    });
+    const listed = advertisedToolBytes(advertisedEntityTool({
+      name: create.name, operation: "create", title: create.title, description: create.description,
+      inputSchema: create.inputSchema, outputSchema: create.outputSchema, annotations: create.annotations,
+      linksConfigurationApp: true,
+    }));
+    expect(listed).toBeGreaterThan(bare + DATA_ACQUISITION_TOOL_FOOTER.length);
+    // The longer Dutch text is what the budget counts.
+    expect(measured!.bytes).toBeGreaterThan(listed);
+    expect(JSON.stringify(advertisedEntityTool({
+      name: create.name, operation: "create", title: "t", description: "d",
+      inputSchema: {}, annotations: create.annotations, linksConfigurationApp: true,
+    }))).toContain("ui://openshapeforge/configuration");
   });
 
   it("classifies generic tools by the entity's declared policy and refuses the osf_ prefix on a dedicated tool", () => {

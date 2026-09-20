@@ -12,7 +12,7 @@ import { HttpError } from "../rest/http-error.js";
 
 export const ENTITY_OAUTH_CALLBACK_PATH = "/api/entity-oauth/callback";
 export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
-export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";
+export { ENTITY_CONFIGURATION_APP_URI } from "@openshapeforge/operations";
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 export const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
 

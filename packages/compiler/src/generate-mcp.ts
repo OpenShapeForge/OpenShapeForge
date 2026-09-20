@@ -21,18 +21,19 @@
 import {
   DYNAMIC_TOOL_BYTES_ALLOWANCE,
   GENERIC_DESCRIBE_TOOL_NAME,
+  advertisedEntityTool,
+  advertisedGenericTool,
+  localizedEntityToolText,
   GENERIC_TOOL_NAME_PREFIX,
   MAX_ADVERTISED_TOOL_BYTES,
   PLATFORM_TOOL_BYTES_ALLOWANCE,
   advertisedToolBytes,
-  compactGenericInputSchema,
   compareCodeUnits,
   connectHelperTool,
   describeToolDefinition,
   discoveryToolDefinition,
   dryRunHelperTool,
   editLeaseToolDefinitions,
-  genericToolText,
   guideToolDefinition,
   personalizationHelperTool,
   searchableOperationToolDefinitions,
@@ -1347,6 +1348,8 @@ export type StaticListingInput = {
   /** Ids of lease-protected Operations the listing offers; empty lists the release tool alone. */
   editLeaseOperationIds?: readonly string[];
   connectorTools?: readonly McpToolShape[];
+  /** The canonical operations' authored texts by operation id, for the localized measurement. */
+  canonicalTexts?: ReadonlyMap<string, { name?: unknown; description?: unknown }>;
 };
 
 function sizeOf(name: string, tool: unknown): AdvertisedToolSize {
@@ -1367,47 +1370,67 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
   const generic = new Map<string, McpToolDefinition[]>();
   const genericEntities = genericEntityNames(input.entities);
   const sizes: AdvertisedToolSize[] = [];
-  const titles = new Map(input.entities.map((entity) => [entity.entity, entity.title]));
+  const entities = new Map(input.entities.map((entity) => [entity.entity, entity]));
+  const canonical = input.canonicalTexts ?? new Map();
+  // The runtime resolves an entity's title through its authored labels for
+  // the session's language, falling back to the compiled title.
+  const titleIn = (entity: string, language: string) =>
+    entities.get(entity)?.labels?.[language] ?? entities.get(entity)?.title ?? entity;
+  const languages = ["en", "nl"];
+  const largest = (shape: (language: string) => unknown) =>
+    Math.max(...languages.map((language) => advertisedToolBytes(shape(language))));
   for (const tool of input.tools) {
     if (genericEntities.has(tool.entity)) {
       generic.set(tool.name, [...(generic.get(tool.name) ?? []), tool]);
       continue;
     }
-    sizes.push(sizeOf(tool.name, {
+    // Listed exactly as the runtime lists a dedicated tool (describeTool):
+    // localized text, the write reminder, the mirrored title and the app
+    // link a create that elicits carries on an https origin.
+    sizes.push({
       name: tool.name,
-      title: tool.title,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    }));
+      bytes: largest((language) => {
+        const text = localizedEntityToolText(tool, canonical.get(tool.operationId ?? ""), language);
+        return advertisedEntityTool({
+          name: tool.name,
+          operation: tool.operation,
+          title: text.title,
+          description: text.description,
+          inputSchema: tool.inputSchema,
+          outputSchema: tool.outputSchema,
+          annotations: tool.annotations,
+          linksConfigurationApp: entities.get(tool.entity)?.elicitOnCreate !== undefined,
+        });
+      }),
+    });
   }
-  const languages = ["en", "nl"];
   const addressable = new Set<string>();
   for (const [name, entries] of generic) {
     const operation = entries[0]!.operation;
-    const branches: GenericToolBranch[] = entries.map((tool) => ({
-      entity: tool.entity,
-      title: titles.get(tool.entity) ?? tool.entity,
-      inputSchema: tool.inputSchema,
-    }));
-    for (const branch of branches) addressable.add(branch.entity);
+    for (const tool of entries) addressable.add(tool.entity);
     sizes.push({
       name,
-      bytes: Math.max(...languages.map((language) => advertisedToolBytes({
-        name,
-        ...genericToolText(operation, branches, ENTITY_CATALOG_URI, language),
-        inputSchema: compactGenericInputSchema(operation, branches, language),
-        outputSchema: entries.every((tool) => tool.outputSchema) ? entries[0]!.outputSchema : undefined,
-        annotations: entries[0]!.annotations,
-      }))),
+      bytes: largest((language) =>
+        advertisedGenericTool({
+          name,
+          operation,
+          branches: entries.map((tool) => ({
+            entity: tool.entity,
+            title: titleIn(tool.entity, language),
+            inputSchema: tool.inputSchema,
+          })),
+          entityCatalogUri: ENTITY_CATALOG_URI,
+          outputSchema: entries.every((tool) => tool.outputSchema) ? entries[0]!.outputSchema : undefined,
+          annotations: entries[0]!.annotations,
+          linksConfigurationApp: entries.some((tool) => entities.get(tool.entity)?.elicitOnCreate !== undefined),
+          locale: language,
+        })),
     });
   }
   if (addressable.size > 0) {
     sizes.push({
       name: GENERIC_DESCRIBE_TOOL_NAME,
-      bytes: Math.max(...languages.map((language) =>
-        advertisedToolBytes(describeToolDefinition([...addressable], language)))),
+      bytes: largest((language) => describeToolDefinition([...addressable], language)),
     });
   }
   if (input.projection === "dedicated") {
@@ -2268,6 +2291,14 @@ export function buildMcpCatalog(
           .map((operation) => operation.key),
       ],
       connectorTools,
+      canonicalTexts: new Map(
+        opted.flatMap((input) =>
+          Object.values(input.contract.entityOperations).map((operation) => [
+            operation.id,
+            { name: operation.name, description: operation.description },
+          ]),
+        ),
+      ),
     }),
   );
 

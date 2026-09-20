@@ -350,3 +350,45 @@ export function describeToolDefinition(entities: readonly string[], locale?: str
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   };
 }
+
+/** What one generic tool is advertised with, once its per-entity branches are settled for the session. */
+export type GenericToolAdvertisement = {
+  name: string;
+  operation: GenericToolOperation;
+  branches: readonly GenericToolBranch[];
+  entityCatalogUri: string;
+  /** The canonical envelope, when every entity behind the tool advertises one. */
+  outputSchema?: JsonObject | undefined;
+  annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  /** Whether a create links the private configuration app (an entity elicits, on an https origin). */
+  linksConfigurationApp: boolean;
+  locale?: string | undefined;
+};
+
+/**
+ * The listed generic tool: compact schema, localized text, the title
+ * mirrored into the annotations, the app link on a create that elicits.
+ * The runtime lists it with this; the compiler measures it with this.
+ */
+export function advertisedGenericTool(tool: GenericToolAdvertisement): {
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: JsonObject;
+  outputSchema?: JsonObject;
+  annotations: { title: string; readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  _meta?: Record<string, unknown>;
+} {
+  const text = genericToolText(tool.operation, tool.branches, tool.entityCatalogUri, tool.locale);
+  return {
+    name: tool.name,
+    title: text.title,
+    description: text.description,
+    inputSchema: compactGenericInputSchema(tool.operation, tool.branches, tool.locale),
+    ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+    annotations: { title: text.title, ...tool.annotations },
+    ...(tool.operation === "create" && tool.linksConfigurationApp
+      ? { _meta: { ui: { resourceUri: "ui://openshapeforge/configuration" } } }
+      : {}),
+  };
+}

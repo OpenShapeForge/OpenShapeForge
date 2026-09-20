@@ -74,11 +74,7 @@ export const DATA_ACQUISITION_GUIDANCE =
  * order above lives once in the server's `instructions` rather than being
  * repeated on every tool.
  */
-export const DATA_ACQUISITION_TOOL_FOOTER =
-  " Filling this in: derive values from existing records, defaults and " +
-  "server-issued fields before asking; propose one complete draft rather " +
-  "than asking field-by-field. See this server's instructions for the full " +
-  "order.";
+export { DATA_ACQUISITION_TOOL_FOOTER } from "@openshapeforge/operations";
 
 /** One entity this session can reach, in the words the deployment authored for it. */
 export type VocabularyEntry = {

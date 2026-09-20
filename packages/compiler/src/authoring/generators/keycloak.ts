@@ -60,7 +60,7 @@ import {
   type KeycloakRequiredActionExport,
 } from "./keycloak-passkeys.js";
 
-const DEFAULT_REALM_NAME = "openshapeforge";
+export const DEFAULT_REALM_NAME = "openshapeforge";
 
 /**
  * The compiler-owned directory every realm export is written under. Registered

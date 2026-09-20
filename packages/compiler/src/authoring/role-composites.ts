@@ -25,7 +25,8 @@
  *   Member = { realm: role } | { client: clientId, role }
  * Direct members only (the API walks transitively), sorted for determinism.
  */
-import type { KeycloakRealmArtifact } from "./generators/keycloak.js";
+import { DEFAULT_REALM_NAME, type KeycloakRealmArtifact } from "./generators/keycloak.js";
+import type { AuthorizationConfigFile } from "./types/authoring.js";
 
 export const ROLE_COMPOSITES_PATH = "apps/api/src/generated/compiler/role-composites.json";
 
@@ -101,20 +102,39 @@ export function renderRoleComposites(composites: RoleCompositesByRealm): string 
 }
 
 /**
- * Every role name the generated realms declare — realm roles and every
- * client's roles, composites included — read from the realm exports so it
- * is exactly what Keycloak will know, entity- and Operation-derived roles
- * included. What an audience or another authored role reference is checked
- * against.
+ * Every role name ONE generated realm declares — its realm roles and every
+ * client's roles, composites included — read from the realm export so it is
+ * exactly what Keycloak will know, entity- and Operation-derived roles
+ * included. Scoped to a realm on purpose: a tenant session never holds a
+ * control-realm role, so a control-only role (`platform-operator`) must not
+ * validate as the audience of a tenant tool, or the tool is listed to nobody
+ * that can execute it. Unknown realm: an empty set, so every reference is
+ * refused rather than silently admitted.
  */
-export function realmRoleNames(realms: readonly KeycloakRealmArtifact[]): Set<string> {
+export function realmRoleNames(
+  realms: readonly KeycloakRealmArtifact[],
+  realmName: string,
+): Set<string> {
   const names = new Set<string>();
   for (const artifact of realms) {
     const realm = JSON.parse(artifact.contents) as RealmExport;
+    if (realm.realm !== realmName) continue;
     for (const role of realm.roles?.realm ?? []) if (role.name) names.add(role.name);
     for (const roles of Object.values(realm.roles?.client ?? {})) {
       for (const role of roles) if (role.name) names.add(role.name);
     }
   }
   return names;
+}
+
+/**
+ * The realm that serves the tenant API and its derived tools: the authored
+ * realm that names the client entity-derived roles land on. The generator
+ * defaults its name to "openshapeforge" when the file does not state one.
+ */
+export function tenantRealmName(configs: readonly AuthorizationConfigFile[]): string {
+  const tenant = configs.find(
+    (config) => config.keycloak?.entityRoleClient ?? config.keycloak?.client,
+  );
+  return tenant?.realm?.name ?? DEFAULT_REALM_NAME;
 }

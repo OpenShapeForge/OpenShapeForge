@@ -3,7 +3,7 @@
  * API role: fastify server hosting the GraphQL endpoint at /api/graphql.
  *
  * Trimmed from the full apps/api service — the metrics route, erp document
- * routes, messaging/whatsapp webhooks, workflow node bridges, realtime dirty
+ * routes, messaging/whatsapp webhooks, realtime dirty
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";

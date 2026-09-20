@@ -110,7 +110,7 @@ export function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env
  * order is deterministic.
  *
  * Derived rather than listed because a compiler PLUGIN contributes schemas the
- * core has never heard of — the workflow plugin owns `workflow` — and a
+ * core has never heard of — a workflow plugin owns `workflow` — and a
  * hardcoded list silently withholds every grant from them. The database is
  * loud about it (`permission denied for schema workflow`), but only once
  * something actually connects as the restricted role, and the migration and

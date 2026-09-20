@@ -3,7 +3,6 @@ import type { EntityManifestEntry } from "@/compiler/entity-manifest";
 import { ENTITY_LIST_PAGE_SIZE, mapConnectionRows } from "@/components/entity/entity-list-rows";
 import { buildGeneratedListFilter } from "@/components/entity/generated-list-filter";
 import { resolveEntityLoadErrorMessage } from "@/components/entity/entity-page-errors";
-import { fetchActiveActions } from "@/features/entity-actions/lib/fetch-active-actions";
 import { getSingleSearchParamValue } from "./search-state";
 import { naturalPersonWorkspaceHeaderQuery } from "./natural-person-header";
 import type { WorkspaceListData, WorkspaceSearchParams } from "./types";
@@ -91,7 +90,7 @@ export async function loadWorkspaceList({
   }
 }
 
-export async function loadWorkspaceDetailAndActions({
+export async function loadWorkspaceDetail({
   entry,
   config,
   selectedId,
@@ -106,14 +105,12 @@ export async function loadWorkspaceDetailAndActions({
 }): Promise<{
   detailLoadError: string | null;
   entity: Record<string, unknown> | null;
-  activeActions: any[];
 }> {
   let detailLoadError: string | null = null;
   let entity: Record<string, unknown> | null = null;
-  let activeActions: any[] = [];
 
   if (!selectedId) {
-    return { detailLoadError, entity, activeActions };
+    return { detailLoadError, entity };
   }
 
   try {
@@ -126,13 +123,7 @@ export async function loadWorkspaceDetailAndActions({
     detailLoadError = resolveEntityLoadErrorMessage(error, lang);
   }
 
-  try {
-    activeActions = await fetchActiveActions(entry.entityType, selectedId);
-  } catch {
-    activeActions = [];
-  }
-
-  return { detailLoadError, entity, activeActions };
+  return { detailLoadError, entity };
 }
 
 export { resolveListSort };

@@ -14,8 +14,8 @@ import type { EntityPageConfigBundle } from "./generators/app.js";
 import { normalizeKeycloakRoleName } from "./generators/keycloak.js";
 import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
-import type { CoreEntity, ViewDefinition } from "./types.js";
-import { generateWebContractModules } from "./generators/web-contract.js";
+import type { ViewDefinition } from "./types.js";
+import { generateWebContractModules, type ComposedEntity } from "./generators/web-contract.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
 import { buildWebManifest, renderWebManifest, type WebStandaloneOperationsInput } from "./web-manifest.js";
 
@@ -374,12 +374,12 @@ export async function generateAuthoringUiArtifacts(
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
-  const coreEntities: CoreEntity[] = [];
+  const composedEntities: ComposedEntity[] = [];
 
   for (const entityName of entityNames) {
     const loaded = loadEntity(authoringDir, entityName);
     const contract = compile(loaded);
-    coreEntities.push(loaded.coreEntity);
+    composedEntities.push({ entity: loaded.coreEntity, profiles: loaded.profiles });
     compiled.push({
       name: entityName,
       contract,
@@ -500,7 +500,7 @@ export async function generateAuthoringUiArtifacts(
 
   // The renderer's contract modules: the web app types every rendered field
   // against these rather than importing the compiler package.
-  for (const [name, contents] of generateWebContractModules(authoringDir, coreEntities)) {
+  for (const [name, contents] of generateWebContractModules(authoringDir, composedEntities)) {
     generatedFiles.set(`generated/web/compiler/${name}`, contents);
   }
 

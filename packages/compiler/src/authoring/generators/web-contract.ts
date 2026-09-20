@@ -17,8 +17,9 @@ import { parse as parseYaml } from "yaml";
 import { buildCrud } from "../compiler/crud.js";
 import { pluralize, uncapitalize } from "../compiler/helpers.js";
 import { graphqlOperationActions } from "../entity-model.js";
+import { withBaseTypes } from "../entity-fields.js";
 import { loadOsfTypes } from "../loader.js";
-import type { CoreEntity, Field } from "../types.js";
+import type { CoreEntity, EntityProfile, Field, OsfTypeDefinition } from "../types.js";
 import { buildWebFieldContractSource } from "./web-field-contract.js";
 
 const CANONICAL_DIR = join(import.meta.dirname, "../canonical");
@@ -93,12 +94,16 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
  * YAML they came from, and the identity aliases the compiler derives per
  * entity, limited to the entities a picker can list.
  */
-function loadCategorizedOsfTypes(authoringDir: string, listableSlugs: ReadonlySet<string>): CategorizedOsfTypes {
+function loadCategorizedOsfTypes(
+  osfTypes: Record<string, OsfTypeDefinition>,
+  authoringDir: string,
+  listableSlugs: ReadonlySet<string>,
+): CategorizedOsfTypes {
   const core: Record<string, unknown> = {};
   const context: Record<string, unknown> = {};
   const entityIds: Record<string, unknown> = {};
 
-  for (const [key, definition] of Object.entries(loadOsfTypes(authoringDir))) {
+  for (const [key, definition] of Object.entries(osfTypes)) {
     if (definition.kind !== "entityId") continue;
     if (definition.entity && !listableSlugs.has(toKebabCase(definition.entity))) continue;
     entityIds[key] = enrichEntityIdOsfType(definition);
@@ -300,15 +305,31 @@ function pickerField(field: Field): Field {
 /** The tenant column is the fence, not a value anyone selects. */
 const isTenantField = (field: Field) => field.key === "tenantId" || field.osfType === "tenantId";
 
+/** An entity as a host composes it: the core entity and its context partials. */
+export type ComposedEntity = { entity: CoreEntity; profiles: readonly EntityProfile[] };
+
+/**
+ * The context-complete field set of an entity: its own normalized fields
+ * followed by every context partial's, each with its base type derived.
+ */
+export function composedEntityFields({ entity, profiles }: ComposedEntity, osfTypes: Record<string, OsfTypeDefinition>): Field[] {
+  const own = new Set(entity.fields.map((field) => field.key));
+  const partial = profiles.flatMap((profile) =>
+    withBaseTypes(profile.fields ?? [], osfTypes, `${entity.entity}[${profile.profile}]`, { entityReferences: "normalizedLater" })
+      .filter((field) => !own.has(field.key)));
+  return [...entity.fields, ...partial].filter((field) => !isTenantField(field));
+}
+
 /**
  * Every entity's readable fields, keyed by entity name, for the renderer's
- * entity-field variable source (label rules, condition builders). Nested
- * shapes come along; the tenant field does not.
+ * entity-field variable source (label rules, condition builders). Context
+ * partials' fields belong to the entity a host sees, so they come along;
+ * nested shapes do too; the tenant field does not.
  */
-function entityFieldsModule(entities: readonly CoreEntity[]): string {
+function entityFieldsModule(entities: readonly ComposedEntity[], osfTypes: Record<string, OsfTypeDefinition>): string {
   const byEntity: Record<string, Field[]> = {};
-  for (const entity of [...entities].sort((left, right) => left.entity.localeCompare(right.entity))) {
-    byEntity[entity.entity] = entity.fields.filter((field) => !isTenantField(field)).map(pickerField);
+  for (const composed of [...entities].sort((left, right) => left.entity.entity.localeCompare(right.entity.entity))) {
+    byEntity[composed.entity.entity] = composedEntityFields(composed, osfTypes).map(pickerField);
   }
   return generatedModule("packages/compiler/config/authoring/entities/**/*.yaml", [
     'import type { Field } from "./field-contract";',
@@ -323,9 +344,11 @@ function entityFieldsModule(entities: readonly CoreEntity[]): string {
  * Every module of the renderer contract, keyed by file name; the caller
  * places them under the web app's generated compiler directory.
  */
-export function generateWebContractModules(authoringDir: string, entities: readonly CoreEntity[]): Map<string, string> {
+export function generateWebContractModules(authoringDir: string, composed: readonly ComposedEntity[]): Map<string, string> {
+  const entities = composed.map(({ entity }) => entity);
+  const osfTypes = loadOsfTypes(authoringDir);
   const registry = buildCoreEntityGraphqlRegistry(entities);
-  const categorized = loadCategorizedOsfTypes(authoringDir, new Set(Object.keys(registry)));
+  const categorized = loadCategorizedOsfTypes(osfTypes, authoringDir, new Set(Object.keys(registry)));
   const files = new Map<string, string>([
     ["field-contract.ts", buildWebFieldContractSource()],
     ["component-defaults.ts", componentDefaultsModule(authoringDir)],
@@ -333,7 +356,7 @@ export function generateWebContractModules(authoringDir: string, entities: reado
     ["canonical-condition.ts", canonicalConditionModule()],
     ["core-entity-graphql-registry.ts", graphqlRegistryModule(registry)],
     ["osf-type-lookups.ts", lookupsModule(buildLookupManifest(categorized))],
-    ["entity-fields.ts", entityFieldsModule(entities)],
+    ["entity-fields.ts", entityFieldsModule(composed, osfTypes)],
   ]);
   for (const [name, contents] of osfTypeModules(categorized)) files.set(name, contents);
   return files;

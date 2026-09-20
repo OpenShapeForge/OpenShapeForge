@@ -30,7 +30,7 @@ export type SettleJobResult =
 
 const RETRY_BASE_MS = 30_000;
 const RETRY_CAP_MS = 60 * 60 * 1_000;
-/** A dead-letter or unknown outcome keeps the last 2 KiB of a message, like the workflow queue. */
+/** A dead-letter or unknown outcome keeps the last 2 KiB of a message, so a stack trace cannot bloat the row. */
 const MAX_ERROR_MESSAGE = 2_000;
 
 /**

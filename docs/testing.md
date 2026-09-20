@@ -8,7 +8,7 @@ so coverage extends to new entities automatically.
 ```sh
 bun run check:authoring-local   # authoring catalog compiles deterministically
 bun run check:generated         # artifacts fresh + deterministic, no orphans
-bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
+bun run check:ts-nocheck        # compiler @ts-nocheck baseline does not grow
 bun run typecheck:compiler && bun run typecheck:api
 bun run test:compiler           # compiler unit tests (bun test packages/compiler)
 bun run test:web                # apps/web pure modules (after generate)

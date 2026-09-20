@@ -17,7 +17,6 @@ pluralLabels:
   nl: Zaakstapsjablonen
 domains:
   - cases
-  - workflow
 authorization:
   roles:
     read:
@@ -241,9 +240,9 @@ fields:
       nl: Acties
     description:
       en: Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required,
-        startMode, and task or workflow configuration.
-      nl: Geordende inline actiesjablonen voor deze stap. Elke actie heeft een stabiele sleutel, volgnummer, type,
-        verplichting, startmodus en taak- of workflowconfiguratie.
+        startMode, and the configuration of its kind, such as a task template.
+      nl: Geordende inline actiesjablonen voor deze zaakstap. Elke actie heeft een stabiele sleutel, volgnummer, soort,
+        verplichting, startmodus en de configuratie van dat soort, zoals een taaksjabloon.
     persisted:
       column: actions
       storageClass: core

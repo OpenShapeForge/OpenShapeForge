@@ -11002,30 +11002,6 @@
           }
         },
         {
-          "key": "processStepId",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Legacy process step ID",
-            "nl": "Legacy processtap-ID"
-          },
-          "description": {
-            "en": "Optional legacy bridge to the older process-step row while the runtime migrates to process-owned actions.",
-            "nl": "Optionele legacy-koppeling naar de oudere processtaprij terwijl de runtime migreert naar proces-acties."
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "process_step_id",
-            "storageClass": "core"
-          },
-          "osfType": "ProcessStep",
-          "relationship": {
-            "ownership": "reference"
-          }
-        },
-        {
           "key": "actionKey",
           "osfType": "string",
           "required": true,
@@ -11121,23 +11097,6 @@
             "referentieGroep": "CASESTEPACTIONSTATUS"
           },
           "osfType": "referenceDataCode"
-        },
-        {
-          "key": "workflowInstanceId",
-          "osfType": "string",
-          "required": false,
-          "readOnly": true,
-          "label": {
-            "en": "Workflow instance",
-            "nl": "Workflowinstantie"
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "workflow_instance_id",
-            "storageClass": "core"
-          }
         },
         {
           "key": "taskTemplate",
@@ -11572,8 +11531,8 @@
             "nl": "Acties"
           },
           "description": {
-            "en": "Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required, startMode, and task or workflow configuration.",
-            "nl": "Geordende inline actiesjablonen voor deze stap. Elke actie heeft een stabiele sleutel, volgnummer, type, verplichting, startmodus en taak- of workflowconfiguratie."
+            "en": "Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required, startMode, and the configuration of its kind, such as a task template.",
+            "nl": "Geordende inline actiesjablonen voor deze zaakstap. Elke actie heeft een stabiele sleutel, volgnummer, soort, verplichting, startmodus en de configuratie van dat soort, zoals een taaksjabloon."
           },
           "persisted": {
             "column": "actions",
@@ -28010,19 +27969,6 @@
           }
         },
         {
-          "key": "caseStepActions",
-          "label": {
-            "en": "Case step actions",
-            "nl": "Zaakstapacties"
-          },
-          "osfType": "CaseStepAction",
-          "cardinality": "collection",
-          "relationship": {
-            "inverse": "processStepId",
-            "ownership": "reference"
-          }
-        },
-        {
           "key": "nextSteps",
           "label": {
             "en": "Next steps",
@@ -42594,7 +42540,7 @@
       ]
     },
     "CASESTEPACTIONKIND": {
-      "description": "Kerncodetabel voor typen acties binnen een zaakstap.",
+      "description": "Kerncodetabel voor soorten acties binnen een zaakstap; een plugin kan soorten toevoegen.",
       "items": [
         {
           "value": "task",
@@ -42602,14 +42548,6 @@
             "nl": "Taak",
             "en": "Task",
             "fr": "Tâche"
-          }
-        },
-        {
-          "value": "workflow",
-          "label": {
-            "nl": "Workflow",
-            "en": "Workflow",
-            "fr": "Workflow"
           }
         }
       ]

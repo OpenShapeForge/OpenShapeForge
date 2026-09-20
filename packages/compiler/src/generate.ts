@@ -261,7 +261,7 @@ function groupFunctionForExpand(expand: GroupExpand): string {
  * The second stays because `workerAccess` is a per-role authoring surface, not
  * a per-deployment one. Dropping it would make every worker role in the
  * deployment equivalent: a second plugin's worker, connected as the same
- * PostgreSQL role, would inherit the workflow plugin's queue for free. Keeping
+ * PostgreSQL role, would inherit the first plugin's queue for free. Keeping
  * it as an AND costs one comparison and preserves the distinction the compiler
  * already expresses.
  *

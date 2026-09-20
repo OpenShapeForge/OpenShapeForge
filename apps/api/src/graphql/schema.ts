@@ -4,7 +4,7 @@
  *
  * Composes the compiler-driven generated entity types/resolvers with a JSON
  * scalar and a Health query. The full apps/api service carries a much larger
- * schema (workflow, messaging, erp workspace, identity, realtime); those
+ * schema (messaging, erp workspace, identity, realtime); those
  * domains are intentionally absent here.
  */
 import {

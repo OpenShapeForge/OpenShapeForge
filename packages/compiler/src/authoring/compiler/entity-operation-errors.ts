@@ -13,7 +13,13 @@
  * Statuses follow the runtime's code-to-status table
  * (apps/api/src/connectors/provider-outcome.ts).
  */
-import type { OperationConcurrency, OperationConfirmation } from "@openshapeforge/operations";
+import {
+  ENTITY_RUNTIME_ERRORS,
+  type EntityRuntimeError,
+  type EntityRuntimeErrorSituation,
+  type OperationConcurrency,
+  type OperationConfirmation,
+} from "@openshapeforge/operations";
 import type { CompiledEntityOperation, EntityOperationIntent } from "../types.js";
 
 export type EntityOperationError = NonNullable<CompiledEntityOperation["errors"]>[number];
@@ -23,78 +29,62 @@ export type EntityOperationErrorPolicy = {
   confirmation: OperationConfirmation;
   /** The entity carries record-level permissions the caller may lack. */
   recordPermissions: boolean;
+  /** The create collects a secure input through an interaction adapter. */
+  secureInput?: boolean | undefined;
 };
 
-const error = (status: number, code: string, description: string): EntityOperationError => ({
-  status,
-  code,
-  description,
-});
-
+/**
+ * The situations an entity Operation can meet, each contributing the codes
+ * ENTITY_RUNTIME_ERRORS lists for it. The entity name is worked into the
+ * descriptions a reader sees per Operation.
+ */
 export function deriveEntityOperationErrors(
   entityName: string,
   intent: EntityOperationIntent,
   policy: EntityOperationErrorPolicy,
 ): EntityOperationError[] {
   const reads = intent === "list" || intent === "get";
-  const errors: EntityOperationError[] = [];
-
-  if (intent === "list") {
-    errors.push(error(400, "BAD_USER_INPUT", "Invalid filter, sort, or pagination input."));
-  } else if (!reads) {
-    errors.push(error(400, "BAD_USER_INPUT", "Invalid request body or mutation controls."));
-  }
-  errors.push(error(401, "UNAUTHENTICATED", "Missing or invalid credentials."));
-  errors.push(
-    error(
-      403,
-      "FORBIDDEN",
-      policy.recordPermissions
-        ? `The caller lacks a required ${entityName} role or the record permission.`
-        : `The caller lacks a required ${entityName} role.`,
+  const situations: EntityRuntimeErrorSituation[] = ["session"];
+  if (intent === "list") situations.push("list");
+  if (intent === "get" || intent === "update" || intent === "delete") situations.push("record");
+  if (!reads) situations.push("write");
+  if (intent === "create" || intent === "update") situations.push("values");
+  if (intent === "create" && policy.secureInput) situations.push("secureInput");
+  if (intent === "delete") situations.push("delete");
+  if (policy.concurrency?.version) situations.push("version");
+  if (policy.concurrency?.editLease) situations.push("editLease");
+  if (policy.confirmation.mode !== "none") situations.push("confirmation");
+  if (policy.confirmation.mode === "challenge") situations.push("challenge");
+  return withDeclaredEntityOperationErrors(
+    situations.flatMap((situation) =>
+      ENTITY_RUNTIME_ERRORS[situation].map((error) => ({
+        ...error,
+        description: describe(error, entityName, policy),
+      })),
     ),
+    undefined,
   );
-  if (intent === "get" || intent === "update" || intent === "delete") {
-    errors.push(error(404, "NOT_FOUND", `The ${entityName} does not exist.`));
+}
+
+function describe(
+  error: EntityRuntimeError,
+  entityName: string,
+  policy: EntityOperationErrorPolicy,
+): string {
+  switch (error.code) {
+    case "FORBIDDEN":
+      return policy.recordPermissions
+        ? `The caller lacks a required ${entityName} role or the record permission.`
+        : `The caller lacks a required ${entityName} role.`;
+    case "NOT_FOUND":
+      return `The ${entityName} does not exist or is not visible.`;
+    case "ALREADY_EXISTS":
+      return `A ${entityName} with the same unique values exists.`;
+    case "REFERENCE_IN_USE":
+      return `The ${entityName} is still referenced by other records.`;
+    default:
+      return error.description;
   }
-  if (intent === "create" || intent === "update") {
-    errors.push(
-      error(404, "REFERENCE_NOT_FOUND", "A referenced record does not exist in this tenant."),
-      error(409, "ALREADY_EXISTS", `A ${entityName} with the same unique values exists.`),
-      error(422, "VALIDATION", "The values or mutation controls are invalid."),
-    );
-  }
-  if (intent === "delete") {
-    errors.push(
-      error(409, "REFERENCE_IN_USE", `The ${entityName} is still referenced by other records.`),
-    );
-  }
-  if (policy.concurrency?.version) {
-    errors.push(
-      error(409, "VERSION_CONFLICT", "expectedVersion does not match the current record version."),
-    );
-    if (intent === "delete") {
-      errors.push(error(422, "VALIDATION", "expectedVersion is not a valid record version."));
-    }
-  }
-  if (policy.concurrency?.editLease) {
-    errors.push(
-      error(423, "LOCKED", "Another identity currently holds the record edit lease."),
-      error(409, "LEASE_INVALID", "The edit lease is missing, expired or held by another identity."),
-    );
-  }
-  if (policy.confirmation.mode !== "none") {
-    errors.push(
-      error(428, "CONFIRMATION_REQUIRED", "This Operation requires confirmation controls."),
-    );
-  }
-  if (policy.confirmation.mode === "challenge") {
-    errors.push(
-      error(400, "CONFIRMATION_MISMATCH", "The confirmation answer does not match the challenge."),
-      error(409, "CONFIRMATION_EXPIRED", "The confirmation challenge expired or was already used."),
-    );
-  }
-  return errors;
 }
 
 /**

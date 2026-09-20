@@ -28,7 +28,28 @@ describe("derived entity Operation errors", () => {
     expect(errors).toContain("423 LOCKED");
     expect(errors).toContain("428 CONFIRMATION_REQUIRED");
     expect(errors).toContain("409 REFERENCE_IN_USE");
+    expect(errors).toContain("409 OPERATION_REFUSED");
     expect(errors).not.toContain("400 CONFIRMATION_MISMATCH");
+  });
+
+  test("a challenge declares every way the challenge itself can be refused", () => {
+    const errors = codes(deriveEntityOperationErrors("Widget", "update", {
+      confirmation: {
+        mode: "challenge",
+        challenge: { kind: "type-current-field", field: "name", issuedBy: "server", bindTo: ["subject"], expiresAfter: "PT5M", singleUse: true },
+      },
+      recordPermissions: false,
+    }));
+    for (const code of ["CONFIRMATION_REQUIRED", "CONFIRMATION_MISMATCH", "CONFIRMATION_VALUE_UNAVAILABLE", "CONFIRMATION_ALREADY_USED", "CONFIRMATION_EXPIRED", "CONFIRMATION_STALE"]) {
+      expect(errors.some((entry) => entry.endsWith(` ${code}`))).toBe(true);
+    }
+  });
+
+  test("a create that elicits a secure input declares the interaction it needs", () => {
+    const errors = codes(deriveEntityOperationErrors("Widget", "create", {
+      confirmation: { mode: "none" }, recordPermissions: false, secureInput: true,
+    }));
+    expect(errors).toContain("409 INTERACTION_REQUIRED");
   });
 
   test("a declared error wins over the derived one with the same status and code", () => {

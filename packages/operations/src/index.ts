@@ -109,3 +109,5 @@ export {
 export type { EntityToolAdvertisement } from "./mcp-entity-tool-shape.js";
 export type { ScalarJsonSchema, ScalarProjection, ScalarType } from "./scalar-projection.js";
 export { isScalarType, SCALAR_PROJECTION, SCALAR_TYPES, scalarJsonSchema } from "./scalar-projection.js";
+export type { EntityRuntimeError, EntityRuntimeErrorSituation } from "./entity-runtime-errors.js";
+export { ENTITY_RUNTIME_ERRORS, ENTITY_RUNTIME_ERROR_STATUS } from "./entity-runtime-errors.js";

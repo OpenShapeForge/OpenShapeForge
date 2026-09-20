@@ -116,6 +116,7 @@ function compileOperation(
         concurrency: definition?.concurrency,
         confirmation: definition?.confirmation ?? { mode: "none" },
         recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
+        secureInput: definition?.interaction !== undefined,
       }),
       pluginImplementation ? definition?.errors : undefined,
     ),

@@ -120,6 +120,46 @@ write first persists a running receipt; if its outcome is lost, core returns
 Schema, authorization, version, lease, and confirmation refusals that happen
 before authored effects leave no receipt, so corrected input may reuse the key.
 
+### Derived-tool execution bindings
+
+A plugin that projects stored rows as MCP tools (`executionCompatibility`, or
+an entity `mcp.derivedTools.execution` block) names where the ordered binding
+rows live. Exactly one of these two sources is required; the compiler refuses
+both or neither and names the owner entity:
+
+- **`bindingsField`** — a JSON collection on the owner row. Legitimate when
+  the steps are embedded data, not first-class records.
+- **`bindingsRelation`** — an owned `hasMany` collection on the owner. The
+  compiler resolves the collection's target, checks that the target carries
+  the execution vocabulary (`operationRef` plus `order`, `optional`, `when`,
+  `inputMapping`, `outputMapping`), and projects the target table and parent
+  foreign key into the catalog. The runtime then joins those rows under the
+  caller's session (RLS / tenant scope) and orders them by `order`.
+
+Do not author `bindingsEntity` or `parentRef`: they are inferred from the
+owned collection. The catalog still carries the resolved names so the runtime
+can join without knowing the plugin.
+
+```ts
+executionCompatibility: {
+  version: 1,
+  records: [{
+    entity: "Service",
+    // ...
+    execution: {
+      bindingsRelation: "capabilityBindings", // owned hasMany on Service
+      operationRef: "capabilityId",
+      operationEntity: "Capability",
+      providerRef: "adapterId",
+      providerEntity: "Adapter",
+      connectionEntity: "Connection",
+      connectionProviderRef: "adapterId",
+      connectionValuesField: "configurationValues",
+    },
+  }],
+}
+```
+
 ## The compiler half
 
 ### The contract

@@ -101,11 +101,14 @@ export async function registerEntityOAuthCallbackRoute(
       // The owner is part of the query, not of a scan over the first page:
       // a tenant with more personal connections to one provider than a
       // page holds would otherwise get a second row for the same person.
+      // Ordered by id like selectOAuthConnectionRow, so the row the callback
+      // updates is the row the connect tool and execution select.
       const existing = (
         await listGeneratedEntitiesForTable(db, writeSession, table, {
           limit: 1,
           filter: { [pending.connectionProviderRef]: pending.providerRowId },
           fixedWhere: [{ column: "owner_user_id", value: personalScope ? pending.userId : null }],
+          sort: { field: "id", direction: "asc" },
         })
       ).rows.map((row) => serializeRow(table, row))[0];
       if (existing) {

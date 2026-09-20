@@ -4,6 +4,7 @@
  * dispatch-connect-tool.ts, verbatim, with `continue` spelled as an
  * undefined answer.
  */
+import { selectOAuthConnectionRow } from "./session-connections.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { resolveTemplate } from "./declarative-execution.js";
 import { mintAuthorization, scopesCovered } from "./entity-oauth.js";
@@ -136,8 +137,8 @@ export async function connectProviderStep(
   );
   const existingForScope =
     scope_ === "user"
-      ? connectionRows.find((row) => row.ownerUserId === session.userId)
-      : connectionRows.find((row) => !row.ownerUserId);
+      ? selectOAuthConnectionRow(connectionRows, "user", session.userId)
+      : selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
   const existingValues = (existingForScope?.[
     execution.connectionValuesField
   ] ?? null) as Record<string, unknown> | null;
@@ -160,9 +161,7 @@ export async function connectProviderStep(
     return undefined;
   }
   const reconsent = hasExistingTokens;
-  const tenantConnection = connectionRows.find(
-    (row) => !row.ownerUserId,
-  );
+  const tenantConnection = selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
   const secretScope =
     entityForTable(execution.connectionTable)?.elicitOnCreate
       ?.sourceTable ?? execution.providerTable;

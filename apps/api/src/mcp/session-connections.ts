@@ -65,15 +65,25 @@ export function normalizeConnectionValueRows(
   });
 }
 
-/** The only OAuth connection-row selector used by derived execution. */
+/**
+ * The one connection-row selector: the OAuth callback (through the query's
+ * order), the connect tool and derived execution all pick the same row for a
+ * scope — the caller's own row for `user`, the organization's for `tenant`,
+ * and among several the one with the lowest id by code units, so the choice
+ * is the same on every node and never the database's row order.
+ */
 export function selectOAuthConnectionRow(
   rows: readonly Record<string, unknown>[],
   scope: "user" | "tenant",
   userId: string | null | undefined,
 ): Record<string, unknown> | undefined {
-  return scope === "user"
-    ? rows.find((row) => row.ownerUserId === userId)
-    : rows.find((row) => row.ownerUserId === null || row.ownerUserId === undefined);
+  return rows
+    .filter((row) =>
+      scope === "user"
+        ? row.ownerUserId === userId
+        : row.ownerUserId === null || row.ownerUserId === undefined,
+    )
+    .sort((left, right) => compareCodeUnits(String(left.id ?? ""), String(right.id ?? "")))[0];
 }
 
 /**

@@ -126,9 +126,7 @@ export async function resolvePersonalConnection(
     )
   ) {
     const keyring = elicitedKeyring();
-    const tenantConnection = connectionRows.find(
-      (row) => !row.ownerUserId,
-    );
+    const tenantConnection = selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
     let credentials: ReturnType<typeof readClientCredentials>;
     try {
       credentials = readClientCredentials(
@@ -224,9 +222,7 @@ export async function resolvePersonalConnection(
   // Resolving it HERE keeps the AAD scopes straight: tenant
   // fields decrypt under the elicitation scope, while the merged
   // row executes under the personal scope.
-  const tenantConnectionForPlain = connectionRows.find(
-    (row) => !row.ownerUserId,
-  );
+  const tenantConnectionForPlain = selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
   const tenantUrlSafe = urlSafeConnectionValues(
     tenantConnectionForPlain,
     execution.connectionValuesField,

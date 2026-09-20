@@ -3,48 +3,15 @@ import { GraphQLError } from "graphql";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { resolveSessionContext } from "../auth/identity.js";
 import { HttpError } from "../rest/http-error.js";
-import type {
-  SessionCredential,
-  SessionScope,
-  TrustedSessionContext,
-} from "../auth/trusted-context.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
 /**
  * The session a GraphQL resolver sees: the resolved session itself, arrays
- * copied. Typed as the trusted session so a field the resolver adds (the
- * acting Relation, the issuer) is carried without an edit here.
+ * copied, so a field the resolver establishes (the credential, the scope,
+ * the acting Relation, the issuer) reaches every resolver as REST and MCP
+ * see it.
  */
-export type GraphqlSessionContext = TrustedSessionContext & {
-  tenantId: string | null;
-  userId: string | null;
-  /** Opaque binding to the verified interactive login session, when present. */
-  loginSessionBinding?: string;
-  roles: string[];
-  /** OAuth scopes from a verified bearer or API-key identity. */
-  oauthScopes?: string[];
-  /**
-   * Keycloak group paths from the trusted-context bundle. Empty array when
-   * the caller did not propagate group claims (e.g. legacy callers, bearer
-   * tokens without the group-membership protocol mapper).
-   */
-  groups: string[];
-  /** Active server-derived RelationGroup memberships; never token claims. */
-  relationGroupIds?: readonly string[];
-  /**
-   * Effective access scope resolved upstream (tenant/group/self). Threaded
-   * through to the DB session layer as `DbSessionInput.scope`, which sets the
-   * `app.scope` GUC — without this field `normalizeScope(undefined)` always
-   * yielded "self" and `app.has_scope('tenant')` never fired (F5).
-   * `SessionScope` and `DbSessionScope` are the same "tenant"|"group"|"self".
-   */
-  scope: SessionScope;
-  /**
-   * Which credential authenticated this request. Threaded through so controls
-   * can depend on it rather than on a convention — API key management refuses
-   * an "api-key" session.
-   */
-  credential: SessionCredential;
-};
+export type GraphqlSessionContext = TrustedSessionContext;
 
 export type GraphqlContext = Record<string, unknown> & {
   session: GraphqlSessionContext;

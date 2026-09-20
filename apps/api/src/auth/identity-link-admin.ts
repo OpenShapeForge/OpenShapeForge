@@ -8,6 +8,7 @@
  */
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { UUID_PATTERN } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { actingPartyColumns, actingPartyTable } from "./identity-contract.js";
@@ -15,7 +16,6 @@ import {
   invalidateIdentityLink,
   readLinkRow,
   toState,
-  UUID_PATTERN,
   writeMembershipRoles,
   type IdentityLinkState,
   type SessionInput,
@@ -143,7 +143,9 @@ export async function linkIdentityToRelation(
       throw new HttpError(
         404,
         "IDENTITY_NOT_FOUND",
-        "No identity with that e-mail has signed in to this organization yet.",
+        input.identityId
+          ? "No identity with that id has a record in this organization; list_pending_members names the ones that do."
+          : "No identity with that e-mail has signed in to this organization yet; an identity without an e-mail (an integration, a web-only login) is linked by its identityId from list_pending_members.",
       );
     }
     if (identities.rows.length > 1) {
@@ -204,6 +206,48 @@ export type PendingRoleAssignment = {
   /** When this identity first signed in and got JIT-linked (linked_at). */
   firstSignInAt: string;
 };
+
+/**
+ * An identity this organization has recorded but not linked: a person whose
+ * web session made the row before any bearer login named their e-mail, or an
+ * integration's service account, which has no e-mail at all. Named by its
+ * identity id, which is what `link_identity` takes for it.
+ */
+export type UnlinkedIdentity = {
+  identityId: string;
+  displayName: string | null;
+  email: string | null;
+  candidateRelationId: string | null;
+};
+
+export async function listUnlinkedIdentities(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+): Promise<UnlinkedIdentity[]> {
+  if (!(session.roles ?? []).includes(IDENTITY_LINK_ADMIN_ROLE)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      `Listing pending members requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
+    );
+  }
+  return withDbSession(db, session, async (trx) => {
+    const result = await sql<{ identity_id: string; display_name: string | null; email: string | null; candidate_relation_id: string | null }>`
+      select ir.identity_id, i.display_name, i.email, ir.candidate_relation_id
+        from platform.identity_relations ir
+        join platform.identities i on i.id = ir.identity_id
+       where ir.tenant_id = ${session.tenantId}
+         and ir.status = 'pending_confirmation'
+       order by i.created_at asc
+    `.execute(trx);
+    return result.rows.map((row) => ({
+      identityId: row.identity_id,
+      displayName: row.display_name,
+      email: row.email,
+      candidateRelationId: row.candidate_relation_id,
+    }));
+  });
+}
 
 /**
  * Identities in this tenant awaiting a real role — `list_pending_members`:

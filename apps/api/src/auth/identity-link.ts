@@ -76,7 +76,8 @@
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
-import { UUID_PATTERN, withDbSession, type DbSessionInput } from "../db/session.js";
+import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { __resetIdentityLinkCacheForTests, cachedLinkState, invalidateIdentityLink, linkCacheKey, recordLinkWrite, type SessionInput } from "./identity-link-session.js";
 import { HttpError } from "../rest/http-error.js";
 import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
 // This module and ./employee-invitations.ts import each other: an invitation
@@ -90,7 +91,6 @@ import { SessionAuthenticationUnavailableError } from "./session-unavailable.js"
 import {
   insertLinkRow,
   readLinkRow,
-  readLinkRowByIdentity,
   relationsWithEmail,
   toState,
   upsertIdentity,
@@ -233,139 +233,22 @@ export function personNameFromClaims(
 }
 
 // ---------------------------------------------------------------------------
-// Cache and single-flight
+// Single-flight
 //
-// Every request resolves a session, so the link is read once per request
-// without this. Linked and pending states are cached briefly; a change made
-// through this module invalidates its own key, and a change made by another
-// replica shows up within the TTL. Concurrent first requests of one person
-// share one in-flight resolution so the just-in-time path creates one
-// Relation, not one per parallel request.
+// Concurrent first requests of one person share one in-flight resolution so
+// the just-in-time path creates one Relation, not one per parallel request.
+// The cache itself lives in ./identity-link-session.ts, shared with the
+// session-side reads, so a link made on either path is seen by both.
 
-const LINK_CACHE_TTL_MS = 60_000;
-const linkCache = new Map<string, { state: IdentityLinkState; expiresAtMs: number }>();
 const inFlight = new Map<string, Promise<IdentityLinkState | null>>();
 
-function cacheKey(issuer: string, subject: string, tenantId: string): string {
-  return `${issuer}\n${subject}\n${tenantId}`;
-}
-
-export function invalidateIdentityLink(issuer: string, subject: string, tenantId: string): void {
-  const key = cacheKey(issuer, subject, tenantId);
-  linkCache.delete(key);
-  sessionLinkCache.delete(key);
-  bumpGeneration(key);
-}
+export { invalidateIdentityLink, type SessionInput } from "./identity-link-session.js";
 
 /** Test-only. */
 export function __resetIdentityLinkForTests(): void {
-  linkCache.clear();
   inFlight.clear();
-  sessionLinkCache.clear();
-  sessionLinkGeneration.clear();
+  __resetIdentityLinkCacheForTests();
 }
-
-// The session-side cache, keyed like the claims-side one on (issuer, subject,
-// tenant). An invalidation may land while a read is in flight; the read then
-// stores only if the generation it started under is still current, so a
-// stale state cannot be written over the invalidation.
-const sessionLinkCache = new Map<string, { state: IdentityLinkState | null; expiresAtMs: number }>();
-const sessionLinkGeneration = new Map<string, number>();
-
-function generationOf(key: string): number {
-  return sessionLinkGeneration.get(key) ?? 0;
-}
-
-function bumpGeneration(key: string): void {
-  sessionLinkGeneration.set(key, generationOf(key) + 1);
-}
-
-async function cachedSessionLink(
-  key: string,
-  read: () => Promise<IdentityLinkState | null>,
-  what: string,
-): Promise<IdentityLinkState | null> {
-  const cached = sessionLinkCache.get(key);
-  if (cached && cached.expiresAtMs > Date.now()) return cached.state;
-  const generation = generationOf(key);
-  try {
-    const state = await read();
-    if (generationOf(key) === generation) {
-      sessionLinkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
-    }
-    return state;
-  } catch (error) {
-    console.warn(
-      `[auth] ${what} failed; refusing the session (503):`,
-      error instanceof Error ? error.message : String(error),
-    );
-    throw new SessionAuthenticationUnavailableError("The identity link could not be read; try again.");
-  }
-}
-
-/** A tenant or user that is not a uuid can hold no link: the tables key on uuids. */
-function canHoldLink(session: SessionInput): boolean {
-  return UUID_PATTERN.test(session.tenantId) && UUID_PATTERN.test(session.userId);
-}
-
-/**
- * The link state of the identity (issuer, subject) names — for a session
- * that carries no token claims (trusted-context): the same row the bearer
- * path resolves, read under the session's own policies, never created. Null
- * when no linked or pending row exists. A failure to read it is a 503, as
- * on the bearer path: a session that silently acts as nobody would refuse
- * every stamp it should have carried.
- */
-export async function readSessionLink(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  identity: { issuer: string; subject: string },
-): Promise<IdentityLinkState | null> {
-  if (!canHoldLink(session)) return null;
-  return cachedSessionLink(cacheKey(identity.issuer, identity.subject, session.tenantId), async () => {
-    const row = await withDbSession(db, session, (trx) => readLinkRowByIdentity(trx, identity, session.tenantId));
-    return row ? toState(row, identity) : null;
-  }, "Reading the session's identity ↔ Relation link");
-}
-
-/**
- * The link state of a service account (an API key's session): its identity
- * row and an empty pending link are made on first use — under its own
- * session, which is the one the identities policy lets write that subject —
- * exactly as a person's first bearer session does, without the admission
- * question a person faces: a service account is admitted by the key an
- * administrator issued. The pending row is what `link_identity` finds when
- * an administrator makes the integration act as a Relation.
- */
-export async function ensureServiceIdentityLink(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
-  identity: { issuer: string; subject: string },
-  displayName: string,
-): Promise<IdentityLinkState | null> {
-  if (!canHoldLink(session)) return null;
-  return cachedSessionLink(cacheKey(identity.issuer, identity.subject, session.tenantId), () =>
-    withDbSession(db, session, async (trx) => {
-      const identityId = await upsertIdentity(trx, { ...identity, name: displayName }, displayName);
-      const existing = await readLinkRow(trx, identityId, session.tenantId);
-      if (existing) return toState(existing, identity);
-      const inserted = await insertLinkRow(trx, {
-        identityId,
-        tenantId: session.tenantId,
-        status: "pending_confirmation",
-        relationId: null,
-        candidateRelationId: null,
-        linkedBy: null,
-      });
-      const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
-      return row ? toState(row, identity) : null;
-    }), "Recording the service account's identity");
-}
-
-// ---------------------------------------------------------------------------
-// Resolution (just in time)
-
-export type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 
 /**
  * The link state for this session's identity in this tenant, creating it
@@ -384,9 +267,11 @@ export async function resolveIdentityLink(
   session: SessionInput,
   claims: IdentityClaims,
 ): Promise<IdentityLinkState | null> {
-  const key = cacheKey(claims.issuer, claims.subject, session.tenantId);
-  const cached = linkCache.get(key);
-  if (cached && cached.expiresAtMs > Date.now()) return cached.state;
+  const key = linkCacheKey(claims.issuer, claims.subject, session.tenantId);
+  // A cached "no row" is a session-side answer; the bearer path is the one
+  // that makes rows, so only a state that exists short-circuits it.
+  const cached = cachedLinkState(key);
+  if (cached?.state) return cached.state;
 
   const pending = inFlight.get(key);
   if (pending) return pending;
@@ -394,9 +279,10 @@ export async function resolveIdentityLink(
   const work = (async () => {
     try {
       const state = await ensureIdentityLink(db, session, claims);
-      if (state) {
-        linkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
-      }
+      // This path may have written the row (created, admitted, linked): a
+      // write bumps the generation, so a session-side read in flight cannot
+      // store what it saw before.
+      if (state) recordLinkWrite(key, state);
       return state;
     } catch (error) {
       if (error instanceof NotInvitedError) throw error;
@@ -512,7 +398,8 @@ async function ensureIdentityLink(
 // The SQL lives in ./identity-link-store.ts and the explicit-linking and
 // administration half in ./identity-link-admin.ts; both re-exported so every
 // importer keeps one address.
-export { readLinkRow, toState, UUID_PATTERN, writeMembershipRoles, type LinkRow } from "./identity-link-store.js";
+export { readLinkRow, toState, writeMembershipRoles, type LinkRow } from "./identity-link-store.js";
+export { ensureSessionIdentityLink, readSessionLink, type SessionIdentity } from "./identity-link-session.js";
 // The explicit-linking and administration half lives in
 // ./identity-link-admin.ts; re-exported so every importer keeps one address.
 export {
@@ -520,7 +407,9 @@ export {
   identityIdForRelation,
   linkIdentityToRelation,
   listPendingRoleAssignments,
+  listUnlinkedIdentities,
   setMembershipRoles,
   type LinkIdentityInput,
   type PendingRoleAssignment,
+  type UnlinkedIdentity,
 } from "./identity-link-admin.js";

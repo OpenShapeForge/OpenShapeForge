@@ -18,9 +18,6 @@ import {
 } from "./identity-contract.js";
 import type { IdentityClaims, IdentityLinkState, IdentityLinkStatus } from "./identity-link.js";
 
-export const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 export type LinkRow = {
   identity_id: string;
   issuer: string;
@@ -38,7 +35,7 @@ export type LinkRow = {
 export async function upsertIdentity(
   trx: Transaction<DB>,
   claims: IdentityClaims,
-  displayName: string,
+  displayName: string | null,
 ): Promise<string> {
   const result = await sql<{ id: string }>`
     insert into platform.identities (issuer, subject, email, display_name)

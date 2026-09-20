@@ -59,6 +59,47 @@ describe("crudToolCanSucceed", () => {
     }
   });
 
+  it("omits the create of an owner whose owned collection must hold at least one child", () => {
+    const parent = {
+      ...(owner as Record<string, unknown>),
+      source: {
+        graphql: {
+          typeName: "Document",
+          relationships: [
+            {
+              fieldKey: "variants",
+              resolve: "hasMany",
+              target: "DocumentVariant",
+              foreignKey: "document_id",
+              ownership: "owned",
+              cardinality: { min: 1 },
+            },
+          ],
+        },
+      },
+    } as never;
+    const strict = new Map<string, never>([["erp.documents", parent], ["erp.document_variants", child]]);
+    // Named as an entity the manifest has no plugin-backed create for: a
+    // plugin create owns its own contract and is not the generic path.
+    expect(crudToolCanSucceed(tool("create", "Folder", "erp.documents"), strict)).toBe(false);
+    // Without the lower bound the same create is available.
+    expect(crudToolCanSucceed(tool("create", "Folder", "erp.documents"), tables)).toBe(true);
+  });
+
+  it("omits the create of a child whose managed owner key is required", () => {
+    const strictChild = {
+      ...(child as Record<string, unknown>),
+      columns: [
+        { name: "id", type: "uuid" },
+        { name: "document_id", type: "uuid", sourceField: "document", required: true },
+      ],
+    } as never;
+    const strict = new Map<string, never>([["erp.documents", owner], ["erp.document_variants", strictChild]]);
+    expect(crudToolCanSucceed(tool("create", "DocumentVariant", "erp.document_variants"), strict)).toBe(false);
+    // The optional key of the fixture above leaves the child's create available.
+    expect(crudToolCanSucceed(tool("create", "DocumentVariant", "erp.document_variants"), tables)).toBe(true);
+  });
+
   it("omits a tool whose table is missing from the manifest", () => {
     expect(crudToolCanSucceed(tool("delete", "Ghost", "erp.ghosts"), tables)).toBe(false);
   });

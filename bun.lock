@@ -151,6 +151,13 @@
         "@openshapeforge/plugin-runtime": "workspace:*",
       },
     },
+    "examples/plugins/notebook": {
+      "name": "@openshapeforge/example-plugin-notebook",
+      "version": "0.1.0",
+      "dependencies": {
+        "kysely": "^0.29.4",
+      },
+    },
     "packages/auth": {
       "name": "@openshapeforge/auth",
       "version": "0.1.0",
@@ -539,6 +546,8 @@
     "@openshapeforge/connector-twinfield": ["@openshapeforge/connector-twinfield@workspace:connectors/twinfield"],
 
     "@openshapeforge/documents": ["@openshapeforge/documents@workspace:packages/documents"],
+
+    "@openshapeforge/example-plugin-notebook": ["@openshapeforge/example-plugin-notebook@workspace:examples/plugins/notebook"],
 
     "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
 

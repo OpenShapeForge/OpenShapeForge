@@ -195,7 +195,7 @@ describe("generated MCP server", () => {
 
     const called = await callTool(notebookWriter, "osf_execute_operation", {
       operationId: "notebook.import",
-      input: { notebookId: randomUUID() },
+      input: { notebookId: randomUUID(), body: "imported" },
       idempotencyKey: randomUUID(),
     });
     // The Operation is keyed with no external effect, so the runtime records

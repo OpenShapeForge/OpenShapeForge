@@ -7,8 +7,9 @@
  * NodeNext specifiers), so what it needs of the compiled contract is projected
  * into plain TypeScript modules: the field-contract types, the resolved osf
  * type catalog split by origin, the remote-lookup manifest, the component
- * defaults, the field authoring profiles, the canonical condition types and
- * the GraphQL names an entity reference picker needs to list records.
+ * defaults, the field authoring profiles, the canonical condition types, the
+ * GraphQL names an entity reference picker needs to list records, and every
+ * entity's readable fields for the variable and condition pickers.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ import { buildCrud } from "../compiler/crud.js";
 import { pluralize, uncapitalize } from "../compiler/helpers.js";
 import { graphqlOperationActions } from "../entity-model.js";
 import { loadOsfTypes } from "../loader.js";
-import type { CoreEntity } from "../types.js";
+import type { CoreEntity, Field } from "../types.js";
 import { buildWebFieldContractSource } from "./web-field-contract.js";
 
 const CANONICAL_DIR = join(import.meta.dirname, "../canonical");
@@ -281,6 +282,43 @@ function canonicalConditionModule(): string {
   return generatedModule("packages/compiler/src/authoring/canonical/canonical-condition.ts", [body.trimEnd()]);
 }
 
+/** What a picker needs of a field: its key, type, shape and options — not its storage or policy. */
+function pickerField(field: Field): Field {
+  return {
+    key: field.key,
+    osfType: field.osfType,
+    ...(field.baseType ? { baseType: field.baseType } : {}),
+    ...(field.cardinality ? { cardinality: field.cardinality } : {}),
+    label: field.label,
+    ...(field.validation ? { validation: field.validation } : {}),
+    ...(field.options ? { options: field.options } : {}),
+    ...(field.children?.length ? { children: field.children.map(pickerField) } : {}),
+    ...(field.item ? { item: pickerField(field.item) } : {}),
+  } as Field;
+}
+
+/** The tenant column is the fence, not a value anyone selects. */
+const isTenantField = (field: Field) => field.key === "tenantId" || field.osfType === "tenantId";
+
+/**
+ * Every entity's readable fields, keyed by entity name, for the renderer's
+ * entity-field variable source (label rules, condition builders). Nested
+ * shapes come along; the tenant field does not.
+ */
+function entityFieldsModule(entities: readonly CoreEntity[]): string {
+  const byEntity: Record<string, Field[]> = {};
+  for (const entity of [...entities].sort((left, right) => left.entity.localeCompare(right.entity))) {
+    byEntity[entity.entity] = entity.fields.filter((field) => !isTenantField(field)).map(pickerField);
+  }
+  return generatedModule("packages/compiler/config/authoring/entities/**/*.yaml", [
+    'import type { Field } from "./field-contract";',
+    "",
+    "// A JSON.parse string rather than an object literal, so TypeScript does not",
+    "// infer a multi-megabyte literal type during `tsc --noEmit`.",
+    `export const COMPILER_ENTITY_FIELDS = JSON.parse(${JSON.stringify(JSON.stringify(byEntity))}) as Record<string, Field[]>;`,
+  ]);
+}
+
 /**
  * Every module of the renderer contract, keyed by file name; the caller
  * places them under the web app's generated compiler directory.
@@ -295,6 +333,7 @@ export function generateWebContractModules(authoringDir: string, entities: reado
     ["canonical-condition.ts", canonicalConditionModule()],
     ["core-entity-graphql-registry.ts", graphqlRegistryModule(registry)],
     ["osf-type-lookups.ts", lookupsModule(buildLookupManifest(categorized))],
+    ["entity-fields.ts", entityFieldsModule(entities)],
   ]);
   for (const [name, contents] of osfTypeModules(categorized)) files.set(name, contents);
   return files;

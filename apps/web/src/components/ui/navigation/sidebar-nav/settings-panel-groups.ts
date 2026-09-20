@@ -161,10 +161,6 @@ export const DEFAULT_SETTINGS_PANEL_GROUPS: SettingsPanelGroup[] = [
     ],
   },
   {
-    label: "Workflow",
-    items: [{ label: "Workflow Viewer", href: "/workflow-instances" }],
-  },
-  {
     label: "Messaging",
     items: [
       { label: "WhatsApp-instellingen", href: "/messaging/whatsapp" },

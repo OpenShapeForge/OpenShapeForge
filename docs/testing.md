@@ -11,6 +11,7 @@ bun run check:generated         # artifacts fresh + deterministic, no orphans
 bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
 bun run typecheck:compiler && bun run typecheck:api
 bun run test:compiler           # compiler unit tests (bun test packages/compiler)
+bun run test:web                # apps/web pure modules (after generate)
 bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres,
                                 # shared across worktrees — see below)
 bun run test:e2e:report         # same suite + HTML report

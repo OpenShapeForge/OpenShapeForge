@@ -45,6 +45,7 @@ bun run typecheck:compiler
 bun run typecheck:api
 bun run typecheck:examples  # the shipped example plugins/connectors
 bun run test:compiler
+bun run test:web                # apps/web pure modules (after generate)
 bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres up)
 bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/db)
 ```

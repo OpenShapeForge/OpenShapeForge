@@ -100,9 +100,9 @@ issues, pull requests, and review comments. Act accordingly.
   its `kind`, and the gate asserts the per-schema file count so a schema cannot
   quietly stop covering its corpus.
 - **Decisions live in the plugin's web half; `apps/web` holds assembly.**
-  `apps/web` has no test runner: anything that could be wrong goes to the
-  plugin that owns the screen, where that plugin's own runner reaches it, and
-  the source comments saying so stay as they are.
+  `bun run test:web` covers `apps/web`'s pure modules (field rendering, the
+  variable sources); anything a plugin's screen decides goes to that plugin,
+  where its own runner reaches it.
 - Prefer extension over modification: authoring overlays
   (`kind: entityPatch`) and compiler plugins exist so behavior can be
   changed without forking base files. See `docs/layers.md` and

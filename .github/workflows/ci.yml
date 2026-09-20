@@ -106,6 +106,12 @@ jobs:
       - name: Web GraphQL transport tests
         run: bun run test:web-transport
 
+      # apps/web's pure modules (field rendering, the entity-field variable
+      # source over the generated contract). After generate, which emits what
+      # they import.
+      - name: Web unit tests
+        run: bun run test:web
+
       # The connector packages carry unit tests that `test:compiler` (scoped
       # to packages/compiler) and the db/e2e jobs (which reach them only
       # through the API) never ran. A test that never executes is worse than

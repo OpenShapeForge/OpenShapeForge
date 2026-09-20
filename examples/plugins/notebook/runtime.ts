@@ -6,8 +6,15 @@
  * Everything runs inside the caller's tenant session, so the notebook table's
  * policy fences the rows: another tenant's notebook is NOT_FOUND rather than
  * FORBIDDEN, and the handler never carries a tenant id of its own.
+ *
+ * The write is one conditional UPDATE: it lands only on a notebook that is
+ * not published, so a publish that commits first leaves this import with no
+ * row to change and it answers CONFLICT, and a publish that commits later
+ * versions the imported body. `updated_at` moves with the body, because it
+ * is the version token every optimistic entity write compares against.
  */
 import { randomUUID } from "node:crypto";
+import { sql } from "kysely";
 import { withDbSession } from "../../../apps/api/src/db/session.js";
 import type {
   ModuleOperationErrorResult,
@@ -25,19 +32,24 @@ const importNotebook: ModuleOperationHandler = async (input, { db, session }) =>
     return failure(401, "UNAUTHENTICATED", "An authenticated tenant session is required.");
   }
   const notebookId = String(input.notebookId);
-  const body = typeof input.body === "string" ? input.body : "";
+  const body = String(input.body);
   return withDbSession(db, session, async (trx) => {
-    const notebook = await trx
+    const imported = await trx
+      .updateTable("notebook.notebooks")
+      .set({ body, updated_at: sql`now()` })
+      .where("id", "=", notebookId)
+      .where("lifecycle_status", "<>", "published")
+      .returning("id")
+      .executeTakeFirst();
+    if (imported) return { value: { status: "accepted", importId: randomUUID(), notebookId } };
+    const existing = await trx
       .selectFrom("notebook.notebooks")
-      .select("lifecycle_status")
+      .select("id")
       .where("id", "=", notebookId)
       .executeTakeFirst();
-    if (!notebook) return failure(404, "NOT_FOUND", "No notebook with that id exists in this tenant.");
-    if (notebook.lifecycle_status === "published") {
-      return failure(409, "CONFLICT", "A published notebook takes no import; publish a new draft first.");
-    }
-    await trx.updateTable("notebook.notebooks").set({ body }).where("id", "=", notebookId).execute();
-    return { value: { status: "accepted", importId: randomUUID(), notebookId } };
+    return existing
+      ? failure(409, "CONFLICT", "A published notebook takes no import; publish a new draft first.")
+      : failure(404, "NOT_FOUND", "No notebook with that id exists in this tenant.");
   });
 };
 

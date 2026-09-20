@@ -36,7 +36,6 @@ import type { RendererCustomFieldRenderProps } from "@/features/renderer/compone
 import { RendererDefaultsProvider } from "@/features/renderer/components/renderer-defaults-context";
 import { translateRendererText } from "@/features/renderer/runtime/field-utils";
 import { useFormVariableSuggestions } from "@/features/renderer/runtime/use-form-variable-suggestions";
-import { useEntityFieldSuggestionsVersion } from "@/features/renderer/runtime/use-entity-field-suggestions-version";
 import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2";
 import type { Field as CompilerField } from "@/generated/compiler/field-contract";
 
@@ -243,13 +242,6 @@ export function Renderer({
     rendererForm.structuredValues,
     lang,
   );
-
-  // Re-render when the entity field-suggestion cache fills. The legacy
-  // `suggestions.sourceField` path and the workflow trigger-condition builder
-  // read suggestions synchronously via getEntityFieldSuggestions /
-  // getEntityConditionFilterFields, which fetch on a cache miss; this
-  // subscription surfaces the loaded data without each call site needing a hook.
-  useEntityFieldSuggestionsVersion();
 
   const surface = definition.presentation?.surface;
   // Inspector / workspace / embedded surfaces show fields in a narrow column

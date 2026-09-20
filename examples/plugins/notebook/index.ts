@@ -34,7 +34,7 @@ const plugin: CompilerPlugin = {
       handler: "importNotebook",
       inputSchema: {
         type: "object",
-        required: ["notebookId", "idempotencyKey"],
+        required: ["notebookId", "body", "idempotencyKey"],
         properties: {
           notebookId: { type: "string", format: "uuid" },
           body: { type: "string" },

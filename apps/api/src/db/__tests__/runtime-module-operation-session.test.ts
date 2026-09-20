@@ -462,7 +462,7 @@ describe("canonical operation database sessions", () => {
                 ...Object.fromEntries(signedHeaders),
                 [operation.idempotency.header!.toLowerCase()]: "rest-request",
               },
-              payload: {},
+              payload: { body: "imported" },
             });
             expect(response.statusCode).toBe(
               operation.transports.rest.response.status ?? 200,
@@ -484,6 +484,7 @@ describe("canonical operation database sessions", () => {
             variableValues: {
               input: {
                 notebookId,
+                body: "imported",
                 idempotencyKey: "graphql-request",
               },
             },
@@ -511,6 +512,7 @@ describe("canonical operation database sessions", () => {
               name: operation.transports.mcp.name!,
               arguments: {
                 notebookId,
+                body: "imported",
                 idempotencyKey: "mcp-request",
               },
             });

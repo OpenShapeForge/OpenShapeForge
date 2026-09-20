@@ -349,6 +349,7 @@ describe("canonical operation runtime", () => {
     }, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
     const result = await invokeOperation(bound, {
       notebookId: "22222222-2222-4222-8222-222222222222",
+      body: "imported",
       idempotencyKey: "webhook-1",
     }, { transport: "graphql", session });
     expect(result.value).toMatchObject({ status: "accepted" });
@@ -393,6 +394,7 @@ describe("canonical operation runtime", () => {
     try {
       await expect(invokeOperation(bound, {
         notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "database-session",
       }, {
         db,
@@ -485,6 +487,7 @@ describe("canonical operation runtime", () => {
       const result = await platform.withActiveInvocation(invocation, () =>
         invokeOperation(bound, {
           notebookId: "44444444-4444-4444-8444-444444444444",
+          body: "imported",
           idempotencyKey: "mcp-binding",
         }, {
           db,
@@ -524,6 +527,7 @@ describe("canonical operation runtime", () => {
     try {
       await expect(invokeOperation(bound, {
         notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "fabricated-platform",
       }, {
         db,
@@ -578,6 +582,7 @@ describe("canonical operation runtime", () => {
     try {
       await expect(invokeOperation(outer, {
         notebookId: "44444444-4444-4444-8444-444444444444",
+        body: "imported",
         idempotencyKey: "nested-authority",
       }, {
         db,
@@ -688,6 +693,7 @@ describe("canonical operation runtime", () => {
     }]).get("notebook.import")!;
     await expect(invokeOperation(bound, {
       notebookId: "22222222-2222-4222-8222-222222222222",
+      body: "imported",
       idempotencyKey: "webhook-2",
     }, { transport: "rest", session })).rejects.toMatchObject({ status: 500 });
   });
@@ -1368,6 +1374,7 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   };
   const input = {
     notebookId: "22222222-2222-4222-8222-222222222222",
+    body: "imported",
     idempotencyKey: "declared-error",
   };
 
@@ -1439,7 +1446,7 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
       }),
     },
   };
-  const input = { notebookId: value.notebookId, idempotencyKey: "content-blocks" };
+  const input = { notebookId: value.notebookId, body: "imported", idempotencyKey: "content-blocks" };
 
   // Other transports keep the canonical value; the projection is not validated
   // against the output schema and does not leak into it.
@@ -1526,7 +1533,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       operations: [{
         operation: { id: "notebook.import", intent: "invoke" },
         inputSchema: expect.objectContaining({
-          required: ["notebookId", "idempotencyKey"],
+          required: ["notebookId", "body", "idempotencyKey"],
         }),
       }],
     });
@@ -1535,7 +1542,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       name: "osf_execute_operation",
       arguments: {
         operationId: "notebook.import",
-        input: { notebookId: value.notebookId },
+        input: { notebookId: value.notebookId, body: "imported" },
         idempotencyKey: "generic-attempt",
       },
     });
@@ -1546,6 +1553,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       name: "notebook_import",
       arguments: {
         notebookId: value.notebookId,
+        body: "imported",
         idempotencyKey: "named-attempt",
       },
     });
@@ -1555,6 +1563,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       {
         input: {
           notebookId: value.notebookId,
+          body: "imported",
           idempotencyKey: "generic-attempt",
         },
         userId: session.userId,
@@ -1562,6 +1571,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       {
         input: {
           notebookId: value.notebookId,
+          body: "imported",
           idempotencyKey: "named-attempt",
         },
         userId: session.userId,
@@ -1598,7 +1608,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
         name: "osf_execute_operation",
         arguments: {
           operationId: "notebook.import",
-          input: { notebookId: value.notebookId },
+          input: { notebookId: value.notebookId, body: "imported" },
           idempotencyKey: "denied-attempt",
         },
       });
@@ -1854,7 +1864,7 @@ test("rejects an MCP projection that is not well-formed content", async () => {
     importId: "11111111-1111-4111-8111-111111111111",
     notebookId: "22222222-2222-4222-8222-222222222222",
   };
-  const input = { notebookId: value.notebookId, idempotencyKey: "bad-blocks" };
+  const input = { notebookId: value.notebookId, body: "imported", idempotencyKey: "bad-blocks" };
   for (const mcp of [
     { content: [] },
     { content: [{ type: "image", mimeType: "image/png" }] },

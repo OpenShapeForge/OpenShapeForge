@@ -153,10 +153,13 @@ describe("transport and authentication", () => {
       undefined,
       { bearer: "not-a-real-token" },
     );
-    // Fails closed either way: a configured verifier refuses the token, a
-    // deployment without one refuses to guess (503) — never nobody.
-    const code = result.errors?.[0]?.extensions?.code;
-    expect(code === "UNAUTHENTICATED" || code === "AUTHENTICATION_UNAVAILABLE").toBe(true);
+    // Fails closed either way, and the door has a name: a configured verifier
+    // refuses the token (401), a deployment without one cannot decide (503) —
+    // never nobody. The harness configures a verifier only with a JWKS URI.
+    const expected = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI
+      ? "UNAUTHENTICATED"
+      : "AUTHENTICATION_UNAVAILABLE";
+    expect(result.errors?.[0]?.extensions?.code).toBe(expected);
     expect(result.data ?? null).toBeNull();
   });
 

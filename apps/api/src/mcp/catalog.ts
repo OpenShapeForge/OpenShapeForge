@@ -275,6 +275,41 @@ export const catalogDiscoveryTools: CatalogDiscoveryTool[] =
 export const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 export const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
+/**
+ * The public names of the derived-tool helpers (connect, dry run, set
+ * preferences). A plugin's own Operation of the same name is implemented BY
+ * the helper (the execution compatibility bridge), so a call under such a
+ * name — direct, or the bridge's own dispatch — goes to the helper, never to
+ * the Operation handler that would only bridge back here.
+ */
+export function isDerivedHelperToolName(name: string): boolean {
+  return catalogDerivedTools.some(
+    (entry) =>
+      entry.connect?.name === name ||
+      entry.dryRun?.name === name ||
+      entry.personalization?.set.name === name,
+  );
+}
+
+/**
+ * Test-only: add derived entries the way the compiled catalogue would carry
+ * them, as copies, and hand back the exact removal. The catalogue is a
+ * module-level import, so a test that needs an entry the reference
+ * catalogue lacks registers it here rather than editing the import.
+ */
+export function __withDerivedToolEntriesForTests(
+  entries: readonly DerivedToolsCatalogEntry[],
+): () => void {
+  const added = entries.map((entry) => structuredClone(entry));
+  catalogDerivedTools.push(...added);
+  return () => {
+    for (const entry of added) {
+      const index = catalogDerivedTools.indexOf(entry);
+      if (index >= 0) catalogDerivedTools.splice(index, 1);
+    }
+  };
+}
+
 export const compatibilityOperations = catalog.executionCompatibility ?? [];
 export const compatibilityOperationByKey = new Map(
   compatibilityOperations.map((entry) => [entry.operation, entry]),
@@ -282,6 +317,18 @@ export const compatibilityOperationByKey = new Map(
 export const compatibilityToolNames = new Set(
   compatibilityOperations.map((entry) => entry.toolName),
 );
+
+/** Test-only: register one execution compatibility bridge the way the catalogue would carry it. */
+export function __registerExecutionCompatibilityForTests(
+  entry: NonNullable<Catalog["executionCompatibility"]>[number],
+): () => void {
+  compatibilityOperationByKey.set(entry.operation, entry);
+  compatibilityToolNames.add(entry.toolName);
+  return () => {
+    compatibilityOperationByKey.delete(entry.operation);
+    compatibilityToolNames.delete(entry.toolName);
+  };
+}
 
 
 export function hasMcpSurface(

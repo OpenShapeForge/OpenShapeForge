@@ -1105,14 +1105,22 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
   for (const tool of editLeaseToolDefinitions(input.editLeaseOperationIds ?? [])) {
     sizes.push(sizeOf(tool.name, tool));
   }
+  // The helpers of every derived entry, compatibility entries included: the
+  // runtime lists them under their public names. In the dedicated projection
+  // a compatibility helper's Operation is listed (and counted above) instead,
+  // so it is skipped exactly when that Operation tool is in the listing.
+  const operationCounted = new Set(
+    input.projection === "dedicated" ? input.operationTools.map((tool) => tool.name) : [],
+  );
   for (const entry of input.derivedTools ?? []) {
-    if (entry.compatibility) continue;
-    if (entry.connect) sizes.push(sizeOf(entry.connect.name, connectHelperTool(entry.connect.name, entry.connect.description)));
-    if (entry.personalization) {
+    if (entry.connect && !operationCounted.has(entry.connect.name)) {
+      sizes.push(sizeOf(entry.connect.name, connectHelperTool(entry.connect.name, entry.connect.description)));
+    }
+    if (entry.personalization && !operationCounted.has(entry.personalization.set.name)) {
       sizes.push(sizeOf(entry.personalization.set.name,
         personalizationHelperTool(entry.personalization.set.name, entry.personalization.set.description)));
     }
-    if (entry.dryRun && entry.execution) {
+    if (entry.dryRun && entry.execution && !operationCounted.has(entry.dryRun.name)) {
       sizes.push(sizeOf(entry.dryRun.name, dryRunHelperTool(entry.dryRun.name, entry.dryRun.description)));
     }
   }
@@ -1580,7 +1588,12 @@ export function buildMcpCatalog(
    * by an assistant, unlike the discovery/test/record dispatch bridges named
    * by internalCompatibilityName above — so they keep the Operation's own
    * projected mcp tool name (e.g. connect_service) instead of an
-   * osf_internal_* name that never reaches an assistant's tool list.
+   * osf_internal_* name that never reaches an assistant's tool list. They
+   * are still execution compatibility: the plugin's canonical Operation is
+   * implemented by the core tool of that name, so the Operation runtime
+   * (osf_execute_operation, the plugin's own handler) must find the bridge
+   * under the Operation key or it answers that the host Operation is
+   * unavailable.
    */
   const publicCompatibilityName = (
     plugin: string,
@@ -1593,7 +1606,24 @@ export function buildMcpCatalog(
           `must enable its own mcp transport to be assistant-callable.`,
       );
     }
-    return operation.transports.mcp.name;
+    const name = operation.transports.mcp.name;
+    const existing = compatibilityNames.get(operation.key);
+    if (existing !== undefined) {
+      if (existing !== name) {
+        throw new Error(
+          `Execution compatibility name collision for canonical Operation "${operation.key}".`,
+        );
+      }
+      return name;
+    }
+    compatibilityNames.set(operation.key, name);
+    executionCompatibilityOperations.push({
+      plugin,
+      operation: operation.key,
+      toolName: name,
+      auth: operation.auth,
+    });
+    return name;
   };
   const compatibilityEntity = (plugin: string, entityName: string) => {
     const found = inputs.find(
@@ -1913,6 +1943,19 @@ export function buildMcpCatalog(
   }
 
   const dedicatedCount = tools.filter((tool) => !generic.has(tool.entity)).length;
+  // The helpers of compatibility entries are listed under their public
+  // names in the searchable projection; in the dedicated projection their
+  // Operation tools carry the same names, so they are counted once: with
+  // the dedicated tools here, and taken out of the Operation count below.
+  const compatibilityHelperNames = new Set(
+    derivedTools
+      .filter((entry) => entry.compatibility)
+      .flatMap((entry) => [
+        ...(entry.connect ? [entry.connect.name] : []),
+        ...(entry.personalization ? [entry.personalization.set.name] : []),
+        ...(entry.dryRun && entry.execution ? [entry.dryRun.name] : []),
+      ]),
+  );
   const operationTools = operations
     .filter((operation) => operation.transports.mcp.enabled)
     .map((operation) => ({
@@ -1934,8 +1977,10 @@ export function buildMcpCatalog(
   // control server lists its own dedicated tools regardless, so control
   // Operations are excluded from the count (see operationMcpServer).
   const locallyRequiredProjection = selectOperationToolProjection(
-    dedicatedCount,
-    operationTools.filter((tool) => operationMcpServer(tool) === "tenant").length,
+    dedicatedCount + compatibilityHelperNames.size,
+    operationTools.filter(
+      (tool) => operationMcpServer(tool) === "tenant" && !compatibilityHelperNames.has(tool.name),
+    ).length,
   );
   const operationToolProjection =
     locallyRequiredProjection === "searchable" ||

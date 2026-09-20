@@ -13,7 +13,7 @@ import {
 } from "@openshapeforge/operations";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import { ListToolsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
-import { sessionInAudience } from "./derived-tools.js";
+import { derivedHelperAvailable } from "./derived-tools.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { productName } from "../config/product-name.js";
 import { EDIT_LEASE_TOOL_NAMES, editLeaseToolsForOperationIds } from "./edit-lease-tools.js";
@@ -28,11 +28,7 @@ import type { McpToolCallSource } from "../modules/contract.js";
 import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules/mcp-hooks.js";
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { searchableOperationTools } from "./operation-search.js";
-import {
-  type ProjectedRuntimeOperationTool,
-  catalog,
-  projectedDerivedTools,
-} from "./catalog.js";
+import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
 import {
   discoveryToolsForSession,
@@ -78,6 +74,33 @@ export function createToolListing(scope: ServerScope) {
       )
     : [];
 
+  /**
+   * The derived-tool helpers (connect, preferences, dry run) are assistant-
+   * callable under their public names for every derived entry — the ones a
+   * plugin registers through execution compatibility too, whose Service
+   * rows the Operation runtime projects but whose helpers only this listing
+   * can offer. Whether THIS session gets one is derivedHelperAvailable, the
+   * rule the dispatch applies too. In the dedicated projection a plugin's
+   * own Operation tool of the same name is listed to the session instead
+   * (when it would be: handler loaded and roles held) and dispatches to the
+   * same handler, so the helper is skipped exactly then.
+   */
+  const dedicatedOperationListed = (key: string | undefined) => {
+    if (operationToolProjection.mode !== "dedicated" || key === undefined) return false;
+    const tool = catalog.operationTools.find((candidate) => candidate.key === key);
+    return tool !== undefined && operations.has(key) && operationMayInvoke(tool, session);
+  };
+  const helperEntries = catalogDerivedTools.map((entry) => {
+    if (!entry.compatibility) return entry;
+    return {
+      ...entry,
+      ...(dedicatedOperationListed(entry.compatibility.connectOperation) ? { connect: undefined } : {}),
+      ...(dedicatedOperationListed(entry.compatibility.dryRunOperation) ? { dryRun: undefined } : {}),
+      ...(dedicatedOperationListed(entry.compatibility.setPreferenceOperation)
+        ? { personalization: undefined }
+        : {}),
+    };
+  });
   const listedTools = async (): Promise<ListedTool[]> => {
     const runtimeOperationTools = await runtimeProviderToolsForSession();
     const coreTools = [
@@ -92,28 +115,16 @@ export function createToolListing(scope: ServerScope) {
         : []),
       ...crudToolsForSession(session, tables, locale),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
-      ...projectedDerivedTools
-        .filter(
-          (entry) => entry.connect && sessionInAudience(entry, session.roles),
-        )
+      ...helperEntries
+        .filter((entry) => derivedHelperAvailable(entry, "connect", session.roles))
         .map((entry) => connectHelperTool(entry.connect!.name, entry.connect!.description)),
-      ...projectedDerivedTools
-        .filter(
-          (entry) =>
-            entry.personalization && sessionInAudience(entry, session.roles),
-        )
+      ...helperEntries
+        .filter((entry) => derivedHelperAvailable(entry, "personalization", session.roles))
         .map((entry) =>
           personalizationHelperTool(entry.personalization!.set.name, entry.personalization!.set.description),
         ),
-      ...projectedDerivedTools
-        .filter(
-          (entry) =>
-            entry.dryRun &&
-            entry.execution &&
-            entry.dryRun.roles.some((role) =>
-              (session.roles ?? []).includes(role),
-            ),
-        )
+      ...helperEntries
+        .filter((entry) => derivedHelperAvailable(entry, "dryRun", session.roles))
         .map((entry) => dryRunHelperTool(entry.dryRun!.name, entry.dryRun!.description)),
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),

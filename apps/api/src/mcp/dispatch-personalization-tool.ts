@@ -5,7 +5,7 @@ import {
   listGeneratedEntitiesForTable,
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
-import { deriveToolName, sessionInAudience } from "./derived-tools.js";
+import { deriveToolName, derivedHelperAvailable } from "./derived-tools.js";
 import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
@@ -34,7 +34,7 @@ export async function personalizationToolCall(
   );
   if (personalizationEntry) {
     if (
-      !sessionInAudience(personalizationEntry, session.roles) ||
+      !derivedHelperAvailable(personalizationEntry, "personalization", session.roles) ||
       !personalizationEntry.personalization
     ) {
       return failed(

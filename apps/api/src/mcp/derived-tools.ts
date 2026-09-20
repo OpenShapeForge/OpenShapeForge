@@ -232,11 +232,46 @@ export function inputSchemaFromStoredFields(
 
 /** Whether the session's roles admit it to this derived-tools audience. */
 export function sessionInAudience(
-  entry: Pick<DerivedToolsCatalogEntry, "roles">,
+  entry: { roles: readonly string[] },
   sessionRoles: readonly string[] | null | undefined,
 ): boolean {
   const granted = new Set(sessionRoles ?? []);
   return entry.roles.some((role) => granted.has(role));
+}
+
+/**
+ * Whether a session may use one of an entry's helpers — the one rule the
+ * listing and the dispatch share, so a helper is never listed to a session
+ * that cannot call it or reachable by one it is not listed to. Connect and
+ * dry run need the entry's audience AND the helper's own roles (the roles
+ * of the Operation behind it: a user of the tools is not thereby allowed to
+ * sign the organization in or to preview compositions); the preferences
+ * helper has no roles of its own and follows the audience. Connect and dry
+ * run also need an execution contract to act on.
+ */
+export function derivedHelperAvailable(
+  entry: {
+    roles: readonly string[];
+    connect?: DerivedToolsCatalogEntry["connect"] | undefined;
+    dryRun?: DerivedToolsCatalogEntry["dryRun"] | undefined;
+    personalization?: DerivedToolsCatalogEntry["personalization"] | undefined;
+    execution?: DerivedToolsCatalogEntry["execution"] | undefined;
+  },
+  helper: "connect" | "dryRun" | "personalization",
+  sessionRoles: readonly string[] | null | undefined,
+): boolean {
+  if (!sessionInAudience(entry, sessionRoles)) return false;
+  const granted = new Set(sessionRoles ?? []);
+  switch (helper) {
+    case "connect":
+      return entry.connect !== undefined && entry.execution !== undefined &&
+        entry.connect.roles.some((role) => granted.has(role));
+    case "dryRun":
+      return entry.dryRun !== undefined && entry.execution !== undefined &&
+        entry.dryRun.roles.some((role) => granted.has(role));
+    case "personalization":
+      return entry.personalization !== undefined;
+  }
 }
 
 /**

@@ -9,13 +9,13 @@ import { connectProviderStep } from "./dispatch-connect-provider.js";
 import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { withDbSession } from "../db/session.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
-import { deriveToolName, derivedToolsFromRows, sessionInAudience } from "./derived-tools.js";
+import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
-import { runtimeBindingReader, runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowByFilter } from "./session-connections.js";
 import { type DirectCallScope } from "./tool-dispatch.js";
 import { failed, ok } from "./tool-results.js";
 export async function connectToolCall(
@@ -34,10 +34,9 @@ export async function connectToolCall(
     (entry) => entry.connect?.name === name,
   );
   if (connectEntry) {
-    if (
-      !sessionInAudience(connectEntry, session.roles) ||
-      !connectEntry.execution
-    ) {
+    // The listing's rule (derivedHelperAvailable): audience AND the connect
+    // Operation's roles — a user of the tools may not sign the organization in.
+    if (!derivedHelperAvailable(connectEntry, "connect", session.roles) || !connectEntry.execution) {
       return failed(
         new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
       );

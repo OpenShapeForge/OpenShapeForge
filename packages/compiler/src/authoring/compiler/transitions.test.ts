@@ -7,7 +7,7 @@ import { compile } from "./index.js";
 import { withStatusTransitions } from "./transitions.js";
 import { buildWebManifest } from "../web-manifest.js";
 import { collectAuthoredEntityPluginOperations } from "../../generate-operations.js";
-import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./transitions.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./transitions-corpus.js";
 
 const authoringDir = join(import.meta.dir, "../../../config/authoring");
 const milestone = loadEntity(authoringDir, "agreement-milestone");

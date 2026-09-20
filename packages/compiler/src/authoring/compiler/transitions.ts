@@ -29,6 +29,7 @@ import { compiledFieldSchemaWithoutDefinitions } from "../../field-json-schema.j
 import { resolveModelFields } from "./model.js";
 import { deriveTableName } from "./helpers.js";
 import { fieldCardinality } from "./helpers.js";
+import { COMPARABLE_BASE_TYPES } from "./transitions-corpus.js";
 
 export const TRANSITIONS_PLUGIN = "osf-transitions";
 
@@ -211,16 +212,6 @@ function offerClause(status: string, rule: FieldDefinitionTransitionRule): Local
   };
 }
 
-/** Base types a database can compare exactly; an object has no equality worth a refusal. */
-const COMPARABLE_BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime"]);
-
-function valueMatchesBaseType(value: unknown, baseType: string): boolean {
-  if (baseType === "boolean") return typeof value === "boolean";
-  if (baseType === "integer") return typeof value === "number" && Number.isInteger(value);
-  if (baseType === "number") return typeof value === "number" && Number.isFinite(value);
-  return typeof value === "string";
-}
-
 /**
  * `agreesOn` names fields the referenced record must share with this one:
  * the written field must be a single entity reference, and every named field
@@ -236,120 +227,6 @@ function assertAgreesOn(entity: CoreEntity, field: Field, where: string, target:
     const local = fields.get(key);
     if (!local?.persisted || fieldCardinality(local) !== "single" || !COMPARABLE_BASE_TYPES.has(local.baseType ?? "")) {
       fail(entity, field, `${where} agreesOn "${key}", which is not a persisted single comparable field of ${entity.entity}.`);
-    }
-  }
-}
-
-/**
- * The corpus-wide half of `agreesOn`, run by collectAllArtifacts over every
- * compiled entity, core and plugin alike: the referenced entity must carry
- * every named field as a persisted single field of the same base type and
- * column type, so the comparison the runtime issues in SQL is between
- * columns of one type. A rule whose reference no compiled entity answers to
- * is refused, never skipped.
- */
-type AgreementContract = {
-  transitions?: CompiledTransitionField[];
-  model: {
-    fields: ReadonlyArray<{
-      key: string;
-      osfType: string;
-      baseType: string;
-      cardinality: string;
-      options?: { type?: string; items?: Array<{ value: string }> };
-    }>;
-  };
-  storage: { columns: ReadonlyArray<{ field: string; type: string }> };
-  entity: { name: string };
-};
-
-export function assertTransitionAgreements(entities: ReadonlyArray<AgreementContract>): void {
-  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
-  const describe = (contract: AgreementContract, key: string) => {
-    const field = contract.model.fields.find((candidate) => candidate.key === key);
-    const column = contract.storage.columns.find((candidate) => candidate.field === key);
-    return field && column && field.cardinality === "single" ? `${field.baseType} ${column.type}` : undefined;
-  };
-  for (const contract of entities) {
-    for (const status of contract.transitions ?? []) {
-      for (const rule of status.rules) {
-        for (const write of rule.writes ?? []) {
-          if (!write.agreesOn?.length) continue;
-          const reference = contract.model.fields.find((candidate) => candidate.key === write.field);
-          const target = reference && byName.get(reference.osfType);
-          if (!target) throw new Error(`[${contract.entity.name}] ${rule.operation} constrains "${write.field}" with agreesOn, but it references no compiled entity.`);
-          for (const key of write.agreesOn) {
-            const local = describe(contract, key);
-            const remote = describe(target, key);
-            if (!local || !remote || local !== remote) {
-              throw new Error(
-                `[${contract.entity.name}] ${rule.operation} agreesOn "${key}", but ${target.entity.name}.${key} (${remote ?? "absent"}) is not a persisted single field of the same type as ${contract.entity.name}.${key} (${local ?? "absent"}).`,
-              );
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-/**
- * Corpus-wide half of a referenced precondition: `via` must name a compiled
- * entity (core or plugin), and `field` a persisted single field of it. `in`
- * values must match that field's base type and, when it has static options,
- * sit in that set. A reference no compiled entity answers to is refused,
- * never skipped.
- */
-export function assertTransitionReferencedPreconditions(entities: ReadonlyArray<AgreementContract>): void {
-  const byName = new Map(entities.map((contract) => [contract.entity.name, contract]));
-  const describe = (contract: AgreementContract, key: string) => {
-    const field = contract.model.fields.find((candidate) => candidate.key === key);
-    const column = contract.storage.columns.find((candidate) => candidate.field === key);
-    return field && column && field.cardinality === "single" ? field : undefined;
-  };
-  for (const contract of entities) {
-    for (const status of contract.transitions ?? []) {
-      for (const rule of status.rules) {
-        for (const precondition of rule.preconditions ?? []) {
-          if (!precondition.via) continue;
-          const reference = contract.model.fields.find((candidate) => candidate.key === precondition.via);
-          const target = reference && byName.get(reference.osfType);
-          if (!target) {
-            throw new Error(
-              `[${contract.entity.name}] ${rule.operation} precondition via "${precondition.via}" references no compiled entity.`,
-            );
-          }
-          const remote = describe(target, precondition.field);
-          if (!remote) {
-            throw new Error(
-              `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" is not a persisted single field of ${target.entity.name}.`,
-            );
-          }
-          if (!precondition.in?.length) continue;
-          if (!COMPARABLE_BASE_TYPES.has(remote.baseType)) {
-            throw new Error(
-              `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in requires a comparable field, not ${remote.baseType}.`,
-            );
-          }
-          for (const value of precondition.in) {
-            if (!valueMatchesBaseType(value, remote.baseType)) {
-              throw new Error(
-                `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not a ${remote.baseType}.`,
-              );
-            }
-          }
-          const options = remote.options?.type === "static" ? remote.options.items?.map((item) => item.value) : undefined;
-          if (options?.length) {
-            for (const value of precondition.in) {
-              if (!options.includes(String(value))) {
-                throw new Error(
-                  `[${contract.entity.name}] ${rule.operation} precondition "${precondition.via}.${precondition.field}" in value ${JSON.stringify(value)} is not one of the static options.`,
-                );
-              }
-            }
-          }
-        }
-      }
     }
   }
 }

@@ -48,7 +48,7 @@ import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from 
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
-import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions.js";
+import { assertTransitionAgreements, assertTransitionReferencedPreconditions } from "./authoring/compiler/transitions-corpus.js";
 import { withOwnedChildErrors } from "./authoring/compiler/entity-operation-errors.js";
 import {
   auditOperationSurfaceCollisions,

@@ -210,6 +210,18 @@ describe("refreshSessionInRedis", () => {
     expect(calls[0]!.body).toContain("refresh_token=refresh-rotated");
   });
 
+  test("a session gone from Redis is not resurrected from the snapshot", async () => {
+    console.error = () => {};
+    const store = fakeStore();
+    const calls = keycloakResponses({ status: 200, body: {} });
+
+    const result = await refresher(store).refreshSessionInRedis("s1", stored);
+
+    expect(result.error).toBe("RefreshTokenError");
+    expect(calls).toHaveLength(0);
+    expect(store.records.has("s1")).toBe(false);
+  });
+
   test("concurrent callers in one process share a single refresh", async () => {
     console.error = () => {};
     const store = fakeStore({ "s1": stored });

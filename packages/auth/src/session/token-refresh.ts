@@ -299,9 +299,12 @@ export function createTokenRefresh<Extra extends object>(
         // holder that just finished may have rotated the refresh token, and a
         // consumed token would turn a good session into RefreshTokenError.
         const current = await store.getSession(sessionId);
-        if (current?.error) return current;
-        if (current && hasUsableAccessWindow(current)) return current;
-        const refreshed = await doRefreshAccessToken(current ?? stored);
+        // Gone from Redis (signed out elsewhere, or expired) is not a refresh;
+        // writing the snapshot back would resurrect a session that ended.
+        if (!current) return { ...stored, error: "RefreshTokenError" };
+        if (current.error) return current;
+        if (hasUsableAccessWindow(current)) return current;
+        const refreshed = await doRefreshAccessToken(current);
         await store.setSession(sessionId, refreshed);
         return refreshed;
       } finally {

@@ -111,7 +111,7 @@ export function refreshedTenantFields(
   { accessTokenClaims, idTokenClaims }: RefreshedClaims,
   stored: TenantSessionFields,
 ): TenantSessionFields {
-  const tenantId = (accessTokenClaims?.tid as string | undefined) ?? stored.tenantId;
+  const tenantId = parseTenantId(accessTokenClaims) ?? stored.tenantId;
   return {
     tenantId,
     actorType: parseTenantContext(accessTokenClaims, tenantId)

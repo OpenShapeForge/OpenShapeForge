@@ -28,11 +28,13 @@ import {
   nextMarker,
   pluginCreateInput,
   contractSample,
+  referencingRows,
   schemaSample,
   tables,
   tablesByName,
   untrackRow,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
+import { isOperationWrittenColumn } from "../../operations/entity/write-policy.js";
 import {
   acknowledgementRequired,
   challengeAnswerFor,
@@ -890,7 +892,10 @@ describe("generated MCP server", () => {
       expect(toolError(created.body)).toBeUndefined();
       if (canonical) {
         expectCanonicalToolOutput(table, "create", created.body);
-        expect(createdEnvelope.operations.every((offer: any) => offer.available)).toBe(true);
+        // A fresh record offers every Operation, except a status transition
+        // whose `from` the initial state is not: that one is listed as
+        // unavailable with INVALID_STATE, which is the offer doing its job.
+        expect(createdEnvelope.operations.every((offer: any) => offer.available || offer.error?.code === "INVALID_STATE")).toBe(true);
       } else {
         expect(createdEnvelope).not.toHaveProperty("data");
         expect(createdEnvelope).not.toHaveProperty("operations");
@@ -951,10 +956,13 @@ describe("generated MCP server", () => {
         deleted = await call(tenantA, "delete", { id: row.id, ...deleteControls });
       }
 
-      if (!isEntityBackedCreate(table)) {
-        // A plugin-backed create makes companion records the entity delete is
-        // authored to refuse while they exist (a document and its first
-        // version); removing them is the plugin's own contract.
+      // What the delete must do depends on what the create actually left
+      // behind, read from the database: a record whose create also made rows
+      // that reference it (a document and its first version) is refused by
+      // the schema's on-delete rule while they exist, and removing them is the
+      // create's own contract; any other record is removed. A refusal without
+      // such rows, or a removal despite them, is a finding.
+      if ((await referencingRows(table, row.id, tenantA)).length > 0) {
         expect(toolError(deleted.body)).toMatch(/REFERENCE_IN_USE/);
         return;
       }
@@ -1086,11 +1094,40 @@ describe("generated MCP server", () => {
      * plugin-backed create advertises its own contract, so only the update
      * and filter halves apply to it.
      */
-    const relationshipKeys = table.columns.filter((column) => {
+    const referenceColumns = table.columns.filter((column) => {
       if (column.primaryKey || column.required) return false;
       const target = foreignKeyTargets(table).get(column.name);
       return target !== undefined && tablesByName.has(target);
     });
+    // A reference an Operation writes (`writtenBy`: the invoice a milestone's
+    // `invoice` transition names) is nobody's to set through create or
+    // update; it is still a filter, and the refusal names its writer.
+    const relationshipKeys = referenceColumns.filter((column) => !isOperationWrittenColumn(column));
+    for (const column of referenceColumns.filter((column) => isOperationWrittenColumn(column))) {
+      const key = fieldName(column);
+      const writers = column.writtenBy!.map((writer) => writer.operation);
+
+      test(`${prefix}: ${key} is written by ${writers.join(", ")} only — a filter, never create or update input`, async () => {
+        const { body } = await rpc(tenantA, "tools/list");
+        const tools = body.result.tools as { name: string; inputSchema: any }[];
+        expect(advertisedSchema(tools, table, "list").properties.filter.properties[key]).toMatchObject({ type: "string", format: "uuid" });
+        expect(advertisedSchema(tools, table, "update").properties.values.properties).not.toHaveProperty(key);
+        if (isEntityBackedCreate(table)) expect(advertisedSchema(tools, table, "create").properties).not.toHaveProperty(key);
+
+        const refusedCreate = await call(tenantA, "create", { ...(await createArgs(table, tenantA)), [key]: randomUUID() });
+        expect(toolError(refusedCreate.body)).toMatch(new RegExp(key));
+        const created = await call(tenantA, "create", await createArgs(table, tenantA));
+        expect(toolError(created.body)).toBeUndefined();
+        const row = toolPayload(created.body);
+        createdRows.push({ table, id: row.id, identity: tenantA });
+        expect(row[key] ?? null).toBeNull();
+
+        const refusedUpdate = await call(tenantA, "update", { id: row.id, values: { [key]: randomUUID() } });
+        expect(toolError(refusedUpdate.body)).toMatch(new RegExp(key));
+        for (const writer of writers) expect(toolError(refusedUpdate.body)).toContain(writer);
+        expect(toolPayload((await call(tenantA, "list", { filter: { [key]: randomUUID() } })).body).items).toEqual([]);
+      });
+    }
 
     for (const column of relationshipKeys) {
       const key = fieldName(column);

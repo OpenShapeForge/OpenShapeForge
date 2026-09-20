@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword } from "./schema-annotations.js";
+export { operationChoiceKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword } from "./schema-annotations.js";
 
 export type {
   OperationEnvelope,

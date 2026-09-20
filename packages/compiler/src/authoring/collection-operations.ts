@@ -99,10 +99,15 @@ export function materializeCollectionOperations(
             if (valueField.entityValue?.parameterBindings) {
               const properties = valueSchema.properties as Record<string, unknown>;
               for (const reference of valueDefinition.model.fields.filter(field => field.relationship?.target)) {
-                properties[reference.key] = { anyOf: [properties[reference.key], {
-                  type: "object", additionalProperties: false, required: ["parameter"],
-                  properties: { parameter: { type: "string", pattern: "^[a-z][A-Za-z0-9]{0,127}$" } },
-                }] };
+                // The wrapper is what a form reads: it carries the property's type and reference like the branch it wraps.
+                const original = properties[reference.key] as Record<string, unknown>;
+                properties[reference.key] = {
+                  ...Object.fromEntries(Object.entries(original).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n" || key === "title")),
+                  anyOf: [original, {
+                    type: "object", additionalProperties: false, required: ["parameter"],
+                    properties: { parameter: { type: "string", pattern: "^[a-z][A-Za-z0-9]{0,127}$" } },
+                  }],
+                };
               }
             }
             branches.push({ if: { properties: { [discriminator]: { const: name } }, required: [discriminator] }, then: { properties: { [valueField.key]: valueSchema } } });

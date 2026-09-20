@@ -305,6 +305,7 @@ export function applyCollectionShape(
 ): JsonObject {
   const { description, ...items } = scalar;
   const array: JsonObject = { type: "array", items };
+  if (items["x-osf-type"] !== undefined) array["x-osf-type"] = items["x-osf-type"];
   if (description !== undefined) array.description = description;
   return applyCollectionBounds(array, field);
 }
@@ -497,6 +498,8 @@ function addCompiledFieldMetadata(
   if (title) {
     schema.title = title;
   }
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  if (field.osfType) schema["x-osf-type"] = field.osfType;
   if (enumeration) {
     schema.enum = typedEnumValues(enumeration.values, sourceBaseType(field));
   }
@@ -572,9 +575,13 @@ export function compiledFieldSchemaWithoutDefinitions(
           outerItemSchema,
           compiledFieldSchemaWithoutDefinitions(field.item, referentiedata, options),
         ],
+        // The row node names the row's type whether the item is explicit or not.
+        ...(field.item.osfType ? { "x-osf-type": field.item.osfType } : {}),
       }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
+  // The collection is a use of the same type as its items: a form resolves the property, not the row.
+  if (field.osfType) array["x-osf-type"] = field.osfType;
   if (uiCopy !== undefined) array["x-osf-i18n"] = uiCopy;
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   buildOperationSchemas,
   connectorFieldSchema,
+  connectorObjectSchema,
 } from "./connector-schemas.js";
 import { constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition } from "../types/field-definition.js";
@@ -96,6 +97,21 @@ describe("connector field schemas", () => {
       description: "Object keys",
       minItems: 1,
     });
+  });
+
+  it("honours object cardinality: exact bounds make a bounded array and a lower bound of one makes the field required", () => {
+    expect(connectorFieldSchema({ key: "tags", osfType: "string", cardinality: { min: 1, max: 5 } } as FieldDefinition)).toEqual({
+      type: "array", items: { type: "string" }, minItems: 1, maxItems: 5,
+    });
+    expect(connectorFieldSchema({ key: "note", osfType: "string", cardinality: { min: 0, max: 1 } } as FieldDefinition)).toEqual({ type: "string" });
+    const input = connectorObjectSchema([
+      { key: "tags", osfType: "string", cardinality: { min: 1, max: "unbounded" } },
+      { key: "note", osfType: "string", cardinality: { min: 1, max: 1 } },
+      { key: "extra", osfType: "string", cardinality: { max: 3 } },
+    ] as FieldDefinition[]);
+    expect(input.required).toEqual(["tags", "note"]);
+    expect(() => connectorFieldSchema({ key: "bad", osfType: "string", cardinality: { min: 2, max: 1 } } as FieldDefinition))
+      .toThrow("Connector field bad: invalid cardinality bounds.");
   });
 
   it("projects a catalog type that declares its schema through that schema, bundled at the root", () => {

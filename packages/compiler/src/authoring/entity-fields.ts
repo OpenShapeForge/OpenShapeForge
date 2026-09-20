@@ -159,12 +159,40 @@ export function deriveProviderOsfTypes(
   return result;
 }
 
-/** Profile fields are not normalized as an entity; they still need their base type. */
-export function withBaseTypes(fields: readonly Field[], catalog: Record<string, OsfTypeDefinition>): Field[] {
+/**
+ * Profile (partial) fields extend an entity with columns on a profile table.
+ * They resolve their base type, catalog validation and cardinality the way
+ * entity fields do, but they never go through relationship normalization:
+ * a profile table carries no foreign keys, so a field that names an entity
+ * would silently compile to a bare text column. It is refused; the
+ * relationship belongs on the entity, added with an entityPatch. The one
+ * exception is an entity-value definition, whose profile fields are its own
+ * fields and are normalized as such by the compiler.
+ */
+export function withBaseTypes(
+  fields: readonly Field[],
+  catalog: Record<string, OsfTypeDefinition>,
+  path = "",
+  options: { entityReferences?: "refuse" | "normalizedLater" } = {},
+): Field[] {
   return fields.map((field) => {
+    const origin = path ? `${path}.${field.key}` : field.key;
+    const semantic = osfTypeDefinitionOf(field.osfType, catalog);
     const baseType = field.baseType ?? resolveBaseType(field.osfType, catalog);
-    if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
-    return { ...field, baseType };
+    if (!baseType) throw new Error(`${origin}: unknown osfType ${field.osfType}.`);
+    const references = semantic?.kind === "entity" || semantic?.kind === "entityId" || semantic?.kind === "provider";
+    if (references && options.entityReferences !== "normalizedLater") {
+      throw new Error(
+        `${origin}: a profile field cannot reference entity ${semantic.entity ?? field.osfType}; ` +
+          "profile tables carry no relationships. Add the field to the entity itself (kind: entityPatch).",
+      );
+    }
+    const result: Field = { ...field, baseType };
+    if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
+    const cardinality = field.cardinality ?? semantic?.cardinality;
+    if (cardinality) result.cardinality = cardinality;
+    if (cardinalityOf(cardinality, origin).required) result.required = true;
+    return result;
   });
 }
 

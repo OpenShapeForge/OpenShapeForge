@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
+import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields, withBaseTypes } from "./entity-fields.js";
 import { resolveStorageColumns } from "./compiler/storage.js";
 import { resolveRelationships } from "./compiler/relationships.js";
 import { resolveModelFields } from "./compiler/model.js";
@@ -31,6 +31,19 @@ describe("one relational field contract", () => {
     expect(() => deriveEntityOsfTypes([page], {
       pageId: { kind: "scalar", label: { en: "Page ID" }, baseType: "string" },
     })).toThrow("Osf type pageId is the identity alias of entity Page; it is derived, not authored.");
+  });
+  test("profile fields resolve like entity fields but may not reference an entity", () => {
+    const fields = withBaseTypes([
+      { key: "heading", osfType: "title", validation: { maxLength: 10 } },
+      { key: "aliases", osfType: "string", cardinality: { min: 1, max: "unbounded" } },
+    ], { ...catalog(), title: { label: { en: "Title" }, baseType: "string", validation: { minLength: 1 } } }, "Article[vera]");
+    expect(fields[0]).toMatchObject({ baseType: "string", validation: { minLength: 1, maxLength: 10 } });
+    expect(fields[1]).toMatchObject({ baseType: "string", required: true });
+    for (const osfType of ["Page", "pageId"]) {
+      expect(() => withBaseTypes([{ key: "page", osfType }], catalog(), "Article[vera]"))
+        .toThrow("Article[vera].page: a profile field cannot reference entity Page; profile tables carry no relationships. Add the field to the entity itself (kind: entityPatch).");
+    }
+    expect(() => withBaseTypes([{ key: "x", osfType: "nope" }], catalog(), "Article[vera]")).toThrow("Article[vera].x: unknown osfType nope.");
   });
   test("infers scalar types without duplicate authoring", () => {
     expect(normalizeEntityFields(entity("Article", [{ key: "heading", osfType: "title" }]), catalog()).fields[0]?.baseType).toBe("string");

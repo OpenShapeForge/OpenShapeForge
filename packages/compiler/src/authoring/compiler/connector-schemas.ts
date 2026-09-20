@@ -21,7 +21,7 @@ import {
   splitBundledDefinitions,
   type JsonObject,
 } from "../../field-json-schema.js";
-import { collectionShape, constrainedType } from "@openshapeforge/operations";
+import { cardinalityOf, collectionShape, constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition, FieldDefinitionValueType } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
 import type { OsfTypeDefinition, OsfTypeSchemaReference } from "../types/authoring.js";
@@ -41,20 +41,36 @@ function staticEnum(field: FieldDefinition): string[] | undefined {
 
 export type ConnectorOsfTypes = Record<string, OsfTypeDefinition>;
 
+type ResolvedConnectorField = FieldDefinition & {
+  baseType: FieldDefinitionValueType;
+  schema?: OsfTypeSchemaReference;
+  cardinality: "single" | "collection";
+  cardinalityBounds?: { min?: number; max?: number | "unbounded" };
+  required: boolean;
+};
+
 /**
- * Connector fields never go through entity normalization, so their base type
- * is resolved here: a base osf type is its own base, a catalog key resolves
- * through the catalog, anything else is refused. A catalog type that declares
- * its own value schema is projected through that schema.
+ * Connector fields never go through entity normalization, so their type axis
+ * is resolved here the way entity fields resolve theirs: a base osf type is
+ * its own base, a catalog key resolves through the catalog, anything else is
+ * refused; a catalog type that declares its own value schema is projected
+ * through that schema; cardinality is the one reading (`cardinalityOf`), so
+ * exact bounds make a bounded array and a lower bound of one makes the field
+ * required.
  */
-function withBaseType(
-  field: FieldDefinition,
-  osfTypes: ConnectorOsfTypes,
-): FieldDefinition & { baseType: FieldDefinitionValueType; schema?: OsfTypeSchemaReference } {
+function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): ResolvedConnectorField {
   const baseType = resolveBaseType(field.osfType, osfTypes);
   if (!baseType) throw new Error(`Connector field ${field.key}: unknown osfType ${field.osfType}.`);
-  const schema = osfTypeDefinitionOf(field.osfType, osfTypes)?.schema;
-  return { ...field, baseType, ...(schema ? { schema } : {}) };
+  const semantic = osfTypeDefinitionOf(field.osfType, osfTypes);
+  const { cardinality, bounds, required } = cardinalityOf(field.cardinality ?? semantic?.cardinality, `Connector field ${field.key}`);
+  return {
+    ...field,
+    baseType,
+    ...(semantic?.schema ? { schema: semantic.schema } : {}),
+    cardinality,
+    ...(bounds ? { cardinalityBounds: bounds } : {}),
+    required: field.required === true || required,
+  };
 }
 
 /**
@@ -78,7 +94,7 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes
 
   if (field.defaultValue !== undefined) scalar.default = field.defaultValue;
 
-  return field.cardinality === "collection" ? collectionShape(scalar, field) : scalar;
+  return resolved.cardinality === "collection" ? collectionShape(scalar, resolved) : scalar;
 }
 
 export function connectorFieldSchema(field: FieldDefinition, osfTypes: ConnectorOsfTypes = {}): JsonObject {
@@ -96,7 +112,7 @@ export function connectorObjectSchema(fields: FieldDefinition[], osfTypes: Conne
   const required: string[] = [];
   for (const field of fields) {
     properties[field.key] = connectorFieldSchemaWithoutDefinitions(field, osfTypes);
-    if (field.required) required.push(field.key);
+    if (withBaseType(field, osfTypes).required) required.push(field.key);
   }
   return bundleFieldDefinitionSchema({
     type: "object",

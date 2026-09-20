@@ -149,13 +149,18 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     { componentCatalog: artifacts.componentCatalog, osfTypes: artifacts.osfTypes },
   );
   const transitions = lowered.transitions;
+  const valueDefinition = lowered.entity.baseEntity === false && !lowered.entity.fields.some((field) => field.key === "id");
   artifacts = {
     ...artifacts,
     coreEntity: lowered.entity,
-    profiles: artifacts.profiles.map((profile) => (profile.fields ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.osfTypes) } : profile)),
+    // A value definition's profile fields are its own fields: the model below
+    // normalizes them, relationships included. Any other profile field lands
+    // on a profile table and may not reference an entity.
+    profiles: artifacts.profiles.map((profile) => (profile.fields
+      ? { ...profile, fields: withBaseTypes(profile.fields, artifacts.osfTypes, `${lowered.entity.entity}[${profile.profile}]`, valueDefinition ? { entityReferences: "normalizedLater" } : {}) }
+      : profile)),
   };
   const { coreEntity, profiles, mappings, componentCatalog } = artifacts;
-  const valueDefinition = coreEntity.baseEntity === false && !coreEntity.fields.some((field) => field.key === "id");
 
   const relationships = resolveRelationships(artifacts);
   const columns = resolveStorageColumns(coreEntity.fields, profiles);

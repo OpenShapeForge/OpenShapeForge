@@ -25,7 +25,7 @@ import { materializeEntityInputSources } from "./entity-input-sources.js";
 import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
 export const activeManifestSource =
-  "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
+  "packages/compiler/config/platform-schema.yaml + authoring layers (entities)";
 
 const resolvedAuthoringDirs = new Map<string, string>();
 

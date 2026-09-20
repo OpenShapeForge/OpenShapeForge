@@ -379,7 +379,10 @@ export class ModulePlatformRuntime {
       },
       jobs: {
         // The outbox: inside the active Operation transaction when there is
-        // one, so the job commits exactly when the handler's own writes do.
+        // one, so the job commits exactly when the handler's own writes do —
+        // or inside the transaction an artifact call opened, so a storage
+        // provider that stages a file and schedules its collection commits
+        // the row and the job together.
         enqueue: (session, input) => {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Job enqueue requires a live verified session.");
@@ -397,7 +400,13 @@ export class ModulePlatformRuntime {
             relationGroupIds: session.relationGroupIds ?? [],
             scope: session.scope,
           };
-          return this.services.db.withSession(session, (trx) =>
+          const active = this.#operationTransactionStorage.getStore() ??
+            this.#recordAccessTransactionStorage.getStore();
+          if (active) {
+            if (active.session !== session) throw new Error("Job enqueue belongs to another session.");
+            return enqueueJob(active.trx, { ...input, tenantId, actorId, actorSession });
+          }
+          return withDbSession(this.#db, session, (trx) =>
             enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
           );
         },

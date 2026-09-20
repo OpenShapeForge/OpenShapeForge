@@ -196,4 +196,58 @@ describe("artifact record authorization transaction scope", () => {
       await db.destroy();
     }
   });
+
+  test("a job enqueued while staging joins the artifact transaction, so the row and the job commit together", async () => {
+    const observations: QueryObservation[] = [];
+    const db = database(observations);
+    const platform = new ModulePlatformRuntime(db);
+    const session: TrustedSessionContext = {
+      tenantId,
+      userId,
+      roles: ["CaseFile.All.Read"],
+      groups: [],
+      relationGroupIds: [],
+      scope: "tenant",
+      credential: "bearer",
+    };
+    const module: RuntimeModule = {
+      name: "test-artifact-storage",
+      artifactStorage: {
+        providerId,
+        stage: async (context) => context.withTransaction(async (transaction) => {
+          await sql`select 1 as provider_stage_marker`.execute(transaction);
+          await platform.services.jobs.enqueue(context.session, {
+            kind: "storage.gc",
+            payload: { artifactId },
+            deliveryKey: artifactId,
+            availableAt: new Date("2030-01-01T00:00:00Z"),
+          });
+          return descriptor;
+        }),
+        bind: async () => descriptor,
+        read: async () => ({ descriptor, bytes: Uint8Array.of(1, 2, 3), owner: { entity: "Document", id: documentId } }),
+      },
+    };
+    platform.registerArtifactStorage([module]);
+
+    try {
+      await withModuleOperationSession(
+        platform.services,
+        session,
+        async (active) => platform.services.artifacts.stage(active!, {
+          purpose: "record-upload",
+          fileName: "evidence.pdf",
+          source: (async function* () { yield Uint8Array.of(1, 2, 3); })(),
+        }),
+      );
+      const stage = observations.find((entry) => entry.sql.includes("provider_stage_marker"));
+      const enqueue = observations.find((entry) => entry.sql.includes('into "platform"."jobs"'));
+      expect(stage).toBeDefined();
+      expect(enqueue).toBeDefined();
+      expect(enqueue?.connectionId).toBe(stage?.connectionId);
+      expect(new Set(observations.map((entry) => entry.connectionId)).size).toBe(1);
+    } finally {
+      await db.destroy();
+    }
+  });
 });

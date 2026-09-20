@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
+import {
+  GENERIC_DESCRIBE_TOOL_NAME,
+  connectHelperTool,
+  discoveryToolDefinition,
+  dryRunHelperTool,
+  guideToolDefinition,
+  personalizationHelperTool,
+  testToolDefinition,
+  uploadToolDefinition,
+} from "@openshapeforge/operations";
 import { OperationFailure } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import {
@@ -465,16 +474,7 @@ export function createSessionSurface(scope: ServerScope) {
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...(canUploadArtifacts
         ? [{
-            name: ARTIFACT_UPLOAD_TOOL_NAME,
-            title: "Upload document file",
-            description:
-              `Open a private file picker so the person can upload document bytes directly to ${productName()}. Use the returned artifactId in the requested create operation.`,
-            inputSchema: { type: "object", properties: {}, additionalProperties: false },
-            annotations: {
-              readOnlyHint: false,
-              destructiveHint: false,
-              idempotentHint: false,
-            },
+            ...uploadToolDefinition(productName()),
             ...(supportsMcpApp(server) && publicOriginIsHttps()
               ? { _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } } }
               : {}),
@@ -486,65 +486,15 @@ export function createSessionSurface(scope: ServerScope) {
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
         )
-        .map((entry) => ({
-          name: entry.connect!.name,
-          description: entry.connect!.description,
-          inputSchema: {
-            type: "object",
-            properties: {
-              tool: {
-                type: "string",
-                description:
-                  "Name of the tool to connect.",
-              },
-              connectionScope: {
-                type: "string",
-                enum: ["personal", "organization"],
-                description:
-                  "Connect your own account (default) or an organization-managed shared account. Organization scope requires an administrator role.",
-              },
-            },
-            required: ["tool"],
-            additionalProperties: false,
-          },
-          annotations: {
-            readOnlyHint: false,
-            destructiveHint: false,
-            idempotentHint: true,
-          },
-        })),
+        .map((entry) => connectHelperTool(entry.connect!.name, entry.connect!.description)),
       ...projectedDerivedTools
         .filter(
           (entry) =>
             entry.personalization && sessionInAudience(entry, session.roles),
         )
-        .map((entry) => ({
-          name: entry.personalization!.set.name,
-          description: entry.personalization!.set.description,
-          inputSchema: {
-            type: "object",
-            properties: {
-              tool: {
-                type: "string",
-                description:
-                  "Name of the tool the instruction is for. Omit to apply it to all tools.",
-              },
-              instruction: {
-                type: "string",
-                maxLength: 500,
-                description:
-                  "The person's standing instruction, in their own words. Empty clears it.",
-              },
-            },
-            required: ["instruction"],
-            additionalProperties: false,
-          },
-          annotations: {
-            readOnlyHint: false,
-            destructiveHint: false,
-            idempotentHint: true,
-          },
-        })),
+        .map((entry) =>
+          personalizationHelperTool(entry.personalization!.set.name, entry.personalization!.set.description),
+        ),
       ...projectedDerivedTools
         .filter(
           (entry) =>
@@ -554,32 +504,7 @@ export function createSessionSurface(scope: ServerScope) {
               (session.roles ?? []).includes(role),
             ),
         )
-        .map((entry) => ({
-          name: entry.dryRun!.name,
-          description: entry.dryRun!.description,
-          inputSchema: {
-            type: "object",
-            properties: {
-              tool: {
-                type: "string",
-                description:
-                  "Name of the tool whose provider requests to compose. Drafts count too.",
-              },
-              arguments: {
-                type: "object",
-                description:
-                  "The arguments the composed call would be made with.",
-              },
-            },
-            required: ["tool"],
-            additionalProperties: false,
-          },
-          annotations: {
-            readOnlyHint: true,
-            destructiveHint: false,
-            idempotentHint: true,
-          },
-        })),
+        .map((entry) => dryRunHelperTool(entry.dryRun!.name, entry.dryRun!.description)),
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),
       // ---- end identity ↔ Relation link ----
@@ -595,64 +520,13 @@ export function createSessionSurface(scope: ServerScope) {
       // ---- update notices (mcp/update-notices.ts) ----
       ...updateToolsForSession(session),
       // ---- end update notices ----
-      ...guideToolsForSession(session).map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: {
-          type: "object",
-          properties: {},
-          additionalProperties: false,
-        },
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-        },
-      })),
-      ...discoveryToolsForSession(session, tables).map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string",
-              format: "uuid",
-              description: `Identifier of the ${tool.entity} to discover.`,
-            },
-          },
-          required: ["id"],
-          additionalProperties: false,
-        },
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-        },
-      })),
-      ...testToolsForSession(session, tables).map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string",
-              format: "uuid",
-              description: `Identifier of the ${tool.entity} to verify.`,
-            },
-          },
-          required: ["id"],
-          additionalProperties: false,
-        },
-        // Read-only from the deployment's perspective: the probe is a
-        // provider read the definition itself declares harmless.
-        annotations: {
-          readOnlyHint: true,
-          destructiveHint: false,
-          idempotentHint: true,
-        },
-      })),
+      ...guideToolsForSession(session).map((tool) => guideToolDefinition(tool.name, tool.description)),
+      ...discoveryToolsForSession(session, tables).map((tool) =>
+        discoveryToolDefinition(tool.name, tool.description, tool.entity),
+      ),
+      ...testToolsForSession(session, tables).map((tool) =>
+        testToolDefinition(tool.name, tool.description, tool.entity),
+      ),
       // Derived tools: definition rows projected per session and per tenant.
       ...(await derivedToolsForSession(db, session, tables, locale)).map((tool) => ({
         name: tool.name,

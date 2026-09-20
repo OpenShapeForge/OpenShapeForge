@@ -19,11 +19,26 @@
  * entities sorted by tool prefix, fields in authored order.
  */
 import {
+  DYNAMIC_TOOL_BYTES_ALLOWANCE,
+  GENERIC_DESCRIBE_TOOL_NAME,
+  GENERIC_TOOL_NAME_PREFIX,
+  MAX_ADVERTISED_TOOL_BYTES,
+  PLATFORM_TOOL_BYTES_ALLOWANCE,
+  advertisedToolBytes,
   compactGenericInputSchema,
   compareCodeUnits,
+  connectHelperTool,
   describeToolDefinition,
+  discoveryToolDefinition,
+  dryRunHelperTool,
+  editLeaseToolDefinitions,
   genericToolText,
+  guideToolDefinition,
+  personalizationHelperTool,
+  searchableOperationToolDefinitions,
+  testToolDefinition,
   type GenericToolBranch,
+  type McpToolShape,
 } from "@openshapeforge/operations";
 import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import { pluralize } from "./authoring/compiler/helpers.js";
@@ -1300,58 +1315,75 @@ export type McpCatalogInput = {
  */
 export const MAX_DEDICATED_TOOLS = 60;
 
-/**
- * The same guard in bytes. The tool count bounds how many choices a model
- * weighs; it says nothing about how much schema each choice carries, and a
- * `tools/list` of a megabyte is truncated or refused by hosted clients and
- * eats the context of a model that does receive it. 512 KB is the ceiling
- * the reference catalogue sits under with every entity's record schema
- * repeated in four output contracts; tighten it when those are shared.
- * Measured on the listing a session holding every role receives, projected
- * the way the runtime projects it (the generic `osf_*` tools compact, the
- * describe tool beside them, static operations only in dedicated mode).
- */
-export const MAX_ADVERTISED_TOOL_BYTES = 512 * 1024;
+export { MAX_ADVERTISED_TOOL_BYTES } from "@openshapeforge/operations";
 
 /** The URI the runtime advertises the entity schema catalogue under. */
 const ENTITY_CATALOG_URI = "osf://schema/entities";
 
-function advertisedBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), "utf8");
+/** Generic entities, by the policy they declared — never by the shape of a name. */
+function genericEntityNames(entities: readonly McpEntityCatalogEntry[]): Set<string> {
+  return new Set(entities.filter((entity) => entity.tools === "generic").map((entity) => entity.entity));
+}
+
+export type AdvertisedToolSize = { name: string; bytes: number };
+
+/** What the compiler can list beside the CRUD catalogue: the shapes the runtime lists them with. */
+export type StaticListingInput = {
+  tools: readonly McpToolDefinition[];
+  entities: readonly McpEntityCatalogEntry[];
+  operationTools: readonly {
+    name: string;
+    title: string;
+    description: string;
+    inputSchema: JsonObject;
+    outputSchema: JsonObject;
+    annotations: unknown;
+  }[];
+  projection: McpOperationToolProjection;
+  derivedTools?: readonly McpDerivedToolsDefinition[];
+  guideTools?: readonly McpGuideToolDefinition[];
+  discoveryTools?: readonly McpDiscoveryToolDefinition[];
+  testTools?: readonly McpTestToolDefinition[];
+  /** Ids of lease-protected Operations the listing offers; empty lists the release tool alone. */
+  editLeaseOperationIds?: readonly string[];
+  connectorTools?: readonly McpToolShape[];
+};
+
+function sizeOf(name: string, tool: unknown): AdvertisedToolSize {
+  return { name, bytes: advertisedToolBytes(tool) };
 }
 
 /**
- * The byte size of the full-role `tools/list`, per advertised tool, projected
- * exactly as the runtime projects it. Session withholding only makes the
- * listing smaller, so this is the ceiling.
+ * The byte size of the full-role `tools/list`, per advertised tool, for
+ * everything the compiler can derive: the CRUD tools (dedicated verbatim,
+ * generic compact with osf_describe beside them), the static Operations or
+ * the searchable pair, the edit-lease tools, the helpers of every derived
+ * tool definition, the guide, discovery and test tools and the connector
+ * tools — each projected with the function the runtime lists it with.
+ * Session withholding only makes the listing smaller, so this is the
+ * ceiling; the generic texts are measured in the longer of their languages.
  */
-export function advertisedToolSizes(
-  tools: readonly McpToolDefinition[],
-  entities: readonly McpEntityCatalogEntry[],
-  operationTools: readonly { name: string; title: string; description: string; inputSchema: JsonObject; outputSchema: JsonObject; annotations: unknown }[],
-  projection: McpOperationToolProjection,
-): Array<{ name: string; bytes: number }> {
+export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSize[] {
   const generic = new Map<string, McpToolDefinition[]>();
-  const sizes: Array<{ name: string; bytes: number }> = [];
-  const titles = new Map(entities.map((entity) => [entity.entity, entity.title]));
-  for (const tool of tools) {
-    if (tool.name.startsWith("osf_")) {
+  const genericEntities = genericEntityNames(input.entities);
+  const sizes: AdvertisedToolSize[] = [];
+  const titles = new Map(input.entities.map((entity) => [entity.entity, entity.title]));
+  for (const tool of input.tools) {
+    if (genericEntities.has(tool.entity)) {
       generic.set(tool.name, [...(generic.get(tool.name) ?? []), tool]);
       continue;
     }
-    sizes.push({
+    sizes.push(sizeOf(tool.name, {
       name: tool.name,
-      bytes: advertisedBytes({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        outputSchema: tool.outputSchema,
-        annotations: tool.annotations,
-      }),
-    });
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      annotations: tool.annotations,
+    }));
   }
-  const genericEntities = new Set<string>();
+  const languages = ["en", "nl"];
+  const addressable = new Set<string>();
   for (const [name, entries] of generic) {
     const operation = entries[0]!.operation;
     const branches: GenericToolBranch[] = entries.map((tool) => ({
@@ -1359,58 +1391,105 @@ export function advertisedToolSizes(
       title: titles.get(tool.entity) ?? tool.entity,
       inputSchema: tool.inputSchema,
     }));
-    for (const branch of branches) genericEntities.add(branch.entity);
+    for (const branch of branches) addressable.add(branch.entity);
     sizes.push({
       name,
-      bytes: advertisedBytes({
+      bytes: Math.max(...languages.map((language) => advertisedToolBytes({
         name,
-        ...genericToolText(operation, branches, ENTITY_CATALOG_URI),
-        inputSchema: compactGenericInputSchema(operation, branches),
+        ...genericToolText(operation, branches, ENTITY_CATALOG_URI, language),
+        inputSchema: compactGenericInputSchema(operation, branches, language),
         outputSchema: entries.every((tool) => tool.outputSchema) ? entries[0]!.outputSchema : undefined,
         annotations: entries[0]!.annotations,
-      }),
+      }))),
     });
   }
-  if (genericEntities.size > 0) {
-    const describe = describeToolDefinition([...genericEntities]);
-    sizes.push({ name: describe.name, bytes: advertisedBytes(describe) });
+  if (addressable.size > 0) {
+    sizes.push({
+      name: GENERIC_DESCRIBE_TOOL_NAME,
+      bytes: Math.max(...languages.map((language) =>
+        advertisedToolBytes(describeToolDefinition([...addressable], language)))),
+    });
   }
-  if (projection === "dedicated") {
-    for (const tool of operationTools) {
-      sizes.push({
+  if (input.projection === "dedicated") {
+    for (const tool of input.operationTools) {
+      sizes.push(sizeOf(tool.name, {
         name: tool.name,
-        bytes: advertisedBytes({
-          name: tool.name,
-          title: tool.title,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-          outputSchema: tool.outputSchema,
-          annotations: tool.annotations,
-        }),
-      });
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        annotations: tool.annotations,
+      }));
     }
+  } else if (input.operationTools.length > 0) {
+    for (const tool of searchableOperationToolDefinitions(SEARCHABLE_OPERATION_TOOL_NAMES)) {
+      sizes.push(sizeOf(tool.name, tool));
+    }
+  }
+  for (const tool of editLeaseToolDefinitions(input.editLeaseOperationIds ?? [])) {
+    sizes.push(sizeOf(tool.name, tool));
+  }
+  for (const entry of input.derivedTools ?? []) {
+    if (entry.compatibility) continue;
+    if (entry.connect) sizes.push(sizeOf(entry.connect.name, connectHelperTool(entry.connect.name, entry.connect.description)));
+    if (entry.personalization) {
+      sizes.push(sizeOf(entry.personalization.set.name,
+        personalizationHelperTool(entry.personalization.set.name, entry.personalization.set.description)));
+    }
+    if (entry.dryRun && entry.execution) {
+      sizes.push(sizeOf(entry.dryRun.name, dryRunHelperTool(entry.dryRun.name, entry.dryRun.description)));
+    }
+  }
+  for (const guide of input.guideTools ?? []) {
+    sizes.push(sizeOf(guide.name, guideToolDefinition(guide.name, guide.description)));
+  }
+  for (const discovery of input.discoveryTools ?? []) {
+    if (discovery.compatibility) continue;
+    sizes.push(sizeOf(discovery.name, discoveryToolDefinition(discovery.name, discovery.description, discovery.entity)));
+  }
+  for (const test of input.testTools ?? []) {
+    if (test.compatibility) continue;
+    sizes.push(sizeOf(test.name, testToolDefinition(test.name, test.description, test.entity)));
+  }
+  for (const tool of input.connectorTools ?? []) {
+    sizes.push(sizeOf(tool.name, {
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: { title: tool.title, ...tool.annotations },
+    }));
   }
   return sizes;
 }
 
-/** Fail the build when the full-role listing would exceed the byte budget. */
+/**
+ * Fail the build when the static projection plus the two documented
+ * reservations (mcp-tool-budget.ts) would exceed the byte budget of one
+ * listing. The message says what is over and which tools weigh most.
+ */
 export function assertAdvertisedToolBytes(
-  sizes: readonly { name: string; bytes: number }[],
+  sizes: readonly AdvertisedToolSize[],
   maximum = MAX_ADVERTISED_TOOL_BYTES,
 ): void {
   const total = sizes.reduce((sum, entry) => sum + entry.bytes, 0);
-  if (total <= maximum) return;
+  const reserved = PLATFORM_TOOL_BYTES_ALLOWANCE + DYNAMIC_TOOL_BYTES_ALLOWANCE;
+  if (total + reserved <= maximum) return;
+  const kb = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
   const largest = [...sizes]
     .sort((left, right) => right.bytes - left.bytes || compareCodeUnits(left.name, right.name))
     .slice(0, 5)
-    .map((entry) => `${entry.name} (${Math.round(entry.bytes / 1024)} KB)`)
+    .map((entry) => `${entry.name} (${kb(entry.bytes)})`)
     .join(", ");
   throw new Error(
-    `MCP tool catalog would advertise ${Math.round(total / 1024)} KB of tools to a session ` +
-      `holding every role, over the ${Math.round(maximum / 1024)} KB limit ` +
-      `(MAX_ADVERTISED_TOOL_BYTES). Largest: ${largest}. Switch the entities behind the ` +
-      "largest dedicated tools to `mcp: { tools: generic }`, whose per-entity schemas are " +
-      "served on demand by osf_describe, or disable operations that are not needed on MCP.",
+    `MCP tool catalog would advertise ${kb(total)} of static tools to a session holding ` +
+      `every role; with the ${kb(PLATFORM_TOOL_BYTES_ALLOWANCE)} reserved for the platform's ` +
+      `fixed tools and the ${kb(DYNAMIC_TOOL_BYTES_ALLOWANCE)} reserved for tools that exist ` +
+      `only at run time, that is ${kb(total + reserved - maximum)} over the ${kb(maximum)} ` +
+      `listing budget (MAX_ADVERTISED_TOOL_BYTES). Largest: ${largest}. Switch the entities ` +
+      "behind the largest dedicated tools to `mcp: { tools: generic }`, whose per-entity " +
+      "schemas are served on demand by osf_describe, or disable operations that are not " +
+      "needed on MCP.",
   );
 }
 
@@ -1471,6 +1550,8 @@ export function buildMcpCatalog(
   operations: readonly CompiledPluginOperation[] = [],
   executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
   requestedOperationToolProjection?: McpOperationToolProjection,
+  /** The connector tools the same listing carries, for the byte budget. */
+  connectorTools: readonly McpToolShape[] = [],
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -2109,8 +2190,18 @@ export function buildMcpCatalog(
   for (const test of testTools) {
     reserveName(test.name, test.entity, "test", test.table);
   }
+  const generic = genericEntityNames(entities);
   for (const tool of tools) {
-    if (tool.name.startsWith("osf_")) continue;
+    if (generic.has(tool.entity)) continue;
+    // The shared tools own the prefix: a dedicated tool named under it would
+    // be merged into them by the runtime and escape the checks below.
+    if (tool.name.startsWith(GENERIC_TOOL_NAME_PREFIX)) {
+      throw new Error(
+        `MCP tool name "${tool.name}" (${tool.entity}.${tool.operation}) uses the reserved ` +
+          `"${GENERIC_TOOL_NAME_PREFIX}" prefix of the shared generic tools. Choose another ` +
+          `toolPrefix or name override, or switch the entity to \`mcp: { tools: generic }\`.`,
+      );
+    }
     const existing = seenNames.get(tool.name);
     if (existing) {
       throw new Error(
@@ -2123,9 +2214,7 @@ export function buildMcpCatalog(
     seenNames.set(tool.name, tool);
   }
 
-  const dedicatedCount = tools.filter(
-    (tool) => !tool.name.startsWith("osf_"),
-  ).length;
+  const dedicatedCount = tools.filter((tool) => !generic.has(tool.entity)).length;
   const operationTools = operations
     .filter((operation) => operation.transports.mcp.enabled)
     .map((operation) => ({
@@ -2160,12 +2249,26 @@ export function buildMcpCatalog(
       ? "searchable"
       : "dedicated";
   assertAdvertisedToolBytes(
-    advertisedToolSizes(
+    advertisedToolSizes({
       tools,
       entities,
-      operationTools.filter((tool) => operationMcpServer(tool) === "tenant"),
-      operationToolProjection,
-    ),
+      operationTools: operationTools.filter((tool) => operationMcpServer(tool) === "tenant"),
+      projection: operationToolProjection,
+      derivedTools,
+      guideTools,
+      discoveryTools,
+      testTools,
+      editLeaseOperationIds: [
+        ...opted.flatMap((input) =>
+          Object.values(input.contract.entityOperations)
+            .filter((operation) => operation.concurrency?.editLease?.mode === "required")
+            .map((operation) => operation.id)),
+        ...operations
+          .filter((operation) => operation.transports.mcp.enabled && operation.concurrency?.editLease)
+          .map((operation) => operation.key),
+      ],
+      connectorTools,
+    }),
   );
 
   return {
@@ -2194,6 +2297,7 @@ export function renderMcpCatalog(
   operations: readonly CompiledPluginOperation[] = [],
   executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
   operationToolProjection?: McpOperationToolProjection,
+  connectorTools: readonly McpToolShape[] = [],
 ): string {
   return `${JSON.stringify(buildMcpCatalog(
     inputs,
@@ -2202,5 +2306,6 @@ export function renderMcpCatalog(
     operations,
     executionCompatibility,
     operationToolProjection,
+    connectorTools,
   ), null, 2)}\n`;
 }

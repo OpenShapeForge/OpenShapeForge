@@ -267,7 +267,13 @@ compiler **fails the build** when the dedicated tool count would exceed 60,
 naming the entities to switch to `generic`. The same guard exists in bytes:
 the listing a session holding every role would receive — projected exactly as
 the runtime projects it, generic tools compact — may not exceed
-`MAX_ADVERTISED_TOOL_BYTES` (512 KB), and the failure names the largest tools.
+`MAX_ADVERTISED_TOOL_BYTES` (640 KB, of which 32 KB is reserved for the
+platform's fixed tools and 128 KB for tools that exist only at run time —
+`packages/operations/src/mcp-tool-budget.ts`), and the failure says what is
+over and which tools weigh most. The fixed tools' shapes, the searchable pair,
+the edit-lease trio, the derived-tool helpers and the connector projection live
+in `@openshapeforge/operations`, imported by both the runtime and the compiler,
+so the compiler measures what the runtime lists.
 Both are build failures rather than runtime surprises, matching how the rest of
 the compiler fails closed.
 

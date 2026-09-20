@@ -10,7 +10,7 @@ import { productName } from "../config/product-name.js";
 
 export const ARTIFACT_UPLOAD_APP_URI = "ui://openshapeforge/artifact-upload";
 export const ARTIFACT_UPLOAD_PATH = "/api/artifact-upload";
-export const ARTIFACT_UPLOAD_TOOL_NAME = "upload_document_file";
+export { ARTIFACT_UPLOAD_TOOL_NAME } from "@openshapeforge/operations";
 export const ARTIFACT_UPLOAD_TTL_SECONDS = 10 * 60;
 
 export type PendingArtifactUpload = {

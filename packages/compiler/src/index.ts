@@ -32,6 +32,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { connectorMcpTools } from "@openshapeforge/operations";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
 import {
   collectPluginMigrationRegistry,
@@ -465,6 +466,8 @@ export async function collectAllArtifacts(
           operations,
           executionCompatibility,
           operationToolProjection,
+          // The connector tools share the listing, so they share its byte budget.
+          connectorMcpTools(connectors),
         ),
       },
     ],

@@ -42,9 +42,40 @@ export {
 export { compareCodeUnits } from "./ordering.js";
 export {
   GENERIC_DESCRIBE_TOOL_NAME,
+  GENERIC_TOOL_NAME_PREFIX,
   GENERIC_TOOL_OPERATIONS,
   compactGenericInputSchema,
   describeToolDefinition,
+  genericTextLanguage,
   genericToolText,
 } from "./mcp-generic-projection.js";
+export {
+  ARTIFACT_UPLOAD_TOOL_NAME,
+  DEFAULT_OPERATION_SEARCH_RESULTS,
+  EDIT_LEASE_TOOL_NAMES,
+  MAX_OPERATION_SEARCH_RESULTS,
+  connectHelperTool,
+  discoveryToolDefinition,
+  dryRunHelperTool,
+  editLeaseToolDefinitions,
+  guideToolDefinition,
+  personalizationHelperTool,
+  searchableOperationToolDefinitions,
+  testToolDefinition,
+  uploadToolDefinition,
+} from "./mcp-static-tools.js";
+export type { McpToolShape, SearchableOperationToolNames } from "./mcp-static-tools.js";
+export { connectorMcpTools, connectorToolAnnotations } from "./mcp-connector-tools.js";
+export type {
+  ConnectorMcpContractShape,
+  ConnectorMcpOperationShape,
+  ConnectorMcpTool,
+} from "./mcp-connector-tools.js";
+export {
+  DYNAMIC_TOOL_BYTES_ALLOWANCE,
+  MAX_ADVERTISED_TOOL_BYTES,
+  MAX_STATIC_TOOL_BYTES,
+  PLATFORM_TOOL_BYTES_ALLOWANCE,
+  advertisedToolBytes,
+} from "./mcp-tool-budget.js";
 export type { GenericToolBranch, GenericToolOperation } from "./mcp-generic-projection.js";

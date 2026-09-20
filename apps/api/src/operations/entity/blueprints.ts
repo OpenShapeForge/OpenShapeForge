@@ -2,6 +2,7 @@
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { entityColumnName, entityTableName } from "../../db/manifest-lookup.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import type { ModuleOperationHandler } from "../../modules/contract.js";
 import { getGeneratedCrudTables, generatedCrudError, requireEntityOperation } from "./catalog.js";
@@ -86,12 +87,18 @@ async function reset(db: OpenShapeForgeDatabase, session: DbSessionInput, table:
     return serializeEntityRow(table, row);
   });
 }
+/**
+ * The operator role is the publish Operation's `auth.roles` (compiler,
+ * blueprint-operations.ts) and the runtime refuses the session before this
+ * handler runs (runtime.ts, sessionOperationRolesAllow); the insert policy
+ * blueprint_versions_publish checks it a third time inside Postgres.
+ */
 async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, table: GeneratedCrudTable, input: Record<string, unknown>) {
-  if (!session.roles?.includes("platform-operator")) throw generatedCrudError("Blueprint publication requires a platform administrator.", "FORBIDDEN");
   const blueprint = policy(table);
   return withDbSession(db, session, async trx => {
-    const tenant = (await sql<{ tenant_kind: string }>`select tenant_kind from erp.tenants where tenant_id = ${session.tenantId}::uuid`.execute(trx)).rows[0];
-    if (tenant?.tenant_kind !== "blueprint") throw generatedCrudError("Only blueprint tenants can publish.", "FORBIDDEN");
+    const tenant = (await sql<{ kind: string }>`select ${sql.ref(entityColumnName("Tenant", "tenantKind"))} as kind from ${sql.table(entityTableName("Tenant"))} where tenant_id = ${session.tenantId}::uuid`.execute(trx)).rows[0];
+    // "blueprint" is the Tenant.tenantKind value of a blueprint tenant.
+    if (tenant?.kind !== "blueprint") throw generatedCrudError("Only blueprint tenants can publish.", "FORBIDDEN");
     const row = await getGeneratedEntity(db, session, { table: table.name, id: text(input, "id") });
     if (!row) throw generatedCrudError("Record not found.", "NOT_FOUND");
     const fields = Object.fromEntries(table.columns.map(column => [fieldNameForColumn(column), row[column.name]]));

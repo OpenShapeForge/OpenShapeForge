@@ -250,25 +250,6 @@ export interface ItemAction {
 }
 
 /**
- * Canonical form field definition — used in userInput and per-action formFields.
- * Single source of truth shared across compiler, workflow service, and web client.
- */
-export interface FormFieldDefinition {
-  key: string;
-  valueType: string;
-  cardinality?: "single" | "collection";
-  osfType?: string;
-  label: LocalizedText;
-  required?: boolean;
-  description?: LocalizedText | null;
-  options?: Record<string, unknown>;
-  render?: Record<string, unknown>;
-  validation?: Record<string, unknown>;
-  children?: FormFieldDefinition[];
-  item?: FormFieldDefinition;
-}
-
-/**
  * Canonical action definition — single source of truth for all action shapes
  * across the platform: view actions, workflow awaitAction/userInput nodes,
  * and formDefinition action bars.
@@ -285,8 +266,8 @@ export interface ActionDefinition {
   visibleWhen?: VisibilityConfig;
   disabledWhen?: VisibilityConfig;
   disabledMessage?: LocalizedText;
-  /** Optional per-action form fields shown in a modal before triggering. */
-  formFields?: FormFieldDefinition[];
+  /** Optional per-action form fields shown in a modal before triggering: the one authored field contract. */
+  formFields?: import("./field-definition.js").FieldDefinition[];
 }
 
 /**

@@ -397,25 +397,6 @@
         }
       }
     },
-    "formFieldDefinition": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["key", "valueType", "label"],
-      "properties": {
-        "key": { "type": "string" },
-        "valueType": { "type": "string" },
-        "cardinality": { "type": "string", "enum": ["single", "collection"] },
-        "osfType": { "type": "string" },
-        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "required": { "type": "boolean" },
-        "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "options": { "type": "object" },
-        "render": { "type": "object" },
-        "validation": { "type": "object" },
-        "children": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
-        "item": { "$ref": "#/$defs/formFieldDefinition" }
-      }
-    },
     "compiledViewAction": {
       "type": "object",
       "additionalProperties": false,
@@ -429,7 +410,7 @@
         "visibleWhen": { "type": "object" },
         "disabledWhen": { "type": "object" },
         "disabledMessage": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
-        "formFields": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
+        "formFields": { "type": "array", "items": { "$ref": "core-entity.schema.json#/$defs/field" } },
         "actionRef": { "type": "string" },
         "route": { "type": "string" },
         "mutation": { "type": "string" },

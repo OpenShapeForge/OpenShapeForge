@@ -14,7 +14,8 @@ import {
 import { handoffFailureCode } from "./configuration-handoff.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
 import { exchangeCodeForTokens, redeemState } from "./entity-oauth.js";
-import { serializeRow, tablesByName } from "./catalog.js";
+import { tablesByName } from "./catalog.js";
+import { serializeRow } from "./catalog-rows.js";
 import { ENTITY_OAUTH_CALLBACK_PATH } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
 

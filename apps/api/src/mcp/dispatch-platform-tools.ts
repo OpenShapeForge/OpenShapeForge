@@ -15,10 +15,9 @@ import {
   catalogGuideTools,
   catalogTestTools,
   entityForTable,
-  guideToolsForSession,
-  serializeRow,
-  sessionMayInvoke,
 } from "./catalog.js";
+import { serializeRow } from "./catalog-rows.js";
+import { guideToolsForSession, sessionMayInvoke } from "./session-projection.js";
 import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { type ToolResult, failed, ok } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";

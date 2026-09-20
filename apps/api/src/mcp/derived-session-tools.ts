@@ -23,9 +23,9 @@ import {
   catalog,
   catalogDerivedTools,
   entityForTable,
-  serializeRow,
   type GeneratedTable,
 } from "./catalog.js";
+import { serializeRow } from "./catalog-rows.js";
 import { connectionToolsFor, providerDisplayName } from "./session-connections.js";
 
 /**

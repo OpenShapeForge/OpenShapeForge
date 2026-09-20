@@ -1,112 +1,38 @@
 // SPDX-License-Identifier: BUSL-1.1
-import {
-  GENERIC_DESCRIBE_TOOL_NAME,
-  connectHelperTool,
-  discoveryToolDefinition,
-  dryRunHelperTool,
-  guideToolDefinition,
-  personalizationHelperTool,
-  testToolDefinition,
-  uploadToolDefinition,
-} from "@openshapeforge/operations";
-import { OperationFailure } from "@openshapeforge/operations";
+import { registerResourceReadHandler } from "./resource-read-handler.js";
+import { createToolListing } from "./tool-listing.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import {
-  ErrorCode,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
-  ListToolsRequestSchema,
-  McpError,
-  ReadResourceRequestSchema,
-  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { entityOperationRef, executeEntityOperation } from "../operations/entity/index.js";
-import { sessionInAudience } from "./derived-tools.js";
-import { renderConfigurationApp } from "./configuration-handoff.js";
-import {
-  ARTIFACT_UPLOAD_APP_URI,
-  ARTIFACT_UPLOAD_TOOL_NAME,
-  renderArtifactUploadApp,
-} from "./artifact-upload.js";
-import { productName } from "../config/product-name.js";
-import { EDIT_LEASE_TOOL_NAMES, editLeaseToolsForOperationIds } from "./edit-lease-tools.js";
-import { identityLinkToolsForSession } from "./identity-link-tools.js";
-import {
-  ORGANIZATION_PROFILE_RESOURCE,
-  ORGANIZATION_PROFILE_RESOURCE_URI,
-  organizationProfileToolsForSession,
-  readOrganizationProfileResource,
-} from "./organization-profile-tools.js";
-import { employeeInvitationToolsForSession } from "./employee-invitation-tools.js";
-import {
-  describeOnboarding,
-  onboardingEnvironment,
-  onboardingToolsForSession,
-  withOnboarding,
-} from "./onboarding.js";
+import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
+import { ORGANIZATION_PROFILE_RESOURCE } from "./organization-profile-tools.js";
+import { describeOnboarding, onboardingEnvironment, withOnboarding } from "./onboarding.js";
 import {
   ONBOARDING_STEP_RESOURCE_TEMPLATE,
   onboardingResourcesForSession,
-  readOnboardingStepResource,
 } from "./onboarding-resources.js";
-import {
-  describeUpdates,
-  updateNoticesStore,
-  updateToolsForSession,
-  withUpdates,
-} from "./update-notices.js";
-import { listConnectorContracts } from "../connectors/catalog.js";
-import { connectorToolsForSession } from "../connectors/mcp-tools.js";
-import type { McpToolCallSource } from "../modules/contract.js";
-import {
-  assertUniqueToolNames,
-  decorateMcpTools,
-  moduleResources,
-  moduleResourceTemplates,
-  moduleTools,
-  prepareModuleResourceRead,
-  type SourcedTool,
-} from "../modules/mcp-hooks.js";
-import {
-  SESSION_INFO_TOOL,
-  SESSION_INFO_TOOL_NAME,
-  SESSION_RESOURCE,
-  SESSION_RESOURCE_URI,
-} from "./session-info.js";
-import { describeSession, sessionInfoResourceResult } from "./session-describe.js";
+import { describeUpdates, updateNoticesStore, withUpdates } from "./update-notices.js";
+import { moduleResources, moduleResourceTemplates, type SourcedTool } from "../modules/mcp-hooks.js";
+import { SESSION_RESOURCE } from "./session-info.js";
+import { describeSession } from "./session-describe.js";
 import { ENTITY_CATALOG_URI } from "./server-instructions.js";
-import { searchableOperationTools } from "./operation-search.js";
 import {
   JSON_MIME_TYPE,
-  type McpOperation,
-  type ProjectedRuntimeOperationTool,
   catalog,
-  discoveryToolsForSession,
   entityForTable,
-  guideToolsForSession,
-  projectRuntimeOperationTool,
   projectedDerivedTools,
-  resourcesForSession,
-  serializeRowForEntity,
-  testToolsForSession,
 } from "./catalog.js";
+import { guideToolsForSession, resourcesForSession } from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
-import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
-import {
-  RESOURCE_READ_LIMIT,
-  crudToolsForSession,
-  describeCatalogResource,
-  describeEntityResource,
-  entitiesForSession,
-  entityResourceUri,
-} from "./entity-tool-projection.js";
+import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import {
   ENTITY_CONFIGURATION_APP_URI,
   ENTITY_OAUTH_CALLBACK_PATH,
   MCP_APP_MIME_TYPE,
   callbackOrigin,
-  publicOriginIsHttps,
   supportsMcpApp,
 } from "./handoff-config.js";
 import { type ServerScope } from "./server-scope.js";
@@ -294,327 +220,13 @@ export function createSessionSurface(scope: ServerScope) {
     ],
   }));
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-    const ctx = invocationContext(extra.requestId);
-    const moduleRead = await prepareModuleResourceRead(
-      runtimeModules,
-      request.params.uri,
-      projectionContext(),
-      ctx,
-      coreResourceOwnership,
-    );
-    const moduleFallback = async () => {
-      if (!moduleRead) return undefined;
-      return modulePlatform
-        ? modulePlatform.withActiveInvocation(ctx, moduleRead)
-        : moduleRead();
-    };
-    const fallbackOrNotFound = async () => {
-      const result = await moduleFallback();
-      if (result !== undefined) return result;
-      throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
-    };
-    // --- session-info (whoami / osf://session) ---
-    if (request.params.uri === SESSION_RESOURCE_URI) {
-      return sessionInfoResourceResult(await sessionInfo());
-    }
-    // --- end session-info ---
-    // ---- organization profile (mcp/organization-profile-tools.ts) ----
-    if (request.params.uri === ORGANIZATION_PROFILE_RESOURCE_URI) {
-      return readOrganizationProfileResource(db, session);
-    }
-    // ---- end organization profile ----
-    // ---- onboarding step detail (mcp/onboarding-resources.ts): the same
-    // per-session environment the onboarding TOOLS use, so a resource read is
-    // authorized exactly as onboarding_status is. ----
-    const onboardingStep = await readOnboardingStepResource(
-      request.params.uri,
-      onboarding,
-    );
-    if (onboardingStep) return onboardingStep;
-    // ---- end onboarding step detail ----
-    if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
-      return {
-        contents: [
-          {
-            uri: request.params.uri,
-            mimeType: MCP_APP_MIME_TYPE,
-            text: await renderConfigurationApp(),
-            _meta: {
-              ui: {
-                csp: { resourceDomains: [callbackOrigin()] },
-                prefersBorder: true,
-              },
-            },
-          },
-        ],
-      };
-    }
-    if (request.params.uri === ARTIFACT_UPLOAD_APP_URI && canUploadArtifacts) {
-      return {
-        contents: [
-          {
-            uri: request.params.uri,
-            mimeType: MCP_APP_MIME_TYPE,
-            text: await renderArtifactUploadApp(),
-            _meta: {
-              ui: {
-                csp: { connectDomains: [callbackOrigin()] },
-                prefersBorder: true,
-              },
-            },
-          },
-        ],
-      };
-    }
-    const entries = entitiesForSession(session, tables);
-    let payload: unknown;
-    if (request.params.uri === ENTITY_CATALOG_URI) {
-      payload = describeCatalogResource(entries, locale);
-    } else if (request.params.uri.startsWith(`${ENTITY_CATALOG_URI}/`)) {
-      const entry = entries.find(
-        ({ entity }) => entityResourceUri(entity) === request.params.uri,
-      );
-      if (!entry) return fallbackOrNotFound();
-      payload = describeEntityResource(entry, entries, tables, session, locale);
-    } else {
-      const uri = request.params.uri;
-      const readable = resourcesForSession(session, tables);
-      const direct = readable.find((resource) => resource.uri === uri);
-      if (direct) {
-        const table = tables.get(direct.table);
-        if (!table) return fallbackOrNotFound();
-        const result = await executeEntityOperation(db, session, {
-          operation: entityOperationRef(table, "list"),
-          offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
-            McpOperation,
-            boolean,
-          ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
-          input: { limit: RESOURCE_READ_LIMIT },
-        });
-        if (result.intent !== "list") throw new Error("Unexpected entity result.");
-        if ("error" in result) throw new OperationFailure(result.error);
-        payload = (table.source?.authoringVersion ?? 1) >= 2
-          ? {
-              data: {
-                ...result.data,
-                items: result.data.items.map((item) => ({
-                  data: serializeRowForEntity(
-                    entityForTable(direct.table),
-                    table,
-                    item.data,
-                  ),
-                  operations: item.operations,
-                })),
-              },
-              operations: result.operations,
-            }
-          : result.data.items.map((item) =>
-              serializeRowForEntity(entityForTable(direct.table), table, item.data),
-            );
-      } else {
-        const templated = readable.find((resource) =>
-          uri.startsWith(`${resource.uri}/`),
-        );
-        const id = templated ? uri.slice(templated.uri.length + 1) : "";
-        const table = templated ? tables.get(templated.table) : undefined;
-        if (templated && table && id.length > 0 && !id.includes("/")) {
-          const result = await executeEntityOperation(db, session, {
-            operation: entityOperationRef(table, "get"),
-            offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
-              McpOperation,
-              boolean,
-            ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
-            input: { id },
-          });
-          if (result.intent !== "get") throw new Error("Unexpected entity result.");
-          if ("error" in result) throw new OperationFailure(result.error);
-          if (result.data) {
-            const data = serializeRowForEntity(
-              entityForTable(templated.table),
-              table,
-              result.data,
-            );
-            payload = (table.source?.authoringVersion ?? 1) >= 2
-              ? { data, operations: result.operations }
-              : data;
-          }
-        }
-        if (payload === undefined) {
-          return fallbackOrNotFound();
-        }
-      }
-    }
-    return {
-      contents: [
-        {
-          uri: request.params.uri,
-          mimeType: JSON_MIME_TYPE,
-          text: JSON.stringify(payload, null, 2),
-        },
-      ],
-    };
-  });
+  registerResourceReadHandler(scope, { onboarding, sessionInfo });
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: [],
   }));
 
-  const runtimeProviderToolsForSession = async (): Promise<
-    ProjectedRuntimeOperationTool[]
-  > => modulePlatform
-    ? (await modulePlatform.listRuntimeProviderOperations(moduleSession)).map(
-        (definition) => projectRuntimeOperationTool(definition, locale),
-      )
-    : [];
-
-  const listedTools = async (): Promise<ListedTool[]> => {
-    const runtimeOperationTools = await runtimeProviderToolsForSession();
-    const coreTools = [
-      SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
-      ...(canUploadArtifacts
-        ? [{
-            ...uploadToolDefinition(productName()),
-            ...(supportsMcpApp(server) && publicOriginIsHttps()
-              ? { _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } } }
-              : {}),
-          }]
-        : []),
-      ...crudToolsForSession(session, tables, locale),
-      ...editLeaseToolsForOperationIds(editLeaseOperationIds),
-      ...projectedDerivedTools
-        .filter(
-          (entry) => entry.connect && sessionInAudience(entry, session.roles),
-        )
-        .map((entry) => connectHelperTool(entry.connect!.name, entry.connect!.description)),
-      ...projectedDerivedTools
-        .filter(
-          (entry) =>
-            entry.personalization && sessionInAudience(entry, session.roles),
-        )
-        .map((entry) =>
-          personalizationHelperTool(entry.personalization!.set.name, entry.personalization!.set.description),
-        ),
-      ...projectedDerivedTools
-        .filter(
-          (entry) =>
-            entry.dryRun &&
-            entry.execution &&
-            entry.dryRun.roles.some((role) =>
-              (session.roles ?? []).includes(role),
-            ),
-        )
-        .map((entry) => dryRunHelperTool(entry.dryRun!.name, entry.dryRun!.description)),
-      // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
-      ...identityLinkToolsForSession(session),
-      // ---- end identity ↔ Relation link ----
-      // ---- organization profile (mcp/organization-profile-tools.ts) ----
-      ...organizationProfileToolsForSession(session),
-      // ---- end organization profile ----
-      // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
-      ...employeeInvitationToolsForSession(session),
-      // ---- end employee invitations ----
-      // ---- first-use onboarding (mcp/onboarding.ts) ----
-      ...onboardingToolsForSession(session),
-      // ---- end first-use onboarding ----
-      // ---- update notices (mcp/update-notices.ts) ----
-      ...updateToolsForSession(session),
-      // ---- end update notices ----
-      ...guideToolsForSession(session).map((tool) => guideToolDefinition(tool.name, tool.description)),
-      ...discoveryToolsForSession(session, tables).map((tool) =>
-        discoveryToolDefinition(tool.name, tool.description, tool.entity),
-      ),
-      ...testToolsForSession(session, tables).map((tool) =>
-        testToolDefinition(tool.name, tool.description, tool.entity),
-      ),
-      // Derived tools: definition rows projected per session and per tenant.
-      ...(await derivedToolsForSession(db, session, tables, locale)).map((tool) => ({
-        name: tool.name,
-        ...(tool.title ? { title: tool.title } : {}),
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        annotations: {
-          readOnlyHint: tool.readOnly === true,
-          destructiveHint: tool.destructive === true,
-          idempotentHint: tool.readOnly === true,
-        },
-      })),
-      // Connector operations join the SAME catalog, filtered by the same
-      // session, so a caller sees one tool list rather than two surfaces with
-      // different rules. The shared 60-tool budget is enforced at compile time.
-      ...connectorToolsForSession(listConnectorContracts(), {
-        roles: session.roles ?? [],
-      }).map((tool) => ({
-        name: tool.name,
-        title: tool.title,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        annotations: { title: tool.title, ...tool.annotations },
-      })),
-      ...(operationToolProjection.mode === "dedicated"
-        ? catalog.operationTools
-            .filter(
-              (tool) =>
-                operations.has(tool.key) && operationMayInvoke(tool, session),
-            )
-            .map(projectCatalogOperationTool)
-        : modulePlatform && searchableStaticOperationIds.size > 0
-        ? searchableOperationTools(searchableOperationToolNames)
-        : []),
-    ] as Tool[];
-    const sourceOf = (name: string): McpToolCallSource => {
-      if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
-      // The second step of the generic projection is a core tool over the
-      // CRUD catalogue, not a row-defined one: classified as such here so the
-      // authorization path answers for it as it does for osf_list.
-      if (name === GENERIC_DESCRIBE_TOOL_NAME) return "crud";
-      if (EDIT_LEASE_TOOL_NAMES.includes(name as (typeof EDIT_LEASE_TOOL_NAMES)[number])) {
-        return "operation";
-      }
-      if (catalog.tools.some((tool) => tool.name === name)) return "crud";
-      if (catalog.operationTools.some((tool) => tool.name === name))
-        return "operation";
-      if (
-        operationToolProjection.mode === "searchable" &&
-        Object.values(searchableOperationToolNames).includes(name)
-      )
-        return "operation";
-      if (
-        connectorToolsForSession(listConnectorContracts(), {
-          roles: session.roles ?? [],
-        }).some((tool) => tool.name === name)
-      ) {
-        return "connector";
-      }
-      return "derived";
-    };
-    const projectedModuleTools = await moduleTools(
-      runtimeModules,
-      projectionContext(),
-    );
-    await assertModuleToolNamesAvailable(projectedModuleTools);
-    const sourced: ListedTool[] = [
-      ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
-      ...runtimeOperationTools.map(({ definition, tool }) => ({
-        tool,
-        source: "operation" as const,
-        runtimeOperation: definition,
-      })),
-      ...projectedModuleTools,
-    ];
-    assertUniqueToolNames(sourced);
-    const decorated = decorateMcpTools(
-      sourced,
-      runtimeModules,
-      projectionContext(),
-    );
-    assertUniqueToolNames(decorated);
-    return decorated as ListedTool[];
-  };
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: (await listedTools()).map((entry) => entry.tool),
-  }));
+  const { runtimeProviderToolsForSession, listedTools } = createToolListing(scope);
 
   return {
     listedResources,

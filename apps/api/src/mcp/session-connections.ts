@@ -17,12 +17,8 @@ import { decryptSecret, type StoredSecret } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { connectionProblemError, type ConnectionProblem } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
-import {
-  catalog,
-  entityForTable,
-  serializeRow,
-  type GeneratedTable,
-} from "./catalog.js";
+import { catalog, entityForTable, type GeneratedTable } from "./catalog.js";
+import { serializeRow } from "./catalog-rows.js";
 import {
   ENTITY_CONFIGURATION_PATH,
   ENTITY_OAUTH_CALLBACK_PATH,

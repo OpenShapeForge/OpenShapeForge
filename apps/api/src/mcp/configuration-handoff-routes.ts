@@ -31,12 +31,8 @@ import {
 } from "./configuration-handoff.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
-import {
-  connectionScopeOf,
-  fieldNameForColumn,
-  serializeRow,
-  tablesByName,
-} from "./catalog.js";
+import { tablesByName } from "./catalog.js";
+import { connectionScopeOf, fieldNameForColumn, serializeRow } from "./catalog-rows.js";
 import { ENTITY_CONFIGURATION_PATH, elicitedKeyring } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
 import { ok } from "./tool-results.js";

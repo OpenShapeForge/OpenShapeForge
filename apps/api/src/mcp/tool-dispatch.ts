@@ -28,7 +28,9 @@ import type { DerivedToolsCatalogEntry } from "./derived-tools.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool, SessionSurface } from "./session-surface.js";
 import { staticToolCall } from "./dispatch-static-tools.js";
-import { connectToolCall, dryRunToolCall, personalizationToolCall } from "./dispatch-derived-helpers.js";
+import { connectToolCall } from "./dispatch-connect-tool.js";
+import { dryRunToolCall } from "./dispatch-dry-run-tool.js";
+import { personalizationToolCall } from "./dispatch-personalization-tool.js";
 import { platformToolCall } from "./dispatch-platform-tools.js";
 import { entityToolCall } from "./dispatch-entity-tools.js";
 

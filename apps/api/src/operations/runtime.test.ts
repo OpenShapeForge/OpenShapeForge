@@ -902,11 +902,14 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       headers: { authorization: "Bearer test-token" },
       payload: {},
     });
-    expect(undeclaredUnavailable.statusCode).toBe(401);
+    // A bearer the deployment cannot verify is the deployment's outage, not
+    // an anonymous caller: never 401, never a downgrade to trusted context.
+    expect(undeclaredUnavailable.statusCode).toBe(503);
     expect(undeclaredUnavailable.json() as unknown).toEqual({
       error: {
-        code: "UNAUTHENTICATED",
-        message: "Operation requires an authenticated bearer session.",
+        code: "AUTHENTICATION_UNAVAILABLE",
+        message:
+          "Bearer tokens cannot be verified: OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI and _ISSUER are not configured.",
         retryable: false,
       },
     });

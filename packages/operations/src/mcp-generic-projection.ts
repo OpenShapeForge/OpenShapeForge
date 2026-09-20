@@ -171,8 +171,8 @@ const DESCRIBE_ENTITY: Authored = {
 };
 
 const DESCRIBE_OPERATION: Authored = {
-  en: "One of the generic operations; omitted means all the session may perform.",
-  nl: "Eén van de generieke operaties; weggelaten betekent alle die de sessie mag uitvoeren.",
+  en: "One of the generic operations this session may perform; omitted means every one it may perform on the entity.",
+  nl: "Eén van de generieke operaties die deze sessie mag uitvoeren; weggelaten betekent elke die ze op de entiteit mag uitvoeren.",
 };
 
 const OPERATION_TITLE: Authored = { en: "Operation", nl: "Operatie" };
@@ -315,7 +315,12 @@ export function genericToolText(
  * The describe tool itself, advertised beside the generic tools whenever a
  * session can address at least one entity through them.
  */
-export function describeToolDefinition(entities: readonly string[], locale?: string): {
+export function describeToolDefinition(
+  entities: readonly string[],
+  locale?: string,
+  /** The operations the session may perform on at least one of the entities. */
+  operations: readonly GenericToolOperation[] = GENERIC_TOOL_OPERATIONS,
+): {
   name: string;
   title: string;
   description: string;
@@ -339,7 +344,7 @@ export function describeToolDefinition(entities: readonly string[], locale?: str
         operation: {
           type: "string",
           "x-osf-type": "string",
-          enum: [...GENERIC_TOOL_OPERATIONS],
+          enum: [...operations],
           title: text(OPERATION_TITLE, locale),
           description: text(DESCRIBE_OPERATION, locale),
         },

@@ -81,7 +81,19 @@ describe("the generic osf_* listing", () => {
     expect(() => describeGenericEntity(undefined, undefined, session(RELATIONS), tables as never, english))
       .toThrow(/needs an "entity" argument/);
     expect(() => describeGenericEntity("Address", "purge", session(RELATIONS), tables as never, english))
-      .toThrow(/"operation" must be one of/);
+      .toThrow(/"operation" must be one of the operations this session may perform on Address: list, get, create, update, delete\./);
+  });
+
+  it.skipIf(generic.length === 0)("bounds the operations to what the session may perform: a read-only session is not told about delete", () => {
+    const readOnly = session("Relations.All.Read");
+    const describe = crudToolsForSession(readOnly, tables as never, english).find((tool) => tool.name === "osf_describe")!;
+    expect((describe.inputSchema as any).properties.operation.enum).toEqual(["list", "get"]);
+    const all = describeGenericEntity("Address", undefined, readOnly, tables as never, english) as any;
+    expect(Object.keys(all.operations)).toEqual(["list", "get"]);
+    expect(() => describeGenericEntity("Address", "delete", readOnly, tables as never, english))
+      .toThrow(/must be one of the operations this session may perform on Address: list, get\./);
+    const writer = crudToolsForSession(session(RELATIONS), tables as never, english).find((tool) => tool.name === "osf_describe")!;
+    expect((writer.inputSchema as any).properties.operation.enum).toEqual(["list", "get", "create", "update", "delete"]);
   });
 
   it.skipIf(generic.length === 0)("withholds a classified field from the describe answer of a read-only session", () => {

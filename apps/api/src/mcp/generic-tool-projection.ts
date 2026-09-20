@@ -117,14 +117,18 @@ export function describeGenericEntity(
             `record type. Available here: ${addressable.join(", ")}.`,
     );
   }
-  if (
-    operation !== undefined &&
-    !(GENERIC_TOOL_OPERATIONS as readonly unknown[]).includes(operation)
-  ) {
+  // Bounded to what the session may perform on this entity, in the order
+  // the operations are always listed: a read-only session is not told what
+  // a delete would take, and an operation it cannot perform reads as absent.
+  const performable = GENERIC_TOOL_OPERATIONS.filter((candidate) =>
+    entries.some(({ tool }) => tool.entity === wanted && tool.operation === candidate),
+  );
+  if (operation !== undefined && !(performable as readonly unknown[]).includes(operation)) {
     throw new HttpError(
       400,
       "BAD_USER_INPUT",
-      `"operation" must be one of ${GENERIC_TOOL_OPERATIONS.join(", ")}.`,
+      `"operation" must be one of the operations this session may perform on ` +
+        `${wanted}: ${performable.join(", ")}.`,
     );
   }
   const own = entries.filter(
@@ -162,15 +166,15 @@ export function describeToolForSession(
   tables: Map<string, GeneratedTable>,
   locale: ResolvedLocale,
 ): Tool[] {
-  const addressable = [
-    ...new Set(
-      toolsForSession(session, tables)
-        .filter(({ entity }) => entityIsGeneric(entity))
-        .map(({ tool }) => tool.entity),
-    ),
-  ];
+  const generic = toolsForSession(session, tables).filter(({ entity }) => entityIsGeneric(entity));
+  const addressable = [...new Set(generic.map(({ tool }) => tool.entity))];
+  // The operation enum is what the session may perform on at least one of
+  // them; the answer narrows it further to the entity asked about.
+  const performable = GENERIC_TOOL_OPERATIONS.filter((candidate) =>
+    generic.some(({ tool }) => tool.operation === candidate),
+  );
   return addressable.length > 0
-    ? [describeToolDefinition(addressable, locale.tag) as Tool]
+    ? [describeToolDefinition(addressable, locale.tag, performable) as Tool]
     : [];
 }
 

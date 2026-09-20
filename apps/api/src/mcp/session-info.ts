@@ -301,6 +301,14 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     sentences.push(`You act as the record ${relation.name}.`);
   } else if (relation.status === "Pending confirmation") {
     sentences.push("A record with your e-mail exists — run confirm_my_link to use it.");
+  } else if (input.relation?.status === "pending_confirmation") {
+    // Recorded but not linked: how the link is made depends on what signed in.
+    // An integration has no e-mail; an administrator links it by identity id.
+    sentences.push(
+      identity.credential === "api-key"
+        ? `This integration is not linked to a record yet; an organization administrator links it with link_identity { identityId: "${input.relation.identityId}", relationId }.`
+        : "Your login is not linked to a record yet; an organization administrator links it with link_identity, by your e-mail address or your identity id.",
+    );
   }
   sentences.push(
     `You can use ${plural(access.tools, "tool")} and ${plural(access.resources, "resource")}.`,

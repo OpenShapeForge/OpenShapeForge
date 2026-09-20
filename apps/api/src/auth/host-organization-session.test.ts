@@ -430,6 +430,8 @@ describe("explicit service credentials in host mode", () => {
     const secret = encryptSecret(keyringFromEnv(keyMaterial)!, integrationId, "clientSecret", "synthetic-secret");
     const issuer = new URL("/realms/host", server.url).href;
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = issuer;
+    const identityId = "66666666-6666-4666-8666-666666666666";
+    let linkRecorded = false;
     // The database credential, not the deployment service allowlist, grants this client access.
     delete process.env.OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES;
     const credentialRows = (query: CompiledQuery) => {
@@ -446,8 +448,15 @@ describe("explicit service credentials in host mode", () => {
         client_secret_key_id: secret.keyId, client_secret_algorithm: secret.algorithm,
       }];
       // The service account's first session records its own identity row and
-      // an empty pending link (identity-link.ts, ensureServiceIdentityLink).
-      if (query.sql.includes("insert into platform.identities")) return [{ id: "66666666-6666-4666-8666-666666666666" }];
+      // an empty pending link (identity-link-session.ts); the fixture answers
+      // both writes and the read-back of the pending row.
+      if (query.sql.includes("insert into platform.identities")) return [{ id: identityId }];
+      const pendingRow = {
+        identity_id: identityId, issuer, subject: "service-user", status: "pending_confirmation", relation_id: null,
+        candidate_relation_id: null, linked_by: null, display_name: null, relation_type: null, needs_role_assignment: false, roles: [],
+      };
+      if (query.sql.includes("insert into platform.identity_relations")) { linkRecorded = true; return [pendingRow]; }
+      if (query.sql.includes("from platform.identity_relations ir")) return linkRecorded ? [pendingRow] : [];
       return undefined;
     };
     const request = new Headers({ authorization: `Bearer ${apiKey.token}` });
@@ -467,8 +476,8 @@ describe("explicit service credentials in host mode", () => {
       if (scenario.allowed) {
         expect(session.tenantId).toBe(TENANT_A);
         expect(session.roles).toEqual(["Records.Read"]);
-        // The session names its identity and recorded it; nothing links it yet.
-        expect(session).toMatchObject({ issuer, userDisplayName: "Scoped worker", relation: null });
+        // The session names its identity and recorded it: a pending link, nothing linked yet.
+        expect(session).toMatchObject({ issuer, userDisplayName: "Scoped worker", relation: { identityId, status: "pending_confirmation", relationId: null } });
         expect(queries.some((q) => q.sql.includes("insert into platform.identities") && q.parameters.includes(issuer))).toBe(true);
         expect(queries.some((q) => q.sql.includes("insert into platform.identity_relations"))).toBe(true);
         // Let the fire-and-forget use-timestamp write settle before counting,

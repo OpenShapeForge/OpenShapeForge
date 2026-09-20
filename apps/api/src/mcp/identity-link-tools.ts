@@ -35,6 +35,7 @@ import {
   IDENTITY_LINK_ADMIN_ROLE,
   linkIdentityToRelation,
   listPendingRoleAssignments,
+  listUnlinkedIdentities,
   setMembershipRoles,
   type IdentityLinkState,
 } from "../auth/identity-link.js";
@@ -57,11 +58,13 @@ const LINK_IDENTITY: Tool = {
   name: LINK_IDENTITY_TOOL,
   title: "Link a login to a Relation",
   description:
-    "Link a person's login (their e-mail address at the identity provider) to a " +
-    "Relation of this organization, so that what they do is recorded as that " +
-    "person. Use it when someone signed in but is not yet linked, or is waiting " +
-    "for confirmation, or is linked to the wrong Relation. The person must have " +
-    "signed in to this organization at least once. For organization administrators.",
+    "Link a login to a Relation of this organization, so that what it does is " +
+    "recorded as that party: a person by the e-mail address their identity provider " +
+    "reports, or — for an identity without one, an integration's API key or a " +
+    "web-only login — by the identityId list_pending_members shows. Use it when " +
+    "someone signed in but is not yet linked, or is waiting for confirmation, or " +
+    "is linked to the wrong Relation. The login must have reached this organization " +
+    "at least once. For organization administrators.",
   inputSchema: {
     type: "object",
     properties: {
@@ -114,10 +117,13 @@ const LIST_PENDING_MEMBERS: Tool = {
   name: LIST_PENDING_MEMBERS_TOOL,
   title: "List members awaiting a role",
   description:
-    "List identities in this organization whose very first sign-in already created their " +
-    "Relation, but who are still running on read-only access because nobody has assigned " +
-    "them a real role yet. Check this after employees start signing in through a newly " +
-    "linked identity provider. For organization administrators.",
+    "List identities this organization has recorded but not settled: `pending` are members " +
+    "whose very first sign-in already created their Relation but who still run on read-only " +
+    "access because nobody assigned them a role (set_member_role); `unlinked` are logins " +
+    "recorded without a Relation — an integration's API key, a web-only login — each with " +
+    "the identityId link_identity takes. Check this after employees start signing in " +
+    "through a newly linked identity provider, or after issuing an API key. For organization " +
+    "administrators.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -287,8 +293,11 @@ export async function callIdentityLinkTool(
   if (name === LIST_PENDING_MEMBERS_TOOL) {
     if (!sessionMayLinkIdentities(session)) return notFound(name);
     try {
-      const pending = await listPendingRoleAssignments(db, scoped);
-      return succeeded({ pending });
+      const [pending, unlinked] = await Promise.all([
+        listPendingRoleAssignments(db, scoped),
+        listUnlinkedIdentities(db, scoped),
+      ]);
+      return succeeded({ pending, unlinked });
     } catch (error) {
       return failed(error);
     }

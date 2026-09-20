@@ -406,9 +406,12 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   record), "Pending confirmation" (a Relation carrying the person's e-mail
   exists; `name`/`kind` describe that candidate and the summary says "A record
   with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
-  (no record, or a session that carries no person: API key, development
-  identity). `explanation` is one fixed line saying what a Relation is. No
-  ids leave the answer.
+  (no record yet). A login that reached the organization without a bearer
+  token — a web session, an API key — has recorded its identity and an
+  empty pending link, and the summary says how it gets linked: a person by
+  e-mail or identity id, an integration by the identity id it names, both
+  through an administrator's `link_identity`. `explanation` is one fixed line
+  saying what a Relation is. Beyond that identity id, no ids leave the answer.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
@@ -582,13 +585,21 @@ const party = sessionRelation(session); // { relationId, displayName } | null
 ```
 
 `null` means "not linked": pending, or no link yet. Every credential kind
-resolves through the same row: a bearer session with its token's claims, a
-trusted-context session by the realm this deployment trusts and its user id
-(the identity subject), an API-key session likewise — its first use records
-the service account's identity and an empty pending link, so `link_identity`
-can make the integration act as a Relation like anyone else. Resolution is
-cached per (identity, tenant) for a minute inside a process; a link made
-through the tools invalidates it there and shows up elsewhere within the TTL.
+resolves through the same row: a bearer session with its token's claims and
+the admission that goes with them; a trusted-context session (the web host)
+or an API-key session by the realm this deployment trusts
+(`OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER`, which such a deployment must set:
+a session that could be linked but names no realm is refused as
+unavailable, never treated as nobody) and its user id, the identity subject.
+Both record, on first use, their own identity row and an empty pending link
+under their own session, so a person's later bearer login admits them
+through it and an administrator's `link_identity` can name an integration's
+service account — or a web-only login — by the identity id
+`list_pending_members` lists under `unlinked`. One cache, keyed (issuer,
+subject, tenant), serves both paths for a minute inside a process; every
+write and every invalidation moves its generation on, so neither path can
+store a stale state over what the other just wrote, and a link shows up on
+other replicas within the TTL.
 
 Not part of this: Keycloak user attributes as a data source, relation ids in
 tokens, and RelationRoles — the administrator assigns those.
@@ -631,7 +642,7 @@ naming the exact next call:
 
 | step | done when | not applicable when |
 | --- | --- | --- |
-| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`. | the session carries no person (development identity, API key) |
+| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`, by e-mail or by the identity id the step names. | the session is not a person's: an API key (an integration records its identity for `link_identity` but is never onboarded), or a development identity that cannot be linked |
 | `organization_connections` | **organization administrators only** (`org_admin`): for every Adapter in the organization whose auth needs organization-level configuration — it declares `configurationFields`, or its auth profile references credential values (an API key, basic credentials, the OAuth client behind a personal sign-in) — a tenant-owned Connection exists and passes the same required-values check `test_connection` runs. The `howTo` names `create_connection` with the `adapterId`, lists the form fields with secret ones marked, and for an OAuth Adapter the redirect URL to register (`<OPENSHAPEFORGE_PUBLIC_ORIGIN>/api/entity-oauth/callback`); an incomplete Connection is named with its missing values. Shared vocabulary: `apps/api/src/mcp/connection-guidance.ts`. | the person is not an organization administrator, or no Adapter needs organization-level configuration |
 | `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
 | `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |

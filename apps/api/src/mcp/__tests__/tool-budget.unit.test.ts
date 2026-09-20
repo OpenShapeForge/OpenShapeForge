@@ -9,6 +9,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import { PLATFORM_TOOL_BYTES_ALLOWANCE, advertisedToolBytes, uploadToolDefinition } from "@openshapeforge/operations";
+import { productName } from "../../config/product-name.js";
+import { ARTIFACT_UPLOAD_APP_URI } from "../artifact-upload.js";
 import { employeeInvitationToolsForSession } from "../employee-invitation-tools.js";
 import { identityLinkToolsForSession } from "../identity-link-tools.js";
 import { onboardingToolsForSession } from "../onboarding.js";
@@ -30,9 +32,19 @@ const everything = {
 
 describe("the platform's fixed tools", () => {
   test("fit the allowance the compiler reserves for them", () => {
+    // The upload tool as the listing attaches it: the deployment's product
+    // name (a long one here) and the MCP App link an https origin adds.
+    const previous = process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    process.env.OPENSHAPEFORGE_PRODUCT_NAME = "A product name of quite ordinary length";
+    const upload = {
+      ...uploadToolDefinition(productName()),
+      _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } },
+    };
+    if (previous === undefined) delete process.env.OPENSHAPEFORGE_PRODUCT_NAME;
+    else process.env.OPENSHAPEFORGE_PRODUCT_NAME = previous;
     const tools = [
       SESSION_INFO_TOOL,
-      uploadToolDefinition("A product name of ordinary length"),
+      upload,
       ...identityLinkToolsForSession(everything),
       ...organizationProfileToolsForSession(everything),
       ...employeeInvitationToolsForSession(everything),

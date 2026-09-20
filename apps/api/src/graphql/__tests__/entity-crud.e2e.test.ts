@@ -22,6 +22,7 @@ import {
 import {
   contractSample,
   createRow,
+  referencingRows,
   eligibleTablesByName,
   fieldName,
   foreignKeyTargets,
@@ -45,7 +46,6 @@ import {
 } from "./e2e/gql-shapes.js";
 import {
   createOffersField,
-  createsCompanionRecords,
   isEntityBackedCreate,
   leaseRequired,
   placeholderControls,
@@ -180,25 +180,25 @@ for (const table of tables) {
       });
     }
 
-    if (!createsCompanionRecords(table)) {
-      test("delete removes the row", async () => {
-        const id = await createRow(table, tenantA);
+    // What the delete must do depends on what the create actually left
+    // behind, read from the database: a record nothing references is
+    // removed; a record whose create also made rows that reference it (a
+    // document and its first version) is refused by the schema's on-delete
+    // rule while they exist, and removing them is the create's own contract.
+    // A refusal without such rows, or a removal despite them, is a finding.
+    test("delete removes the row, or is refused only while rows that reference it exist", async () => {
+      const id = await createRow(table, tenantA);
+      const referencing = await referencingRows(table, id, tenantA);
+      if (referencing.length === 0) {
         await expectDeleted(tenantA, table, id);
         expect(await fetchRecord(tenantA, table, id)).toBeNull();
         untrackRow(id);
-      });
-    } else {
-      // A plugin-backed create makes companion records the entity delete is
-      // authored to refuse while they exist (a document and its first
-      // version); removing them is the plugin's own contract, so what the
-      // generic delete must prove here is that it refuses cleanly.
-      test("delete is refused while the create's companion records exist", async () => {
-        const id = await createRow(table, tenantA);
-        const refused = await deleteRecord(tenantA, table, id);
-        expectOperationError(table, refused, graphql.deleteMutationName, "REFERENCE_IN_USE");
-        expect((await fetchRecord(tenantA, table, id))?.id).toBe(id);
-      });
-    }
+        return;
+      }
+      const refused = await deleteRecord(tenantA, table, id);
+      expectOperationError(table, refused, graphql.deleteMutationName, "REFERENCE_IN_USE");
+      expect((await fetchRecord(tenantA, table, id))?.id).toBe(id);
+    });
 
     if (leaseRequired(table, "delete")) {
       // A lease-protected delete cannot even begin on a row that does not

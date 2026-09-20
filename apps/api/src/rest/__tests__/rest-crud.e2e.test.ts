@@ -39,6 +39,7 @@ import {
   nextMarker,
   pluginCreateInput,
   redactableColumnFor,
+  referencingRows,
   contractSample,
   tables,
   tablesByName,
@@ -50,7 +51,6 @@ import {
   acknowledgementRequired,
   challengeAnswerFor,
   createOffersField,
-  createsCompanionRecords,
   isCanonical,
   isEntityBackedCreate,
   leaseRequired,
@@ -545,9 +545,23 @@ for (const table of restTables) {
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
 
-    if (!createsCompanionRecords(table)) {
-      test("DELETE preserves v1 status and uses the v2 result envelope", async () => {
-        const id = await createRestRow(table, tenantA);
+    // What DELETE must do depends on what the create actually left behind,
+    // read from the database: a record nothing references is removed; a
+    // record whose create also made rows that reference it (a document and
+    // its first version) is refused by the schema's on-delete rule while
+    // they exist, and removing them is the create's own contract. A refusal
+    // without such rows, or a removal despite them, is a finding.
+    test("DELETE removes the row with the v2 envelope, or is refused only while rows that reference it exist", async () => {
+      const id = await createRestRow(table, tenantA);
+      const referencing = await referencingRows(table, id, tenantA);
+      if (referencing.length > 0) {
+        const refused = await restDelete(table, tenantA, id);
+        expect(refused.status).toBe(409);
+        expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
+        expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
+        return;
+      }
+      {
         const deleted = isCanonical(table)
           ? await restDelete(table, tenantA, id)
           // Legacy DELETE ignored object bodies; v2 controls must not change that contract.
@@ -573,19 +587,8 @@ for (const table of restTables) {
                 : {}),
             });
         expect(again.status).toBe(404);
-      });
-    } else {
-      // A plugin-backed create makes companion records the entity delete is
-      // authored to refuse while they exist (a document and its first
-      // version); removing them is the plugin's own contract.
-      test("DELETE is refused while the create's companion records exist", async () => {
-        const id = await createRestRow(table, tenantA);
-        const refused = await restDelete(table, tenantA, id);
-        expect(refused.status).toBe(409);
-        expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
-        expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
-      });
-    }
+      }
+    });
 
     if (leaseRequired(table, "update") && leaseRequired(table, "delete")) {
       test("the central record lease blocks a second writer across update and delete", async () => {

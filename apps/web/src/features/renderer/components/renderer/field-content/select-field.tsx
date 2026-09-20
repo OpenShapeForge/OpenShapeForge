@@ -94,11 +94,7 @@ export function renderSelectField(
       disabled={isSubmitting}
       readOnly={false}
       clearable={Boolean(resolvedRender.props?.clearable)}
-      referentieGroep={
-        typeof resolvedRender.props?.referentieGroep === "string"
-          ? resolvedRender.props.referentieGroep
-          : field.options?.referentieGroep
-      }
+      referentieGroep={field.options?.referentieGroep ?? getFieldOsfTypeDefinition(field)?.options?.referentieGroep}
       placeholder={
         translateRendererText(field.placeholder, lang) ||
         (options.length > 0

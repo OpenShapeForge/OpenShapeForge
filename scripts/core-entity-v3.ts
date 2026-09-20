@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The coreEntity v3 gate: every authored entity is schemaVersion 3 with its
- * relationships on fields. The v1/v2 rewrite this file once carried is done;
- * the one-type-axis migration lives in scripts/migrate-one-type-axis/.
+ * relationships on fields. There is no migration path from older shapes;
+ * the corpus is authored in the current one.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";

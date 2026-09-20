@@ -21,91 +21,19 @@
  * here has to police it.
  */
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
+import {
+  connectorMcpTools as sharedConnectorMcpTools,
+  type ConnectorMcpTool,
+} from "@openshapeforge/operations";
 
 export type McpSessionLike = { roles: readonly string[] };
 
-export type ConnectorMcpTool = {
-  name: string;
-  connectorSlug: string;
-  operationKey: string;
-  title: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  annotations: {
-    readOnlyHint: boolean;
-    destructiveHint: boolean;
-    idempotentHint: boolean;
-  };
-};
+export type { ConnectorMcpTool } from "@openshapeforge/operations";
+export { connectorToolAnnotations as annotationsFor } from "@openshapeforge/operations";
 
-function localized(value: unknown): string | undefined {
-  if (typeof value === "string") return value.trim() || undefined;
-  if (value && typeof value === "object") {
-    const text = value as Record<string, string>;
-    return (text.en ?? text.nl ?? text.fr)?.trim() || undefined;
-  }
-  return undefined;
-}
-
-/**
- * Annotations derived mechanically from the operation, matching how the entity
- * tools derive theirs.
- *
- * A query is read-only and idempotent. A mutation is neither by default —
- * `idempotentHint` is claimed only when the contract declares an idempotency
- * strategy, because that hint tells a model a retry is safe, and saying so
- * without the contract backing it is how a model double-charges a customer.
- */
-export function annotationsFor(
-  operation: ConnectorOperationContract,
-): ConnectorMcpTool["annotations"] {
-  if (operation.kind === "query") {
-    return { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
-  }
-  return {
-    readOnlyHint: false,
-    // The platform cannot know whether a connector mutation destroys anything,
-    // and the contract has no vocabulary for it yet. Claiming false would be a
-    // guess in the direction that makes a model bolder.
-    destructiveHint: true,
-    idempotentHint: operation.reliability.idempotency !== undefined,
-  };
-}
-
-function describeOperation(
-  contract: ConnectorContract,
-  operation: ConnectorOperationContract,
-): string {
-  const parts = [
-    localized(operation.description) ??
-      localized(operation.label) ??
-      `${operation.key} on ${contract.title}`,
-  ];
-  if (operation.kind === "mutation" && operation.reliability.idempotency === undefined) {
-    // A model reading this decides whether to retry. Tell it plainly.
-    parts.push("Not safe to repeat: this operation declares no idempotency strategy.");
-  }
-  return parts.join(" ");
-}
-
-/** Every connector tool this build advertises, before session filtering. */
+/** Every connector tool this build advertises, before session filtering (shape shared with the compiler). */
 export function connectorMcpTools(contracts: ConnectorContract[]): ConnectorMcpTool[] {
-  return contracts
-    .filter((contract) => contract.exposure.mcp)
-    .flatMap((contract) =>
-      contract.operations
-        .filter((operation) => operation.mcp)
-        .map((operation) => ({
-          name: operation.mcp!.toolName,
-          connectorSlug: contract.slug,
-          operationKey: operation.key,
-          title: localized(operation.label) ?? operation.key,
-          description: describeOperation(contract, operation),
-          inputSchema: operation.schemas.input,
-          annotations: annotationsFor(operation),
-        })),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return sharedConnectorMcpTools(contracts);
 }
 
 /**

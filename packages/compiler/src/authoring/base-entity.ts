@@ -94,7 +94,7 @@ export function entityIdOsfType(entityName: string): string {
 export function applyBaseEntityToCore(
   coreEntity: CoreEntity,
   base: BaseEntityDefinition | null,
-  source: { kind: "core" | "contextFull"; path: string },
+  source: { kind: "core"; path: string },
 ): CoreEntity {
   if (base === null) return coreEntity;
   if ((coreEntity as { baseEntity?: boolean }).baseEntity === false) {
@@ -112,7 +112,7 @@ export function applyBaseEntityToCore(
   if (conflicts.length > 0) {
     const list = conflicts.map((key) => `\`${key}\``).join(", ");
     throw new Error(
-      `${source.kind === "core" ? "Core entity" : "Context-full entity"} at ${source.path} ` +
+      `Core entity at ${source.path} ` +
         `declares field(s) ${list} that are provided by BaseEntity. ` +
         `Remove them from the entity YAML (strict-replace policy) or set ` +
         `\`baseEntity: false\` at the top level to opt out of base merging.`,
@@ -121,9 +121,8 @@ export function applyBaseEntityToCore(
 
   const idOsfType = entityIdOsfType(coreEntity.entity);
   const baseFieldsWithSemantics = base.fields.map((baseField) => {
-    const field = coreEntity.schemaVersion >= 2
-      ? { ...baseField, render: undefined }
-      : baseField;
+    // Field presentation belongs to an interface or renderer registry.
+    const field = { ...baseField, render: undefined };
     if (field.key !== "id") return field;
     return { ...field, osfType: idOsfType };
   });

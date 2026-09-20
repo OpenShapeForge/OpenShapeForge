@@ -7,14 +7,13 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { mintConfiguration, peekConfiguration } from "../configuration-handoff.js";
 import {
-  mintConfiguration,
-  peekConfiguration,
   renderConfigurationForm,
   renderConfigurationExpiredPage,
   renderConfigurationFailedPage,
   renderConfigurationSavedPage,
-} from "../configuration-handoff.js";
+} from "../browser-pages.js";
 import { renderEntityOAuthCallbackPage } from "../browser-pages.js";
 
 const outDir = process.argv[2];

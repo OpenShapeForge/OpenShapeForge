@@ -30,6 +30,11 @@
  * same interface, for when third-party packages are on the table.
  */
 import { randomUUID } from "node:crypto";
+import type {
+  ConnectorContext,
+  ConnectorPackage,
+  FetchLike,
+} from "@openshapeforge/plugin-runtime/connector";
 import { ConnectorContractBoundary } from "./contract-boundary.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
 import {
@@ -167,51 +172,6 @@ export function rewrapPlatformExecutionError(
     },
   );
 }
-
-/**
- * What a connector package receives. Deliberately small: resolved
- * configuration, a bound fetch, a redacting logger, an abort signal. No
- * database handle, no session, no filesystem helper, no `process`.
- *
- * Only the secrets this connector's own contract declares are present — the
- * platform never hands over a bag of every credential it holds.
- */
-/**
- * The subset of `fetch` a connector gets. Deliberately not `typeof fetch`: the
- * bound version carries no `preconnect` and no other host affordances, and
- * saying so in the type keeps a package from reaching for them.
- *
- * Spelled `string | URL | Request` rather than `RequestInfo`, for the reason
- * the example package already states about its own structural copy:
- * `RequestInfo` is an ambient global that exists only once a DOM or host lib is
- * loaded. Naming it here made this module unimportable from any program without
- * one — which the examples project is, so a connector test could not reach the
- * executor it is testing.
- */
-export type FetchLike = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
-
-export type ConnectorContext = {
-  config: Readonly<Record<string, unknown>>;
-  secrets: Readonly<Record<string, string>>;
-  fetch: FetchLike;
-  signal: AbortSignal;
-  log: (message: string, fields?: Record<string, unknown>) => void;
-};
-
-export type ConnectorPackage = {
-  slug: string;
-  contractVersion: number;
-  contractChecksum?: string;
-  operations: string[];
-  invoke(
-    operationKey: string,
-    context: ConnectorContext,
-    input: unknown,
-  ): Promise<unknown>;
-};
 
 /**
  * The trust gate. Called before a package is loaded, not after.

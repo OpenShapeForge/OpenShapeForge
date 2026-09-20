@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import {
   compileAuthoringBackendManifest,
-  listAuthoringContextEntitySpecs,
   listAuthoringEntitySlugs,
 } from "./authoring/backend-manifest.js";
 import { resolveAuthoringLayers } from "./authoring/layers.js";
@@ -26,7 +25,7 @@ import { materializeEntityInputSources } from "./entity-input-sources.js";
 import { ensureCompositeReferenceKeys } from "./tenant-bound-references.js";
 
 export const activeManifestSource =
-  "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
+  "packages/compiler/config/platform-schema.yaml + authoring layers (entities)";
 
 const resolvedAuthoringDirs = new Map<string, string>();
 
@@ -143,7 +142,6 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       mergePluginPlatformTables(baseManifest, plugins, { repoRoot, authoringDir, webPresent });
 
       const authoringEntitySlugs = listAuthoringEntitySlugs(authoringDir);
-      const contextEntitySpecs = listAuthoringContextEntitySpecs(authoringDir);
       const entities: CompiledEntityInfo[] = [];
       const promotedManifest = compileAuthoringBackendManifest(
         authoringDir,
@@ -151,11 +149,9 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           mode: "promote",
           sourcePathPrefix: canonicalRepoRelativePath(repoRoot, authoringDir),
           entityAllowlist: authoringEntitySlugs,
-          contextEntityAllowlist: contextEntitySpecs,
           schemaByModule: { core: "erp" },
           relationshipRegister: baseManifest.relationshipRegister ?? [],
           generatedCrudAllowlist: authoringEntitySlugs,
-          contextEntityGeneratedCrudAllowlist: contextEntitySpecs,
           onCandidate: (candidate) => entities.push(candidate),
         },
       );

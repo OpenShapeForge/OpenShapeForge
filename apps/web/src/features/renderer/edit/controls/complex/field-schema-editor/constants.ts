@@ -20,7 +20,7 @@ export const OSF_TYPE_OPTIONS = Object.entries(COMPILER_OSF_TYPES).map(
     return {
       value,
       label: typedDefinition.label,
-      valueType: typedDefinition.valueType,
+      valueType: typedDefinition.baseType,
       cardinality: typedDefinition.cardinality ?? "single",
     };
   },

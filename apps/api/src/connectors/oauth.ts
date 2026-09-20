@@ -26,13 +26,14 @@
  * halves are needed: one stops a contract naming its way in, the other stops
  * the invocation path handing it over by accident.
  */
+import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { recordConnectorAudit } from "./audit.js";
 import type { ConnectorContract } from "./catalog.js";
-import { ConnectorExecutionError, type FetchLike } from "./executor.js";
+import { ConnectorExecutionError } from "./executor.js";
 import {
   decryptSecret,
   encryptSecret,

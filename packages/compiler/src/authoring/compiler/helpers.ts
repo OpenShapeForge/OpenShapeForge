@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // ── Naming & pluralization helpers ──
 import type { Field } from "../types.js";
+import { cardinalityOf } from "@openshapeforge/operations";
 
 export const FIELD_VALUE_TYPE_TO_SQL: Record<string, string> = {
   string: "text",
@@ -42,14 +43,7 @@ function needsWideInteger(field: Pick<Field, "baseType" | "validation">): boolea
 }
 
 export function fieldCardinality(field: Pick<Field, "cardinality">): "single" | "collection" {
-  if (field.cardinality === "collection") return "collection";
-  if (field.cardinality && typeof field.cardinality === "object") {
-    if (field.cardinality.max === "unbounded") return "collection";
-    if (typeof field.cardinality.max === "number" && field.cardinality.max > 1) {
-      return "collection";
-    }
-  }
-  return "single";
+  return cardinalityOf(field.cardinality).cardinality;
 }
 
 export function isCollectionField(field: Pick<Field, "cardinality">): boolean {

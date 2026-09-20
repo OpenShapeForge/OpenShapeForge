@@ -15,12 +15,44 @@ const catalog: ComponentCatalog = {
   components: {},
 };
 
+describe("choice resolution", () => {
+  const osfTypes: Record<string, OsfTypeDefinition> = {
+    accountId: { kind: "entityId", entity: "Account", label: { en: "Account" }, baseType: "string", validation: { format: "uuid" }, optionSource: { type: "entity", source: "Account", valueField: "id" } },
+    referenceDataCode: { label: { en: "Code" }, baseType: "string" },
+  };
+
+  test("an inline identifier value picks from the alias's optionSource; the entity's own primary key does not", () => {
+    const [id, holder] = resolveModelFields([
+      { key: "id", osfType: "accountId" },
+      { key: "meta", osfType: "object", children: [{ key: "ownerId", osfType: "accountId" }] },
+    ], catalog, osfTypes);
+    expect(id!.options).toBeUndefined();
+    expect(holder!.children![0]!.options).toEqual({ type: "entity", source: "Account", valueField: "id" });
+    const [authored] = resolveModelFields([
+      { key: "meta", osfType: "object", children: [{ key: "ownerId", osfType: "accountId", options: { type: "static", items: [{ value: "x", label: { en: "X" } }] } }] },
+    ], catalog, osfTypes);
+    expect(authored!.children![0]!.options).toMatchObject({ type: "static" });
+  });
+
+  test("the select component's render prop is the same referentiedata group, folded into options", () => {
+    const [folded, agreeing] = resolveModelFields([
+      { key: "status", osfType: "referenceDataCode", render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } } },
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "KIND" } } },
+    ], catalog, osfTypes);
+    expect(folded!.options).toEqual({ type: "referentiedata", referentieGroep: "STATUS" });
+    expect(agreeing!.options).toEqual({ type: "referentiedata", referentieGroep: "KIND" });
+    expect(() => resolveModelFields([
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "OTHER" } } },
+    ], catalog, osfTypes)).toThrow("kind: render.props.referentieGroep OTHER contradicts options.referentieGroep KIND.");
+  });
+});
+
 describe("semantic renderer mapping", () => {
   test("retains authored and semantic collection bounds after normalization", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       boundedTags: {
         label: { en: "Tags" },
-        valueType: "string",
+        baseType: "string",
         cardinality: { min: 1, max: 3 },
       },
     };
@@ -49,7 +81,7 @@ describe("semantic renderer mapping", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "ReferenceSelect" },
         props: { clearable: false },
       },
@@ -71,7 +103,7 @@ describe("semantic renderer mapping", () => {
     const osfTypes: Record<string, OsfTypeDefinition> = {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
-        valueType: "string",
+        baseType: "string",
         render: { display: "TextDisplay", input: "FileUpload" },
         props: {
           fileNameField: "fileName",
@@ -103,7 +135,7 @@ test("inherits semantic choices recursively while explicit options win", () => {
     { key: "override", osfType: "choice", options: { type: "static", items: [] } },
     { key: "nested", osfType: "object", children: [{ key: "choice", osfType: "choice" }] },
     { key: "items", osfType: "string", cardinality: "collection", item: { key: "choice", osfType: "choice" } },
-  ], catalog, { choice: { label: { en: "Choice" }, valueType: "string", options } });
+  ], catalog, { choice: { label: { en: "Choice" }, baseType: "string", options } });
   expect(fields[0]!.options).toEqual(options);
   expect(fields[1]!.options?.items).toEqual([]);
   expect(fields[2]!.children?.[0]?.options).toEqual(options);

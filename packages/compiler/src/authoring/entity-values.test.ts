@@ -67,8 +67,8 @@ function compileFixture(
     write("catalogs/components.yaml", { defaults: {}, components: {} });
     write("catalogs/transforms.yaml", { transforms: {} });
     write("catalogs/osf-types.yaml", { types: {
-      entityValue: { kind: "object", valueType: "object", label: { en: "Entity value" } },
-      shortText: { kind: "scalar", valueType: "string", validation: { maxLength: 80 }, label: { en: "Text" } },
+      entityValue: { kind: "object", baseType: "object", label: { en: "Entity value" } },
+      shortText: { kind: "scalar", baseType: "string", validation: { maxLength: 80 }, label: { en: "Text" } },
     } });
     const entities = corpus(); mutate(entities);
     for (const entry of entities) write(`entities/${entry.entity.toLowerCase()}.yaml`, entry);
@@ -146,7 +146,7 @@ describe("entityValue compiled storage and registry", () => {
   it("allows immutable:false but rejects inherited immutable:true on nested value fields", () => {
     expect(() => compileFixture((entities) => named(entities, "Copy").fields[0]!.immutable = false)).not.toThrow();
     const definition = entity("FixedValue", [{ key: "nested", osfType: "object", children: [{ key: "fixed", osfType: "fixedText" }] }], true);
-    const fixedText = { kind: "scalar" as const, valueType: "string" as const, label: { en: "Fixed" }, immutable: true };
+    const fixedText = { kind: "scalar" as const, baseType: "string" as const, label: { en: "Fixed" }, immutable: true };
     expect(() => normalizeEntityFields(definition, deriveEntityOsfTypes([definition], { fixedText }))).toThrow("field policy immutable");
   });
 
@@ -154,7 +154,7 @@ describe("entityValue compiled storage and registry", () => {
     expect(() => compileFixture(undefined, [{ key: "profileSecret", osfType: "string", permissions: { read: ["Example.Read"] } }])).toThrow("field policy permissions");
     const definition = entity("SecureValue", [{ key: "nested", osfType: "object", children: [{ key: "sensitive", osfType: "privateText" }] }], true);
     const catalog = deriveEntityOsfTypes([definition], {
-      privateText: { kind: "scalar", valueType: "string", label: { en: "Private" }, classification: { sensitivity: "pii" } },
+      privateText: { kind: "scalar", baseType: "string", label: { en: "Private" }, classification: { sensitivity: "pii" } },
     });
     expect(() => normalizeEntityFields(definition, catalog)).toThrow("field policy classification");
   });

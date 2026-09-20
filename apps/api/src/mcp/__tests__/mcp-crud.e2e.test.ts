@@ -766,10 +766,10 @@ describe("generated MCP server", () => {
       test(`${prefix}: advertises ${key} as a uuid on ${onCreate ? "create, " : ""}update and filter`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
         const tools = body.result.tools as { name: string; inputSchema: any }[];
-        const update = advertisedSchema(tools, table, "update");
-        const list = advertisedSchema(tools, table, "list");
+        const update = await advertisedSchema(tenantA, tools, table, "update");
+        const list = await advertisedSchema(tenantA, tools, table, "list");
         if (onCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(create.properties[key]).toMatchObject({ type: "string", format: "uuid" });
         }
         expect(list.properties.filter.properties[key]).toMatchObject({
@@ -865,21 +865,21 @@ describe("generated MCP server", () => {
     test(`${prefix}: the update schema ${immutable ? "withholds" : "matches create on"} immutable fields`, async () => {
       const { body } = await rpc(tenantA, "tools/list");
       const tools = body.result.tools as { name: string; inputSchema: any }[];
-      const update = advertisedSchema(tools, table, "update");
+      const update = await advertisedSchema(tenantA, tools, table, "update");
       // Authored fields only: a create may also offer a blueprint control,
       // an update its version and lease controls.
       const updatable = authoredKeys(update.properties.values.properties);
 
       if (!immutable) {
         if (offeredOnCreate) {
-          const create = advertisedSchema(tools, table, "create");
+          const create = await advertisedSchema(tenantA, tools, table, "create");
           expect(updatable).toEqual(authoredKeys(create.properties));
         }
         return;
       }
       for (const field of immutableFields) expect(updatable).not.toContain(field);
       if (offeredOnCreate) {
-        const creatable = authoredKeys(advertisedSchema(tools, table, "create").properties);
+        const creatable = authoredKeys((await advertisedSchema(tenantA, tools, table, "create")).properties);
         for (const field of immutableFields) expect(creatable).toContain(field);
         expect(updatable).toEqual(creatable.filter((key) => !immutableFields.includes(key)));
       }

@@ -40,7 +40,8 @@
     "baseEntity": { "type": "boolean" },
     "schemaVersion": {
       "type": "integer",
-      "enum": [1, 2, 3]
+      "const": 3,
+      "description": "The only authored shape: behaviour in operations and interfaces, relationships on fields."
     },
     "kind": {
       "type": "string",
@@ -134,60 +135,6 @@
       }
     },
     "relationships": false,
-    "hooks": {
-      "type": "object",
-      "description": "Lifecycle hooks for custom business logic.",
-      "properties": {
-        "beforeCreate": {
-          "$ref": "#/$defs/hookList"
-        },
-        "afterCreate": {
-          "$ref": "#/$defs/hookList"
-        },
-        "beforeUpdate": {
-          "$ref": "#/$defs/hookList"
-        },
-        "afterUpdate": {
-          "$ref": "#/$defs/hookList"
-        },
-        "beforeDelete": {
-          "$ref": "#/$defs/hookList"
-        },
-        "afterDelete": {
-          "$ref": "#/$defs/hookList"
-        }
-      }
-    },
-    "permissions": {
-      "type": "object",
-      "description": "Entity-level RBAC permissions (legacy).",
-      "properties": {
-        "read": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "create": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "update": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "delete": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    },
     "authorization": {
       "type": "object",
       "description": "Entity-level RBAC authorization. Defines roles required for CRUD operations. Used by the compiler to generate GraphQL auth guards and Keycloak role definitions.",
@@ -320,311 +267,36 @@
         }
       }
     },
-    "ui": {
-      "type": "object",
-      "description": "View definitions for the core entity. Build-time generated into frontend components.",
-      "additionalProperties": false,
-      "properties": {
-        "routes": {
-          "type": "object",
-          "additionalProperties": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/localizedText"
-              }
-            ]
-          }
-        },
-        "presentations": {
-          "$ref": "#/$defs/presentations"
-        }
-      }
-    },
-    "crud": {
-      "description": "Common generated-CRUD upper bound shared by GraphQL, REST, MCP and workflow. Absent or true enables all operations for backward compatibility; false disables all. Later entityPatch layers may only narrow this policy.",
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "operations": { "$ref": "#/$defs/crudOperations" }
-          }
-        }
-      ]
-    },
-    "rest": {
-      "description": "Opt-in generated REST exposure. Absent or false means no REST routes (fail closed). `true` enables all operations under a derived base path; the object form allows per-operation flags and a custom basePath.",
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "basePath": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9-]*$"
-            },
-            "operations": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "list": { "type": "boolean" },
-                "get": { "type": "boolean" },
-                "create": { "type": "boolean" },
-                "update": { "type": "boolean" },
-                "delete": { "type": "boolean" }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "mcp": {
-      "description": "Opt-in generated MCP (Model Context Protocol) exposure. Absent or false means no tools are generated (fail closed). `true` emits one tool per operation under a prefix derived from the entity name; the object form allows per-operation flags, a custom toolPrefix, and the `generic` tool style for large catalogs.",
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "toolPrefix": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*$"
-            },
-            "tools": {
-              "type": "string",
-              "enum": ["dedicated", "generic"]
-            },
-            "operations": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "list": { "$ref": "#/$defs/mcpOperation" },
-                "get": { "$ref": "#/$defs/mcpOperation" },
-                "create": { "$ref": "#/$defs/mcpOperation" },
-                "update": { "$ref": "#/$defs/mcpOperation" },
-                "delete": { "$ref": "#/$defs/mcpOperation" }
-              }
-            },
-            "guide": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["name", "description", "roles", "content"],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]*$"
-                },
-                "description": { "type": "string" },
-                "roles": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "minItems": 1
-                },
-                "content": { "type": "string" },
-                "requireBeforeCreate": { "type": "boolean" }
-              }
-            },
-            "discovery": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["name"],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]*$"
-                },
-                "description": { "type": "string" }
-              }
-            },
-            "test": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["name"],
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9_]*$"
-                },
-                "description": { "type": "string" }
-              }
-            },
-            "resource": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["uri"],
-              "properties": {
-                "uri": {
-                  "type": "string",
-                  "pattern": "^[a-z][a-z0-9+.-]*://[A-Za-z0-9][A-Za-z0-9/_-]*[A-Za-z0-9]$"
-                },
-                "name": { "type": "string" },
-                "description": { "type": "string" },
-                "templateDescription": { "type": "string" }
-              }
-            },
-            "elicitOnCreate": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "sourceField",
-                "sourceEntity",
-                "definitionsField",
-                "into"
-              ],
-              "properties": {
-                "sourceField": { "type": "string" },
-                "sourceEntity": { "type": "string" },
-                "definitionsField": { "type": "string" },
-                "into": { "type": "string" },
-                "message": { "type": "string" }
-              }
-            },
-            "derivedTools": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "roles",
-                "keyField",
-                "descriptionField",
-                "inputFieldsField"
-              ],
-              "properties": {
-                "roles": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "minItems": 1
-                },
-                "keyField": { "type": "string" },
-                "titleField": { "type": "string" },
-                "descriptionField": { "type": "string" },
-                "inputFieldsField": { "type": "string" },
-                "outputFieldsField": { "type": "string" },
-                "versionField": { "type": "string" },
-                "visibleToRolesField": { "type": "string" },
-                "internalOnlyField": { "type": "string" },
-                "visibleWhen": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["field", "equals"],
-                  "properties": {
-                    "field": { "type": "string" },
-                    "equals": { "type": "string" }
-                  }
-                },
-                "connect": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["name", "roles"],
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "pattern": "^[a-z][a-z0-9_]*$"
-                    },
-                    "description": { "type": "string" },
-                    "roles": {
-                      "type": "array",
-                      "items": { "type": "string" },
-                      "minItems": 1
-                    }
-                  }
-                },
-                "dryRun": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": ["name", "roles"],
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "pattern": "^[a-z][a-z0-9_]*$"
-                    },
-                    "description": { "type": "string" },
-                    "roles": {
-                      "type": "array",
-                      "items": { "type": "string" },
-                      "minItems": 1
-                    }
-                  }
-                },
-                "personalization": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "entity",
-                    "serviceRef",
-                    "instructionField",
-                    "set"
-                  ],
-                  "properties": {
-                    "entity": { "type": "string" },
-                    "serviceRef": { "type": "string" },
-                    "instructionField": { "type": "string" },
-                    "set": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": ["name"],
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "pattern": "^[a-z][a-z0-9_]*$"
-                        },
-                        "description": { "type": "string" }
-                      }
-                    }
-                  }
-                },
-                "execution": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "bindingsField",
-                    "operationRef",
-                    "operationEntity",
-                    "providerRef",
-                    "providerEntity",
-                    "connectionEntity",
-                    "connectionProviderRef",
-                    "connectionValuesField"
-                  ],
-                  "properties": {
-                    "bindingsField": { "type": "string" },
-                    "operationRef": { "type": "string" },
-                    "operationEntity": {
-                      "type": "string",
-                      "description": "Entity whose rows carry declarative operation definitions. An operation may author baseUrlKey to select one named URL from its adapter and requestMapping.headers entries that map declared scalar inputs onto fixed non-auth header names. Caller input never supplies URL keys or header names."
-                    },
-                    "providerRef": { "type": "string" },
-                    "providerEntity": {
-                      "type": "string",
-                      "description": "Entity whose rows carry the default baseUrlTemplate and an optional baseUrlTemplates object mapping authored keys to HTTPS URL templates."
-                    },
-                    "connectionEntity": { "type": "string" },
-                    "connectionProviderRef": { "type": "string" },
-                    "connectionValuesField": { "type": "string" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
     "operations": {
       "type": "object",
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
       "additionalProperties": { "$ref": "#/$defs/entityOperationV2" }
     },
+    "workflow": { "$ref": "#/$defs/workflowInterface" },
     "interfaces": {
       "$ref": "#/$defs/entityInterfacesV2"
+    }
+  },
+  "allOf": [
+    {
+      "properties": {
+        "fields": {
+          "items": {
+            "properties": {
+              "relationship": {
+                "properties": { "displayField": false }
+              }
+            }
+          }
+        }
+      }
     },
-    "workflow": {
+    {
+      "required": ["operations", "interfaces"]
+    }
+  ],
+  "$defs": {
+    "workflowInterface": {
       "type": "object",
       "description": "Workflow node generation settings for this entity.",
       "additionalProperties": false,
@@ -649,65 +321,7 @@
           }
         }
       }
-    }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "schemaVersion": { "const": 2 } }, "required": ["schemaVersion"] },
-      "then": { "properties": { "operations": { "minProperties": 1 }, "interfaces": { "minProperties": 1 } } }
     },
-    {
-      "if": { "properties": { "schemaVersion": { "const": 3 } }, "required": ["schemaVersion"] },
-      "then": {
-        "properties": {
-          "fields": {
-            "items": {
-              "properties": {
-                "relationship": {
-                  "properties": { "displayField": false }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": { "schemaVersion": { "const": 1 } },
-        "required": ["schemaVersion"]
-      },
-      "then": {
-        "not": {
-          "anyOf": [
-            { "required": ["operations"] },
-            { "required": ["interfaces"] }
-          ]
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": { "schemaVersion": { "enum": [2, 3] } },
-        "required": ["schemaVersion"]
-      },
-      "then": {
-        "required": ["operations", "interfaces"],
-        "not": {
-          "anyOf": [
-            { "required": ["crud"] },
-            { "required": ["rest"] },
-            { "required": ["mcp"] },
-            { "required": ["ui"] },
-            { "required": ["workflow"] },
-            { "required": ["hooks"] },
-            { "required": ["permissions"] }
-          ]
-        }
-      }
-    }
-  ],
-  "$defs": {
     "localizedOrString": {
       "oneOf": [
         { "type": "string", "minLength": 1 },
@@ -1269,16 +883,11 @@
         ]
       }
     },
-    "entityInterfaceV2": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": { "operations": { "$ref": "#/$defs/interfaceOperationsV2" } }
-    },
     "entityInterfacesV2": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "workflow": { "$ref": "#/properties/workflow" },
+        "workflow": { "$ref": "#/$defs/workflowInterface" },
         "rest": {
           "type": "object",
           "additionalProperties": false,
@@ -1715,35 +1324,6 @@
         }
       ],
       "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
-    },
-    "mcpOperation": {
-      "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name and/or description for that operation (dedicated style only).",
-      "oneOf": [
-        { "type": "boolean" },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "name": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*$"
-            },
-            "description": { "type": "string" }
-          }
-        }
-      ]
-    },
-    "crudOperations": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "list": { "type": "boolean" },
-        "get": { "type": "boolean" },
-        "create": { "type": "boolean" },
-        "update": { "type": "boolean" },
-        "delete": { "type": "boolean" }
-      }
     },
     "localizedText": {
       "type": "object",
@@ -2436,21 +2016,6 @@
           "$ref": "#/$defs/localizedText"
         },
         "constraints": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationshipConstraints" }
-      }
-    },
-    "hookList": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["handler"],
-        "properties": {
-          "handler": {
-            "type": "string"
-          },
-          "failMessage": {
-            "$ref": "#/$defs/localizedText"
-          }
-        }
       }
     }
   }

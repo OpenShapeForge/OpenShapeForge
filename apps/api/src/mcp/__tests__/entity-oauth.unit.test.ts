@@ -9,12 +9,11 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   __pendingForTests,
-  exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
-  refreshTokens,
   scopesCovered,
 } from "../entity-oauth.js";
+import { exchangeCodeForTokens, refreshTokens } from "../entity-oauth-tokens.js";
 import {
   decryptSecret,
   keyringFromEnv,

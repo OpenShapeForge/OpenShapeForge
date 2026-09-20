@@ -170,12 +170,12 @@ repo bundling this package needs to do the same.
   `platform.entity_events`, since the API runtime and migrator assume both.
 - **Bun is required** — the CLI and plugin/package resolution use Bun APIs;
   there is no Node fallback.
-- **Generated CRUD policy is entity-authored.** The common `crud.operations`
-  block is the upper bound for GraphQL, REST, MCP and workflow. Stock generated
-  entity pages require the full five-operation policy; partial policies use a
-  purpose-built UI.
-  External layers/packages can narrow that policy with `entityPatch`; the
-  layer resolver rejects attempts to re-enable an operation disabled earlier.
+- **Generated CRUD is the set of implemented Operations.** The compiled
+  `crud.operations` section is derived from the entity's `operations` and is
+  the upper bound for GraphQL, REST, MCP and workflow; each `interfaces.*`
+  block may withhold an Operation from its transport, never add one. Stock
+  generated entity pages require all five intents; smaller sets use a
+  purpose-built UI declared under `interfaces.web`.
 - **The `core` module maps to the `erp` schema** via a default
   (`schemaByModule: { core: "erp" }`) that host repos cannot override
   through configuration; other module names fall back to their snake_cased

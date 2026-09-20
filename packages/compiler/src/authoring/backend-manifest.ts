@@ -3,9 +3,7 @@ import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import {
-  discoverContextEntities,
   listEntityFiles,
-  loadContextEntity,
   loadEntity,
   resolveEntityFilePath,
 } from "./loader.js";
@@ -63,11 +61,6 @@ function bridgeAuthorizationRoles(
 
 export type AuthoringBackendMode = "report" | "promote";
 
-export type ContextEntitySpec = {
-  context: string;
-  name: string;
-};
-
 export type CompileAuthoringBackendManifestOptions = {
   /**
    * Repo-root-relative prefix recorded as each table's provenance path.
@@ -77,18 +70,16 @@ export type CompileAuthoringBackendManifestOptions = {
   sourcePathPrefix?: string;
   mode: AuthoringBackendMode;
   entityAllowlist: string[];
-  contextEntityAllowlist?: ContextEntitySpec[];
   schemaByModule?: Record<string, string>;
   relationshipRegister?: RelationshipRegisterEntry[];
   generatedCrudAllowlist?: string[];
-  contextEntityGeneratedCrudAllowlist?: ContextEntitySpec[];
   domainInternalEntities?: string[];
   /** Observe each compiled candidate (slug, provenance, contract) — used to
       build the plugin context without recompiling entities. */
   onCandidate?: (candidate: {
     slug: string;
     path: string;
-    origin: "core" | "contextFull";
+    origin: "core";
     contract: CompiledEntityContract;
   }) => void;
 };
@@ -124,17 +115,14 @@ export type AuthoringBackendReport = {
   hasDifferences: boolean;
 };
 
-type CandidateOrigin =
-  | { kind: "core"; slug: string }
-  | { kind: "contextFull"; context: string; name: string };
+type CandidateOrigin = { kind: "core"; slug: string };
 
 type CompiledCandidate = {
   /**
    * Stable, human-friendly identifier used for the manifest `source` block and
-   * collision/CRUD allowlists. For core entities this is the kebab-case file
-   * stem (e.g. `case`); for context-full entities this is the file stem too
-   * (e.g. `eenheid`) — uniqueness across both kinds is enforced by the
-   * pre-emission collision audit, not by the slug.
+   * collision/CRUD allowlists: the kebab-case file stem (e.g. `case`).
+   * Uniqueness of the compiled identities is enforced by the pre-emission
+   * collision audit, not by the slug.
    */
   slug: string;
   origin: CandidateOrigin;
@@ -161,17 +149,6 @@ function quoteSqlString(value: string): string {
 
 export function listAuthoringEntitySlugs(authoringDir: string): string[] {
   return listEntityFiles(authoringDir).map((file) => file.slug);
-}
-
-/**
- * Sorted catalog of every standalone context-full entity discovered under
- * `authoring/contexts/<context>/full/`. The order matches what the UI compiler
- * uses so candidate compilation is deterministic across both pipelines.
- */
-export function listAuthoringContextEntitySpecs(authoringDir: string): ContextEntitySpec[] {
-  return discoverContextEntities(authoringDir).sort((left, right) =>
-    `${left.context}/${left.name}`.localeCompare(`${right.context}/${right.name}`),
-  );
 }
 
 function flattenFields(fields: Field[] | undefined, result = new Map<string, Field>()) {
@@ -836,32 +813,13 @@ function compileCoreCandidate(
   };
 }
 
-function compileContextCandidate(
-  authoringDir: string,
-  spec: ContextEntitySpec,
-  sourcePathPrefix: string,
-): CompiledCandidate {
-  const artifacts = loadContextEntity(authoringDir, spec.context, spec.name);
-  const contract = compile(artifacts);
-  return {
-    slug: spec.name,
-    origin: { kind: "contextFull", context: spec.context, name: spec.name },
-    path: `${sourcePathPrefix}/contexts/${spec.context}/full/${spec.name}.yaml`,
-    contract,
-    effectiveFields: contract.model.fields,
-    fieldsByKey: new Map(contract.model.fields.map((field) => [field.key, field as Field])),
-  };
-}
-
 function describeCandidateOrigin(candidate: CompiledCandidate): string {
-  return candidate.origin.kind === "core"
-    ? `entities/${candidate.origin.slug}`
-    : `contexts/${candidate.origin.context}/full/${candidate.origin.name}`;
+  return `entities/${candidate.origin.slug}`;
 }
 
 /**
- * Pre-emission collision audit. Both core and context-full candidates land in
- * the same generated GraphQL graph and the same physical schema, so any
+ * Pre-emission collision audit. Every candidate lands in the same generated
+ * GraphQL graph and the same physical schema, so any
  * duplicate type/query/mutation/table identity would silently overwrite at
  * runtime. We fail loudly with the offending source files instead.
  */
@@ -902,9 +860,7 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     const schema = schemaByModule[moduleName] ?? snakeCase(moduleName);
     record("physical table", `${schema}.${candidate.contract.storage.table}`, candidate);
 
-    const slugKey = candidate.origin.kind === "core"
-      ? `core:${candidate.origin.slug}`
-      : `${candidate.origin.context}:${candidate.origin.name}`;
+    const slugKey = `core:${candidate.origin.slug}`;
     record("candidate slug", slugKey, candidate);
 
     if (candidate.contract.rest) {
@@ -1215,26 +1171,15 @@ export function compileAuthoringBackendManifest(
   const sourcePathPrefix =
     options.sourcePathPrefix ?? "packages/compiler/config/authoring";
   const allowlist = [...new Set(options.entityAllowlist.map(kebabCase))].sort();
-  const contextAllowlist = (options.contextEntityAllowlist ?? []).slice().sort((left, right) =>
-    `${left.context}/${left.name}`.localeCompare(`${right.context}/${right.name}`),
-  );
   const generatedCrudAllowlist = new Set(
     (options.generatedCrudAllowlist ?? []).map(kebabCase),
-  );
-  const contextGeneratedCrudAllowlist = new Set(
-    (options.contextEntityGeneratedCrudAllowlist ?? []).map(
-      (spec) => `${spec.context}:${spec.name}`,
-    ),
   );
   const domainInternalEntities = new Set((options.domainInternalEntities ?? []).map(kebabCase));
   const relationshipRegister = [...(options.relationshipRegister ?? [])];
   const schemaByModule = options.schemaByModule ?? { core: "erp" };
-  const candidates: CompiledCandidate[] = [
-    ...allowlist.map((slug) => compileCoreCandidate(authoringDir, slug, sourcePathPrefix)),
-    ...contextAllowlist.map((spec) =>
-      compileContextCandidate(authoringDir, spec, sourcePathPrefix),
-    ),
-  ];
+  const candidates: CompiledCandidate[] = allowlist.map((slug) =>
+    compileCoreCandidate(authoringDir, slug, sourcePathPrefix),
+  );
 
   if (options.onCandidate) {
     for (const candidate of candidates) {
@@ -1271,12 +1216,8 @@ export function compileAuthoringBackendManifest(
   const tables: TableDefinition[] = physicalCandidates.map((candidate) => {
     const schema = schemaByModule[candidate.contract.entity.module] ?? snakeCase(candidate.contract.entity.module);
     const name = candidate.contract.storage.table;
-    const candidateCrudKey =
-      candidate.origin.kind === "core"
-        ? candidate.origin.slug
-        : `${candidate.origin.context}:${candidate.origin.name}`;
-    const domainInternal =
-      candidate.origin.kind === "core" && domainInternalEntities.has(candidate.slug);
+    const candidateCrudKey = candidate.origin.slug;
+    const domainInternal = domainInternalEntities.has(candidate.slug);
     const crudOperations = candidate.contract.crud?.operations ?? {
       list: true,
       get: true,
@@ -1285,9 +1226,7 @@ export function compileAuthoringBackendManifest(
       delete: true,
     };
     const generatedCrudEligible =
-      (candidate.origin.kind === "core"
-        ? generatedCrudAllowlist.has(candidateCrudKey)
-        : contextGeneratedCrudAllowlist.has(candidateCrudKey)) &&
+      generatedCrudAllowlist.has(candidateCrudKey) &&
       Object.values(crudOperations).some(Boolean) &&
       !domainInternal;
     // Compatibility guard: runtimes predating per-operation CRUD understand

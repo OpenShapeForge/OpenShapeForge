@@ -12,12 +12,13 @@
  * with a reason; it never partially loads, and it never fails startup, because
  * one bad connector must not take an API down.
  */
+import type { ConnectorPackage } from "@openshapeforge/plugin-runtime/connector";
 import {
   ConnectorContractBoundary,
   ConnectorBoundaryError,
   type BoundaryContract,
 } from "./contract-boundary.js";
-import { assertExecutable, ConnectorExecutionError, type ConnectorPackage } from "./executor.js";
+import { assertExecutable, ConnectorExecutionError } from "./executor.js";
 import type { ConnectorContract } from "./catalog.js";
 
 export type LoadedConnector = {

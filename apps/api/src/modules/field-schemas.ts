@@ -9,6 +9,8 @@ import {
   operationI18nKeyword,
   operationInputFieldsKeyword,
   operationReferenceKeyword,
+  resolveFieldBaseType,
+  type OperationFieldBaseType,
   operationTypeKeyword,
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
@@ -103,19 +105,34 @@ export function createRuntimeFieldSchemaCompiler(
   return Object.freeze(compiler);
 }
 
+let generatedRegistry: GeneratedRuntimeFieldSchemaRegistry | undefined;
 let generatedCompiler: RuntimeFieldSchemaCompiler | undefined;
+
+function loadGeneratedRegistry(): GeneratedRuntimeFieldSchemaRegistry {
+  if (!generatedRegistry) {
+    const path = new URL("../generated/operations/field-schema-registry.json", import.meta.url);
+    const registry: unknown = JSON.parse(readFileSync(path, "utf8"));
+    assertRegistry(registry);
+    generatedRegistry = registry;
+  }
+  return generatedRegistry;
+}
+
+/**
+ * The base type of a stored field definition, resolved through the generated
+ * osf-type registry the way the compiler resolves an authored field. An
+ * unknown osfType is refused, never projected as a string.
+ */
+export function storedFieldBaseType(definition: { key?: unknown; osfType?: unknown }): OperationFieldBaseType {
+  return resolveFieldBaseType({
+    key: typeof definition.key === "string" ? definition.key : "(field)",
+    osfType: typeof definition.osfType === "string" ? definition.osfType : "(none)",
+  }, loadGeneratedRegistry().osfTypes);
+}
 
 export const generatedRuntimeFieldSchemas: RuntimeFieldSchemaCompiler = Object.freeze({
   object(fields) {
-    if (!generatedCompiler) {
-      const path = new URL(
-        "../generated/operations/field-schema-registry.json",
-        import.meta.url,
-      );
-      const registry: unknown = JSON.parse(readFileSync(path, "utf8"));
-      assertRegistry(registry);
-      generatedCompiler = createRuntimeFieldSchemaCompiler(registry);
-    }
+    generatedCompiler ??= createRuntimeFieldSchemaCompiler(loadGeneratedRegistry());
     return generatedCompiler.object(fields);
   },
   validateObject(fields, values) {

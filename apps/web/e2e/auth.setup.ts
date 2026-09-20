@@ -6,7 +6,8 @@
  * is worth stating: `apps/api`'s harness gets a *token* by password grant, but
  * the web session is not a token. It is an opaque id in an encrypted cookie,
  * and the record it points at is written into Redis by the NextAuth callback
- * (`apps/web/src/lib/auth/auth/next-auth.ts`) during the authorization-code
+ * (`packages/auth/src/session/next-auth.ts`, composed by
+ * `apps/web/src/lib/auth/index.ts`) during the authorization-code
  * exchange. Nothing outside that callback can produce one, so there is no
  * hand-written cookie that would be a shortcut — the browser has to complete
  * the flow.

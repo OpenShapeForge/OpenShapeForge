@@ -100,9 +100,6 @@ configFields:
               case.start dit sjabloon om de juiste gepubliceerde zaak-workflow te starten.
             en: The designer synchronizes linked workflow metadata and start-input mappings. At runtime, case.start uses this
               template to start the correct published case workflow.
-          options:
-            type: remote
-            remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
           render:
             component: OptionVariablePicker
             props:

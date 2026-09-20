@@ -9,19 +9,20 @@
 import { describe, expect, it } from "bun:test";
 import {
   consumeConfiguration,
+  mintConfiguration,
+  peekConfiguration,
+  type PendingConfiguration,
+} from "../configuration-handoff.js";
+import { renderConfigurationForm } from "../browser-pages.js";
+import { renderConfigurationApp, renderMessagePage } from "../configuration-app.js";
+import {
   findExistingConfiguration,
   handoffFailureCode,
   handoffModelValues,
   mergeConfigurationValues,
-  mintConfiguration,
   parseSubmission,
-  peekConfiguration,
-  renderConfigurationApp,
-  renderConfigurationForm,
-  renderMessagePage,
   storeSubmission,
-  type PendingConfiguration,
-} from "../configuration-handoff.js";
+} from "../configuration-submission.js";
 import {
   keyringFromEnv,
   redactElicitedValues,

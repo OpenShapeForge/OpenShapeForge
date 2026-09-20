@@ -48,10 +48,12 @@ import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
 import {
-  createRuntimeDeclarativeServiceExecutor,
-  createRuntimeHostOperationExecutor,
   registerGeneratedMcpServer,
 } from "../mcp/generated-mcp-server.js";
+import {
+  createRuntimeDeclarativeServiceExecutor,
+  createRuntimeHostOperationExecutor,
+} from "../mcp/runtime-executors.js";
 import {
   registerAuthorizationServerMetadataAliases,
   registerProtectedResourceMetadata,

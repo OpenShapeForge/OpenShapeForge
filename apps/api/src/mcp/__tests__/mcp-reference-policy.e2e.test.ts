@@ -39,9 +39,9 @@ describe("generated MCP server: operation-written references", () => {
       test(`${prefix}: ${field} is written by ${writers.join(", ")} only — a filter, never create or update input`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
         const tools = body.result.tools as { name: string; inputSchema: any }[];
-        expect(advertisedSchema(tools, table, "list").properties.filter.properties[field]).toMatchObject({ type: "string", format: "uuid" });
-        expect(advertisedSchema(tools, table, "update").properties.values.properties).not.toHaveProperty(field);
-        if (isEntityBackedCreate(table)) expect(advertisedSchema(tools, table, "create").properties).not.toHaveProperty(field);
+        expect((await advertisedSchema(tenantA, tools, table, "list")).properties.filter.properties[field]).toMatchObject({ type: "string", format: "uuid" });
+        expect((await advertisedSchema(tenantA, tools, table, "update")).properties.values.properties).not.toHaveProperty(field);
+        if (isEntityBackedCreate(table)) expect((await advertisedSchema(tenantA, tools, table, "create")).properties).not.toHaveProperty(field);
 
         const refusedCreate = await call(tenantA, "create", { ...(await createArgs(table, tenantA)), [field]: randomUUID() });
         expectCreateWriteRefusal(table, { text: toolError(refusedCreate.body) }, field, writers);

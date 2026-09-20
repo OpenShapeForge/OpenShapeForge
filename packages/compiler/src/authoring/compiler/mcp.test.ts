@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import { buildMcp, deriveToolPrefix } from "./mcp.js";
-import type { CoreEntity } from "../types.js";
+import { buildMcp, buildMcpSection, deriveToolPrefix } from "./mcp.js";
+import type { CoreEntity, McpConfig } from "../types.js";
 
-const entityWithMcp = (mcp: CoreEntity["mcp"], entity = "ContactDetail"): CoreEntity =>
+const contactDetail = (entity = "ContactDetail"): CoreEntity =>
   ({
-    schemaVersion: 1,
+    schemaVersion: 3,
     kind: "coreEntity",
     module: "core",
     entity,
@@ -15,8 +15,9 @@ const entityWithMcp = (mcp: CoreEntity["mcp"], entity = "ContactDetail"): CoreEn
       { key: "value", osfType: "string", baseType: "string" },
       { key: "version", osfType: "integer", baseType: "integer" },
     ],
-    ...(mcp === undefined ? {} : { mcp }),
   }) as CoreEntity;
+/** A resolved MCP configuration compiled for the fixture entity; `undefined` is no interface. */
+const mcpSection = (mcp: McpConfig | undefined, entity?: string) => buildMcpSection(contactDetail(entity), mcp);
 
 const v2Relation = (tools?: "dedicated" | "generic"): CoreEntity => {
   const actions = ["list", "get", "create", "update", "delete"] as const;
@@ -66,34 +67,30 @@ describe("deriveToolPrefix", () => {
 });
 
 describe("buildMcp", () => {
-  it("returns undefined when the entity has no mcp block (fail closed)", () => {
-    expect(buildMcp(entityWithMcp(undefined))).toBeUndefined();
+  it("returns undefined when the entity has no mcp interface (fail closed)", () => {
+    expect(mcpSection(undefined)).toBeUndefined();
+    expect(buildMcp(contactDetail())).toBeUndefined();
   });
 
-  it("returns undefined for mcp: false and mcp: { enabled: false }", () => {
-    expect(buildMcp(entityWithMcp(false))).toBeUndefined();
-    expect(buildMcp(entityWithMcp({ enabled: false }))).toBeUndefined();
+  it("returns undefined for { enabled: false }", () => {
+    expect(mcpSection({ enabled: false })).toBeUndefined();
   });
 
-  it("mcp: true enables every operation under a derived snake_case prefix", () => {
-    expect(buildMcp(entityWithMcp(true))).toEqual({
+  it("an empty configuration enables every operation under a derived snake_case prefix", () => {
+    expect(mcpSection({})).toEqual({
       toolPrefix: "contact_detail",
       tools: "dedicated",
       operations: { list: true, get: true, create: true, update: true, delete: true },
     });
   });
 
-  it("an empty object block behaves like mcp: true", () => {
-    expect(buildMcp(entityWithMcp({}))).toEqual(buildMcp(entityWithMcp(true)));
-  });
-
   it("honours an explicit toolPrefix override", () => {
-    expect(buildMcp(entityWithMcp({ toolPrefix: "contact" }))?.toolPrefix).toBe("contact");
+    expect(mcpSection({ toolPrefix: "contact" })?.toolPrefix).toBe("contact");
   });
 
   it("defaults to the dedicated tool style and honours generic", () => {
-    expect(buildMcp(entityWithMcp(true))?.tools).toBe("dedicated");
-    expect(buildMcp(entityWithMcp({ tools: "generic" }))?.tools).toBe("generic");
+    expect(mcpSection({})?.tools).toBe("dedicated");
+    expect(mcpSection({ tools: "generic" })?.tools).toBe("generic");
   });
 
   it("lowers strict v2 MCP tools while keeping an omitted Relation setting dedicated", () => {
@@ -130,7 +127,7 @@ describe("buildMcp", () => {
   });
 
   it("per-operation flags default to true and can be disabled individually", () => {
-    const section = buildMcp(entityWithMcp({ operations: { delete: false, create: false } }));
+    const section = mcpSection({ operations: { delete: false, create: false } });
     expect(section?.operations).toEqual({
       list: true,
       get: true,
@@ -141,16 +138,14 @@ describe("buildMcp", () => {
   });
 
   it("object-form operations carry enabled plus name/description overrides", () => {
-    const section = buildMcp(
-      entityWithMcp({
+    const section = mcpSection({
         operations: {
           list: false,
           get: { name: "read_contact_detail", description: "Read one contact detail." },
           update: { name: "edit_contact_detail" },
           delete: { enabled: false },
         },
-      }),
-    );
+      });
     expect(section?.operations).toEqual({
       list: false,
       get: true,
@@ -165,22 +160,20 @@ describe("buildMcp", () => {
   });
 
   it("omits toolOverrides when object-form operations only toggle enabled", () => {
-    const section = buildMcp(entityWithMcp({ operations: { delete: { enabled: false } } }));
+    const section = mcpSection({ operations: { delete: { enabled: false } } });
     expect(section?.toolOverrides).toBeUndefined();
   });
 
   it("rejects name/description overrides on the generic tool style", () => {
     expect(() =>
-      buildMcp(
-        entityWithMcp({ tools: "generic", operations: { get: { name: "read_contact" } } }),
-      ),
+      mcpSection({ tools: "generic", operations: { get: { name: "read_contact" } } }),
     ).toThrow(/generic tool style/);
   });
 
   it("rejects an override name that could break out of a tool-name position", () => {
     for (const hostile of ["a-b", "Upper", "with space", "{id}", "1leading"]) {
       expect(() =>
-        buildMcp(entityWithMcp({ operations: { get: { name: hostile } } })),
+        mcpSection({ operations: { get: { name: hostile } } }),
       ).toThrow(/Unsafe mcp tool name/);
     }
   });
@@ -191,8 +184,8 @@ describe("buildMcp", () => {
       name: "Things",
       description: "Read the things.",
     };
-    expect(buildMcp(entityWithMcp({ resource }))?.resource).toEqual(resource);
-    expect(buildMcp(entityWithMcp(true))?.resource).toBeUndefined();
+    expect(mcpSection({ resource })?.resource).toEqual(resource);
+    expect(mcpSection({})?.resource).toBeUndefined();
   });
 
   it("rejects a resource uri that could break out of a listing position", () => {
@@ -204,7 +197,7 @@ describe("buildMcp", () => {
       "App://things",
       "app://thi ngs",
     ]) {
-      expect(() => buildMcp(entityWithMcp({ resource: { uri: hostile } }))).toThrow(
+      expect(() => mcpSection({ resource: { uri: hostile } })).toThrow(
         /Unsafe mcp resource uri/,
       );
     }
@@ -218,27 +211,22 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       outputFieldsField: "value",
     };
-    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools).toEqual(derivedTools);
+    expect(mcpSection({ derivedTools })?.derivedTools).toEqual(derivedTools);
   });
 
   it("rejects derivedTools with an empty audience or unknown fields", () => {
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { roles: [], keyField: "value", descriptionField: "value", inputFieldsField: "value" },
         }),
-      ),
     ).toThrow(/non-empty roles list/);
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { roles: ["viewer"], keyField: "missing", descriptionField: "value", inputFieldsField: "value" },
         }),
-      ),
     ).toThrow(/does not name an authored field/);
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: {
             roles: ["viewer"],
             keyField: "value",
@@ -247,7 +235,6 @@ describe("buildMcp", () => {
             outputFieldsField: "missing",
           },
         }),
-      ),
     ).toThrow(/outputFieldsField.*does not name an authored field/);
   });
 
@@ -258,13 +245,12 @@ describe("buildMcp", () => {
       definitionsField: "configFields",
       into: "value",
     };
-    expect(buildMcp(entityWithMcp({ elicitOnCreate }))?.elicitOnCreate).toEqual(elicitOnCreate);
+    expect(mcpSection({ elicitOnCreate })?.elicitOnCreate).toEqual(elicitOnCreate);
   });
 
   it("rejects elicitOnCreate naming unknown local fields", () => {
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           elicitOnCreate: {
             sourceField: "missing",
             sourceEntity: "Widget",
@@ -272,13 +258,12 @@ describe("buildMcp", () => {
             into: "value",
           },
         }),
-      ),
     ).toThrow(/does not name an authored field/);
   });
 
   it("rejects a toolPrefix that could break out of a tool-name position", () => {
     for (const hostile of ["a-b", "Upper", "with space", "quote\"y", "{id}", "1leading"]) {
-      expect(() => buildMcp(entityWithMcp({ toolPrefix: hostile }))).toThrow(
+      expect(() => mcpSection({ toolPrefix: hostile })).toThrow(
         /Unsafe mcp toolPrefix/,
       );
     }
@@ -292,17 +277,16 @@ describe("buildMcp", () => {
       into: "value",
     };
     expect(
-      buildMcp(entityWithMcp({ elicitOnCreate, test: { name: "test_connection" } }))?.test,
+      mcpSection({ elicitOnCreate, test: { name: "test_connection" } })?.test,
     ).toEqual({ name: "test_connection" });
   });
 
   it("rejects a test tool without elicitOnCreate, and unsafe test names", () => {
-    expect(() => buildMcp(entityWithMcp({ test: { name: "test_connection" } }))).toThrow(
+    expect(() => mcpSection({ test: { name: "test_connection" } })).toThrow(
       /requires an elicitOnCreate block/,
     );
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           elicitOnCreate: {
             sourceField: "value",
             sourceEntity: "Widget",
@@ -311,7 +295,6 @@ describe("buildMcp", () => {
           },
           test: { name: "Bad Name" },
         }),
-      ),
     ).toThrow(/Unsafe mcp test name/);
   });
 
@@ -334,27 +317,23 @@ describe("buildMcp", () => {
       },
       dryRun: { name: "dry_run_widget", roles: ["author"] },
     };
-    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools?.dryRun).toEqual({
+    expect(mcpSection({ derivedTools })?.derivedTools?.dryRun).toEqual({
       name: "dry_run_widget",
       roles: ["author"],
     });
     const { execution: _execution, ...withoutExecution } = derivedTools;
-    expect(() => buildMcp(entityWithMcp({ derivedTools: withoutExecution }))).toThrow(
+    expect(() => mcpSection({ derivedTools: withoutExecution })).toThrow(
       /requires an execution block/,
     );
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { ...derivedTools, dryRun: { name: "dry_run_widget", roles: [] } },
         }),
-      ),
     ).toThrow(/non-empty roles list/);
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { ...derivedTools, dryRun: { name: "Bad Name", roles: ["author"] } },
         }),
-      ),
     ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
   });
 
@@ -376,22 +355,18 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       execution,
     };
-    expect(() => buildMcp(entityWithMcp({ derivedTools: base }))).toThrow(
+    expect(() => mcpSection({ derivedTools: base })).toThrow(
       /versionField.*single-value integer/,
     );
     expect(() =>
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { ...base, versionField: "value" },
         }),
-      ),
     ).toThrow(/versionField.*single-value integer/);
     expect(
-      buildMcp(
-        entityWithMcp({
+      mcpSection({
           derivedTools: { ...base, versionField: "version" },
-        }),
-      )?.derivedTools?.versionField,
+        })?.derivedTools?.versionField,
     ).toBe("version");
   });
 
@@ -415,7 +390,7 @@ describe("buildMcp", () => {
       },
     };
     expect(() =>
-      buildMcp(entityWithMcp({ derivedTools } as CoreEntity["mcp"])),
+      mcpSection({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*baseUrlKeyField.*caller-controlled fields/);
   });
 
@@ -439,7 +414,7 @@ describe("buildMcp", () => {
       },
     };
     expect(() =>
-      buildMcp(entityWithMcp({ derivedTools } as CoreEntity["mcp"])),
+      mcpSection({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*requestHeaderNameField.*caller-controlled fields/);
   });
 });

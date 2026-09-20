@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationI18nKeyword, operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import type { CompiledField } from "./authoring/types.js";
 import {
   compiledFieldSchema,
@@ -110,6 +110,19 @@ describe("compiled field JSON Schema projection", () => {
     // A constraint the runtime does not evaluate stays refused.
     expect(compile({ type: "string", "x-osf-reference": { entity: "Relation", constraints: { relationType: { in: ["organization"] } } } })).toThrow(/x-osf-reference/);
   });
+  it("what the projector emits into x-osf-i18n is what the runtime keyword accepts", () => {
+    // Stored definitions reach the same Ajv validators as compiled schemas. A
+    // label authored in one language is incomplete copy (a build-time lint),
+    // not an invalid schema that fails a form closed at runtime.
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationI18nKeyword);
+    const compile = (schema: Record<string, unknown>) => () => ajv.compile({ type: "object", properties: { code: schema } });
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { en: "Code" } })))).not.toThrow();
+    expect(compile(compiledFieldSchema(field({ key: "code", label: { nl: "Code", fr: "Code" }, help: { en: "Help", nl: "Hulp" } })))).not.toThrow();
+    expect(compile({ type: "string", "x-osf-i18n": { title: {} } })).toThrow(/x-osf-i18n/);
+    expect(compile({ type: "string", "x-osf-i18n": { title: { de: "Code" } } })).toThrow(/x-osf-i18n/);
+  });
+
   it("names the OSF type behind every property, and the runtime keyword accepts what it emits", () => {
     // A form renders a property through the renderer registered for its type
     // (#521); the JSON type beside it stays the only thing validated.
@@ -168,6 +181,7 @@ describe("compiled field JSON Schema projection", () => {
         defaultValue: "active",
         relationship: { kind: "belongsTo", entity: "StatusDefinition" },
         hints: { aiInstructions: "Choose the closest status." },
+        options: { type: "referentiedata", referentieGroep: "STATUS" },
         render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
       }),
       {
@@ -315,6 +329,7 @@ describe("compiled field JSON Schema projection", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
 
@@ -356,6 +371,7 @@ describe("compiled field JSON Schema projection", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         description: { en: "Definition" },
       }),
     );
@@ -374,12 +390,14 @@ describe("compiled field JSON Schema projection", () => {
           key: "definition",
           baseType: "object",
           osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
         field({
           key: "definitions",
           baseType: "object",
           cardinality: "collection",
           osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
       ],
       {},
@@ -391,6 +409,30 @@ describe("compiled field JSON Schema projection", () => {
     expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
+  });
+
+  it("projects a stored field of a catalog type through the schema that type declares, by contract not by name", () => {
+    const declared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } } },
+    });
+    const schema = declared.object([{ key: "form", osfType: "object", children: [{ key: "fields", osfType: "fieldDefinition", cardinality: "collection" }] }]);
+    const form = (schema.properties as Record<string, Record<string, unknown>>).form!;
+    expect((form.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
+    expect(form.$defs).toBeUndefined();
+    expect(Object.keys(schema.$defs as object)).toContain("fieldDefinition");
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(validate({ form: { fields: [{ key: "name", osfType: "string" }] } })).toBe(true);
+    expect(validate({ form: { fields: [{ osfType: "string" }] } })).toBe(false);
+    expect(declared.compile([{ key: "definition", osfType: "fieldDefinition" }])[0]).toMatchObject({ schema: { $ref: "#/$defs/fieldDefinition" } });
+
+    // The name carries nothing: the same key without a declared schema is a plain object.
+    const undeclared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { baseType: "object", label: { en: "Field" } } },
+    });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" })).toMatchObject({ type: "object" });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" }).$ref).toBeUndefined();
   });
 
   it("gives compiler plugins the canonical recursive FieldDefinition projector", () => {

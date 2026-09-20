@@ -21,6 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
+import { GENERIC_TOOL_NAME_PREFIX } from "@openshapeforge/operations";
 import { MAX_DEDICATED_TOOLS } from "./generate-mcp.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
@@ -141,6 +142,12 @@ export function buildConnectorCatalog(
 
       for (const operation of connector.operations) {
         if (!operation.mcp) continue;
+        if (operation.mcp.toolName.startsWith(GENERIC_TOOL_NAME_PREFIX)) {
+          throw new Error(
+            `MCP tool name "${operation.mcp.toolName}" (${connector.slug}.${operation.key}) uses the ` +
+              `reserved "${GENERIC_TOOL_NAME_PREFIX}" prefix of the shared generic tools. Choose another toolPrefix.`,
+          );
+        }
         const previousTool = seenToolNames.get(operation.mcp.toolName);
         if (previousTool) {
           throw new Error(

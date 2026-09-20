@@ -9,6 +9,8 @@ import {
   resolveRemoteOptionSourceUrl,
   type RemoteOptionRequestParams,
 } from "@/features/renderer/runtime/remote-option-source";
+import { resolveEntityOptionSource } from "@/features/renderer/runtime/entity-option-source";
+import { listEntityOptions } from "@/actions/entity-options";
 
 export function useRemoteOptions(field: Field): {
   items: StaticOption[];
@@ -35,14 +37,21 @@ export function useRemoteOptionSourceData<T>(
 } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
-  const url = resolveRemoteOptionSourceUrl(field, {
-    params: options.params,
-  });
+  // An entity source lists the entity's records through the gateway; a remote
+  // source fetches JSON from a declared endpoint. The picker asks the same way
+  // for both: a search term, or one known value to name.
+  const entity = resolveEntityOptionSource(field);
+  const url = entity ? null : resolveRemoteOptionSourceUrl(field, { params: options.params });
+  const params = options.params ?? {};
+  const search = typeof params.search === "string" ? params.search : "";
+  const id = typeof params.id === "string" ? params.id : "";
+  const entityName = entity?.entity ?? null;
+  const valueField = entity?.valueField ?? "id";
 
   useEffect(() => {
     let active = true;
 
-    if (!url || options.enabled === false) {
+    if ((!url && !entityName) || options.enabled === false) {
       setData(null);
       setLoading(false);
       return () => {
@@ -52,7 +61,10 @@ export function useRemoteOptionSourceData<T>(
 
     setLoading(true);
 
-    loadRemoteJson<T>(url)
+    const load = entityName
+      ? listEntityOptions({ entity: entityName, valueField, search, id }) as Promise<T>
+      : loadRemoteJson<T>(url!);
+    load
       .then((nextData) => {
         if (active) {
           setData(nextData);
@@ -72,7 +84,7 @@ export function useRemoteOptionSourceData<T>(
     return () => {
       active = false;
     };
-  }, [options.enabled, url]);
+  }, [options.enabled, url, entityName, valueField, search, id]);
 
   return { data, loading, url };
 }

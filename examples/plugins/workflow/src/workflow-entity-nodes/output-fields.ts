@@ -2,13 +2,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "../../../../../packages/compiler/src/authoring/types.js";
 import { UNBOUNDED_CARDINALITY } from "./types.js";
-import { toKebabCase, toOutputField } from "./utils.js";
+import { toOutputField } from "./utils.js";
 
+/**
+ * The record a node acts on, picked from the entity's own records (its list
+ * Operation) when it has one; a plain identifier input otherwise. There is
+ * no options endpoint to point at.
+ */
 export function buildRecordIdField(
   entityLabels: { en: string; nl: string },
   idField: Field | undefined,
   osfType: string,
   entityName: string,
+  optionSource: Field["options"] | undefined,
 ): Field {
   return {
     key: "recordId",
@@ -28,10 +34,7 @@ export function buildRecordIdField(
       en: "e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6",
       nl: "bijv. 3fa85f64-5717-4562-b3fc-2c963f66afa6",
     },
-    options: {
-      type: "remote",
-      remoteUrl: `/api/workflow/designer/core-entity-options?entity=${toKebabCase(entityName)}`,
-    },
+    ...(optionSource ? { options: { ...optionSource } } : {}),
     render: {
       component: "OptionVariablePicker",
       props: {

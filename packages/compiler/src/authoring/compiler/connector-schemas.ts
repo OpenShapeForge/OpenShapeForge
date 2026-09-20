@@ -16,21 +16,16 @@
  * Determinism: pure function of the authored fields, in authored order.
  */
 import {
-  applyCollectionShape,
   bundleFieldDefinitionSchema,
-  constraintsForField,
-  FIELD_DEFINITION_OSF_TYPE,
-  fieldDefinitionValueSchema,
-  isCollection,
   localizedText,
-  objectSchemaFrom,
   splitBundledDefinitions,
   type JsonObject,
 } from "../../field-json-schema.js";
-import type { FieldDefinition } from "../types/field-definition.js";
+import { cardinalityOf, collectionShape, constrainedType } from "@openshapeforge/operations";
+import type { FieldDefinition, FieldDefinitionValueType } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
-import type { OsfTypeDefinition } from "../types/authoring.js";
-import { resolveBaseType } from "../entity-fields.js";
+import type { OsfTypeDefinition, OsfTypeSchemaReference } from "../types/authoring.js";
+import { osfTypeDefinitionOf, resolveBaseType } from "../entity-fields.js";
 
 /**
  * A closed vocabulary, when the field declares one. Only `static` options are
@@ -46,15 +41,36 @@ function staticEnum(field: FieldDefinition): string[] | undefined {
 
 export type ConnectorOsfTypes = Record<string, OsfTypeDefinition>;
 
+type ResolvedConnectorField = FieldDefinition & {
+  baseType: FieldDefinitionValueType;
+  schema?: OsfTypeSchemaReference;
+  cardinality: "single" | "collection";
+  cardinalityBounds?: { min?: number; max?: number | "unbounded" };
+  required: boolean;
+};
+
 /**
- * Connector fields never go through entity normalization, so their base type
- * is resolved here: a base osf type is its own base, a catalog key resolves
- * through the catalog, anything else is refused.
+ * Connector fields never go through entity normalization, so their type axis
+ * is resolved here the way entity fields resolve theirs: a base osf type is
+ * its own base, a catalog key resolves through the catalog, anything else is
+ * refused; a catalog type that declares its own value schema is projected
+ * through that schema; cardinality is the one reading (`cardinalityOf`), so
+ * exact bounds make a bounded array and a lower bound of one makes the field
+ * required.
  */
-function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): FieldDefinition & { baseType: string } {
+function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): ResolvedConnectorField {
   const baseType = resolveBaseType(field.osfType, osfTypes);
   if (!baseType) throw new Error(`Connector field ${field.key}: unknown osfType ${field.osfType}.`);
-  return { ...field, baseType };
+  const semantic = osfTypeDefinitionOf(field.osfType, osfTypes);
+  const { cardinality, bounds, required } = cardinalityOf(field.cardinality ?? semantic?.cardinality, `Connector field ${field.key}`);
+  return {
+    ...field,
+    baseType,
+    ...(semantic?.schema ? { schema: semantic.schema } : {}),
+    cardinality,
+    ...(bounds ? { cardinalityBounds: bounds } : {}),
+    required: field.required === true || required,
+  };
 }
 
 /**
@@ -62,10 +78,8 @@ function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): Fiel
  * description, then default, then the collection wrapper.
  */
 function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes: ConnectorOsfTypes): JsonObject {
-  const scalar =
-    field.osfType === FIELD_DEFINITION_OSF_TYPE
-      ? fieldDefinitionValueSchema()
-      : constraintsForField(withBaseType(field, osfTypes));
+  const resolved = withBaseType(field, osfTypes);
+  const scalar: JsonObject = resolved.schema ? structuredClone(resolved.schema) : constrainedType(resolved);
 
   // The type a form renders the property through; the JSON type beside it is what validates.
   scalar["x-osf-type"] = field.osfType;
@@ -82,21 +96,32 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes
 
   if (field.defaultValue !== undefined) scalar.default = field.defaultValue;
 
-  return isCollection(field) ? applyCollectionShape(scalar, field) : scalar;
+  return resolved.cardinality === "collection" ? collectionShape(scalar, resolved) : scalar;
 }
 
 export function connectorFieldSchema(field: FieldDefinition, osfTypes: ConnectorOsfTypes = {}): JsonObject {
   return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field, osfTypes));
 }
 
+/**
+ * `additionalProperties` is always false: an unknown property is a caller
+ * error worth surfacing, not something to drop silently. A default never
+ * makes a required field omittable here — connector contract validators do
+ * not materialize defaults, so their callers keep the stricter boundary.
+ */
 export function connectorObjectSchema(fields: FieldDefinition[], osfTypes: ConnectorOsfTypes = {}): JsonObject {
-  return bundleFieldDefinitionSchema(
-    objectSchemaFrom(
-      fields,
-      (field) => connectorFieldSchemaWithoutDefinitions(field as FieldDefinition, osfTypes),
-      { requireRequired: true },
-    ),
-  );
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  for (const field of fields) {
+    properties[field.key] = connectorFieldSchemaWithoutDefinitions(field, osfTypes);
+    if (withBaseType(field, osfTypes).required) required.push(field.key);
+  }
+  return bundleFieldDefinitionSchema({
+    type: "object",
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+    additionalProperties: false,
+  });
 }
 
 export type ConnectorOperationSchemas = {

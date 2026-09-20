@@ -124,7 +124,7 @@ const FIXTURES: { name: string; document: Record<string, unknown> }[] = [
       name: "Onboarding",
       description: null,
       version: "3",
-      processVariables: [{ key: "total", valueType: "number" }],
+      processVariables: [{ key: "total", osfType: "number" }],
       processVariableInitializers: [{ targetKey: "total", value: 0 }],
       // Nothing reads this. It has to come back anyway: a document written by a
       // newer designer must survive being opened by an older one.
@@ -766,7 +766,7 @@ describe("the designer writes the two variable keys and nothing else", () => {
     id: "def-1",
     name: "Onboarding",
     processVariables: [
-      { key: "total", valueType: "number", osfType: "amount", authoring: { profile: "x" } },
+      { key: "total", osfType: "amount", authoring: { profile: "x" } },
     ],
     processVariableInitializers: [{ targetKey: "total", value: "{{input.amount}}" }],
     canvasViewport: { x: -120, y: 40, zoom: 0.75 },
@@ -795,18 +795,18 @@ describe("the designer writes the two variable keys and nothing else", () => {
   test("an added variable is written, and the rest of the document is not", () => {
     const added = addProcessVariable(readProcessVariableSet(base), {
       key: "channel",
-      valueType: "string",
+      osfType: "string",
       label: "Channel",
     });
     expect(added.refused).toBeNull();
 
     const result = save(added.set);
-    // The stored entry comes back whole. `osfType` and `authoring` are
-    // read by `runtime/field-definitions.ts` and by an authoring pass, and by
-    // nothing in this editor — an add that rebuilt the list would drop them.
+    // The stored entry comes back whole. A catalog `osfType` and `authoring`
+    // are read by `runtime/field-definitions.ts` and by an authoring pass, and
+    // by nothing in this editor — an add that rebuilt the list would drop them.
     expect(result.processVariables).toEqual([
-      { key: "total", valueType: "number", osfType: "amount", authoring: { profile: "x" } },
-      { key: "channel", valueType: "string", label: { en: "Channel" } },
+      { key: "total", osfType: "amount", authoring: { profile: "x" } },
+      { key: "channel", osfType: "string", label: { en: "Channel" } },
     ]);
     // Untouched, and still the same array: only the key that changed is
     // assigned, so the initializers reach the document through the spread.

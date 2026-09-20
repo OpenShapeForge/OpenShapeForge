@@ -2,7 +2,8 @@
 
 Canonical identity model + claim parsers + the two verifier paths (HMAC
 trusted-context for in-mesh hops, JWKS-backed bearer for trust-boundary
-services). Framework-neutral: no Fastify, no Next, no Auth.js wiring.
+services), plus one composed browser session under `./session`. The root
+export stays framework-neutral: no Fastify, no Next, no Auth.js wiring.
 
 ## Scope
 
@@ -18,15 +19,21 @@ services). Framework-neutral: no Fastify, no Next, no Auth.js wiring.
 - `bearer.ts` — `createBearerVerifier({ jwksUri, issuer, audience })`
   returns a verifier function. Pass `keySet` instead of `jwksUri` in
   tests to bypass the JWKS HTTP fetch.
+- `session/` (`@openshapeforge/auth/session`) — the Keycloak-backed
+  NextAuth session on Redis that apps/web and apps/admin share: store,
+  refresh mutex and retry budget, cookie set, callbacks, Keycloak
+  settings and production-env validation. An app composes one
+  (`createSessionAuth`) with its realm defaults, key and cookie prefixes,
+  admit gate, extra stored fields and refresh invariant; nothing
+  app-specific lives here. This subpath is the only one that reads
+  `process.env` and depends on `next-auth` / `ioredis` (peers).
 
 ## Out of scope
 
-- Auth.js / Keycloak provider config — stays in `apps/web/src/lib/auth/`.
-- Redis session store — stays in `apps/web/src/lib/auth/`.
 - HTTP framework plugins (Fastify, Next route handlers) — apps write a
-  thin adapter; keep this package framework-neutral.
-- Secret / env loading — callers pass values in. The package never reads
-  `process.env` directly so it stays trivially testable.
+  thin adapter; the root export stays framework-neutral.
+- Secret / env loading outside `./session` — callers pass values in, so
+  the verifiers stay trivially testable.
 
 ## Build / consumption
 

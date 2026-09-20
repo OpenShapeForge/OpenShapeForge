@@ -248,14 +248,41 @@ strict-v2 `interfaces.mcp.tools`:
   `osf_create` / `osf_update` / `osf_delete` tools taking an `entity`
   parameter, keeping the advertised tool count flat.
 
+The generic tools are advertised in two steps, so their size does not grow
+with the number of entities behind them. `tools/list` carries the `entity`
+enum (bounded to what the session may address), the properties every entity
+shares with the same schema (`id`, paging, the mutation controls) verbatim, a
+stub for a property every entity has but describes differently (`values`,
+`filter`, the sort field enum), and a one-line per-entity summary in the
+description; an entity's own fields are not listed and the schema stays open
+to them. The exact per-entity schema — the one the call is validated against —
+comes from **`osf_describe { entity, operation? }`**, listed beside the generic
+tools whenever the session can address a generic entity, described with the
+same withholding and collection policy the dedicated tools get. The
+`osf://schema/entities/{slug}` resource keeps describing the readable field
+model; `osf_describe` is the write contract.
+
 Tool-selection quality degrades well before a model runs out of context, so the
 compiler **fails the build** when the dedicated tool count would exceed 60,
-naming the entities to switch to `generic`. This is a build failure rather than
-a runtime surprise, matching how the rest of the compiler fails closed.
+naming the entities to switch to `generic`. The same guard exists in bytes:
+the listing a session holding every role would receive — projected exactly as
+the runtime projects it, generic tools compact — may not exceed
+`MAX_ADVERTISED_TOOL_BYTES` (640 KB, of which 32 KB is reserved for the
+platform's fixed tools and 128 KB for tools that exist only at run time —
+`packages/operations/src/mcp-tool-budget.ts`), and the failure says what is
+over and which tools weigh most. The fixed tools' shapes, the searchable pair,
+the edit-lease trio, the derived-tool helpers and the connector projection live
+in `@openshapeforge/operations`, imported by both the runtime and the compiler,
+so the compiler measures what the runtime lists.
+Both are build failures rather than runtime surprises, matching how the rest of
+the compiler fails closed.
 
 Every tool carries annotations derived mechanically from its operation:
-`readOnlyHint` on list/get, `idempotentHint` on update/delete, and
-`destructiveHint` on delete.
+`readOnlyHint` on list/get, `destructiveHint` on delete, `idempotentHint` on
+list/get/delete — and **not** on update: the runtime appends an event and
+advances `updatedAt` on every execution, so repeating an update is not
+idempotent, unless the entity's update operation declares keyed idempotency
+(`reliability.idempotency.mode: keyed`), which sets it.
 
 ## Resource surface
 
@@ -287,7 +314,8 @@ Entity resources describe the readable field model. They deliberately do not
 compose those fields into a second `jsonSchema`: create and update inputs differ
 from the read model because identifiers, timestamps and other server-managed
 fields are not writable. The per-operation input schemas returned by
-`tools/list` are the authoritative write contract.
+`tools/list` (dedicated entities) and `osf_describe` (generic entities) are the
+authoritative write contract.
 
 OpenShapeForge does not currently author MCP prompts or resource templates, so
 their list methods return valid empty catalogs. This keeps generic MCP clients
@@ -331,6 +359,13 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "Organization administrator", `org_employee` as "Employee" — and otherwise
   falls back to the raw role list. `permissions` lists the remaining role names
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
+  The words come from the roles themselves: `roleLabels` in
+  `authorization.yaml` (`label` for a persona, `phrase` for the wording inside
+  the opening sentence — "may manage clients and other relations"), which a
+  host extends for its own roles through an `authorizationPatch`; the compiler
+  emits them as `generated/compiler/role-labels.json`. A `<Area>.All.ReadWrite`
+  role without a phrase is described from its shape; any other role without
+  one is left unsaid rather than shown as a technical name.
 - `groups` are the Keycloak Organization memberships the token carries, with
   the one the session acts for marked `active`. On a per-organization endpoint
   (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
@@ -340,7 +375,7 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   row-level security fences — left open on purpose).
 - `signedInVia` names the client the token was issued to (`codex` → "Codex",
   `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
-  "Hubble", any other `azp` as is). A trusted-context session reports
+  the product name, `OPENSHAPEFORGE_PRODUCT_NAME`, any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
   summary adds "on the Zerocopter endpoint" (the organization's display name).
 - `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own

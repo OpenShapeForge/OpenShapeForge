@@ -75,7 +75,7 @@ export function getFieldValueType(field: Field): VariableValueType {
   const semanticDefinition = osfType
     ? COMPILER_OSF_TYPES[osfType as keyof typeof COMPILER_OSF_TYPES]
     : undefined;
-  const semanticValueType = semanticDefinition?.valueType as string | undefined;
+  const semanticValueType = semanticDefinition?.baseType as string | undefined;
 
   if (
     semanticValueType === "string" ||

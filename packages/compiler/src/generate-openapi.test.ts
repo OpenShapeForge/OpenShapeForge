@@ -1033,6 +1033,7 @@ describe("rich generated REST OpenAPI", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
     const semanticManifest = structuredClone(manifest);

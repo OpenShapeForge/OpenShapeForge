@@ -82,6 +82,7 @@ export function resolveModelFields(
     if (field.graphqlType) compiled.graphqlType = field.graphqlType;
     const fieldOptions = resolveFieldOptions(field) ?? semType?.options;
     if (fieldOptions) compiled.options = fieldOptions;
+    if (semType?.schema) compiled.schema = semType.schema;
     if (field.layoutFraction) compiled.layoutFraction = field.layoutFraction;
     if (field.localized) compiled.localized = field.localized;
     if (field.suggestions) compiled.suggestions = field.suggestions;
@@ -155,11 +156,7 @@ export function resolveRender(
   }
 
   // 3. Default for field value shape
-  const defaultKey = fieldCardinality(field) === "collection"
-    ? field.osfType === "fieldDefinition"
-      ? "fieldDefinitionCollection"
-      : "collection"
-    : field.baseType;
+  const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
   const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   if (defaultEntry) {
     const componentName = defaultEntry.component;

@@ -26,6 +26,15 @@
           "options": {
             "$ref": "core-entity.schema.json#/$defs/field/properties/options"
           },
+          "schema": {
+            "description": "The complete value schema of this type, as a $ref into the bundled field-definition definitions. A type that declares one is projected through it instead of through valueType and shape.",
+            "type": "object",
+            "required": ["$ref"],
+            "additionalProperties": false,
+            "properties": {
+              "$ref": { "type": "string", "pattern": "^#/\\$defs/[A-Za-z][A-Za-z0-9]*$" }
+            }
+          },
           "lookup": {
             "type": "object",
             "required": ["provider"],

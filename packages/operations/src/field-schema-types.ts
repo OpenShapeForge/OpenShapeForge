@@ -73,6 +73,13 @@ export type OperationFieldOsfType = {
   kind?: string;
   entity?: string;
   valueType: OperationFieldBaseType;
+  /**
+   * The complete value schema of this type, as a `$ref` into the bundled
+   * definitions (`fieldDefinitionDefinitions`). A type that declares one is
+   * projected through it instead of through its base type and shape, so a
+   * recursive contract needs no engine code that knows its name.
+   */
+  schema?: OperationJsonSchema;
   cardinality?: OperationFieldCardinality;
   label?: OperationLocalizedText;
   validation?: OperationFieldValidation;
@@ -88,7 +95,11 @@ export type OperationFieldSchemaRegistry = {
     value: string;
     label?: OperationLocalizedText;
   }[]>>;
-  /** Self-contained definitions used by the recursive fieldDefinition type. */
+  /**
+   * The `$defs` a catalog type's `schema` may refer to (the authoring
+   * field-definition schema's own definitions), bundled at the root of any
+   * projected schema that refers to one of them.
+   */
   fieldDefinitionDefinitions?: OperationJsonSchema;
 };
 
@@ -127,6 +138,8 @@ export type ResolvedOperationField = {
   render?: { props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
   computed?: { expression?: string };
+  /** The catalog-declared value schema of the field's type, when it has one. */
+  schema?: OperationJsonSchema;
   children?: readonly ResolvedOperationField[];
   item?: ResolvedOperationField;
 };

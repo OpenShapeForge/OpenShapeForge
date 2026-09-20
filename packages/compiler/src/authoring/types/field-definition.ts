@@ -324,6 +324,7 @@ export interface FieldDefinitionOsfType {
   cardinality?: FieldDefinitionCardinality;
   validation?: FieldDefinitionValidation;
   options?: FieldOptions;
+  schema?: { $ref: string };
   render?: {
     display?: string;
     input?: string;

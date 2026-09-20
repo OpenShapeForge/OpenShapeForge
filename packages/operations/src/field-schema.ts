@@ -44,9 +44,6 @@ export type {
   ResolvedOperationField,
 } from "./field-schema-types.js";
 
-export const FIELD_DEFINITION_OSF_TYPE = "fieldDefinition";
-export const FIELD_DEFINITION_SCHEMA_REF = "#/$defs/fieldDefinition";
-
 export function localizedText(value: OperationLocalizedText | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.trim() || undefined;
@@ -224,6 +221,7 @@ export function resolveFields(
           ? { relationship: field.relationship }
           : {}),
       ...(field.computed ? { computed: field.computed } : {}),
+      ...(semantic?.schema ? { schema: semantic.schema } : {}),
       ...(nested ? { children: resolveFields(nested, registry, [...ancestry, field.key]) } : {}),
       ...(item ? { item: resolveFields([item], registry, [...ancestry, field.key])[0] } : {}),
     };
@@ -369,7 +367,7 @@ function valueSchema(
   registry: OperationFieldSchemaRegistry,
   options: OperationFieldSchemaOptions,
 ): OperationJsonSchema {
-  if (field.osfType === FIELD_DEFINITION_OSF_TYPE) return { $ref: FIELD_DEFINITION_SCHEMA_REF };
+  if (field.schema) return structuredClone(field.schema) as OperationJsonSchema;
   if (field.baseType === "object" && field.children?.length) {
     return objectSchema(field.children, registry, { ...options, requireRequired: options.requireNestedRequired ?? true });
   }
@@ -478,20 +476,22 @@ export function objectSchema(
   };
 }
 
-function referencesFieldDefinitionSchema(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(referencesFieldDefinitionSchema);
+function referencesDefinitions(value: unknown, definitions: OperationJsonSchema): boolean {
+  if (Array.isArray(value)) return value.some((entry) => referencesDefinitions(entry, definitions));
   if (!value || typeof value !== "object") return false;
   return Object.entries(value as OperationJsonSchema).some(
-    ([key, entry]) => (key === "$ref" && entry === FIELD_DEFINITION_SCHEMA_REF) || referencesFieldDefinitionSchema(entry),
+    ([key, entry]) =>
+      (key === "$ref" && typeof entry === "string" && entry.startsWith("#/$defs/") && Object.hasOwn(definitions, entry.slice("#/$defs/".length))) ||
+      referencesDefinitions(entry, definitions),
   );
 }
 
-/** Bundle the recursive fieldDefinition definitions at the root of a schema that refers to them. */
+/** Bundle the registry definitions at the root of a schema that refers to one of them. */
 export function bundleDefinitions(
   schema: OperationJsonSchema,
   registry: Pick<OperationFieldSchemaRegistry, "fieldDefinitionDefinitions">,
 ): OperationJsonSchema {
-  if (!registry.fieldDefinitionDefinitions || !referencesFieldDefinitionSchema(schema)) return schema;
+  if (!registry.fieldDefinitionDefinitions || !referencesDefinitions(schema, registry.fieldDefinitionDefinitions)) return schema;
   const existing = schema.$defs && typeof schema.$defs === "object" && !Array.isArray(schema.$defs)
     ? (schema.$defs as OperationJsonSchema)
     : {};

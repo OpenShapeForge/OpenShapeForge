@@ -87,6 +87,7 @@ const CONTRACT_DECLARATIONS = [
   { kind: "interface", name: "FieldDefinitionWorkflowInspector" },
   { kind: "interface", name: "FieldDefinitionAuthoringMetadata" },
   { kind: "interface", name: "FieldDefinition" },
+  { kind: "type", name: "OsfTypeSchemaReference" },
   { kind: "interface", name: "OsfTypeDefinition" },
   { kind: "type", name: "FieldSuggestions" },
   { kind: "type", name: "FieldRelationship" },

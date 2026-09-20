@@ -816,6 +816,9 @@
     },
     "fieldDefinition": {
       "valueType": "object",
+      "schema": {
+        "$ref": "#/$defs/fieldDefinition"
+      },
       "label": {
         "en": "Field definition",
         "nl": "Velddefinitie"

@@ -616,6 +616,7 @@ describe("buildMcpCatalog", () => {
                   key: "definition",
                   baseType: "object",
                   osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
                 }),
               ],
             }),

@@ -350,8 +350,11 @@ types:
       display: TextDisplay
       input: VariableTemplateInput
 
+  # A stored FieldDefinition is the authored field contract itself: its value
+  # schema is the field-definition authoring schema, bundled by the compiler.
   fieldDefinition:
     valueType: object
+    schema: { $ref: "#/$defs/fieldDefinition" }
     label: { en: Field definition, nl: Velddefinitie }
     pluralLabel: { en: Field definitions, nl: Velddefinities }
     icon: ListChecks

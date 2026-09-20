@@ -302,6 +302,7 @@ describe("compiled field JSON Schema projection", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
       }),
     );
 
@@ -343,6 +344,7 @@ describe("compiled field JSON Schema projection", () => {
         key: "definition",
         baseType: "object",
         osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         description: { en: "Definition" },
       }),
     );
@@ -361,12 +363,14 @@ describe("compiled field JSON Schema projection", () => {
           key: "definition",
           baseType: "object",
           osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
         field({
           key: "definitions",
           baseType: "object",
           cardinality: "collection",
           osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
         }),
       ],
       {},
@@ -378,6 +382,30 @@ describe("compiled field JSON Schema projection", () => {
     expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
+  });
+
+  it("projects a stored field of a catalog type through the schema that type declares, by contract not by name", () => {
+    const declared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { valueType: "object", label: { en: "Field" }, schema: { $ref: "#/$defs/fieldDefinition" } } },
+    });
+    const schema = declared.object([{ key: "form", osfType: "object", children: [{ key: "fields", osfType: "fieldDefinition", cardinality: "collection" }] }]);
+    const form = (schema.properties as Record<string, Record<string, unknown>>).form!;
+    expect((form.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
+    expect(form.$defs).toBeUndefined();
+    expect(Object.keys(schema.$defs as object)).toContain("fieldDefinition");
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(validate({ form: { fields: [{ key: "name", osfType: "string" }] } })).toBe(true);
+    expect(validate({ form: { fields: [{ osfType: "string" }] } })).toBe(false);
+    expect(declared.compile([{ key: "definition", osfType: "fieldDefinition" }])[0]).toMatchObject({ schema: { $ref: "#/$defs/fieldDefinition" } });
+
+    // The name carries nothing: the same key without a declared schema is a plain object.
+    const undeclared = createFieldSchemaCompiler({
+      componentCatalog,
+      osfTypes: { fieldDefinition: { valueType: "object", label: { en: "Field" } } },
+    });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" })).toMatchObject({ type: "object" });
+    expect(undeclared.field({ key: "definition", osfType: "fieldDefinition" }).$ref).toBeUndefined();
   });
 
   it("gives compiler plugins the canonical recursive FieldDefinition projector", () => {

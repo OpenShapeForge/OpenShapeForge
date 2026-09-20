@@ -42,8 +42,6 @@ export type {
   ResolvedOperationField,
 } from "./field-schema.js";
 export {
-  FIELD_DEFINITION_OSF_TYPE,
-  FIELD_DEFINITION_SCHEMA_REF,
   bundleDefinitions,
   cardinalityOf,
   collectionBounds,

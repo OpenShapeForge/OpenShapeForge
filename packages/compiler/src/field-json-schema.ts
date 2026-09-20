@@ -30,7 +30,6 @@ import {
   objectSchema,
   operationFieldObjectSchema,
   operationFieldSchema,
-  FIELD_DEFINITION_SCHEMA_REF,
   type DescribeFieldOptions,
   type OperationFieldDefinition,
   type OperationFieldSchemaOptions,
@@ -39,8 +38,6 @@ import {
 } from "@openshapeforge/operations";
 
 export {
-  FIELD_DEFINITION_OSF_TYPE,
-  FIELD_DEFINITION_SCHEMA_REF,
   localizedText,
   numericRule,
   ruleValue,
@@ -79,7 +76,7 @@ export function runtimeFieldSchemaRegistry(input: {
     referentiedata: (input.referentiedata ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["referentiedata"]>,
     fieldDefinitionDefinitions: structuredClone(fieldDefinitionDefinitions),
     fieldDefinitionSchema: {
-      $ref: FIELD_DEFINITION_SCHEMA_REF,
+      $ref: fieldDefinitionAuthoringSchema.$ref,
       $defs: structuredClone(fieldDefinitionDefinitions),
     },
   };
@@ -90,10 +87,6 @@ export function renderRuntimeFieldSchemaRegistry(input: {
   referentiedata?: CoreReferentiedataSnapshot;
 }): string {
   return `${JSON.stringify({ version: 1, ...runtimeFieldSchemaRegistry(input) }, null, 2)}\n`;
-}
-
-export function fieldDefinitionValueSchema(): JsonObject {
-  return { $ref: FIELD_DEFINITION_SCHEMA_REF };
 }
 
 export function bundleFieldDefinitionSchema(schema: JsonObject): JsonObject {

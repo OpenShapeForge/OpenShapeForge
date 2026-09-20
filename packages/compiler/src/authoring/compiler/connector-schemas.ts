@@ -17,8 +17,6 @@
  */
 import {
   bundleFieldDefinitionSchema,
-  FIELD_DEFINITION_OSF_TYPE,
-  fieldDefinitionValueSchema,
   localizedText,
   splitBundledDefinitions,
   type JsonObject,
@@ -26,8 +24,8 @@ import {
 import { collectionShape, constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition, FieldDefinitionValueType } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
-import type { OsfTypeDefinition } from "../types/authoring.js";
-import { resolveBaseType } from "../entity-fields.js";
+import type { OsfTypeDefinition, OsfTypeSchemaReference } from "../types/authoring.js";
+import { osfTypeDefinitionOf, resolveBaseType } from "../entity-fields.js";
 
 /**
  * A closed vocabulary, when the field declares one. Only `static` options are
@@ -46,12 +44,17 @@ export type ConnectorOsfTypes = Record<string, OsfTypeDefinition>;
 /**
  * Connector fields never go through entity normalization, so their base type
  * is resolved here: a base osf type is its own base, a catalog key resolves
- * through the catalog, anything else is refused.
+ * through the catalog, anything else is refused. A catalog type that declares
+ * its own value schema is projected through that schema.
  */
-function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): FieldDefinition & { baseType: FieldDefinitionValueType } {
+function withBaseType(
+  field: FieldDefinition,
+  osfTypes: ConnectorOsfTypes,
+): FieldDefinition & { baseType: FieldDefinitionValueType; schema?: OsfTypeSchemaReference } {
   const baseType = resolveBaseType(field.osfType, osfTypes);
   if (!baseType) throw new Error(`Connector field ${field.key}: unknown osfType ${field.osfType}.`);
-  return { ...field, baseType };
+  const schema = osfTypeDefinitionOf(field.osfType, osfTypes)?.schema;
+  return { ...field, baseType, ...(schema ? { schema } : {}) };
 }
 
 /**
@@ -59,10 +62,8 @@ function withBaseType(field: FieldDefinition, osfTypes: ConnectorOsfTypes): Fiel
  * description, then default, then the collection wrapper.
  */
 function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition, osfTypes: ConnectorOsfTypes): JsonObject {
-  const scalar =
-    field.osfType === FIELD_DEFINITION_OSF_TYPE
-      ? fieldDefinitionValueSchema()
-      : constrainedType(withBaseType(field, osfTypes));
+  const resolved = withBaseType(field, osfTypes);
+  const scalar: JsonObject = resolved.schema ? structuredClone(resolved.schema) : constrainedType(resolved);
 
   const values = staticEnum(field);
   if (values) scalar.enum = values;

@@ -107,6 +107,14 @@ export interface OsfTypeDefinition {
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
+  /**
+   * The complete value schema of this type: a `$ref` into the bundled
+   * field-definition definitions. A type that declares one is projected
+   * through it instead of through `valueType` and `shape`, which is how a
+   * recursive contract (a stored FieldDefinition) is a catalog type like any
+   * other, with no engine code that knows its name.
+   */
+  schema?: OsfTypeSchemaReference;
   lookup?: OsfTypeLookupDefinition;
   render?: {
     display: string;
@@ -153,6 +161,8 @@ export interface OsfTypeDefinition {
    */
   filterField?: string;
 }
+
+export type OsfTypeSchemaReference = { $ref: string } & Record<string, unknown>;
 
 export interface OsfTypeCatalog {
   schemaVersion: number;

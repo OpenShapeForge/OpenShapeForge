@@ -205,14 +205,14 @@ test("entity options and relationship constraints project as the live reference 
   expect(() => operationFieldObjectSchema([{ key: "category", osfType: "string", options: { type: "entity" } }])).toThrow("require a source");
 });
 
-test("the recursive fieldDefinition definitions are bundled once, at the root, for nested uses", () => {
+test("a catalog type that declares its schema projects through it, bundled once at the root", () => {
   const definitions = { fieldDefinition: { type: "object", required: ["key"], properties: { key: { type: "string" } } } };
   const schema = operationFieldObjectSchema([
     { key: "form", osfType: "object", children: [
       { key: "fields", osfType: "fieldDefinition", cardinality: "collection" },
     ] },
     { key: "definition", osfType: "fieldDefinition" },
-  ], { osfTypes: { fieldDefinition: { valueType: "object" } }, fieldDefinitionDefinitions: definitions });
+  ], { osfTypes: { fieldDefinition: { valueType: "object", schema: { $ref: "#/$defs/fieldDefinition" } } }, fieldDefinitionDefinitions: definitions });
   const properties = schema.properties as Record<string, Record<string, unknown>>;
   expect(properties.definition).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-i18n": { title: { en: "definition", nl: "definition" } }, title: "definition", description: "definition" });
   expect((properties.form!.properties as Record<string, Record<string, unknown>>).fields!.items).toEqual({ $ref: "#/$defs/fieldDefinition" });

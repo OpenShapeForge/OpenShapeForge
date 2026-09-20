@@ -6,6 +6,12 @@ import {
 } from "./connector-schemas.js";
 import { constrainedType } from "@openshapeforge/operations";
 import type { FieldDefinition } from "../types/field-definition.js";
+import type { OsfTypeDefinition } from "../types/authoring.js";
+
+/** A catalog type that declares its own value schema, the way `fieldDefinition` does. */
+const catalog: Record<string, OsfTypeDefinition> = {
+  fieldDefinition: { valueType: "object", label: { en: "Field definition" }, schema: { $ref: "#/$defs/fieldDefinition" } },
+};
 
 describe("connector field schemas", () => {
   it("maps authored validation bounds into the schema", () => {
@@ -92,12 +98,12 @@ describe("connector field schemas", () => {
     });
   });
 
-  it("reuses the canonical recursive schema for field-definition values", () => {
+  it("projects a catalog type that declares its schema through that schema, bundled at the root", () => {
     const schema = connectorFieldSchema({
       key: "definitions",
       cardinality: "collection",
       osfType: "fieldDefinition",
-    });
+    }, catalog);
 
     expect(schema).toMatchObject({
       type: "array",
@@ -116,7 +122,7 @@ describe("connector field schemas", () => {
           osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
 
     expect(schema).toEqual({ type: "object" });
   });
@@ -182,7 +188,7 @@ describe("operation schemas", () => {
           osfType: "fieldDefinition",
         },
       ],
-    });
+    }, catalog);
     const row = output.items as Record<string, unknown>;
     const definition = (row.properties as Record<string, Record<string, unknown>>).definition;
 

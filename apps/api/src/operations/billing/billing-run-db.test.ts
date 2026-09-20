@@ -203,7 +203,7 @@ describe("the milestone billing run against PostgreSQL", () => {
     const pending = await milestone(session, agreementId, 5, "pending");
     const invoice = transitionOperationHandler(catalogOperation("AgreementMilestone.invoice"));
     const context = handlerContext(session) as unknown as Parameters<typeof invoice>[1];
-    const draft = (extra: Record<string, unknown>) => createGeneratedEntityForTable(restricted.db, session, billingTable("Invoice"), { invoiceKind: "sales", invoiceStatus: "draft", invoiceNumber: 900, issueDate: "2026-01-01", currencyCode: "EUR", ...extra });
+    const draft = (extra: Record<string, unknown>) => createGeneratedEntityForTable(restricted.db, session, billingTable("Invoice"), { invoiceKind: "sales", invoiceStatus: "draft", issueDate: "2026-01-01", currencyCode: "EUR", ...extra });
     const own = await draft({ agreementId });
     await fails(invoice({ id: pending, producedInvoiceId: String(own.id) }, context), "INVALID_STATE");
 
@@ -222,5 +222,28 @@ describe("the milestone billing run against PostgreSQL", () => {
     const result = await invoice({ id: triggered, producedInvoiceId: String(own.id) }, context);
     expect(result).toMatchObject({ value: { status: "invoiced", producedInvoiceId: own.id } });
     await fails(invoice({ id: triggered, producedInvoiceId: String(own.id) }, context), "INVALID_STATE");
+
+    // The comparison is the database's: a null agrees with a null and with nothing else.
+    const unattached = String((await createGeneratedEntityForTable(restricted.db, session, billingTable("AgreementMilestone"), { description: "Loose", amount: 1 })).id);
+    await executeTransition(restricted.db, session, trigger, { id: unattached });
+    await fails(invoice({ id: unattached, producedInvoiceId: String(own.id) }, context), "VALIDATION");
+    expect(await invoice({ id: unattached, producedInvoiceId: String(orphan.id) }, context)).toMatchObject({ value: { status: "invoiced" } });
+  }, 60_000);
+
+  test("numbers are issued past any invoice that already holds the next number", async () => {
+    const tenantId = await tenant();
+    const session = sessionFor(tenantId);
+    const { agreementId } = await agreement(tenantId);
+    await milestone(session, agreementId, 10);
+    await milestone(session, agreementId, 20);
+    // Planted behind the run's back, with the number the counter would issue first.
+    await sql`insert into erp.invoices (tenant_id, invoice_kind, invoice_status, invoice_number, fiscal_year_code, issue_date, currency_code)
+      values (${tenantId}::uuid, 'sales', 'issued', 1, ${new Date().toISOString().slice(0, 4)}, current_date, 'EUR')`.execute(privileged.db);
+    const run = await keyed(session, { idempotencyKey: "past-taken" });
+    expect(run.items.map((item) => item.invoiceNumber)).toEqual([2, 3]);
+    const numbers = (await sql<{ invoice_number: number }>`select invoice_number from erp.invoices where tenant_id = ${tenantId}::uuid order by invoice_number`.execute(privileged.db)).rows.map((row) => row.invoice_number);
+    expect(numbers).toEqual([1, 2, 3]);
+    const sequence = (await sql<{ last_number: number }>`select last_number from erp.invoice_sequences where tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows;
+    expect(sequence).toEqual([{ last_number: 3 }]);
   }, 60_000);
 });

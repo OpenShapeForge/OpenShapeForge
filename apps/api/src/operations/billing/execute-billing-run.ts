@@ -114,6 +114,8 @@ export async function runMilestoneBilling(
   const invoice = transitionBinding({ key: "AgreementMilestone.invoice", target: { entityName: "AgreementMilestone" } });
   const dryRun = input.dryRun === true;
   const issueDate = today();
+  // The fiscal year that scopes the numbers, frozen on every invoice with its number.
+  const fiscalYearCode = issueDate.slice(0, 4);
 
   return withDbSession(db, session, async (trx, dbSession) => {
     await assertKeyUnused(trx, input.idempotencyKey);
@@ -146,12 +148,13 @@ export async function runMilestoneBilling(
         continue;
       }
       const relationId = await agreementRelation(trx, milestone.agreement_id);
-      const invoiceNumber = await allocateInvoiceNumber(trx, dbSession.tenantId, INVOICE_KIND, issueDate.slice(0, 4));
+      const invoiceNumber = await allocateInvoiceNumber(trx, dbSession.tenantId, INVOICE_KIND, fiscalYearCode);
       const description = milestone.description;
       const produced = await createGeneratedEntityForTable(db, session, invoices, {
         invoiceKind: INVOICE_KIND,
         invoiceStatus: INVOICE_STATUS,
         invoiceNumber,
+        fiscalYearCode,
         issueDate,
         currencyCode: CURRENCY,
         amountBase: amount,

@@ -19747,20 +19747,51 @@
         {
           "key": "invoiceNumber",
           "osfType": "integer",
-          "required": true,
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "label": {
             "en": "Invoice number",
             "nl": "Factuurnummer"
           },
           "description": {
-            "en": "Sequential invoice number, unique within (invoice kind, fiscal period).",
-            "nl": "Volgnummer van de factuur, uniek binnen (factuursoort, boekjaarperiode)."
+            "en": "Sequential invoice number issued by the billing run, unique within (invoice kind, fiscal year). Absent on a draft that no run has issued.",
+            "nl": "Volgnummer van de factuur, uitgegeven door de facturatierun, uniek binnen (factuursoort, boekjaar). Leeg op een concept dat nog geen run heeft uitgegeven."
           },
           "validation": {
             "min": 1
           },
           "persisted": {
             "column": "invoice_number",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "fiscalYearCode",
+          "osfType": "string",
+          "required": false,
+          "readOnly": true,
+          "immutable": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
+          "label": {
+            "en": "Fiscal year code",
+            "nl": "Boekjaarcode"
+          },
+          "description": {
+            "en": "The fiscal year whose sequence issued the invoice number, frozen with it; a later change of the issue date does not move the invoice out of its numbering scope.",
+            "nl": "Het boekjaar waarvan de reeks het factuurnummer heeft uitgegeven, samen met dat nummer bevroren; een latere wijziging van de factuurdatum haalt de factuur niet uit zijn nummerreeks."
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 20
+          },
+          "persisted": {
+            "column": "fiscal_year_code",
             "storageClass": "core"
           }
         },
@@ -20811,6 +20842,10 @@
       "shape": [
         {
           "key": "kind",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "required": true,
           "label": {
             "en": "Kind",
@@ -20832,6 +20867,10 @@
         },
         {
           "key": "fiscalYearCode",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "string",
           "required": true,
           "label": {
@@ -20853,6 +20892,10 @@
         },
         {
           "key": "lastNumber",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "integer",
           "required": true,
           "label": {
@@ -20874,6 +20917,10 @@
         },
         {
           "key": "lastIssuedAt",
+          "readOnly": true,
+          "writtenBy": [
+            "BillingRun.execute"
+          ],
           "osfType": "datetime",
           "required": false,
           "label": {

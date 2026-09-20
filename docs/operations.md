@@ -140,9 +140,11 @@ What the compiler makes of it:
   its object form can be `required` (the rule refuses to run without it, and
   the input schema says so) and, on a single entity reference, can carry
   `agreesOn`: field keys on which the referenced record must equal this one.
-  The generic handler reads the referenced record under a share lock inside
-  the transition's transaction and refuses with `VALIDATION` when it is
-  absent from the tenant or disagrees — the constraint is declared once in
+  The generic handler compares in SQL, column against column with `IS
+  DISTINCT FROM` in the query that share-locks the referenced record inside
+  the transition's transaction — typed and null-aware, a null agrees with a
+  null and with nothing else — and refuses with `VALIDATION` when the record
+  is absent from the tenant or disagrees. The constraint is declared once in
   the YAML and enforced for every interface. A `stamps`
   field is filled by the server at execution — `now` is the transaction time
   on a datetime field, `actor` the session's linked Relation on a Relation
@@ -169,9 +171,11 @@ and do not collide with the entity's other operations; a `writes` or `stamps`
 field must be a persisted single field that nothing else writes and, when
 required, must carry a `defaultValue` (it leaves the create input, so without
 one no record could ever be created); an `agreesOn` write must be a single
-entity reference and name persisted single fields of this entity (that the
-target entity carries them too is checked when the runtime binds the rule
-against the generated manifest, at boot); and neither the status field nor a
+entity reference and name persisted single comparable (non-object) fields
+that the referenced entity carries with the same base type and column type
+— checked across the whole corpus when the catalogue is built, and again
+against the manifest's columns when the runtime binds the rule at boot; and
+neither the status field nor a
 `writes`/`stamps` target may be placed in a create or update form, nor may the
 status field be `writtenBy` or `immutable`. `preconditions` is deliberately a small vocabulary — a field is
 present (not null) or absent (null); an empty string is a present value — and
@@ -232,6 +236,22 @@ through the generic entity create, so declared validation, the tenant
 column and the `created` journal events are the ones a hand-made record
 gets; the milestone goes through the transition handler, so the status
 column has no other writer.
+
+The number is identity, frozen at issue: `Invoice.invoiceNumber` and
+`Invoice.fiscalYearCode` are `immutable` and `writtenBy: [BillingRun.execute]`,
+so no generic create or update on any interface sets or changes them (a
+draft made by hand has no number until a run issues it), and the unique
+index over Invoice `(tenantId, invoiceKind, fiscalYearCode, invoiceNumber)`
+is the guarantee that no two invoices of a tenant share a number within a
+kind and fiscal year. The fiscal year is stored on the invoice rather than
+derived from its issue date, because the counter is scoped by it: a later
+change of the issue date must not move an invoice out of the sequence that
+numbered it. InvoiceSequence has no create, update or delete on any
+interface; its counter columns are `writtenBy` the run and only the run
+touches the row. Should an invoice nonetheless hold the number the counter
+would issue next — a counter reset by hand, a row planted past the run —
+the run allocates past it (a gap is cheaper than a run that cannot finish)
+and gives up after a thousand taken numbers rather than scan.
 
 Idempotency is the core receipt, keyed on the caller's `Idempotency-Key`:
 a replay by the same actor returns the first result without running again,

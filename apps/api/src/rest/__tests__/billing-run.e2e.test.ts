@@ -46,10 +46,11 @@ afterAll(async () => {
   await sql`delete from erp.invoices where agreement_id = ${agreementId}::uuid`.execute(db);
   await sql`delete from erp.agreements where id = ${agreementId}::uuid`.execute(db);
   await sql`delete from platform.operation_execution_receipts where tenant_id = ${finance.tenantId}::uuid and actor_id = ${finance.userId}::uuid`.execute(db);
+  await sql`delete from erp.invoice_sequences where tenant_id = ${finance.tenantId}::uuid`.execute(db);
 });
 
 async function call(
-  identity: Identity, method: "GET" | "POST" | "PATCH", url: string, payload?: unknown, extra: Record<string, string> = {},
+  identity: Identity, method: "GET" | "POST" | "PATCH" | "DELETE", url: string, payload?: unknown, extra: Record<string, string> = {},
 ): Promise<{ status: number; body: any }> {
   const headers = new Headers(extra);
   applyTrustedContextHeaders(headers, identity, { secret: SECRET });
@@ -119,6 +120,21 @@ describe("the milestone billing run on REST", () => {
     const reused = await execute(finance, runKey, { agreementId, dryRun: true });
     expect(reused.status).toBe(409);
     expect(reused.body.error.code).toBe("IDEMPOTENCY_KEY_REUSED");
+
+    // The number and its year are the run's: no generic create or update sets them,
+    // and the counter behind them has no write on any interface.
+    const numbered = await call(finance, "POST", "/api/rest/v1/invoices", { invoiceKind: "sales", invoiceStatus: "draft", issueDate: "2026-01-01", currencyCode: "EUR", invoiceNumber: 999 });
+    expect(numbered.status).toBe(400);
+    expect(JSON.stringify(numbered.body)).toContain("BillingRun.execute");
+    const renumbered = await call(finance, "PATCH", `/api/rest/v1/invoices/${item.invoiceId}`, { invoiceNumber: 999, expectedVersion: invoice.body.data.updatedAt });
+    expect(renumbered.status).toBe(400);
+    expect(JSON.stringify(renumbered.body)).toContain("BillingRun.execute");
+    const counter = (await sql<{ id: string; updated_at: string }>`select id::text as id, updated_at::text as updated_at from erp.invoice_sequences where tenant_id = ${finance.tenantId}::uuid and kind = 'sales' order by fiscal_year_code desc limit 1`.execute(getSeedRuntime().db)).rows[0]!;
+    expect(counter).toBeDefined();
+    expect((await call(finance, "GET", `/api/rest/v1/invoice-sequences/${counter.id}`)).status).toBe(200);
+    expect((await call(finance, "PATCH", `/api/rest/v1/invoice-sequences/${counter.id}`, { lastNumber: 0, expectedVersion: counter.updated_at })).status).toBe(404);
+    expect((await call(finance, "POST", "/api/rest/v1/invoice-sequences", { kind: "sales", fiscalYearCode: "1999", lastNumber: 0 })).status).toBe(404);
+    expect((await call(finance, "DELETE", `/api/rest/v1/invoice-sequences/${counter.id}`)).status).toBe(404);
 
     // Nothing is left to invoice, and the status never yields to a generic update.
     const again = await execute(finance, `${runKey}-again`, { agreementId });

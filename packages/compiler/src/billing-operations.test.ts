@@ -63,10 +63,28 @@ describe("billing Operations", () => {
     }
   });
 
-  test("InvoiceSequence is unique per tenant, kind and fiscal year so numbering can upsert", () => {
+  test("InvoiceSequence is unique per tenant, kind and fiscal year, read-only on every interface, and written only by the run", () => {
     expect(sequence.entity.indexes).toContainEqual({
       name: "invoice_sequences_tenant_kind_fiscal_year_uidx",
       fields: ["tenantId", "kind", "fiscalYearCode"],
+      unique: true,
+    });
+    expect(Object.keys(sequence.entityOperations)).toEqual(["list", "get"]);
+    expect(sequence.crud.operations).toMatchObject({ create: false, update: false, delete: false });
+    for (const key of ["kind", "fiscalYearCode", "lastNumber", "lastIssuedAt"]) {
+      expect(sequence.model.fields.find((field) => field.key === key)!.writtenBy).toEqual(["BillingRun.execute"]);
+    }
+  });
+
+  test("an invoice's number and fiscal year are issued by the run only and unique within tenant, kind and year", () => {
+    const invoice = compile(loadEntity(authoringDir, "invoice"));
+    for (const key of ["invoiceNumber", "fiscalYearCode"]) {
+      const field = invoice.model.fields.find((candidate) => candidate.key === key)!;
+      expect(field).toMatchObject({ required: false, immutable: true, writtenBy: ["BillingRun.execute"] });
+    }
+    expect(invoice.entity.indexes).toContainEqual({
+      name: "invoices_tenant_kind_fiscal_year_number_uidx",
+      fields: ["tenantId", "invoiceKind", "fiscalYearCode", "invoiceNumber"],
       unique: true,
     });
   });

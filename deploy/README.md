@@ -269,7 +269,7 @@ Security posture it encodes (see `../SECURITY.md`):
 - the API connects as a **restricted** (`NOSUPERUSER NOBYPASSRLS`) role
   (`database.url`) so `FORCE ROW LEVEL SECURITY` is enforced;
 - a **worker** connects as a *second* restricted role (`database.workerUrl`).
-  The workflow queue policies compare `current_user` against
+  The queue policies compare `current_user` against
   `openshapeforge_worker`, so the connected role — not a session variable — is
   what authorizes a cross-tenant claim, and the API's role can no longer make
   one. A worker process refuses to start on `DATABASE_URL`, including when it

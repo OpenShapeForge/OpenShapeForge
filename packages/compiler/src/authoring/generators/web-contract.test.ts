@@ -8,8 +8,15 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadEntity } from "../loader.js";
-import { generateWebContractModules } from "./web-contract.js";
+import { loadEntity, loadOsfTypes } from "../loader.js";
+import type { EntityProfile } from "../types.js";
+import { composedEntityFields, generateWebContractModules } from "./web-contract.js";
+
+const BASE_AUTHORING = join(import.meta.dir, "../../../config/authoring");
+
+function parseEntityFields(source: string): Record<string, any> {
+  return JSON.parse(JSON.parse(source.slice(source.indexOf("JSON.parse(") + "JSON.parse(".length, source.lastIndexOf(") as"))));
+}
 
 function fixture(): string {
   const dir = mkdtempSync(join(tmpdir(), "web-contract-"));
@@ -59,7 +66,7 @@ test("entity fields carry the context partials' fields with derived base types",
     expect(loaded.profiles).toHaveLength(1);
     const modules = generateWebContractModules(dir, [{ entity: loaded.coreEntity, profiles: loaded.profiles }]);
     const source = modules.get("entity-fields.ts")!;
-    const parsed = JSON.parse(JSON.parse(source.slice(source.indexOf("JSON.parse(") + "JSON.parse(".length, source.lastIndexOf(") as")))) as Record<string, any[]>;
+    const parsed = parseEntityFields(source) as Record<string, any[]>;
 
     const keys = parsed.Widget!.map((field) => field.key);
     expect(keys).toEqual(["id", "name", "dimensions", "careLevel"]);
@@ -73,4 +80,28 @@ test("entity fields carry the context partials' fields with derived base types",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("two context partials defining one field are refused, naming both", () => {
+  const dir = fixture();
+  try {
+    const loaded = loadEntity(dir, "widget");
+    const second: EntityProfile = { ...loaded.profiles[0]!, profile: "billing", fields: [{ key: "careLevel", osfType: "string" }] };
+    expect(() => composedEntityFields({ entity: loaded.coreEntity, profiles: [...loaded.profiles, second] }, loadOsfTypes(dir)))
+      .toThrow("Widget[billing].careLevel is also defined by Widget[care]; a field belongs to one context partial.");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the web type catalogue keeps every identity alias; enumerability is the alias's own optionSource", () => {
+  const modules = generateWebContractModules(BASE_AUTHORING, []);
+  const source = modules.get("osf-types-entity-ids.ts")!;
+  const aliases = JSON.parse(source.slice(source.indexOf("= ") + 2, source.lastIndexOf(" as const"))) as Record<string, any>;
+  // Listable: the picker can enumerate the records through the list Operation.
+  expect(aliases.relationId).toMatchObject({ kind: "entityId", entity: "Relation", options: { type: "entity", source: "Relation" } });
+  // Not listable, still a type a field may name: present, without an option source.
+  expect(aliases.caseStepActionId).toMatchObject({ kind: "entityId", entity: "CaseStepAction", render: { input: "EntityReferenceSelect" } });
+  expect(aliases.caseStepActionId.optionSource).toBeUndefined();
+  expect(aliases.caseStepActionId.options).toBeUndefined();
 });

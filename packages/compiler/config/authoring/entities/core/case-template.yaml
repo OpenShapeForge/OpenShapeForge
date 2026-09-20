@@ -194,7 +194,7 @@ fields:
       max: unbounded
     osfType: fieldDefinition
     authoring:
-      profile: workflowInputField
+      profile: caseVariable
 operations:
   list:
     name: List Case Template

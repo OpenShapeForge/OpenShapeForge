@@ -127,7 +127,7 @@ describe("compiler host artifact assembly", () => {
     expect(JSON.parse(artifact!.contents)).toMatchObject({
       version: 1,
       fieldAuthoringProfiles: {
-        workflowInputField: { typePickerUsage: "requestInput" },
+        caseVariable: { typePickerUsage: "requestInput" },
         hostProfile: { futureProfileProperty: "keep-me" },
       },
       osfTypes: {

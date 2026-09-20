@@ -210,7 +210,7 @@ fields:
       max: unbounded
     osfType: fieldDefinition
     authoring:
-      profile: workflowInputField
+      profile: caseVariable
   - key: confidentiality
     required: false
     label:

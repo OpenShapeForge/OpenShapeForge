@@ -75,7 +75,7 @@ describe("compiler plugins", () => {
       }>;
     };
     expect(fieldAuthoringRegistry.version).toBe(1);
-    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.workflowInputField).toMatchObject({
+    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.caseVariable).toMatchObject({
       keyBehavior: "hiddenGeneratedStable",
       typePickerUsage: "requestInput",
     });

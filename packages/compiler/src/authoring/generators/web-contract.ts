@@ -91,22 +91,22 @@ function enrichEntityIdOsfType(definition: unknown): unknown {
 
 /**
  * The osf types split by origin: the authored core and context catalogs by the
- * YAML they came from, and the identity aliases the compiler derives per
- * entity, limited to the entities a picker can list.
+ * YAML they came from, and every identity alias the compiler derives per
+ * entity. The catalogue is complete — a field may name any alias — and
+ * whether a picker can enumerate the records is the alias's own
+ * `optionSource`, which the compiler sets only for an entity with a list
+ * Operation.
  */
 function loadCategorizedOsfTypes(
   osfTypes: Record<string, OsfTypeDefinition>,
   authoringDir: string,
-  listableSlugs: ReadonlySet<string>,
 ): CategorizedOsfTypes {
   const core: Record<string, unknown> = {};
   const context: Record<string, unknown> = {};
   const entityIds: Record<string, unknown> = {};
 
   for (const [key, definition] of Object.entries(osfTypes)) {
-    if (definition.kind !== "entityId") continue;
-    if (definition.entity && !listableSlugs.has(toKebabCase(definition.entity))) continue;
-    entityIds[key] = enrichEntityIdOsfType(definition);
+    if (definition.kind === "entityId") entityIds[key] = enrichEntityIdOsfType(definition);
   }
 
   const corePath = join(authoringDir, "catalogs", "osf-types.yaml");
@@ -314,9 +314,21 @@ export type ComposedEntity = { entity: CoreEntity; profiles: readonly EntityProf
  */
 export function composedEntityFields({ entity, profiles }: ComposedEntity, osfTypes: Record<string, OsfTypeDefinition>): Field[] {
   const own = new Set(entity.fields.map((field) => field.key));
-  const partial = profiles.flatMap((profile) =>
-    withBaseTypes(profile.fields ?? [], osfTypes, `${entity.entity}[${profile.profile}]`, { entityReferences: "normalizedLater" })
-      .filter((field) => !own.has(field.key)));
+  // A partial extends the entity; two partials each adding the same key
+  // would give the entity two definitions of one field, with nothing to
+  // say which a picker or a form should believe. Refuse, naming both.
+  const partialOrigin = new Map<string, string>();
+  const partial = profiles.flatMap((profile) => {
+    const origin = `${entity.entity}[${profile.profile}]`;
+    return withBaseTypes(profile.fields ?? [], osfTypes, origin, { entityReferences: "normalizedLater" })
+      .filter((field) => !own.has(field.key))
+      .filter((field) => {
+        const earlier = partialOrigin.get(field.key);
+        if (earlier) throw new Error(`${origin}.${field.key} is also defined by ${earlier}; a field belongs to one context partial.`);
+        partialOrigin.set(field.key, origin);
+        return true;
+      });
+  });
   return [...entity.fields, ...partial].filter((field) => !isTenantField(field));
 }
 
@@ -348,7 +360,7 @@ export function generateWebContractModules(authoringDir: string, composed: reado
   const entities = composed.map(({ entity }) => entity);
   const osfTypes = loadOsfTypes(authoringDir);
   const registry = buildCoreEntityGraphqlRegistry(entities);
-  const categorized = loadCategorizedOsfTypes(osfTypes, authoringDir, new Set(Object.keys(registry)));
+  const categorized = loadCategorizedOsfTypes(osfTypes, authoringDir);
   const files = new Map<string, string>([
     ["field-contract.ts", buildWebFieldContractSource()],
     ["component-defaults.ts", componentDefaultsModule(authoringDir)],

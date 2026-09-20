@@ -6,6 +6,7 @@
  * name cannot project; and passes silently when the row is fit to serve.
  */
 import { describe, expect, it } from "bun:test";
+import { MAX_BINDINGS_PER_OWNER } from "../execution-bindings.js";
 import {
   requiredAuthValueKeys,
   validateVisibleDefinition,
@@ -21,7 +22,10 @@ const ENTRY: DerivedToolsCatalogEntry = {
   inputFieldsField: "inputFields",
   visibleWhen: { field: "status", equals: "published" },
   execution: {
-    bindingsField: "bindings",
+    bindingsRelation: "capabilityBindings",
+    bindingsEntity: "Binding",
+    bindingsTable: "core.bindings",
+    parentRef: "serviceId",
     operationRef: "operationId",
     operationEntity: "Operation",
     operationTable: "core.operations",
@@ -37,11 +41,27 @@ const ENTRY: DerivedToolsCatalogEntry = {
 
 type Row = Record<string, unknown>;
 
+const BINDING: Row = {
+  id: "bind-1",
+  serviceId: "svc-1",
+  order: 1,
+  operationId: "op-1",
+};
+
+function matchesFilter(row: Row, filter: Row): boolean {
+  return Object.entries(filter).every(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value) && "in" in value) {
+      const membership = (value as { in?: unknown }).in;
+      return Array.isArray(membership) && membership.includes(row[key]);
+    }
+    return row[key] === value;
+  });
+}
+
 function readerFor(data: Record<string, Row[]>) {
+  const tables: Record<string, Row[]> = { "core.bindings": [BINDING], ...data };
   return async (table: string, filter: Row): Promise<Row[]> =>
-    (data[table] ?? []).filter((row) =>
-      Object.entries(filter).every(([key, value]) => row[key] === value),
-    );
+    (tables[table] ?? []).filter((row) => matchesFilter(row, filter));
 }
 
 const PROVIDER: Row = {
@@ -68,7 +88,6 @@ const ROW: Row = {
   id: "svc-1",
   key: "find-tickets",
   status: "published",
-  bindings: [{ operationId: "op-1", order: 1 }],
 };
 
 async function failure(input: Parameters<typeof validateVisibleDefinition>[0]): Promise<string> {
@@ -81,6 +100,45 @@ async function failure(input: Parameters<typeof validateVisibleDefinition>[0]): 
 }
 
 describe("validateVisibleDefinition", () => {
+  it("loads referenced operations and providers in one membership read each", async () => {
+    const seen: Array<{ table: string; filter: Row }> = [];
+    const base = readerFor({
+      "core.operations": [
+        OPERATION,
+        { ...OPERATION, id: "op-2", key: "create", providerId: "prov-2" },
+      ],
+      "core.providers": [
+        PROVIDER,
+        { ...PROVIDER, id: "prov-2", name: "Mail" },
+      ],
+      "core.connections": [
+        CONNECTION,
+        { ...CONNECTION, id: "conn-2", providerId: "prov-2" },
+      ],
+      "core.bindings": [
+        BINDING,
+        { ...BINDING, id: "bind-2", order: 2, operationId: "op-2" },
+      ],
+      "core.services": [ROW],
+    });
+    await validateVisibleDefinition({
+      entry: ENTRY,
+      row: ROW,
+      rowId: "svc-1",
+      reservedNames: new Set(),
+      readRows: async (table, filter) => {
+        seen.push({ table, filter });
+        return base(table, filter);
+      },
+    });
+    expect(seen.filter((call) => call.table === "core.operations")).toEqual([
+      { table: "core.operations", filter: { id: { in: ["op-1", "op-2"] } } },
+    ]);
+    expect(seen.filter((call) => call.table === "core.providers")).toEqual([
+      { table: "core.providers", filter: { id: { in: ["prov-1", "prov-2"] } } },
+    ]);
+  });
+
   it("passes a complete chain with a usable tenant connection", async () => {
     await validateVisibleDefinition({
       entry: ENTRY,
@@ -101,15 +159,15 @@ describe("validateVisibleDefinition", () => {
     const row = {
       ...ROW,
       inputFields: [{ key: "dealId", osfType: "string" }],
-      bindings: [
-        { operationId: "op-1", order: 1, when: { field: "dealId", present: true } },
-      ],
     };
     const readRows = readerFor({
       "core.operations": [OPERATION],
       "core.providers": [PROVIDER],
       "core.connections": [CONNECTION],
       "core.services": [],
+      "core.bindings": [
+        { ...BINDING, when: { field: "dealId", present: true } },
+      ],
     });
     await validateVisibleDefinition({
       entry: ENTRY,
@@ -125,9 +183,14 @@ describe("validateVisibleDefinition", () => {
     ]) {
       const message = await failure({
         entry: ENTRY,
-        row: { ...row, bindings: [{ operationId: "op-1", order: 1, when }] },
+        row,
         reservedNames: new Set(),
-        readRows,
+        readRows: readerFor({
+          "core.operations": [OPERATION],
+          "core.providers": [PROVIDER],
+          "core.connections": [CONNECTION],
+          "core.bindings": [{ ...BINDING, when }],
+        }),
       });
       expect(message).toContain("binding 1: when");
     }
@@ -239,9 +302,13 @@ describe("validateVisibleDefinition", () => {
   it("names a binding whose operation does not exist", async () => {
     const message = await failure({
       entry: ENTRY,
-      row: { ...ROW, bindings: [{ operationId: "missing", order: 1 }] },
+      row: ROW,
       reservedNames: new Set(),
-      readRows: readerFor({ "core.providers": [PROVIDER], "core.connections": [CONNECTION] }),
+      readRows: readerFor({
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": [{ ...BINDING, operationId: "missing" }],
+      }),
     });
     expect(message).toContain("binding 1 references Operation missing");
     expect(message).toContain("does not exist");
@@ -365,12 +432,76 @@ describe("validateVisibleDefinition", () => {
     expect(unusable).toContain("does not yield a usable tool name");
   });
 
+  it("refuses a colliding order as NOT_PUBLISHABLE, not SERVICE_MISCONFIGURED", async () => {
+    const input = {
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set<string>(),
+      readRows: readerFor({
+        "core.operations": [OPERATION],
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": [
+          { ...BINDING, id: "bind-1", order: 1 },
+          { ...BINDING, id: "bind-2", order: 1, operationId: "op-1" },
+        ],
+      }),
+    };
+    try {
+      await validateVisibleDefinition(input);
+      throw new Error("expected validation to refuse");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "NOT_PUBLISHABLE" });
+      expect(String((error as Error).message)).toContain("unique integer order");
+      expect(String((error as Error).message)).toContain("cannot be made visible");
+    }
+  });
+
+  it("sorts bindings by order before naming problems", async () => {
+    const message = await failure({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": [
+          { ...BINDING, id: "bind-2", order: 2, operationId: "missing-later" },
+          { ...BINDING, id: "bind-1", order: 1, operationId: "missing-first" },
+        ],
+      }),
+    });
+    expect(message).toContain("binding 1 references Operation missing-first");
+    expect(message).toContain("binding 2 references Operation missing-later");
+  });
+
+  it("refuses a relation collection that exceeds the per-owner maximum", async () => {
+    const bindings = Array.from({ length: MAX_BINDINGS_PER_OWNER + 1 }, (_, index) => ({
+      id: `b-${index}`,
+      serviceId: "svc-1",
+      order: index + 1,
+      operationId: "op-1",
+    }));
+    const message = await failure({
+      entry: ENTRY,
+      row: { ...ROW, id: "svc-1" },
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.operations": [OPERATION],
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": bindings,
+      }),
+    });
+    expect(message).toContain(`exceeds ${MAX_BINDINGS_PER_OWNER} bindings`);
+  });
+
   it("aggregates every problem into one readable refusal", async () => {
     const message = await failure({
       entry: ENTRY,
-      row: { key: "x!", status: "published", bindings: [] },
+      row: { key: "x!", status: "published" },
       reservedNames: new Set(),
-      readRows: readerFor({}),
+      readRows: readerFor({ "core.bindings": [] }),
     });
     expect(message).toContain("cannot be made visible");
     expect(message).toContain("usable tool name");

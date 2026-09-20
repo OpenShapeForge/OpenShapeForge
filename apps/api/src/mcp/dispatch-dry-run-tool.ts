@@ -8,7 +8,8 @@
 import { type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
 import { deriveToolName, derivedToolsFromRows } from "./derived-tools.js";
-import { bindingSelected, composeBindingRequest, orderedBindings } from "./declarative-execution.js";
+import { bindingSelected, composeBindingRequest } from "./declarative-execution.js";
+import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { catalog, catalogDerivedTools, entityForTable } from "./catalog.js";
 import { connectionScopeOf, serializeRow } from "./catalog-rows.js";
@@ -16,6 +17,7 @@ import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import {
   normalizeConnectionValueRows,
+  runtimeBindingReader,
   runtimeRowByFilter,
   runtimeRowsByFilter,
   urlSafeConnectionValues,
@@ -98,9 +100,10 @@ export async function dryRunToolCall(
       assertSchemaValid(target.inputSchema, toolArguments, "arguments");
 
       const requests: Record<string, unknown>[] = [];
-      const bindings = orderedBindings(
+      const bindings = await loadOrderedBindings(
+        execution,
         definitionRow,
-        execution.bindingsField,
+        runtimeBindingReader(db, session, tables),
       );
       for (const [index, binding] of bindings.entries()) {
         // Selection is part of what a dry run verifies: show WHICH bindings

@@ -83,6 +83,39 @@ function normalizeSortDirection(value: unknown): "asc" | "desc" {
   return typeof value === "string" && value.toLowerCase() === "desc" ? "desc" : "asc";
 }
 
+const POSTGRES_MEMBERSHIP_TYPE = /^[a-z]+(?:\[\])?$/;
+
+function membershipSqlType(columnType: string): string {
+  if (!POSTGRES_MEMBERSHIP_TYPE.test(columnType)) {
+    throw generatedCrudError(
+      `Unsupported generated CRUD column type ${columnType} for a membership filter.`,
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
+  return columnType;
+}
+
+function postgresArrayLiteral(values: unknown[]): string {
+  // Bun/kysely serializes a JS array as a comma-joined scalar, which Postgres
+  // rejects for a typed [] cast. Bind the Postgres array text form instead.
+  return `{${values.map(postgresArrayElement).join(",")}}`;
+}
+
+function postgresArrayElement(value: unknown): string {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "boolean") return value ? "t" : "f";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  const text = String(value);
+  return `"${text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+}
+
+function membershipCondition(columnName: string, values: unknown[], columnType: string) {
+  // One array parameter, cast from the resolved column type, so uuid columns
+  // compare as uuid[] (not text[]) and a large set does not expand to IN ($1, …).
+  const pgType = membershipSqlType(columnType);
+  return sql`${sql.id("row_source", columnName)} = ANY(${postgresArrayLiteral(values)}::${sql.raw(pgType)}[])`;
+}
+
 function buildFilterConditions(
   table: GeneratedCrudTable,
   session: DbSessionInput,
@@ -100,6 +133,11 @@ function buildFilterConditions(
     }
     // A fixed condition is a runtime-owned predicate, so `null` means the SQL
     // absence (`is null`), unlike a caller filter where it means "no filter".
+    if (Array.isArray(condition.value)) {
+      return condition.value.length === 0
+        ? sql`false`
+        : membershipCondition(condition.column, condition.value, columns.get(condition.column)!.type);
+    }
     return condition.value === null
       ? sql`${sql.id("row_source", condition.column)} is null`
       : sql`${sql.id("row_source", condition.column)} = ${condition.value}`;
@@ -157,7 +195,21 @@ function buildFilterConditions(
       if (!Array.isArray(value) || value.length === 0) {
         continue;
       }
-      conditions.push(sql`${sql.id("row_source", column.name)} in (${sql.join(value)})`);
+      conditions.push(membershipCondition(column.name, value, column.type));
+      continue;
+    }
+
+    const membership = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "in")
+      ? (value as { in?: unknown }).in : undefined;
+    if (membership !== undefined) {
+      if (Object.keys(value as object).length !== 1) {
+        throw generatedCrudError(`In filter ${key} accepts in only.`, "BAD_USER_INPUT");
+      }
+      if (!Array.isArray(membership) || membership.length === 0) {
+        conditions.push(sql`false`);
+        continue;
+      }
+      conditions.push(membershipCondition(column.name, membership, column.type));
       continue;
     }
 

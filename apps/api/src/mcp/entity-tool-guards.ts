@@ -27,7 +27,8 @@ import {
   catalogTestTools,
   entityForTable,
 } from "./catalog.js";
-import { runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowsByFilter } from "./session-connections.js";
+
 export function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
@@ -170,9 +171,21 @@ export async function assertPublishableWrite(
   }
   if (resulting[gate.field] !== gate.equals) return;
 
-  // Static surface a derived name may never shadow: every advertised
-  // non-derived tool name, whichever feature contributed it.
-  const reservedNames = new Set<string>([
+  await validateVisibleDefinition({
+    entry,
+    row: resulting,
+    rowId,
+    reservedNames: reservedDerivedToolNames(),
+    providerDefinitionsField: entityForTable(entry.execution!.connectionTable)
+      ?.elicitOnCreate?.definitionsField,
+    readRows: (rowTable, filter) =>
+      runtimeRowsByFilter(db, session, tables, rowTable, filter),
+    readBindingPages: runtimeBindingReader(db, session, tables),
+  });
+}
+
+function reservedDerivedToolNames(): Set<string> {
+  return new Set<string>([
     ...catalog.tools.map((tool) => tool.name),
     ...catalogDerivedTools.flatMap((candidate) => [
       ...(candidate.connect ? [candidate.connect.name] : []),
@@ -185,14 +198,5 @@ export async function assertPublishableWrite(
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
   ]);
-  await validateVisibleDefinition({
-    entry,
-    row: resulting,
-    rowId,
-    reservedNames,
-    providerDefinitionsField: entityForTable(entry.execution!.connectionTable)
-      ?.elicitOnCreate?.definitionsField,
-    readRows: (rowTable, filter) =>
-      runtimeRowsByFilter(db, session, tables, rowTable, filter),
-  });
 }
+

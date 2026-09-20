@@ -19,6 +19,41 @@ const contactDetail = (entity = "ContactDetail"): CoreEntity =>
 /** A resolved MCP configuration compiled for the fixture entity; `undefined` is no interface. */
 const mcpSection = (mcp: McpConfig | undefined, entity?: string) => buildMcpSection(contactDetail(entity), mcp);
 
+const ownedBindingsField = {
+  key: "bindings",
+  osfType: "ServiceBinding",
+  cardinality: "collection" as const,
+  relationship: {
+    kind: "hasMany" as const,
+    ownership: "owned" as const,
+    target: "ServiceBinding",
+    inverse: "serviceId",
+  },
+};
+
+const relationEntity = (): CoreEntity =>
+  ({
+    ...contactDetail(),
+    fields: [
+      ...(contactDetail().fields ?? []),
+      ownedBindingsField,
+    ],
+  }) as CoreEntity;
+
+const mcpJson = (mcp: McpConfig | undefined) =>
+  buildMcpSection(relationEntity(), mcp);
+
+const relationExecution = {
+  bindingsRelation: "bindings",
+  operationRef: "capabilityId",
+  operationEntity: "Capability",
+  providerRef: "adapterId",
+  providerEntity: "Adapter",
+  connectionEntity: "Connection",
+  connectionProviderRef: "adapterId",
+  connectionValuesField: "values",
+};
+
 const v2Relation = (tools?: "dedicated" | "generic"): CoreEntity => {
   const actions = ["list", "get", "create", "update", "delete"] as const;
   return {
@@ -305,69 +340,68 @@ describe("buildMcp", () => {
       descriptionField: "value",
       inputFieldsField: "value",
       versionField: "version",
-      execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
-      },
+      execution: relationExecution,
       dryRun: { name: "dry_run_widget", roles: ["author"] },
     };
-    expect(mcpSection({ derivedTools })?.derivedTools?.dryRun).toEqual({
+    expect(mcpJson({ derivedTools })?.derivedTools?.dryRun).toEqual({
       name: "dry_run_widget",
       roles: ["author"],
     });
     const { execution: _execution, ...withoutExecution } = derivedTools;
-    expect(() => mcpSection({ derivedTools: withoutExecution })).toThrow(
+    expect(() => mcpJson({ derivedTools: withoutExecution })).toThrow(
       /requires an execution block/,
     );
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...derivedTools, dryRun: { name: "dry_run_widget", roles: [] } },
         }),
     ).toThrow(/non-empty roles list/);
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...derivedTools, dryRun: { name: "Bad Name", roles: ["author"] } },
         }),
     ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
   });
 
   it("requires an integer version field for every executable definition", () => {
-    const execution = {
-      bindingsField: "value",
-      operationRef: "a",
-      operationEntity: "B",
-      providerRef: "c",
-      providerEntity: "D",
-      connectionEntity: "E",
-      connectionProviderRef: "f",
-      connectionValuesField: "g",
-    };
     const base = {
       roles: ["viewer"],
       keyField: "value",
       descriptionField: "value",
       inputFieldsField: "value",
-      execution,
+      execution: relationExecution,
     };
-    expect(() => mcpSection({ derivedTools: base })).toThrow(
+    expect(() => mcpJson({ derivedTools: base })).toThrow(
       /versionField.*single-value integer/,
     );
     expect(() =>
-      mcpSection({
+      mcpJson({
           derivedTools: { ...base, versionField: "value" },
         }),
     ).toThrow(/versionField.*single-value integer/);
     expect(
-      mcpSection({
+      mcpJson({
           derivedTools: { ...base, versionField: "version" },
         })?.derivedTools?.versionField,
     ).toBe("version");
+  });
+
+  it("refuses leftover bindingsField as an unknown option", () => {
+    expect(() =>
+      mcpJson({
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "value",
+          descriptionField: "value",
+          inputFieldsField: "value",
+          versionField: "version",
+          execution: {
+            ...relationExecution,
+            bindingsField: "value",
+          } as typeof relationExecution,
+        },
+      }),
+    ).toThrow(/unknown option.*bindingsField/);
   });
 
   it("keeps declarative URL selection on the fixed authored row vocabulary", () => {
@@ -378,19 +412,12 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       versionField: "version",
       execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
+        ...relationExecution,
         baseUrlKeyField: "callerChoice",
       },
     };
     expect(() =>
-      mcpSection({ derivedTools } as McpConfig),
+      mcpJson({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*baseUrlKeyField.*caller-controlled fields/);
   });
 
@@ -402,19 +429,64 @@ describe("buildMcp", () => {
       inputFieldsField: "value",
       versionField: "version",
       execution: {
-        bindingsField: "value",
-        operationRef: "a",
-        operationEntity: "B",
-        providerRef: "c",
-        providerEntity: "D",
-        connectionEntity: "E",
-        connectionProviderRef: "f",
-        connectionValuesField: "g",
+        ...relationExecution,
         requestHeaderNameField: "callerChoice",
       },
     };
     expect(() =>
-      mcpSection({ derivedTools } as McpConfig),
+      mcpJson({ derivedTools } as McpConfig),
     ).toThrow(/unknown option.*requestHeaderNameField.*caller-controlled fields/);
+  });
+
+  const relationDerivedTools = {
+    roles: ["viewer"],
+    keyField: "value",
+    descriptionField: "value",
+    inputFieldsField: "value",
+    versionField: "version",
+    execution: relationExecution,
+  };
+
+  it("accepts bindingsRelation naming an owned hasMany collection", () => {
+    expect(
+      buildMcpSection(relationEntity(), { derivedTools: relationDerivedTools })
+        ?.derivedTools?.execution,
+    ).toEqual(relationDerivedTools.execution);
+  });
+
+  it("refuses execution with no bindingsRelation", () => {
+    const { bindingsRelation: _bindingsRelation, ...withoutRelation } = relationExecution;
+    expect(() =>
+      mcpSection({
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "value",
+          descriptionField: "value",
+          inputFieldsField: "value",
+          versionField: "version",
+          execution: withoutRelation as typeof relationExecution,
+        },
+      }),
+    ).toThrow(
+      /mcp derivedTools.execution on entity "ContactDetail" needs bindingsRelation \(owned collection\)/,
+    );
+  });
+
+  it("refuses bindingsRelation that is not an owned hasMany collection", () => {
+    const reference = {
+      ...ownedBindingsField,
+      relationship: {
+        ...ownedBindingsField.relationship,
+        ownership: "reference" as const,
+      },
+    };
+    expect(() =>
+      buildMcpSection(
+        { ...relationEntity(), fields: [...(contactDetail().fields ?? []), reference] } as CoreEntity,
+        { derivedTools: relationDerivedTools },
+      ),
+    ).toThrow(
+      /bindingsRelation "bindings" on entity "ContactDetail" does not name an owned hasMany collection/,
+    );
   });
 });

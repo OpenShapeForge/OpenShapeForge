@@ -1460,6 +1460,31 @@ describe("derived tools catalog", () => {
     };
     const owner = contract({
       name: "ServiceDefinition",
+      fields: [
+        field({ key: "name" }),
+        field({ key: "revision", baseType: "integer" }),
+        field({
+          key: "bindings",
+          osfType: "ServiceBinding",
+          cardinality: "collection",
+          relationship: {
+            kind: "hasMany",
+            ownership: "owned",
+            target: "ServiceBinding",
+            inverse: "serviceId",
+          },
+        }),
+      ],
+      relationships: [
+        {
+          key: "bindings",
+          kind: "hasMany",
+          target: "ServiceBinding",
+          ownership: "owned",
+          inverse: "serviceId",
+          foreignKey: "service_id",
+        },
+      ],
       mcp: {
         toolPrefix: "service",
         tools: "dedicated",
@@ -1477,7 +1502,7 @@ describe("derived tools catalog", () => {
           inputFieldsField: "name",
           versionField: "revision",
           execution: {
-            bindingsField: "bindings",
+            bindingsRelation: "bindings",
             operationRef: "operationId",
             operationEntity: "ProviderOperation",
             providerRef: "providerId",
@@ -1489,10 +1514,57 @@ describe("derived tools catalog", () => {
         },
       },
     });
+    const binding = contract({
+      name: "ServiceBinding",
+      fields: [
+        field({
+          key: "serviceId",
+          osfType: "ServiceDefinition",
+          relationship: {
+            kind: "belongsTo",
+            target: "ServiceDefinition",
+            foreignKey: "service_id",
+          },
+        }),
+        field({
+          key: "operationId",
+          osfType: "ProviderOperation",
+          relationship: {
+            kind: "belongsTo",
+            target: "ProviderOperation",
+            foreignKey: "operation_id",
+          },
+        }),
+        field({ key: "order", baseType: "integer", required: true }),
+        field({ key: "optional", baseType: "boolean" }),
+        field({ key: "when", baseType: "object" }),
+        field({ key: "inputMapping", baseType: "object", cardinality: "collection" }),
+        field({ key: "outputMapping", baseType: "object", cardinality: "collection" }),
+        field({ key: "forEach", baseType: "object" }),
+      ],
+      relationships: [
+        {
+          key: "serviceId",
+          kind: "belongsTo",
+          target: "ServiceDefinition",
+          ownership: "reference",
+          foreignKey: "service_id",
+        },
+        {
+          key: "operationId",
+          kind: "belongsTo",
+          target: "ProviderOperation",
+          ownership: "reference",
+          foreignKey: "operation_id",
+        },
+      ],
+    });
+    delete (binding as { mcp?: unknown }).mcp;
 
     const catalog = buildMcpCatalog(
       [
         input(owner, "service", "services.definitions"),
+        input(binding, "binding", "services.bindings"),
         input(related("ProviderOperation"), "operation", "services.operations"),
         input(related("Provider"), "provider", "services.providers"),
         input(
@@ -1507,9 +1579,13 @@ describe("derived tools catalog", () => {
     expect(catalog.derivedTools[0]).toMatchObject({
       versionField: "revision",
       execution: {
-      operationTable: "services.operations",
-      providerTable: "services.providers",
-      connectionTable: "services.connections",
+        bindingsRelation: "bindings",
+        bindingsEntity: "ServiceBinding",
+        bindingsTable: "services.bindings",
+        parentRef: "serviceId",
+        operationTable: "services.operations",
+        providerTable: "services.providers",
+        connectionTable: "services.connections",
       },
     });
   });

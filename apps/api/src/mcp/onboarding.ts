@@ -48,7 +48,7 @@ import {
   missingRequiredConnectionValues,
   type ConnectionField,
 } from "./connection-guidance.js";
-import { orderedBindings } from "./declarative-execution.js";
+import { MAX_BINDINGS_PER_OWNER, loadOrderedBindings } from "./execution-bindings.js";
 import {
   sessionInAudience,
   type DerivedTool,
@@ -888,7 +888,20 @@ async function personalSignInsFor(
       if (!row) continue;
       let bindings: Record<string, unknown>[];
       try {
-        bindings = orderedBindings(row, execution.bindingsField);
+        bindings = await loadOrderedBindings(
+          execution,
+          row,
+          async (table, filter, options) => ({
+            // Request one past the cap so a 201-binding owner overflows
+            // instead of looking complete when this reader never pages.
+            rows: await env.rowsByFilter(
+              table,
+              filter,
+              (options?.limit ?? MAX_BINDINGS_PER_OWNER) + 1,
+            ),
+            nextCursor: null,
+          }),
+        );
       } catch {
         continue; // a malformed definition cannot block onboarding
       }

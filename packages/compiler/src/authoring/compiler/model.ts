@@ -25,28 +25,26 @@ import type {
 } from "../types.js";
 import { fieldCardinality } from "./helpers.js";
 import { resolveBaseType, osfTypeDefinitionOf } from "../entity-fields.js";
+import { cardinalityOf, resolveOptions } from "@openshapeforge/operations";
 
 export function resolveModelFields(
   coreFields: Field[],
   componentCatalog: ComponentCatalog,
-  osfTypes?: Record<string, OsfTypeDefinition>
+  osfTypes?: Record<string, OsfTypeDefinition>,
+  nested = false,
 ): CompiledField[] {
   return coreFields.map((field) => {
     const semType = osfTypeDefinitionOf(field.osfType, osfTypes ?? {});
     const baseType = field.baseType ?? resolveBaseType(field.osfType, osfTypes ?? {});
     if (!baseType) throw new Error(`${field.key}: unknown osfType ${field.osfType}.`);
-    const authoredCardinality = field.cardinality ?? semType?.cardinality;
-    const cardinality = fieldCardinality({ cardinality: authoredCardinality });
+    const { cardinality, bounds, required } = cardinalityOf(field.cardinality ?? semType?.cardinality, field.key);
 
     const compiled: CompiledField = {
       key: field.key,
       baseType,
       cardinality,
-      ...(authoredCardinality && typeof authoredCardinality === "object" &&
-        cardinality === "collection"
-        ? { cardinalityBounds: { ...authoredCardinality } }
-        : {}),
-      required: field.required ?? false,
+      ...(bounds ? { cardinalityBounds: bounds } : {}),
+      required: field.required === true || required,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),
       osfType: field.osfType,
@@ -83,8 +81,13 @@ export function resolveModelFields(
     if (field.visibility) compiled.visibility = field.visibility;
     if (field.computed) compiled.computed = field.computed;
     if (field.graphqlType) compiled.graphqlType = field.graphqlType;
-    const fieldOptions = resolveFieldOptions(field) ?? semType?.options;
+    // A top-level identity alias is the entity's own primary key (the
+    // normalizer admits it nowhere else): not a choice, so the alias's
+    // optionSource applies only to an inline identifier value.
+    const identity = !nested && semType?.kind === "entityId";
+    const fieldOptions = resolveFieldOptions(field, identity ? { ...semType, optionSource: undefined } : semType);
     if (fieldOptions) compiled.options = fieldOptions;
+    if (semType?.schema) compiled.schema = semType.schema;
     if (field.layoutFraction) compiled.layoutFraction = field.layoutFraction;
     if (field.localized) compiled.localized = field.localized;
     if (field.suggestions) compiled.suggestions = field.suggestions;
@@ -95,29 +98,35 @@ export function resolveModelFields(
       ? undefined
       : field.shape ?? field.children ?? semType?.shape ?? semType?.children;
     if (childFields) {
-      compiled.children = resolveModelFields(childFields, componentCatalog, osfTypes);
+      compiled.children = resolveModelFields(childFields, componentCatalog, osfTypes, true);
     }
     const itemField = field.item ?? semType?.item;
     if (itemField) {
-      compiled.item = resolveModelFields([itemField], componentCatalog, osfTypes)[0];
+      compiled.item = resolveModelFields([itemField], componentCatalog, osfTypes, true)[0];
     }
     return compiled;
   });
 }
 
-export function resolveFieldOptions(field: Pick<Field, "options" | "reference">): FieldOptions | undefined {
-  if (field.options) {
-    return field.options;
+/**
+ * A field's choices, resolved once through the shared resolver (`options`,
+ * `reference`, the catalog type's `options`, then its `optionSource`). The
+ * web presentation's `render.props.referentieGroep` is the same group spelled
+ * for the select component: it is normalized into `options` here, and may
+ * not name a different group than the field's own options.
+ */
+export function resolveFieldOptions(
+  field: Pick<Field, "key" | "options" | "render"> & { reference?: { kind?: string; group?: string } },
+  semType?: OsfTypeDefinition,
+): FieldOptions | undefined {
+  const resolved = resolveOptions(field, semType) as FieldOptions | undefined;
+  const renderGroep = field.render?.props?.referentieGroep;
+  if (typeof renderGroep !== "string" || renderGroep.length === 0) return resolved;
+  if (!resolved) return { type: "referentiedata", referentieGroep: renderGroep };
+  if (resolved.type === "referentiedata" && resolved.referentieGroep !== renderGroep) {
+    throw new Error(`${field.key}: render.props.referentieGroep ${renderGroep} contradicts options.referentieGroep ${resolved.referentieGroep}.`);
   }
-
-  if (field.reference?.kind === "referentiedata" && field.reference.group) {
-    return {
-      type: "referentiedata",
-      referentieGroep: field.reference.group,
-    };
-  }
-
-  return undefined;
+  return resolved;
 }
 
 /**
@@ -158,11 +167,7 @@ export function resolveRender(
   }
 
   // 3. Default for field value shape
-  const defaultKey = fieldCardinality(field) === "collection"
-    ? field.osfType === "fieldDefinition"
-      ? "fieldDefinitionCollection"
-      : "collection"
-    : field.baseType;
+  const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
   const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
   if (defaultEntry) {
     const componentName = defaultEntry.component;

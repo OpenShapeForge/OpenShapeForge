@@ -24,9 +24,6 @@ configFields:
       en: The runtime resolves the published workflow linked to this case template.
     validation:
       required: true
-    options:
-      type: remote
-      remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
     render:
       component: OptionVariablePicker
       props:

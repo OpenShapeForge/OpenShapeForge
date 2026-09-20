@@ -20,7 +20,7 @@
 
 import { localizedText, type ResolvedLocale } from "./locale.js";
 import type { ExecutionCatalogEntry } from "./declarative-execution.js";
-import { storedFieldBaseType } from "./stored-field-base-type.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type DerivedToolsCatalogEntry = {
   entity: string;

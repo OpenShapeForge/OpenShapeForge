@@ -87,7 +87,6 @@ const contract = (
       profileAuthorizations: {},
     },
     views: {},
-    canonical: {} as never,
     profiles: {},
     entityOperations: {},
   } as unknown as CompiledEntityContract;
@@ -616,6 +615,7 @@ describe("buildMcpCatalog", () => {
                   key: "definition",
                   baseType: "object",
                   osfType: "fieldDefinition",
+          schema: { $ref: "#/$defs/fieldDefinition" },
                 }),
               ],
             }),

@@ -16,15 +16,32 @@
       },
       "additionalProperties": {
         "type": "object",
-        "required": ["label", "valueType"],
+        "required": ["label", "baseType"],
         "properties": {
-          "kind": { "type": "string", "enum": ["scalar", "entityId", "object"] },
+          "kind": {
+            "type": "string",
+            "enum": ["scalar", "object"],
+            "description": "Entity types (kind: entity) and their identity aliases (kind: entityId) are derived from the entity corpus, never authored."
+          },
           "label": { "type": "object" },
           "pluralLabel": { "type": "object" },
-          "valueType": { "type": "string" },
+          "baseType": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"],
+            "description": "The base type every transport maps this type to: storage, GraphQL and JSON Schema."
+          },
           "validation": { "type": "object" },
           "options": {
             "$ref": "core-entity.schema.json#/$defs/field/properties/options"
+          },
+          "schema": {
+            "description": "The complete value schema of this type, as a $ref into the bundled field-definition definitions. A type that declares one is projected through it instead of through baseType and shape.",
+            "type": "object",
+            "required": ["$ref"],
+            "additionalProperties": false,
+            "properties": {
+              "$ref": { "type": "string", "pattern": "^#/\\$defs/[A-Za-z][A-Za-z0-9]*$" }
+            }
           },
           "lookup": {
             "type": "object",
@@ -75,33 +92,9 @@
             }
           },
           "entity": { "type": "string" },
-          "listUrl": { "type": "string" },
           "displayTemplate": { "type": "string" },
           "filterField": { "type": "string" }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": { "kind": { "const": "entityId" } },
-              "required": ["kind"]
-            },
-            "then": {
-              "required": ["entity", "listUrl", "icon"],
-              "properties": {
-                "entity": {
-                  "type": "string",
-                  "description": "Kebab-case slug of the entity this type identifies. Must match the entity slug used by the workflow designer's core-entity-options route.",
-                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-                },
-                "listUrl": {
-                  "type": "string",
-                  "description": "Canonical workflow-designer options URL.",
-                  "pattern": "^/api/workflow/designer/core-entity-options\\?entity=[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-                }
-              }
-            }
-          }
-        ]
+        }
       }
     }
   }

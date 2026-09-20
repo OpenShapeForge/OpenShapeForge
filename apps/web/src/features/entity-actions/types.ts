@@ -13,25 +13,6 @@ export interface LocalizedLabel {
   en?: string;
 }
 
-/**
- * Form field definition as stored on a userInput action.
- * Mirrors the FormFieldDefinition from the workflow service.
- */
-export interface ActionFormField {
-  key: string;
-  valueType: NonNullable<Field["baseType"]>;
-  cardinality?: Field["cardinality"];
-  osfType?: string;
-  label: LocalizedLabel;
-  required?: boolean;
-  description?: LocalizedLabel | null;
-  options?: Field["options"];
-  render?: Field["render"];
-  validation?: Field["validation"];
-  children?: Field[];
-  item?: Field;
-}
-
 export interface ActiveAction {
   key: string;
   label: LocalizedLabel;
@@ -41,7 +22,8 @@ export interface ActiveAction {
   visibleWhen?: VisibilityConfig | null;
   disabledWhen?: VisibilityConfig | null;
   disabledMessage?: LocalizedLabel | null;
-  formFields?: ActionFormField[] | null;
+  /** The one authored field contract; rendered through the renderer's Field. */
+  formFields?: Field[] | null;
   awakeableId: string;
   registeredAt?: string;
 }

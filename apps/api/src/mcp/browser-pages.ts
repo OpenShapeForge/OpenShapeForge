@@ -22,7 +22,7 @@ import {
   isSecretDefinition,
 } from "./elicitation.js";
 import type { PendingConfiguration } from "./configuration-handoff.js";
-import { storedFieldBaseType } from "./stored-field-base-type.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 type JsonRecord = Record<string, unknown>;
 

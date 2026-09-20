@@ -13,8 +13,8 @@ for (const [policy, value] of Object.entries({ classification: { sensitivity: "p
     });
   }
   test(`entityValue rejects inherited ${policy} even when the field tries to override it`, () => {
-    expect(() => assertEntityValueFieldPolicy({ key: "value", osfType: "protectedText", [policy]: false }, { protectedText: { valueType: "string", [policy]: value } })).toThrow("Guarded or malformed");
-    expect(() => assertEntityValueFieldPolicy({ key: "container", osfType: "nested" }, { nested: { kind: "scalar", valueType: "object", item: { key: "leaf", osfType: "string", [policy]: value } } })).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "value", osfType: "protectedText", [policy]: false }, { protectedText: { baseType: "string", [policy]: value } })).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "container", osfType: "nested" }, { nested: { kind: "scalar", baseType: "object", item: { key: "leaf", osfType: "string", [policy]: value } } })).toThrow("Guarded or malformed");
   });
 }
 test("entityValue permits immutable:false, but never false-valued authorization or permission policies", () => {

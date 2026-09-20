@@ -9,9 +9,10 @@
  * contract is added. That is the same property the page depends on: a new
  * connector changes `configFields` at runtime, never the code that renders it.
  */
-import type { FieldRender, FieldValidation } from "@/generated/compiler/field-contract";
+import type { FieldDefinition } from "@/generated/compiler/field-contract";
 
-export type LocalizedText = Record<string, string>;
+/** The contract's locale map, read by locale key. */
+export type LocalizedText = import("@/generated/compiler/field-contract").LocalizedText;
 
 export type ConnectorStatus =
   | "AVAILABLE"
@@ -27,30 +28,15 @@ export type ConnectorContractState =
   | "INCOMPATIBLE";
 
 /**
- * One configuration field, exactly as the compiler emitted it.
- *
- * This is the authored field vocabulary — the same shape entity fields use —
- * plus `secret`, the one connector-only addition. Everything the form needs to
- * render a connector it has never seen is in here.
+ * One configuration field, exactly as the compiler emitted it: the authored
+ * field contract (`FieldDefinition`, the same shape entity fields use, typed
+ * by `osfType` alone) plus `secret`, the one connector-only addition.
+ * Everything the form needs to render a connector it has never seen is in
+ * here; the base type and default control resolve through the shared
+ * osf-type resolver, never through a parallel type list.
  */
-export type ConnectorConfigField = {
-  key: string;
-  valueType?: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
-  cardinality?: string | { min?: number; max?: number | "unbounded" };
-  osfType?: string;
-  required?: boolean;
+export type ConnectorConfigField = FieldDefinition & {
   secret?: boolean;
-  readOnly?: boolean;
-  label?: LocalizedText;
-  description?: LocalizedText;
-  help?: LocalizedText;
-  defaultValue?: unknown;
-  validation?: FieldValidation;
-  render?: Partial<FieldRender> | null;
-  options?: {
-    type: string;
-    items?: { value: string; label?: LocalizedText }[];
-  };
 };
 
 export type ConnectorContractHealth = {

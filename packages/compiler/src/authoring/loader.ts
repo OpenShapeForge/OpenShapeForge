@@ -3,13 +3,9 @@
 /**
  * Loads YAML authoring files from disk into a LoadedArtifacts bundle.
  *
- * Supports two directory layouts: the current entities/contexts/ structure and
- * a legacy core/profiles/ fallback. For each entity it loads the core definition,
- * context partials (field extensions), mappings, transform and component catalogs,
+ * For each entity under entities/ it loads the core definition, context
+ * partials (field extensions), mappings, transform and component catalogs,
  * semantic type definitions, the app shell, and an optional view definition.
- *
- * Also discovers and loads standalone "full" context entities that exist only
- * within a single context (contexts/<ctx>/full/).
  *
  * Returns LoadedArtifacts, consumed by the validator (JSON Schema), semantic
  * checks, and compiler stages.
@@ -18,7 +14,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
-import { assertV2Authoring } from "./entity-v2.js";
+import { assertEntityAuthoring } from "./entity-authoring.js";
 import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { loadOperationCatalogs } from "./operation-catalog.js";
 import type {
@@ -136,7 +132,6 @@ const REST_BASE_PATH_PATTERN = /^[a-z][a-z0-9-]*$/;
 // constrains to `^[a-zA-Z0-9_-]{1,128}$` and which the runtime dispatches on.
 // Underscore rather than kebab-case, because the generated names join prefix
 // and operation with `_` (`contact_detail_list`).
-const MCP_TOOL_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 function validateContentIdentifier(
   value: unknown,
@@ -197,24 +192,8 @@ export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin:
   validateContentIdentifier(coreEntity.entity, ENTITY_NAME_PATTERN, "entity name", origin);
   validateFieldKeys(coreEntity.fields, origin);
   assertNoRelationshipsBlock(coreEntity, origin);
-  if (
-    typeof coreEntity.rest === "object" &&
-    coreEntity.rest !== null &&
-    coreEntity.rest.basePath !== undefined
-  ) {
-    validateContentIdentifier(coreEntity.rest.basePath, REST_BASE_PATH_PATTERN, "rest basePath", origin);
-  }
-  if (
-    typeof coreEntity.mcp === "object" &&
-    coreEntity.mcp !== null &&
-    coreEntity.mcp.toolPrefix !== undefined
-  ) {
-    validateContentIdentifier(
-      coreEntity.mcp.toolPrefix,
-      MCP_TOOL_PREFIX_PATTERN,
-      "mcp toolPrefix",
-      origin,
-    );
+  if (coreEntity.interfaces?.rest?.basePath !== undefined) {
+    validateContentIdentifier(coreEntity.interfaces.rest.basePath, REST_BASE_PATH_PATTERN, "rest basePath", origin);
   }
 }
 
@@ -244,10 +223,6 @@ function loadYaml<T>(filePath: string): T {
  *   authoring/mappings/<context>/<entity>.mapping.yaml       (mappings)
  *   authoring/views/<entity>.view.yaml                       (standalone view)
  *   authoring/catalogs/transforms.yaml
- *
- * Legacy fallback:
- *   authoring/core/<entity>.yaml
- *   authoring/profiles/<profile>/<entity>.profile.yaml
  */
 /**
  * Recursively lists entity YAML files under `entities/`. Subfolders (e.g.
@@ -301,11 +276,8 @@ export function resolveEntityFilePath(
   const match = listEntityFiles(authoringDir).find(
     (file) => file.slug === entityFileName,
   );
-  if (match) {
-    return match.path;
-  }
-  // Legacy fallback layout.
-  return join(authoringDir, "core", `${entityFileName}.yaml`);
+  if (!match) throw new Error(`Entity ${entityFileName} is not authored under ${join(authoringDir, "entities")}.`);
+  return match.path;
 }
 
 export function loadEntity(
@@ -314,8 +286,7 @@ export function loadEntity(
 ): LoadedArtifacts {
   validateIdentifier(entityFileName, "entity name");
 
-  // Core entity — resolved anywhere under entities/ (subfolders allowed),
-  // with a legacy fallback to authoring/core/.
+  // Core entity — resolved anywhere under entities/ (subfolders allowed).
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawCoreEntity = loadYaml<CoreEntity>(corePath);
   const baseEntity = loadBaseEntity(authoringDir);
@@ -330,7 +301,7 @@ export function loadEntity(
   // v2 authoring checks below read.
   const osfTypes = loadOsfTypes(authoringDir);
   coreEntity = normalizeEntityFields(coreEntity, osfTypes);
-  assertV2Authoring(coreEntity, corePath);
+  assertEntityAuthoring(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];
@@ -380,126 +351,35 @@ export function assertPartialProfileHasNoCrud(
   profile: EntityProfile,
   profilePath: string,
 ): void {
-  if (profile.crud === undefined) return;
+  if ((profile as { crud?: unknown }).crud === undefined) return;
   throw new Error(
     `${profilePath} declares crud on a partial entity profile. ` +
-      "CRUD exposure belongs to the owning core/full entity or an entityPatch, " +
+      "CRUD exposure belongs to the owning entity or an entityPatch, " +
       "because partial field profiles do not own a generated resource.",
   );
 }
 
 /**
- * Load a full context entity (standalone entity that only exists in a context).
- * Creates a synthetic CoreEntity from the context YAML.
- */
-export function loadContextEntity(
-  authoringDir: string,
-  contextName: string,
-  entityFileName: string
-): LoadedArtifacts {
-  validateIdentifier(entityFileName, "context entity name");
-  validateIdentifier(contextName, "context name");
-
-  const fullPath = join(authoringDir, "contexts", contextName, "full", `${entityFileName}.yaml`);
-  const contextEntity = loadYaml<EntityProfile>(fullPath);
-
-  // Build a synthetic core entity from the context entity
-  const rawCoreEntity: CoreEntity = {
-    schemaVersion: contextEntity.schemaVersion,
-    kind: "coreEntity",
-    module: contextName,
-    entity: contextEntity.entity,
-    title: contextEntity.title ?? contextEntity.entity,
-    description: contextEntity.description,
-    language: contextEntity.language,
-    domains: [...(contextEntity.domains ?? [])],
-    retention: contextEntity.retention,
-    baseEntity: (contextEntity as { baseEntity?: boolean }).baseEntity,
-    displayTemplate: contextEntity.displayTemplate,
-    filterField: contextEntity.filterField,
-    indexes: (contextEntity as { indexes?: CoreEntity["indexes"] }).indexes,
-    fields: contextEntity.fields ?? [],
-    workflow: contextEntity.workflow,
-    crud: contextEntity.crud,
-    rest: (contextEntity as { rest?: CoreEntity["rest"] }).rest,
-    // EntityProfile.authorization is typed for partial-profile field-level
-    // extensions (ProfileAuthorizationConfig). A `full/` profile entity is a
-    // standalone entity, so its YAML carries the wider AuthorizationConfig
-    // shape (CRUD roles + rowAccess) — cast to match the synthetic CoreEntity.
-    authorization: contextEntity.authorization as AuthorizationConfig | undefined,
-    // No ui: — views handle that
-  };
-  const baseEntity = loadBaseEntity(authoringDir);
-  const coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
-    kind: "contextFull",
-    path: fullPath,
-  });
-  validateEntityContentIdentifiers(coreEntity, fullPath);
-
-  // Transform catalog
-  const catalogPath = join(authoringDir, "catalogs", "transforms.yaml");
-  const transformCatalog = loadYaml<TransformCatalog>(catalogPath);
-
-  // Component catalog
-  const componentPath = join(authoringDir, "catalogs", "components.yaml");
-  const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
-
-  // App shell (optional)
-  const shellPath = join(authoringDir, "menu.yaml");
-  const appShell = existsSync(shellPath) ? loadYaml<AppShell>(shellPath) : null;
-
-  // Semantic types
-  const osfTypes = loadOsfTypes(authoringDir);
-  const retentionPolicies = loadRetentionPolicies(authoringDir);
-
-  // View definition
-  const viewPath = join(authoringDir, "views", `${entityFileName}.view.yaml`);
-  const viewDefinition = existsSync(viewPath) ? loadYaml<ViewDefinition>(viewPath) : null;
-
-  return {
-    coreEntity,
-    profiles: [],  // Full context entity — no partials
-    mappings: [],
-    transformCatalog,
-    componentCatalog,
-    osfTypes,
-    retentionPolicies,
-    appShell,
-    viewDefinition,
-  };
-}
-
-/**
- * Discover all full context entities across all contexts.
- * Returns [contextName, entityFileName][] tuples.
- */
-export function discoverContextEntities(authoringDir: string): { context: string; name: string }[] {
-  const result: { context: string; name: string }[] = [];
-  const contextsDir = join(authoringDir, "contexts");
-
-  for (const contextName of listDirs(contextsDir)) {
-    const fullDir = join(contextsDir, contextName, "full");
-    if (!existsSync(fullDir)) continue;
-
-    const files = readdirSync(fullDir).filter(f => f.endsWith(".yaml"));
-    for (const f of files) {
-      result.push({ context: contextName, name: f.replace(".yaml", "") });
-    }
-  }
-
-  return result;
-}
-
-/**
- * Load and merge all semantic type catalogs (core + context-specific). Returns
- * the same merged object as before. Collision detection between core and
- * context catalogs is performed at the orchestrator level via
- * `loadOsfTypeCatalogSources` + `checkOsfTypeCatalogCollisions`.
+ * Load and merge all osf-type catalogs (core, then each context). Catalogs
+ * are add-only: a context may add types but never redefine a key an earlier
+ * catalog declared, because that key names the storage, GraphQL and JSON
+ * Schema contract of every field that uses it.
  */
 export function loadOsfTypes(authoringDir: string): Record<string, OsfTypeDefinition> {
   const merged: Record<string, OsfTypeDefinition> = {};
-  for (const { types } of loadOsfTypeCatalogSources(authoringDir)) {
-    Object.assign(merged, types);
+  const ownerByKey = new Map<string, string>();
+  for (const { source, types } of loadOsfTypeCatalogSources(authoringDir)) {
+    for (const [key, definition] of Object.entries(types)) {
+      const owner = ownerByKey.get(key);
+      if (owner !== undefined) {
+        throw new Error(
+          `Osf type ${key} in ${source}/osf-types.yaml redefines the entry from ${owner}; ` +
+            "osf-type catalogs are add-only.",
+        );
+      }
+      ownerByKey.set(key, source);
+      merged[key] = definition;
+    }
   }
   const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
   const withEntities = deriveEntityOsfTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
@@ -516,8 +396,7 @@ export interface OsfTypeCatalogSource {
 
 /**
  * Returns each osf-type catalog file as its own entry, in load order
- * (core first, then each context). Used by the orchestrator to detect when a
- * context catalog silently overwrites a core key.
+ * (core first, then each context).
  */
 export function loadOsfTypeCatalogSources(
   authoringDir: string,

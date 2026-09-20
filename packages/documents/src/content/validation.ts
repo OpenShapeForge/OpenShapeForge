@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { cardinalityOf, type ResolvedCardinality } from "@openshapeforge/operations";
 import { contentError } from "./errors.js";
 import {
   canonicalJson,
@@ -47,27 +48,27 @@ function exactKeys(record: object, allowed: readonly string[], field: string) {
   }
 }
 
+/**
+ * The one reading of `cardinality` (`cardinalityOf` in operations), with the
+ * shape's own `required` folded into the lower bound. Every check in this
+ * engine takes the bounds from here, so a value the entity would refuse is
+ * refused in a template too.
+ */
 export function contentCardinality(shape: ContentValueShape) {
-  const bounds = shape.cardinality;
-  if (bounds === "collection")
-    return { collection: true, min: shape.required ? 1 : 0, max: Infinity };
-  if (bounds === undefined || bounds === "single")
-    return { collection: false, min: shape.required ? 1 : 0, max: 1 };
-  if (!bounds || typeof bounds !== "object")
-    contentError("INVALID_VALUE", "Invalid field cardinality.");
-  const min = bounds.min ?? 0;
-  const max = bounds.max ?? 1;
-  if (
-    !Number.isSafeInteger(min) ||
-    min < 0 ||
-    (max !== "unbounded" && (!Number.isSafeInteger(max) || max < Math.max(1, min)))
-  ) {
-    contentError("INVALID_VALUE", "Invalid field cardinality.");
+  let resolved: ResolvedCardinality;
+  try {
+    resolved = cardinalityOf(shape.cardinality);
+  } catch {
+    return contentError("INVALID_VALUE", "Invalid field cardinality.");
   }
+  const bounds = typeof shape.cardinality === "object" ? shape.cardinality : undefined;
+  const required = shape.required || resolved.required;
   return {
-    collection: max === "unbounded" || max > 1,
-    min: Math.max(min, shape.required ? 1 : 0),
-    max: max === "unbounded" ? Infinity : max,
+    collection: resolved.cardinality === "collection",
+    min: Math.max(bounds?.min ?? 0, required ? 1 : 0),
+    max: resolved.cardinality !== "collection"
+      ? 1
+      : bounds === undefined || bounds.max === "unbounded" ? Infinity : bounds.max ?? 1,
   };
 }
 

@@ -21,9 +21,7 @@
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
  *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
- *     against canonical `menu.yaml` (legacy `appShell.yaml` is normalized to
- *     that path and retained as a read alias for older hosts). This is how a
- *     PLUGIN contributes a sidebar
+ *     against `menu.yaml`. This is how a PLUGIN contributes a sidebar
  *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
@@ -36,9 +34,12 @@
  * Catalog files (`catalogs/*.yaml`) merge across layers automatically: a
  * later layer's file with the same path strategically merges into the earlier
  * one, so an overlay can add referentiedata groups or transforms without
- * copying the base catalog. For every other path, shipping a plain file that
- * already exists in an earlier layer is an error — replacing wholesale is
- * almost always a mistake; patch instead.
+ * copying the base catalog. The osf-type catalog is add-only: an overlay may
+ * add types but never redefine a key an earlier layer declared, because that
+ * key is the storage, GraphQL and JSON Schema contract of every field using
+ * it. For every other path, shipping a plain file that already exists in an
+ * earlier layer is an error — replacing wholesale is almost always a mistake;
+ * patch instead.
  *
  * With a single layer and no patches the layer directory is used directly
  * (fast path, byte-identical to the pre-layer behavior). Otherwise the merged
@@ -629,45 +630,26 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
   return patch;
 }
 
-function resolvedCrudOperations(document: JsonValue): Record<(typeof CRUD_OPERATION_KEYS)[number], boolean> {
-  const crud = isPlainObject(document) ? document.crud : undefined;
-  if (crud === false) {
-    return Object.fromEntries(CRUD_OPERATION_KEYS.map((operation) => [operation, false])) as Record<
-      (typeof CRUD_OPERATION_KEYS)[number],
-      boolean
-    >;
-  }
-  const config = isPlainObject(crud) ? crud : {};
-  const enabled = config.enabled !== false;
-  const operations = isPlainObject(config.operations) ? config.operations : {};
-  return Object.fromEntries(
-    CRUD_OPERATION_KEYS.map((operation) => [
-      operation,
-      enabled && operations[operation] !== false,
-    ]),
-  ) as Record<(typeof CRUD_OPERATION_KEYS)[number], boolean>;
-}
+type JsonObject = { [key: string]: JsonValue };
 
 /**
- * CRUD exposure is a monotonic security policy across layers. An extension may
- * make an entity read-only or hide it, but a later package must not restore an
- * operation its host (or an earlier package) disabled.
+ * An osf type is the storage, GraphQL and JSON Schema contract of every field
+ * that names it, so a later layer may add types but never redefine one —
+ * not its base type, kind, validation, render, nor anything else.
  */
-function assertCrudPolicyOnlyNarrows(base: JsonValue, merged: JsonValue, origin: string): void {
-  const before = resolvedCrudOperations(base);
-  const after = resolvedCrudOperations(merged);
-  const widened = CRUD_OPERATION_KEYS.filter(
-    (operation) => before[operation] === false && after[operation] === true,
-  );
-  if (widened.length > 0) {
+function assertOsfTypeCatalogOnlyAdds(base: JsonValue, overlay: JsonValue, origin: string, baseLayer: string): void {
+  if (!isPlainObject(base) || !isPlainObject(overlay)) return;
+  if (base.kind !== "osfTypeCatalog" && overlay.kind !== "osfTypeCatalog") return;
+  const baseTypes = isPlainObject(base.types) ? base.types : {};
+  const overlayTypes = isPlainObject(overlay.types) ? overlay.types : {};
+  const redefined = Object.keys(overlayTypes).filter((key) => Object.hasOwn(baseTypes, key)).sort();
+  if (redefined.length > 0) {
     throw new Error(
-      `${origin} widens crud.operations (${widened.join(", ")}) disabled by an earlier layer. ` +
-        "Entity patches may only narrow generated CRUD exposure; change the owning layer instead.",
+      `${origin} redefines osf type${redefined.length > 1 ? "s" : ""} ${redefined.join(", ")} ` +
+        `declared by ${baseLayer}. Osf-type catalogs are add-only; change the owning layer instead.`,
     );
   }
 }
-
-type JsonObject = { [key: string]: JsonValue };
 
 function stableJson(value: JsonValue | undefined): string {
   if (value === undefined) return "undefined";
@@ -1084,7 +1066,6 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
  * other for the result to be the document the generator sees.
  */
 const APP_SHELL_FILENAME = "menu.yaml";
-const LEGACY_APP_SHELL_FILENAME = "appShell.yaml";
 
 function isEntityFile(relativePath: string): boolean {
   return (
@@ -1128,10 +1109,7 @@ export function authoringLayerDirs(repoRoot: string, config?: AuthoringConfig): 
 export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig): string {
   const layerDirs = authoringLayerDirs(repoRoot, config);
 
-  if (
-    layerDirs.length === 1 &&
-    !existsSync(join(layerDirs[0]!, LEGACY_APP_SHELL_FILENAME))
-  ) {
+  if (layerDirs.length === 1) {
     return layerDirs[0]!;
   }
 
@@ -1152,9 +1130,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   for (const layerDir of layerDirs) {
     for (const relativePath of walkFiles(layerDir)) {
       const sourcePath = join(layerDir, relativePath);
-      const resolvedRelativePath = relativePath === LEGACY_APP_SHELL_FILENAME
-        ? APP_SHELL_FILENAME
-        : relativePath;
 
       const parsed = relativePath.endsWith(".yaml")
         ? (YAML.parse(readFileSync(sourcePath, "utf8")) as
@@ -1178,11 +1153,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           ) as JsonValue;
           const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
           const merged = strategicMerge(baseDoc, patchBody as JsonValue);
-          assertCrudPolicyOnlyNarrows(
-            baseDoc,
-            merged,
-            `entityPatch ${layerDir}/${relativePath}`,
-          );
           assertEntitySecurityOnlyNarrows(
             baseDoc,
             merged,
@@ -1258,24 +1228,25 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         }
       }
 
-      if (files.has(resolvedRelativePath)) {
+      if (files.has(relativePath)) {
         const isCatalog =
-          resolvedRelativePath.startsWith("catalogs/") && resolvedRelativePath.endsWith(".yaml");
+          relativePath.startsWith("catalogs/") && relativePath.endsWith(".yaml");
         if (isCatalog) {
-          const target = files.get(resolvedRelativePath)!;
+          const target = files.get(relativePath)!;
           const baseDoc = YAML.parse(
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
           const overlayDoc = YAML.parse(readFileSync(sourcePath, "utf8")) as JsonValue;
+          assertOsfTypeCatalogOnlyAdds(baseDoc, overlayDoc, `${layerDir}/${relativePath}`, target.layer);
           const merged = strategicMerge(baseDoc, overlayDoc);
-          const mergedPath = join(buildDir, resolvedRelativePath);
+          const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
-          files.set(resolvedRelativePath, { layer: buildDir, path: resolvedRelativePath });
+          files.set(relativePath, { layer: buildDir, path: relativePath });
           continue;
         }
         throw new Error(
-          `Layer collision on ${resolvedRelativePath}: ${files.get(resolvedRelativePath)!.layer} ` +
+          `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
             "Entities can be modified with kind: entityPatch; the app shell with " +
             "kind: appShellPatch; realm files (authorization*.yaml) with " +
@@ -1312,7 +1283,7 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           entityPathByName.set(entityName, { layer: layerDir, path: relativePath });
         }
       }
-      files.set(resolvedRelativePath, { layer: layerDir, path: relativePath });
+      files.set(relativePath, { layer: layerDir, path: relativePath });
     }
   }
 
@@ -1323,11 +1294,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
     const target = join(buildDir, relativePath);
     mkdirSync(join(target, ".."), { recursive: true });
     cpSync(join(source.layer, source.path), target);
-  }
-
-  const appShellPath = join(buildDir, APP_SHELL_FILENAME);
-  if (existsSync(appShellPath)) {
-    cpSync(appShellPath, join(buildDir, LEGACY_APP_SHELL_FILENAME));
   }
 
   return buildDir;

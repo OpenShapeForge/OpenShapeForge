@@ -168,7 +168,7 @@ export type PluginGenerateContext = PluginBaseContext & {
 export type CompiledEntityInfo = {
   slug: string;
   path: string;                        // repo-root-relative provenance path
-  origin: "core" | "contextFull";
+  origin: "core";
   contract: CompiledEntityContract;    // storage, model, graphql, views, …
 };
 

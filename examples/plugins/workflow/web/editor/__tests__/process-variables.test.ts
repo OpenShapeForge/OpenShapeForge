@@ -69,7 +69,7 @@ describe("reading a stored document", () => {
     // `normalizeProcessFields` drops an entry with no usable key, so a screen
     // that counted them would disagree with what a run declares.
     expect(
-      processVariableKeys(set([{ key: " total " }, { key: "" }, null, "nope", { valueType: "string" }])),
+      processVariableKeys(set([{ key: " total " }, { key: "" }, null, "nope", { osfType: "string" }])),
     ).toEqual(["total"]);
   });
 });
@@ -116,18 +116,18 @@ describe("adding", () => {
 
   test("a blank label is left absent rather than written as an empty map", () => {
     const result = addProcessVariable(EMPTY_PROCESS_VARIABLE_SET, { key: "total", label: "  " });
-    expect(result.set.fields).toEqual([{ key: "total", valueType: "string" }]);
+    expect(result.set.fields).toEqual([{ key: "total", osfType: "string" }]);
   });
 
   test("a label is written as a locale map, which is what a field is", () => {
     const result = addProcessVariable(EMPTY_PROCESS_VARIABLE_SET, {
       key: "total",
-      valueType: "number",
+      osfType: "number",
       label: "Total",
       locale: "nl",
     });
     expect(result.set.fields).toEqual([
-      { key: "total", valueType: "number", label: { nl: "Total" } },
+      { key: "total", osfType: "number", label: { nl: "Total" } },
     ]);
   });
 
@@ -142,8 +142,7 @@ describe("adding", () => {
 describe("editing one declaration", () => {
   const stored = {
     key: "total",
-    valueType: "number",
-    osfType: "amount",
+    osfType: "number",
     hints: { sourceHint: "x" },
     label: { nl: "Totaal", en: "Total" },
   };
@@ -186,17 +185,17 @@ describe("editing one declaration", () => {
       setProcessVariableField(before, { key: "total", property: "label", value: "Total" }),
     ).toBe(before);
     expect(
-      setProcessVariableField(before, { key: "total", property: "valueType", value: "number" }),
+      setProcessVariableField(before, { key: "total", property: "osfType", value: "number" }),
     ).toBe(before);
   });
 
-  test("a valueType outside the field contract falls back to string", () => {
+  test("an osfType outside the field contract's base types falls back to string", () => {
     // The declaration doubles as a field definition, so a type nothing can
     // render is a field the inspector cannot draw.
-    const before = set([{ key: "a", valueType: "string" }]);
+    const before = set([{ key: "a", osfType: "string" }]);
     const result = setProcessVariableField(before, {
       key: "a",
-      property: "valueType",
+      property: "osfType",
       value: "wormhole",
     });
     // …and since that is the value it already held, nothing was an edit.

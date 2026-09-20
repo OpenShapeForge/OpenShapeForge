@@ -256,10 +256,10 @@ function mcpCatalogInputs(
 }
 
 /**
- * Every referentiedata group an entity points at, from either authoring
- * spelling: the documented `options.referentieGroep`, and the
- * `render.props.referentieGroep` the UI select components consume. Walks
- * nested children/item so a group referenced inside an object field counts.
+ * Every referentiedata group an entity points at, through `options` (the
+ * model compiler folds the select component's `render.props.referentieGroep`
+ * into it). Walks nested children/item so a group referenced inside an
+ * object field counts.
  */
 function collectReferentieGroepReferences(
   fields: readonly CompiledField[] | undefined,
@@ -267,15 +267,11 @@ function collectReferentieGroepReferences(
   entityName: string,
 ): Map<string, Set<string>> {
   for (const field of fields ?? []) {
-    const fromOptions =
-      field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
-    const fromRender = field.render?.props?.referentieGroep;
-    for (const groep of [fromOptions, fromRender]) {
-      if (typeof groep === "string" && groep.length > 0) {
-        const where = into.get(groep) ?? new Set<string>();
-        where.add(`${entityName}.${field.key}`);
-        into.set(groep, where);
-      }
+    const groep = field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
+    if (typeof groep === "string" && groep.length > 0) {
+      const where = into.get(groep) ?? new Set<string>();
+      where.add(`${entityName}.${field.key}`);
+      into.set(groep, where);
     }
     collectReferentieGroepReferences(field.children, into, entityName);
     if (field.item) collectReferentieGroepReferences([field.item], into, entityName);

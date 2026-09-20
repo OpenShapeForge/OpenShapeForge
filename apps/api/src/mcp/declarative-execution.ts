@@ -56,7 +56,7 @@ import {
   type SecretKeyring,
   type StoredSecret,
 } from "../connectors/secrets.js";
-import { storedFieldBaseType } from "./stored-field-base-type.js";
+import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type ExecutionCatalogEntry = {
   bindingsField: string;

@@ -7,7 +7,7 @@ import {
   collectEntityOperations,
 } from "../generate-operations.js";
 import { compile } from "./compiler/index.js";
-import { assertV2Authoring } from "./entity-v2.js";
+import { assertEntityAuthoring } from "./entity-authoring.js";
 import { loadEntity } from "./loader.js";
 import { buildWebManifest } from "./web-manifest.js";
 
@@ -186,7 +186,7 @@ describe("field-relational outcome entities", () => {
     if (!web?.views?.record) throw new Error("Quote must declare both Web views");
     web.views.collection.renderer = "finance.quote.collection";
     web.views.record.renderer = "finance.quote.record";
-    assertV2Authoring(source.coreEntity, "quote.yaml");
+    assertEntityAuthoring(source.coreEntity, "quote.yaml");
 
     const quote = buildWebManifest([{ slug: "quote", contract: compile(source) }])
       .entities.Quote!;
@@ -199,7 +199,7 @@ describe("field-relational outcome entities", () => {
     expect(agreement.views.record?.renderer).toBe("entity.record");
 
     web.views.record.renderer = "Finance/Quote";
-    expect(() => assertV2Authoring(source.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(source.coreEntity, "quote.yaml")).toThrow(
       /interfaces\.web\.views\.record\.renderer/,
     );
   });
@@ -229,7 +229,7 @@ describe("field-relational outcome entities", () => {
       confirmation: { mode: "none" },
     };
     artifacts.coreEntity.interfaces!.web!.views!.collection.actions = ["compose"];
-    assertV2Authoring(artifacts.coreEntity, "quote.yaml");
+    assertEntityAuthoring(artifacts.coreEntity, "quote.yaml");
 
     const contract = compile(artifacts);
     expect(contract.interfaces?.web?.collectionActions).toEqual(["compose"]);
@@ -283,7 +283,7 @@ describe("field-relational outcome entities", () => {
       reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
       confirmation: { mode: "none" },
     };
-    assertV2Authoring(artifacts.coreEntity, "quote.yaml");
+    assertEntityAuthoring(artifacts.coreEntity, "quote.yaml");
 
     const contract = compile(artifacts);
     expect(contract.entityOperations.create).toMatchObject({
@@ -366,12 +366,12 @@ describe("field-relational outcome entities", () => {
     create.tenancy = { mode: "required" };
     create.reliability = { idempotency: { mode: "keyed", inputField: "requestKey" } };
 
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /derives authorization and tenancy from the entity/,
     );
     delete create.auth;
     delete create.tenancy;
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /required string id for the canonical entity head/,
     );
     create.output = {
@@ -384,7 +384,7 @@ describe("field-relational outcome entities", () => {
     ((create.input.schema.properties as Record<string, Record<string, unknown>>).requestKey!)[
       "x-osf-sourceField"
     ] = "missingField";
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /references unknown entity field "missingField"/,
     );
     delete ((create.input.schema.properties as Record<string, Record<string, unknown>>).requestKey!)[
@@ -393,14 +393,14 @@ describe("field-relational outcome entities", () => {
     artifacts.coreEntity.interfaces!.rest = {
       operations: { create: { method: "GET" } },
     };
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /cannot project REST method GET/,
     );
     artifacts.coreEntity.interfaces!.rest.operations!.create = {
       method: "POST",
       path: "/api/example/quotes/:id",
     };
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /cannot bind record parameters in its collection REST path/,
     );
     artifacts.coreEntity.interfaces!.rest.operations!.create = {
@@ -408,7 +408,7 @@ describe("field-relational outcome entities", () => {
       path: "/api/example/quotes",
       response: { kind: "binary" },
     };
-    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+    expect(() => assertEntityAuthoring(artifacts.coreEntity, "quote.yaml")).toThrow(
       /must project a JSON REST response/,
     );
   });

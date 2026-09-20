@@ -53,7 +53,18 @@ const contract = (
       domains: ["things"],
       ...(overrides.filterField ? { filterField: overrides.filterField } : {}),
     },
-    storage: { table: "widgets", columns: overrides.columns ?? [] },
+    storage: {
+      table: "widgets",
+      // Every persisted field has a storage column; a fixture that names none
+      // gets one per field, as the compiler would have derived.
+      columns: overrides.columns ?? (overrides.fields ?? [field({ key: "name" })]).map((entry) => ({
+        field: entry.key,
+        column: entry.key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+        type: entry.baseType === "boolean" ? "boolean" : entry.baseType === "object" || entry.cardinality === "collection" ? "jsonb" : "text",
+        nullable: !entry.required,
+        storageClass: "core" as const,
+      })),
+    },
     model: {
       fields: overrides.fields ?? [field({ key: "name" })],
       relationships: overrides.relationships ?? [],
@@ -376,7 +387,7 @@ describe("buildMcpCatalog", () => {
     const update = catalog.tools.find((tool) => tool.operation === "update")!;
     const deletion = catalog.tools.find((tool) => tool.operation === "delete")!;
 
-    expect(create.inputSchema.required).not.toContain("confirmed");
+    expect(create.inputSchema.required ?? []).not.toContain("confirmed");
     expect(prop(create.inputSchema, "confirmed")).toMatchObject({
       type: "boolean",
     });
@@ -443,13 +454,13 @@ describe("buildMcpCatalog", () => {
     const catalog = buildMcpCatalog([input(acknowledged)], "test");
     for (const intent of ["create", "update", "delete"] as const) {
       const tool = catalog.tools.find((candidate) => candidate.operation === intent)!;
-      expect(tool.inputSchema.required).not.toContain("confirmed");
+      expect(tool.inputSchema.required ?? []).not.toContain("confirmed");
       expect(prop(tool.inputSchema, "confirmed")).toMatchObject({
         type: "boolean",
       });
       expect(prop(tool.inputSchema, "confirmed")).not.toHaveProperty("const");
       expect(prop(tool.inputSchema, "confirmed").description).toContain(
-        "Only true",
+        "acknowledges",
       );
     }
   });
@@ -1515,7 +1526,9 @@ describe("relationship keys", () => {
 
   /** A Finding-shaped contract: two belongsTo keys and a hasMany that must not leak. */
   const finding = (
-    columns: CompiledEntityContract["storage"]["columns"] = [],
+    columns: CompiledEntityContract["storage"]["columns"] = [
+      { field: "title", column: "title", type: "text", nullable: false, storageClass: "core" },
+    ],
   ) =>
     labelled(contract({
       name: "Finding",
@@ -1583,6 +1596,7 @@ describe("relationship keys", () => {
     expect(prop(create, "assessmentId")).toEqual({
       type: "string",
       format: "uuid",
+      "x-osf-type": "Assessment",
       description:
         "Identifier of the Assessment this Finding belongs to, as returned by `assessment_list`.",
     });

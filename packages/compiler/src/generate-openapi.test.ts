@@ -14,7 +14,26 @@ import type { PlatformSchemaManifest } from "./schema.js";
  * mutated the flags, so the projection under test sees what the compiler
  * would have emitted.
  */
-function withDerivedErrors(entity: CompiledEntityContract): CompiledEntityContract {
+function withDerivedErrors(
+  entity: CompiledEntityContract,
+  source: PlatformSchemaManifest = manifest,
+): CompiledEntityContract {
+  // The record schema is projected from compiled storage, which the compiler
+  // derives from the same authoring as the manifest table; mirror it here.
+  const table = source.tables.find((candidate) => candidate.source?.authoringEntityName === entity.entity.name);
+  entity.model.relationships ??= [];
+  if (table) {
+    entity.storage = {
+      table: table.name,
+      columns: table.columns.map((column) => ({
+        field: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+        column: column.name,
+        type: column.type,
+        nullable: !(column.required === true || column.primaryKey === true),
+        storageClass: "core" as const,
+      })),
+    };
+  }
   for (const operation of Object.values(entity.entityOperations)) {
     if (!operation) continue;
     operation.errors = deriveEntityOperationErrors(entity.entity.name, operation.intent, {
@@ -131,7 +150,20 @@ const contract = {
   entityOperations: {
     list: { id: "Relation.list", intent: "list" },
     get: { id: "Relation.get", intent: "get" },
-    create: { id: "Relation.create", intent: "create" },
+    create: {
+      id: "Relation.create",
+      intent: "create",
+      interaction: {
+        confirmation: { mode: "none" },
+        secureInput: {
+          type: "secureInput",
+          sourceField: "externalId",
+          sourceEntity: "ExternalSystem",
+          definitionsField: "metadata",
+          into: "metadata",
+        },
+      },
+    },
     update: {
       id: "Relation.update",
       intent: "update",
@@ -601,7 +633,7 @@ describe("rich generated REST OpenAPI", () => {
       expect(inputSchema.properties.confirmed).toMatchObject({ type: "boolean" });
       expect(inputSchema.properties.confirmed).not.toHaveProperty("const");
       expect(inputSchema.properties.confirmed.description).toContain(
-        "Only true",
+        "acknowledges",
       );
     }
     for (const operation of [
@@ -643,7 +675,7 @@ describe("rich generated REST OpenAPI", () => {
       .toEqual({ $ref: "#/components/schemas/OperationFailure" });
   });
 
-  it("keeps response properties storage-derived while retaining entity documentation", () => {
+  it("documents the canonical record: storage scalars with titles, no input rules", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {
       description?: string;
@@ -651,17 +683,22 @@ describe("rich generated REST OpenAPI", () => {
     };
 
     expect(relation.description).toBe("Canonical relation aggregate.");
-    expect(relation.properties.displayName).toEqual({ type: "string" });
-    expect(relation.properties.relationType).toEqual({ type: "string" });
-    expect(relation.properties.metadata).toEqual({});
-    expect(relation.properties.iban).toEqual({ type: "string" });
-    expect(relation.properties.relationGroupId).toEqual({
+    expect(relation.properties.displayName).toEqual({
       type: "string",
-      format: "uuid",
+      title: "Display name",
+      "x-osf-i18n": { title: { en: "Display name" } },
+      "x-osf-type": "string",
+    });
+    expect(relation.properties.displayName).not.toHaveProperty("maxLength");
+    expect(relation.properties.relationType).toMatchObject({ type: "string" });
+    expect(relation.properties.metadata).toMatchObject({ anyOf: [{ title: "Metadata" }, { type: "null" }] });
+    expect(relation.properties.iban).toMatchObject({ anyOf: [{ type: "string" }, { type: "null" }] });
+    expect(relation.properties.relationGroupId).toMatchObject({
+      anyOf: [{ type: "string", format: "uuid" }, { type: "null" }],
     });
   });
 
-  it("models create requiredness, partial PATCH, immutability, and secure fields", () => {
+  it("models create requiredness, partial PATCH, immutability, and classified fields", () => {
     const schemas = spec().components.schemas;
     const create = schemas.RelationInput as {
       required?: string[];
@@ -691,7 +728,9 @@ describe("rich generated REST OpenAPI", () => {
     expect(create.properties.externalId?.description).toBe(
       "Identifier in the owning external system. References the ExternalSystem entity.",
     );
-    expect(create.properties.iban).toEqual({ type: "string" });
+    // A classified field keeps its authored input rules: the rules describe
+    // what a caller may send, not what any record holds.
+    expect(create.properties.iban).toMatchObject({ type: "string", maxLength: 34 });
     expect(update.required).toEqual(["expectedVersion", "leaseToken"]);
     expect(update.properties.expectedVersion).toMatchObject({
       type: "string",
@@ -1010,7 +1049,7 @@ describe("rich generated REST OpenAPI", () => {
     });
     const generated = JSON.parse(
       renderOpenApiSpec(semanticManifest, "fixture", {
-        entities: [{ contract: withDerivedErrors(semanticContract) }],
+        entities: [{ contract: withDerivedErrors(semanticContract, semanticManifest) }],
       }),
     ) as { components: { schemas: Record<string, Record<string, unknown>> } };
     const create = generated.components.schemas.RelationInput as {

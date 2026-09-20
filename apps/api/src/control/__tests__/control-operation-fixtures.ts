@@ -53,7 +53,10 @@ const anyObject = { type: "object", additionalProperties: true };
 /** The compiler's `withOperationControls` for an acknowledgement. */
 const CONFIRMED = {
   type: "boolean",
-  description: "Set to true after the user explicitly acknowledges this Operation.",
+  description:
+    "Set to true after the user explicitly acknowledges this Operation; " +
+    "this is not a server-issued security proof.",
+  "x-osf-i18n": { title: { en: "Confirmed", nl: "Bevestigd" } },
 };
 
 type Authored = {

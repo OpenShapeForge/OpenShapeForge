@@ -29,7 +29,18 @@ import type {
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
-import { writableEntityFields } from "./entity-operation-json-schema.js";
+import {
+  entityListFilterFields,
+  entityListPageSchema,
+  entityRecordOutputSchema,
+  entityRelationshipColumn,
+  entityRelationshipKeys,
+  type EntityRelationshipTarget,
+  entitySortableFieldKeys,
+  entityValuesSchema,
+  withEntityOperationControls,
+  writableEntityFields,
+} from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
 import {
   compiledFieldSchema,
@@ -62,103 +73,6 @@ const ENTITY_OPERATION_INTENTS = [
   "update",
   "delete",
 ] as const;
-
-function storageValueSchema(type: CompiledColumn["type"]): JsonObject {
-  switch (type) {
-    case "uuid":
-      return { type: "string", format: "uuid" };
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-    case "bigint":
-      return { type: "integer" };
-    case "numeric":
-      return { type: "number" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "timestamptz":
-      return { type: "string", format: "date-time" };
-    case "jsonb":
-      return {};
-    default:
-      return { type: "string" };
-  }
-}
-
-function nullableSchema(schema: JsonObject): JsonObject {
-  return { anyOf: [schema, { type: "null" }] };
-}
-
-/**
- * The record shape returned by generated CRUD. It follows persisted storage,
- * not the create schema: server-managed values and relationship foreign keys
- * are present in reads too. `additionalProperties` stays open because the MCP
- * runtime may add a safe, server-derived projection such as oauthRedirectUrl.
- */
-function entityRecordOutputSchema(
-  contract: CompiledEntityContract,
-  generic: boolean,
-): JsonObject {
-  if (generic) {
-    return { type: "object", additionalProperties: true };
-  }
-
-  const fields = new Map(
-    contract.model.fields.map((field) => [field.key, field]),
-  );
-  const properties: JsonObject = {};
-  const required: string[] = [];
-
-  const add = (
-    key: string,
-    schema: JsonObject,
-    isRequired: boolean,
-  ): void => {
-    properties[key] = schema;
-    if (isRequired) required.push(key);
-  };
-
-  for (const column of contract.storage.columns) {
-    const field = fields.get(column.field);
-    const label = field ? localizedText(field.label) : undefined;
-    const description = field ? describeMcpField(field) : undefined;
-    // Responses describe what storage can actually contain. Create/update
-    // validation bounds and enums constrain new input, but older/imported rows
-    // are not rewritten by those rules and must remain valid output.
-    const schema = {
-      ...storageValueSchema(column.type),
-      ...(label ? { title: label } : {}),
-      ...(description ? { description } : {}),
-    };
-    add(
-      column.field,
-      column.nullable ? nullableSchema(schema) : schema,
-      !column.nullable,
-    );
-  }
-
-  // Generated CRUD requires id and injects tenant/timestamps into its storage
-  // manifest even when a compact compiled fixture omits the platform fields.
-  if (!("id" in properties)) {
-    add("id", { type: "string", format: "uuid" }, true);
-  }
-  if (!("tenantId" in properties)) {
-    add("tenantId", { type: "string", format: "uuid" }, true);
-  }
-  if (!("createdAt" in properties)) {
-    add("createdAt", { type: "string", format: "date-time" }, true);
-  }
-  if (!("updatedAt" in properties)) {
-    add("updatedAt", { type: "string", format: "date-time" }, true);
-  }
-
-  return {
-    type: "object",
-    properties,
-    required,
-    additionalProperties: true,
-  };
-}
 
 function canonicalOutputDefinitions(): JsonObject {
   return {
@@ -298,21 +212,7 @@ function entityToolOutputSchema(
       additionalProperties: false,
       required: ["data", "operations"],
       properties: {
-        data: {
-          type: "object",
-          additionalProperties: false,
-          required: ["items", "totalCount", "nextCursor"],
-          properties: {
-            items: {
-              type: "array",
-              items: recordEnvelopeSchema(record),
-            },
-            totalCount: { type: "integer" },
-            nextCursor: {
-              anyOf: [{ type: "string" }, { type: "null" }],
-            },
-          },
-        },
+        data: entityListPageSchema(recordEnvelopeSchema(record), "counted"),
         operations: offersSchema(),
       },
     };
@@ -356,214 +256,6 @@ function entityToolOutputSchema(
 
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
-
-function operationControlSchema(
-  operation: CompiledEntityOperation | undefined,
-): {
-  properties: JsonObject;
-  required: string[];
-  dependentRequired?: Record<string, string[]>;
-} {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  let dependentRequired: Record<string, string[]> | undefined;
-  if (operation?.concurrency?.version) {
-    properties.expectedVersion = {
-      type: "string",
-      format: "date-time",
-      description:
-        `Version from the record's ${operation.concurrency.version.field} field.`,
-    };
-    required.push("expectedVersion");
-  }
-  if (operation?.concurrency?.editLease) {
-    properties.leaseToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this operation and record.",
-    };
-    required.push("leaseToken");
-  }
-  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
-      type: "boolean",
-      description:
-        "Only true lets the operation continue after user acknowledgement; this is not a server-issued security proof.",
-    };
-  }
-  if (operation?.interaction?.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
-      type: "string",
-      minLength: 1,
-      description:
-        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
-    };
-    dependentRequired = {
-      confirmationToken: ["confirmationAnswer"],
-      confirmationAnswer: ["confirmationToken"],
-    };
-  }
-  return {
-    properties,
-    required,
-    ...(dependentRequired ? { dependentRequired } : {}),
-  };
-}
-
-/**
- * Fields a caller may write, mirroring the CRUD layer's writability rule so the
- * advertised schema matches what the server will actually accept.
- *
- * Authored `readOnly` is deliberately NOT consulted. In this vocabulary it is a
- * presentation flag — resolveRender uses it to pick a display component instead
- * of an input one — not an API contract, and no transport enforces it. Treating
- * it as one here omitted PaymentDetail.relationId, the only link between a
- * payment detail and its relation, so an agent could not create the attached
- * record that REST and GraphQL create happily.
- *
- * Authored `immutable` IS consulted, and only on update: it means "settable at
- * create, fixed afterwards" (#177). The CRUD layer reads the same flag off the
- * manifest column, so the advertised update schema and the server's refusal
- * come from one authored fact.
- *
- * Authored `writtenBy` IS consulted, on create AND update: it means "written
- * only by these operations". A field that records that a process took place —
- * a review signed off, a scope approved — is worth exactly as much as the
- * check the operation runs before writing it, so create/update must not offer
- * a way around that check. Same shape as `immutable`: the advertised schema
- * and the server's refusal both come from the one authored fact.
- *
- * `deriveOnCreate` is absent from both writes because the entity runtime owns
- * its initial value and keeps it stable afterwards. The shared helper below
- * is also used by the canonical Operation schema, preventing transport drift.
- */
-function writableFields(
-  fields: CompiledField[],
-  operation: "create" | "update",
-): CompiledField[] {
-  return writableEntityFields(fields, operation);
-}
-
-/**
- * What a `belongsTo` relationship contributes to the tool schemas.
- *
- * A `belongsTo` with a `foreignKey` is stored as a uuid column that the
- * storage layer names `<key>Id` (authoring/compiler/storage.ts), and REST and
- * GraphQL already accept that key on create, update and list filters. Before
- * this the MCP schemas were built from `model.fields` alone, so
- * `finding_create` advertised `additionalProperties: false` without
- * `assessmentId` — no MCP client could attach a finding to its assessment,
- * while the same body succeeded over REST. The key is derived from the
- * compiled storage column so all three transports agree on one name.
- */
-type RelationshipKey = {
-  key: string;
-  relationship: string;
-  target: string;
-  required: boolean;
-  schema: JsonObject;
-};
-
-/** How a relationship target is named and listed, resolved catalog-wide. */
-type RelationshipTarget = { label: string; listTool?: string };
-
-/**
- * The storage column a `belongsTo` foreign key lands in, and the field key
- * every transport addresses it by. Undefined for relationships that carry no
- * foreign key (`hasMany`, or a `belongsTo` resolved elsewhere).
- */
-function relationshipColumn(
-  contract: CompiledEntityContract,
-  relationship: CompiledRelationship,
-): { key: string; nullable: boolean } | undefined {
-  if (relationship.kind !== "belongsTo" || !relationship.foreignKey)
-    return undefined;
-  const column = contract.storage.columns.find(
-    (candidate) => candidate.column === relationship.foreignKey,
-  );
-  return {
-    key: column?.field ?? `${relationship.key}Id`,
-    nullable: column ? column.nullable : true,
-  };
-}
-
-function relationshipKeys(
-  contract: CompiledEntityContract,
-  targets: ReadonlyMap<string, RelationshipTarget>,
-): RelationshipKey[] {
-  const ownedByField = new Set(contract.model.fields.map((field) => field.key));
-  const keys: RelationshipKey[] = [];
-  for (const relationship of contract.model.relationships) {
-    const column = relationshipColumn(contract, relationship);
-    if (!column) continue;
-    // An authored field may own the foreign-key column itself
-    // (PaymentDetail.relationId persists at relation_id). Its own schema is
-    // already in the tool; a second property for the same column would be a
-    // lie about what the server accepts.
-    if (ownedByField.has(column.key)) continue;
-    // A target outside the catalog has no tool to point at: naming a list tool
-    // that does not exist would send the model on a fruitless call.
-    const target = targets.get(relationship.target);
-    const targetLabel = target?.label ?? relationship.target;
-    const description =
-      `Identifier of the ${targetLabel} this ${entityLabel(contract)} belongs to` +
-      (target?.listTool ? `, as returned by \`${target.listTool}\`.` : ".");
-    keys.push({
-      key: column.key,
-      relationship: relationship.key,
-      target: relationship.target,
-      // The storage column decides: it is nullable unless something made it
-      // NOT NULL, so this is "required iff the column refuses null" — the
-      // same fact the database enforces on the insert.
-      required: !column.nullable,
-      schema: { type: "string", format: "uuid", description },
-    });
-  }
-  return keys;
-}
-
-/** Add relationship keys to an object schema, after the authored fields. */
-function withRelationshipKeys(
-  schema: JsonObject,
-  keys: RelationshipKey[],
-  requireRequired: boolean,
-): JsonObject {
-  if (keys.length === 0) return schema;
-  const properties = {
-    ...((schema.properties as JsonObject | undefined) ?? {}),
-  };
-  const required = [
-    ...((schema.required as string[] | undefined) ?? []),
-  ];
-  for (const entry of keys) {
-    properties[entry.key] = entry.schema;
-    if (requireRequired && entry.required) required.push(entry.key);
-  }
-  return {
-    ...schema,
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-  };
-}
-
-function sortableFieldKeys(
-  fields: CompiledField[],
-  excludedField?: string,
-): string[] {
-  return fields
-    .filter(
-      (field) =>
-        field.key !== excludedField &&
-        field.cardinality !== "collection" &&
-        field.baseType !== "object",
-    )
-    .map((field) => field.key);
-}
 
 /** Fields carrying a restricting classification, for the runtime to withhold. */
 function classifiedFieldKeys(fields: CompiledField[]): string[] {
@@ -669,21 +361,21 @@ function buildToolsForEntity(
   contract: CompiledEntityContract,
   table: string,
   referentiedata: CoreReferentiedataSnapshot,
-  relationshipTargets: ReadonlyMap<string, RelationshipTarget>,
+  relationshipTargets: ReadonlyMap<string, EntityRelationshipTarget>,
 ): McpToolDefinition[] {
   const mcp = contract.mcp;
   if (!mcp) return [];
 
   const fields = contract.model.fields;
-  const relationships = relationshipKeys(contract, relationshipTargets);
+  const relationships = entityRelationshipKeys(contract, relationshipTargets);
   // The elicited target field never appears in the create schema: its values
   // come from the person at the client via elicitation, not from the model.
-  const creatable = writableFields(fields, "create").filter(
-    (field) => field.key !== mcp.elicitOnCreate?.into,
-  );
-  const updatable = writableFields(fields, "update").filter(
-    (field) => field.key !== mcp.elicitOnCreate?.into,
-  );
+  const valuesSchema = (operation: "create" | "update") =>
+    entityValuesSchema(contract, operation, [], referentiedata, {
+      excludeField: mcp.elicitOnCreate?.into,
+      targets: relationshipTargets,
+      ...MCP_FIELD_SCHEMA_OPTIONS,
+    });
   const label = entityLabel(contract);
   const description = entityDescription(contract);
   // Fields that create/update deliberately do not offer, and who does write
@@ -692,12 +384,13 @@ function buildToolsForEntity(
   // pentest.finding.review" calls that instead. The sentence is worth more
   // than the refusal it prevents.
   const writerNote = operationWrittenNote(fields);
-  const sortable = sortableFieldKeys(fields, mcp.elicitOnCreate?.into);
+  const sortable = entitySortableFieldKeys(contract, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
   const output = entityRecordOutputSchema(
     contract,
     mcp.tools === "generic",
+    MCP_FIELD_SCHEMA_OPTIONS,
   );
   const outputSchema = (operation: McpToolDefinition["operation"]) => {
     const canonicalOutput = contract.entityOperations[operation]?.output;
@@ -778,28 +471,12 @@ function buildToolsForEntity(
   });
 
   if (mcp.operations.list) {
-    const filterProperties: JsonObject = {};
-    for (const field of fields) {
-      if (
-        field.key === mcp.elicitOnCreate?.into ||
-        field.cardinality === "collection" ||
-        field.baseType === "object"
-      )
-        continue;
-      const schema = compiledFieldSchemaWithoutDefinitions(
-        field,
-        referentiedata,
-        MCP_FIELD_SCHEMA_OPTIONS,
-      );
-      // Filters are always optional and never defaulted — a default here would
-      // silently narrow a caller's result set.
-      delete schema.default;
-      filterProperties[field.key] = schema;
-    }
-    // Relationship keys filter by exact uuid, like every non-text field.
-    for (const entry of relationships) {
-      filterProperties[entry.key] = entry.schema;
-    }
+    const filterProperties: JsonObject = Object.fromEntries(
+      entityListFilterFields(contract, relationships, referentiedata, {
+        excludeField: mcp.elicitOnCreate?.into,
+        ...MCP_FIELD_SCHEMA_OPTIONS,
+      }).map(({ key, schema }) => [key, schema]),
+    );
     tools.push({
       name: named("list"),
       operationId: operationId("list"),
@@ -873,19 +550,14 @@ function buildToolsForEntity(
 
   if (mcp.operations.create) {
     const canonicalCreate = contract.entityOperations.create;
+    const created = valuesSchema("create");
     const baseInputSchema = canonicalCreate?.input.kind === "json-schema"
       ? canonicalCreate.input.schema
-      : withRelationshipKeys(
-          compiledObjectSchema(creatable, referentiedata, {
-            requireRequired: true,
-            defaultsAreMaterialized: true,
-            ...MCP_FIELD_SCHEMA_OPTIONS,
-          }),
-          relationships,
-          true,
-        );
+      : {
+          ...created.values,
+          ...(Object.keys(created.definitions).length > 0 ? { $defs: created.definitions } : {}),
+        };
     const inputSchema = withBlueprintCreate(baseInputSchema, contract.blueprint);
-    const controls = operationControlSchema(contract.entityOperations.create);
     tools.push({
       name: named("create"),
       operationId: operationId("create"),
@@ -897,20 +569,7 @@ function buildToolsForEntity(
         "create",
         `${description} Creates a new record.${writerNote}`,
       ),
-      inputSchema: {
-        ...inputSchema,
-        properties: {
-          ...(inputSchema.properties as JsonObject),
-          ...controls.properties,
-        },
-        required: [
-          ...((inputSchema.required as string[] | undefined) ?? []),
-          ...controls.required,
-        ],
-        ...(controls.dependentRequired
-          ? { dependentRequired: controls.dependentRequired }
-          : {}),
-      },
+      inputSchema: withEntityOperationControls(inputSchema, contract.entityOperations.create),
       outputSchema: outputSchema("create"),
       annotations: entityAnnotations("create"),
       errors: declaredErrors("create"),
@@ -921,18 +580,7 @@ function buildToolsForEntity(
     // Entity values are a partial: omitting one means "leave it alone", not
     // "clear it". Canonical concurrency controls remain required separately.
     const canonicalUpdate = contract.entityOperations.update;
-    const { schema: patch, definitions } = splitBundledDefinitions(
-      withRelationshipKeys(
-        compiledObjectSchema(updatable, referentiedata, {
-          requireRequired: false,
-          ...MCP_FIELD_SCHEMA_OPTIONS,
-          includeDefault: false,
-        }),
-        relationships,
-        false,
-      ),
-    );
-    const controls = operationControlSchema(contract.entityOperations.update);
+    const { values: patch, definitions } = valuesSchema("update");
     tools.push({
       name: named("update"),
       operationId: operationId("update"),
@@ -945,46 +593,25 @@ function buildToolsForEntity(
         `${description} Partially updates a record; omitted fields are left unchanged.` +
           writerNote,
       ),
-      inputSchema: canonicalUpdate?.input.kind === "json-schema"
-        ? {
-            ...canonicalUpdate.input.schema,
-            properties: {
-              ...((canonicalUpdate.input.schema.properties as JsonObject | undefined) ?? {}),
-              ...controls.properties,
-            },
-            required: [
-              ...((canonicalUpdate.input.schema.required as string[] | undefined) ?? []),
-              ...controls.required,
-            ],
-            ...(controls.dependentRequired
-              ? {
-                  dependentRequired: {
-                    ...((canonicalUpdate.input.schema.dependentRequired as
-                      | Record<string, string[]>
-                      | undefined) ?? {}),
-                    ...controls.dependentRequired,
-                  },
-                }
-              : {}),
-          }
-        : {
-            type: "object",
-            properties: {
-              id: {
-                type: "string",
-                format: "uuid",
-                description: `Identifier of the ${label}.`,
+      inputSchema: withEntityOperationControls(
+        canonicalUpdate?.input.kind === "json-schema"
+          ? canonicalUpdate.input.schema
+          : {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  format: "uuid",
+                  description: `Identifier of the ${label}.`,
+                },
+                values: patch,
               },
-              values: patch,
-              ...controls.properties,
+              required: ["id", "values"],
+              additionalProperties: false,
+              ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
             },
-            required: ["id", "values", ...controls.required],
-            additionalProperties: false,
-            ...(controls.dependentRequired
-              ? { dependentRequired: controls.dependentRequired }
-              : {}),
-            ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
-          },
+        canonicalUpdate,
+      ),
       outputSchema: outputSchema("update"),
       annotations: entityAnnotations("update"),
       errors: declaredErrors("update"),
@@ -992,7 +619,6 @@ function buildToolsForEntity(
   }
 
   if (mcp.operations.delete) {
-    const controls = operationControlSchema(contract.entityOperations.delete);
     tools.push({
       name: named("delete"),
       operationId: operationId("delete"),
@@ -1004,18 +630,7 @@ function buildToolsForEntity(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
-      inputSchema: {
-        type: "object",
-        properties: {
-          ...(idSchema.properties as JsonObject),
-          ...controls.properties,
-        },
-        required: ["id", ...controls.required],
-        additionalProperties: false,
-        ...(controls.dependentRequired
-          ? { dependentRequired: controls.dependentRequired }
-          : {}),
-      },
+      inputSchema: withEntityOperationControls(idSchema, contract.entityOperations.delete),
       outputSchema: outputSchema("delete"),
       annotations: entityAnnotations("delete"),
       errors: declaredErrors("delete"),
@@ -1362,7 +977,7 @@ export function buildMcpCatalog(
   // Every entity in the input set is a possible relationship target, whether
   // or not it is MCP-exposed itself; only an exposed one has a list tool to
   // point the model at.
-  const relationshipTargets = new Map<string, RelationshipTarget>();
+  const relationshipTargets = new Map<string, EntityRelationshipTarget>();
   for (const input of inputs) {
     const targetMcp = input.contract.mcp;
     const listTool =
@@ -1456,7 +1071,7 @@ export function buildMcpCatalog(
       }),
       relationships: contract.model.relationships.map((relationship) => {
         const label = localizedText(relationship.label);
-        const column = relationshipColumn(contract, relationship);
+        const column = entityRelationshipColumn(contract, relationship);
         return {
           key: relationship.key,
           kind: relationship.kind,

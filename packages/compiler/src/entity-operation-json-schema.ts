@@ -16,6 +16,11 @@ import {
 } from "./field-json-schema.js";
 import type { JsonSchema } from "./plugins.js";
 import { isScalarType, scalarJsonSchema } from "@openshapeforge/operations";
+import {
+  operationControlProperties,
+  type OperationControlSchema,
+  withOperationControlProperties,
+} from "./entity-operation-controls.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -53,10 +58,23 @@ function presentation(schema: JsonObject): JsonObject {
   return Object.fromEntries(Object.entries(schema).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n"));
 }
 
-/** Persisted record shape returned by every canonical entity read/write. */
+export type EntityRecordOutputOptions = {
+  /** A transport's own wording for a field, kept beside the shared title. */
+  describeField?: (field: CompiledField) => string | undefined;
+};
+
+/**
+ * Persisted record shape returned by every canonical entity read/write. It
+ * follows storage, not the create schema: server-managed values and
+ * relationship foreign keys are present in reads too, and older rows are not
+ * rewritten by input validation rules, so no bounds or enums constrain it.
+ * `additionalProperties` stays open because a runtime may add a safe,
+ * server-derived projection.
+ */
 export function entityRecordOutputSchema(
   contract: CompiledEntityContract,
   generic = false,
+  options: EntityRecordOutputOptions = {},
 ): JsonObject {
   if (generic) return { type: "object", additionalProperties: true };
 
@@ -70,9 +88,11 @@ export function entityRecordOutputSchema(
   for (const column of contract.storage.columns) {
     const field = fields.get(column.field);
     const title = field ? localizedText(field.label) : undefined;
+    const description = field ? options.describeField?.(field) : undefined;
     const schema = {
       ...storageValueSchema(column.type),
       ...(title ? { title } : {}),
+      ...(description ? { description } : {}),
     };
     add(
       column.field,
@@ -182,61 +202,25 @@ export function withEntityRelationshipKeys(
   };
 }
 
+/** `schema` with the Operation's controls merged in, keeping its own required and dependent keys. */
+export function withEntityOperationControls(
+  schema: JsonObject,
+  operation: CompiledEntityOperation | undefined,
+): JsonObject {
+  return withOperationControlProperties(schema, {
+    concurrency: operation?.concurrency,
+    confirmation: operation?.interaction?.confirmation ?? { mode: "none" },
+  });
+}
+
 /** Platform-owned controls attached to the executor input, never business values. */
 export function entityOperationControlSchema(
   operation: CompiledEntityOperation | undefined,
-): {
-  properties: JsonObject;
-  required: string[];
-  dependentRequired?: Record<string, string[]>;
-} {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  let dependentRequired: Record<string, string[]> | undefined;
-  if (operation?.concurrency?.version) {
-    properties.expectedVersion = {
-      type: "string",
-      format: "date-time",
-      description: `Version from the record's ${operation.concurrency.version.field} field.`,
-    };
-    required.push("expectedVersion");
-  }
-  if (operation?.concurrency?.editLease) {
-    properties.leaseToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this operation and record.",
-    };
-    required.push("leaseToken");
-  }
-  if (operation?.interaction.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
-      type: "boolean",
-      description: "Only true lets the operation continue after user acknowledgement.",
-    };
-  }
-  if (operation?.interaction.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
-      type: "string",
-      minLength: 1,
-      description:
-        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
-    };
-    dependentRequired = {
-      confirmationToken: ["confirmationAnswer"],
-      confirmationAnswer: ["confirmationToken"],
-    };
-  }
-  return {
-    properties,
-    required,
-    ...(dependentRequired ? { dependentRequired } : {}),
-  };
+): OperationControlSchema {
+  return operationControlProperties({
+    concurrency: operation?.concurrency,
+    confirmation: operation?.interaction?.confirmation ?? { mode: "none" },
+  });
 }
 
 function relationshipTargets(
@@ -291,6 +275,116 @@ function relationshipAnyFilters(
     };
   }
   return result;
+}
+
+/**
+ * The fields a list may filter on, each with the bare schema of one value:
+ * no default (a default would silently narrow a caller's result set), no
+ * collection or object fields, and the belongsTo keys as uuids. Every
+ * transport builds its filter properties from this one list; the canonical
+ * executor wraps each in its exact-match alternative.
+ */
+export function entityListFilterFields(
+  contract: CompiledEntityContract,
+  relationships: readonly EntityRelationshipKey[],
+  referentiedata: CoreReferentiedataSnapshot | undefined,
+  options: { excludeField?: string | undefined; describeField?: EntityRecordOutputOptions["describeField"] } = {},
+): Array<{ key: string; schema: JsonObject }> {
+  const fields = contract.model.fields
+    .filter((field) =>
+      field.key !== options.excludeField &&
+      field.cardinality !== "collection" &&
+      field.baseType !== "object"
+    )
+    .map((field) => {
+      const schema = compiledFieldSchemaWithoutDefinitions(
+        field,
+        referentiedata,
+        options.describeField ? { describeField: options.describeField } : {},
+      );
+      delete schema.default;
+      return { key: field.key, schema };
+    });
+  return [...fields, ...relationships.map((entry) => ({ key: entry.key, schema: entry.schema }))];
+}
+
+/** The fields a list may sort on: every single-valued scalar the caller may filter on. */
+export function entitySortableFieldKeys(
+  contract: CompiledEntityContract,
+  excludeField?: string,
+): string[] {
+  return contract.model.fields
+    .filter((field) =>
+      field.key !== excludeField &&
+      field.cardinality !== "collection" &&
+      field.baseType !== "object"
+    )
+    .map((field) => field.key);
+}
+
+/**
+ * One page of a list: the items, the total and the cursor. `counted` is the
+ * page a transport that always counts returns; `optional` the executor's,
+ * whose count is null unless the caller asked for it.
+ */
+export function entityListPageSchema(
+  item: JsonObject,
+  totalCount: "counted" | "optional",
+): JsonObject {
+  return {
+    type: "object",
+    properties: {
+      items: { type: "array", items: item },
+      totalCount: totalCount === "counted"
+        ? { type: "integer" }
+        : { anyOf: [{ type: "integer" }, { type: "null" }] },
+      nextCursor: { anyOf: [{ type: "string" }, { type: "null" }] },
+    },
+    required: ["items", "totalCount", "nextCursor"],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * The writable values of a create or update, as one object schema: the
+ * writable fields with their authored rules, then the belongsTo keys. The
+ * canonical executor nests it under `values`; REST flattens it into the body.
+ * Definitions a field schema bundles are split off so each transport can
+ * place them where its document keeps shared definitions.
+ */
+export function entityValuesSchema(
+  contract: CompiledEntityContract,
+  operation: "create" | "update",
+  contracts: readonly CompiledEntityContract[],
+  referentiedata: CoreReferentiedataSnapshot,
+  options: {
+    /** A field a transport fills by other means (an elicited value), never from the model. */
+    excludeField?: string | undefined;
+    describeField?: EntityRecordOutputOptions["describeField"];
+    targets?: ReadonlyMap<string, EntityRelationshipTarget>;
+  } = {},
+): { values: JsonObject; definitions: JsonObject } {
+  const secureInputTarget = contract.entityOperations.create?.interaction?.secureInput?.into;
+  const relationships = entityRelationshipKeys(contract, options.targets ?? relationshipTargets(contracts));
+  // A field the storage layer gave no column (a runtime-resolved projection)
+  // has nothing the executor could write to.
+  const persisted = new Set(contract.storage.columns.map((column) => column.field));
+  const fields = writableEntityFields(contract.model.fields, operation)
+    .filter((field) =>
+      field.key !== secureInputTarget && field.key !== options.excludeField && persisted.has(field.key)
+    );
+  const compiledValues = withEntityRelationshipKeys(
+    compiledObjectSchema(fields, referentiedata, {
+      ...(operation === "create"
+        ? { requireRequired: true, defaultsAreMaterialized: true }
+        : { requireRequired: false, includeDefault: false }),
+      ...(options.describeField ? { describeField: options.describeField } : {}),
+    }),
+    relationships,
+    operation === "create",
+  );
+  const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
+  return { values, definitions };
 }
 
 /**
@@ -369,27 +463,11 @@ export function entityOperationJsonSchemas(
         throw new Error(`Entity Operation "${operation.id}" has an invalid list input contract.`);
       }
       const filterProperties: JsonObject = {};
-      for (const field of contract.model.fields) {
-        if (
-          field.key === secureInputTarget ||
-          field.cardinality === "collection" ||
-          field.baseType === "object"
-        ) continue;
-        const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
-        delete schema.default;
-        filterProperties[field.key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
-      }
-      for (const relationship of relationships) {
-        filterProperties[relationship.key] = { ...presentation(relationship.schema), oneOf: [relationship.schema, exactFilter(relationship.schema)] };
+      for (const { key, schema } of entityListFilterFields(contract, relationships, referentiedata, { excludeField: secureInputTarget })) {
+        filterProperties[key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
-      const sortable = contract.model.fields
-        .filter((field) =>
-          field.key !== secureInputTarget &&
-          field.cardinality !== "collection" &&
-          field.baseType !== "object"
-        )
-        .map((field) => field.key);
+      const sortable = entitySortableFieldKeys(contract, secureInputTarget);
       return {
         inputSchema: {
           type: "object",
@@ -418,24 +496,15 @@ export function entityOperationJsonSchemas(
           },
           additionalProperties: false,
         },
-        outputSchema: {
-          type: "object",
-          properties: {
-            items: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: { data: record, operations: openOperationOffers() },
-                required: ["data", "operations"],
-                additionalProperties: false,
-              },
-            },
-            totalCount: { anyOf: [{ type: "integer" }, { type: "null" }] },
-            nextCursor: { anyOf: [{ type: "string" }, { type: "null" }] },
+        outputSchema: entityListPageSchema(
+          {
+            type: "object",
+            properties: { data: record, operations: openOperationOffers() },
+            required: ["data", "operations"],
+            additionalProperties: false,
           },
-          required: ["items", "totalCount", "nextCursor"],
-          additionalProperties: false,
-        },
+          "optional",
+        ),
       };
     }
     case "get":
@@ -444,17 +513,7 @@ export function entityOperationJsonSchemas(
         outputSchema: nullableRecord,
       };
     case "create": {
-      const fields = writableEntityFields(contract.model.fields, "create")
-        .filter((field) => field.key !== secureInputTarget);
-      const compiledValues = withEntityRelationshipKeys(
-        compiledObjectSchema(fields, referentiedata, {
-          requireRequired: true,
-          defaultsAreMaterialized: true,
-        }),
-        relationships,
-        true,
-      );
-      const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
+      const { values, definitions } = entityValuesSchema(contract, "create", contracts, referentiedata);
       const blueprint = contract.blueprint;
       const requiredValues = Array.isArray(values.required) ? values.required as string[] : [];
       const copyValues = blueprint ? { ...values, required: requiredValues.filter((key) => !blueprint.fields.includes(key)) } : values;
@@ -477,17 +536,7 @@ export function entityOperationJsonSchemas(
       };
     }
     case "update": {
-      const compiledValues = withEntityRelationshipKeys(
-        compiledObjectSchema(
-          writableEntityFields(contract.model.fields, "update")
-            .filter((field) => field.key !== secureInputTarget),
-          referentiedata,
-          { requireRequired: false, includeDefault: false },
-        ),
-        relationships,
-        false,
-      );
-      const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
+      const { values, definitions } = entityValuesSchema(contract, "update", contracts, referentiedata);
       const inputSchema = controlled({ id, values }, ["id", "values"]);
       return {
         inputSchema: {

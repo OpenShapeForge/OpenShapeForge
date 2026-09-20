@@ -43,7 +43,14 @@ import {
   operationOpenApiPaths,
   type CompiledPluginOperation,
 } from "./generate-operations.js";
-import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
+import {
+  entityListPageSchema,
+  entityOperationControlSchema,
+  entityOperationJsonSchemas,
+  entityRecordOutputSchema,
+  entityValuesSchema,
+  withEntityOperationControls,
+} from "./entity-operation-json-schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
 const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
@@ -143,21 +150,6 @@ const schemaForScalar = (type: ScalarType): JsonObject => scalarJsonSchema(type)
 // `writtenBy` bites on create AND update: the column records that a process
 // took place, and the operation named on it is the only place the preconditions
 // for that are checked.
-function isWritableColumn(
-  column: TableDefinition["columns"][number],
-  operation: "create" | "update",
-): boolean {
-  return (
-    column.primaryKey !== true &&
-    column.generated !== "identity" &&
-    column.name !== "tenant_id" &&
-    column.name !== "created_at" &&
-    column.name !== "updated_at" &&
-    (column.writtenBy === undefined || column.writtenBy.length === 0) &&
-    column.deriveOnCreate === undefined &&
-    !(operation === "update" && column.immutable === true)
-  );
-}
 
 /**
  * One sentence naming the columns a body may not carry and the operations that
@@ -201,77 +193,7 @@ function isRestrictedField(field: CompiledField | undefined): boolean {
   return isRestrictedSensitivity(field?.classification?.sensitivity);
 }
 
-function fieldSchemaForColumn(
-  column: TableDefinition["columns"][number],
-  fieldsByKey: Map<string, CompiledField>,
-  referentiedata: CoreReferentiedataSnapshot,
-  mode: "storage" | "create" | "update",
-): { fieldName: string; compiled?: CompiledField; schema: JsonObject } {
-  const fieldName = fieldNameForColumn(column);
-  const compiled = fieldsByKey.get(fieldName);
-  const classified = isRestrictedField(compiled) || isRestrictedColumn(column);
-  if (!compiled || mode === "storage" || classified) {
-    return { fieldName, schema: schemaForScalar(column.type) };
-  }
 
-  const schema = compiledFieldSchema(compiled, referentiedata, {
-    includeDefault: mode === "create",
-    requireNestedRequired: true,
-    defaultsAreMaterialized: mode === "create",
-  });
-  return { fieldName, compiled, schema };
-}
-
-function columnProperties(
-  columns: TableDefinition["columns"],
-  fieldsByKey: Map<string, CompiledField>,
-  referentiedata: CoreReferentiedataSnapshot,
-  mode: "storage" | "create" | "update",
-): { properties: JsonObject; required: string[]; definitions: JsonObject } {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  const definitions: JsonObject = {};
-  for (const column of columns) {
-    const { fieldName, compiled, schema: bundledSchema } = fieldSchemaForColumn(
-      column,
-      fieldsByKey,
-      referentiedata,
-      mode,
-    );
-    const { schema: unbundledSchema, definitions: bundledDefinitions } =
-      splitBundledDefinitions(bundledSchema);
-    const hasDefinitions = Object.keys(bundledDefinitions).length > 0;
-    const schema = hasDefinitions
-      ? (rebaseJsonSchemaReferences(
-          unbundledSchema,
-          "#/$defs/",
-          FIELD_DEFINITION_DEFS_BASE,
-        ) as JsonObject)
-      : unbundledSchema;
-    if (hasDefinitions) {
-      Object.assign(
-        definitions,
-        rebaseJsonSchemaReferences(
-          bundledDefinitions,
-          "#/$defs/",
-          FIELD_DEFINITION_DEFS_BASE,
-        ) as JsonObject,
-      );
-    }
-    properties[fieldName] = schema;
-    const isRequired =
-      mode === "storage"
-        ? column.required === true || column.primaryKey === true
-        : mode === "create"
-          ? (compiled?.required ?? column.required === true) &&
-            compiled?.defaultValue === undefined
-          : false;
-    if (isRequired) {
-      required.push(fieldName);
-    }
-  }
-  return { properties, required, definitions };
-}
 
 function entityLabel(
   contract: CompiledEntityContract | undefined,
@@ -480,63 +402,6 @@ function entityResponse(name: string, description: string): JsonObject {
   };
 }
 
-function operationControlSchema(
-  operation: CompiledEntityOperation | undefined,
-): {
-  properties: JsonObject;
-  required: string[];
-  dependentRequired?: Record<string, string[]>;
-} {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  let dependentRequired: Record<string, string[]> | undefined;
-  if (operation?.concurrency?.version) {
-    properties.expectedVersion = {
-      type: "string",
-      format: "date-time",
-      description:
-        `Version from the record's ${operation.concurrency.version.field} field.`,
-    };
-    required.push("expectedVersion");
-  }
-  if (operation?.concurrency?.editLease) {
-    properties.leaseToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque edit-lease token issued by the server for this operation and record.",
-    };
-    required.push("leaseToken");
-  }
-  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
-    properties.confirmed = {
-      type: "boolean",
-      description:
-        "Only true lets the operation continue after caller acknowledgement; this is not a server-issued security proof.",
-    };
-  }
-  if (operation?.interaction?.confirmation.mode === "challenge") {
-    properties.confirmationToken = {
-      type: "string",
-      minLength: 1,
-      description: "Opaque, single-use confirmation challenge token issued by the server.",
-    };
-    properties.confirmationAnswer = {
-      type: "string",
-      minLength: 1,
-      description:
-        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
-    };
-    dependentRequired = {
-      confirmationToken: ["confirmationAnswer"],
-      confirmationAnswer: ["confirmationToken"],
-    };
-  }
-  return {
-    properties,
-    required,
-    ...(dependentRequired ? { dependentRequired } : {}),
-  };
-}
 
 export function renderOpenApiSpec(
   manifest: PlatformSchemaManifest,
@@ -1020,46 +885,28 @@ export function renderOpenApiSpec(
     );
     const label = entityLabel(contract, name);
     const description = entityDescription(contract);
-    const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
-      table.source?.mcp?.elicitOnCreate?.into;
     tags.push({ name, ...(description ? { description } : {}) });
 
-    const read = columnProperties(
-      table.columns,
-      fieldsByKey,
-      referentiedata,
-      "storage",
-    );
-    const creatableColumns = table.columns.filter((column) =>
-      isWritableColumn(column, "create") &&
-      fieldNameForColumn(column) !== elicitedOutputField,
-    );
-    const updatableColumns = table.columns.filter((column) =>
-      isWritableColumn(column, "update") &&
-      fieldNameForColumn(column) !== elicitedOutputField,
-    );
-    const creatable = columnProperties(
-      creatableColumns,
-      fieldsByKey,
-      referentiedata,
-      "create",
-    );
-    const updatable = columnProperties(
-      updatableColumns,
-      fieldsByKey,
-      referentiedata,
-      "update",
-    );
+    const compiledContracts = [...contractsByEntityName.values()];
+    // The writable values come from the canonical Operation; the REST body
+    // carries them flat, with the shared definitions rebased into the one
+    // field-definition component of this document.
+    const bodyValues = (operation: "create" | "update") => {
+      const { values, definitions } = entityValuesSchema(contract, operation, compiledContracts, referentiedata);
+      return {
+        schema: rebaseJsonSchemaReferences(values, "#/$defs/", FIELD_DEFINITION_DEFS_BASE) as JsonObject,
+        definitions: rebaseJsonSchemaReferences(definitions, "#/$defs/", FIELD_DEFINITION_DEFS_BASE) as JsonObject,
+      };
+    };
+    const creatable = bodyValues("create");
+    const updatable = bodyValues("update");
     const updateSchemaName = `${name}UpdateInput`;
     const deleteSchemaName = `${name}DeleteInput`;
-    const createControls = operationControlSchema(contract.entityOperations.create);
-    const updateControls = operationControlSchema(contract.entityOperations.update);
-    const deleteControls = operationControlSchema(contract.entityOperations.delete);
+    const deleteControls = entityOperationControlSchema(contract.entityOperations.delete);
     const hasDeleteControls = Object.keys(deleteControls.properties).length > 0;
     const createOperation = contract.entityOperations.create;
     const updateOperation = contract.entityOperations.update;
     const deleteOperation = contract.entityOperations.delete;
-    const compiledContracts = [...contractsByEntityName.values()];
     const createPluginSchemas = createOperation?.implementation?.type === "plugin"
       ? entityOperationJsonSchemas(
           contract,
@@ -1082,7 +929,6 @@ export function renderOpenApiSpec(
       deleteOperation?.interaction?.confirmation.mode !== undefined &&
       deleteOperation.interaction.confirmation.mode !== "none";
     const fieldDefinitionDefinitions = {
-      ...read.definitions,
       ...creatable.definitions,
       ...updatable.definitions,
     };
@@ -1094,10 +940,8 @@ export function renderOpenApiSpec(
     }
 
     schemas[name] = {
-      type: "object",
       ...(description ? { description } : {}),
-      properties: read.properties,
-      ...(read.required.length > 0 ? { required: read.required } : {}),
+      ...entityRecordOutputSchema(contract),
     };
     {
       schemas[`${name}Result`] = {
@@ -1132,31 +976,28 @@ export function renderOpenApiSpec(
       }
     }
     const writerNote = operationWrittenNote(table);
-    schemas[`${name}Input`] = createPluginSchemas?.inputSchema ?? {
-      type: "object",
-      description: `Create body for ${label}.${writerNote}`,
-      additionalProperties: false,
-      properties: { ...creatable.properties, ...createControls.properties },
-      ...(creatable.required.length + createControls.required.length > 0
-        ? { required: [...creatable.required, ...createControls.required] }
-        : {}),
-    };
-    if (!createPluginSchemas) schemas[`${name}Input`] = withBlueprintCreate(schemas[`${name}Input`] as JsonObject, table.source?.blueprint);
-    schemas[updateSchemaName] = updatePluginSchemas?.inputSchema ?? {
-      type: "object",
-      additionalProperties: false,
-      properties: { ...updatable.properties, ...updateControls.properties },
-      ...(updateControls.required.length > 0
-        ? { required: updateControls.required }
-        : {}),
-      ...(updateControls.dependentRequired
-        ? { dependentRequired: updateControls.dependentRequired }
-        : {}),
-      description:
-        "PATCH body; omitted fields are left unchanged. Fields authored " +
-        "immutable are settable at create only and are rejected here." +
-        writerNote,
-    };
+    schemas[`${name}Input`] = createPluginSchemas?.inputSchema ?? withBlueprintCreate(
+      withEntityOperationControls(
+        {
+          ...creatable.schema,
+          description: `Create body for ${label}.${writerNote}`,
+          additionalProperties: false,
+        },
+        createOperation,
+      ),
+      table.source?.blueprint,
+    );
+    schemas[updateSchemaName] = updatePluginSchemas?.inputSchema ?? withEntityOperationControls(
+      {
+        ...updatable.schema,
+        additionalProperties: false,
+        description:
+          "PATCH body; omitted fields are left unchanged. Fields authored " +
+          "immutable are settable at create only and are rejected here." +
+          writerNote,
+      },
+      updateOperation,
+    );
     if (hasDeleteControls) {
       schemas[deleteSchemaName] = {
         type: "object",
@@ -1178,19 +1019,8 @@ export function renderOpenApiSpec(
       };
     }
     schemas[`${name}ListData`] = {
-      type: "object",
       description: `A page of ${label} records.`,
-      required: ["items", "totalCount", "nextCursor"],
-      properties: {
-        items: {
-          type: "array",
-          items: {
-            $ref: `#/components/schemas/${name}Result`,
-          },
-        },
-        totalCount: { type: "integer" },
-        nextCursor: { type: ["string", "null"] },
-      },
+      ...entityListPageSchema({ $ref: `#/components/schemas/${name}Result` }, "counted"),
     };
     {
       schemas[`${name}ListResult`] = {

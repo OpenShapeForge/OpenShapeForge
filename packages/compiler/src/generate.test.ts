@@ -1910,8 +1910,29 @@ describe("generated REST OpenAPI artifact", () => {
       contractVersion: 2,
       kind: "compiledEntityContract",
       entity: { id: `core.${name}`, name, module: "core", title: name, labels: { en: name }, domains: [] },
-      storage: { table: table.name, columns: [] },
-      model: { fields: [], relationships: [] },
+      storage: {
+        table: table.name,
+        columns: table.columns.map((column) => ({
+          field: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+          column: column.name,
+          type: column.type,
+          nullable: !(column.required === true || column.primaryKey === true),
+          storageClass: "core" as const,
+        })),
+      },
+      model: {
+        fields: table.columns
+          .filter((column) => !column.primaryKey && !["tenant_id", "created_at", "updated_at"].includes(column.name))
+          .map((column) => ({
+            key: column.sourceField ?? column.name.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase()),
+            baseType: column.type === "boolean" ? "boolean" : "string",
+            osfType: column.type === "boolean" ? "boolean" : "string",
+            cardinality: "single",
+            required: column.required === true,
+            label: { en: column.name },
+          })),
+        relationships: [],
+      },
       crud,
       graphql: {},
       authorization,
@@ -1960,8 +1981,9 @@ describe("generated REST OpenAPI artifact", () => {
       "displayName",
       "isActive",
       "createdAt",
+      "updatedAt",
     ]);
-    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt"]);
+    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt", "updatedAt"]);
 
     const input = spec.components.schemas.WidgetInput!;
     expect(Object.keys(input.properties ?? {})).toEqual(["displayName", "isActive"]);

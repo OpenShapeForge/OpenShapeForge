@@ -117,19 +117,15 @@ test("canonical entity input sources reach every generated operation interface",
       object(object(documentInput.properties).version),
     );
 
-    // The MCP listing is the same input without the per-language copy: the
-    // runtime localizes tool text itself and the copy weighed on the listing.
-    const withoutLocalizedCopy = (value: unknown): unknown =>
-      JSON.parse(JSON.stringify(value, (key, entry) => (key === "x-osf-i18n" ? undefined : entry)));
     const mcp = parse("apps/api/src/generated/mcp/tools.json");
     const tools = mcp.tools as JsonObject[];
     expect(
       tools.find((tool) => tool.operationId === "Document.create")?.inputSchema,
-    ).toEqual(withoutLocalizedCopy(documentInput));
+    ).toEqual(documentInput);
     expect(
       tools.find((tool) => tool.operationId === "DocumentVersion.create")
         ?.inputSchema,
-    ).toEqual(withoutLocalizedCopy(documentVersionInput));
+    ).toEqual(documentVersionInput);
 
     const openApi = parse("apps/api/src/generated/rest/openapi.json");
     const restSchemas = object(object(openApi.components).schemas);

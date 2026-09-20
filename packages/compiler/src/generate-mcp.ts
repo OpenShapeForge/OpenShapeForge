@@ -660,28 +660,7 @@ function buildToolsForEntity(
     });
   }
 
-  return tools.map((tool) => ({
-    ...tool,
-    inputSchema: withoutLocalizedCopy(tool.inputSchema) as JsonObject,
-    outputSchema: withoutLocalizedCopy(tool.outputSchema) as JsonObject,
-  }));
-}
-
-/**
- * A tool schema without the per-language copy (`x-osf-i18n`). The MCP
- * listing is addressed to a model in one language at a time: the runtime
- * localizes tool texts from the compiled contract, and no MCP surface reads
- * the per-language labels off a schema property. Left in, they were a third
- * of every dedicated tool on the wire and counted against the listing budget.
- */
-function withoutLocalizedCopy(schema: unknown): unknown {
-  if (Array.isArray(schema)) return schema.map(withoutLocalizedCopy);
-  if (!schema || typeof schema !== "object") return schema;
-  return Object.fromEntries(
-    Object.entries(schema as JsonObject)
-      .filter(([key]) => key !== "x-osf-i18n")
-      .map(([key, value]) => [key, withoutLocalizedCopy(value)]),
-  );
+  return tools;
 }
 
 export type McpEntityCatalogEntry = {
@@ -1029,7 +1008,7 @@ export function advertisedToolSizes(input: StaticListingInput): AdvertisedToolSi
           outputSchema: tool.outputSchema,
           annotations: tool.annotations,
           linksConfigurationApp: entities.get(tool.entity)?.elicitOnCreate !== undefined,
-        });
+        }, language);
       }),
     });
   }

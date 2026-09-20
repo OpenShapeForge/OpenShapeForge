@@ -105,6 +105,7 @@ export {
   ENTITY_CONFIGURATION_APP_URI,
   advertisedEntityTool,
   localizedEntityToolText,
+  schemaInLanguage,
 } from "./mcp-entity-tool-shape.js";
 export type { EntityToolAdvertisement } from "./mcp-entity-tool-shape.js";
 export type { ScalarJsonSchema, ScalarProjection, ScalarType } from "./scalar-projection.js";

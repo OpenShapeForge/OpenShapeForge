@@ -22,7 +22,7 @@ describe("scalar projection", () => {
 
   test("a projected schema is a fresh object", () => {
     const first = scalarJsonSchema("uuid");
-    first.format = undefined;
+    delete first.format;
     expect(scalarJsonSchema("uuid")).toEqual({ type: "string", format: "uuid" });
   });
 });

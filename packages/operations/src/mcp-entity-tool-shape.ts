@@ -71,15 +71,45 @@ export type EntityToolAdvertisement = {
   linksConfigurationApp: boolean;
 };
 
-/** The listed tool: write reminder appended, title mirrored, app link attached. */
-export function advertisedEntityTool(tool: EntityToolAdvertisement): McpToolShape {
+/**
+ * A schema in one language: every property's `title` and `description`
+ * become the `x-osf-i18n` text for `language` (English when that language
+ * has none, the compiled text when neither exists) and the per-language copy
+ * itself is dropped. The listing and osf_describe both send this: a model
+ * reads one language at a time, and the copy was a third of every dedicated
+ * tool on the wire. The compiled catalogue keeps every language.
+ */
+export function schemaInLanguage(schema: unknown, language: string): unknown {
+  if (Array.isArray(schema)) return schema.map((entry) => schemaInLanguage(entry, language));
+  if (!schema || typeof schema !== "object") return schema;
+  const copy = (schema as Record<string, unknown>)["x-osf-i18n"] as
+    | Record<string, LocalizedText>
+    | undefined;
+  const localized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === "x-osf-i18n") continue;
+    localized[key] = schemaInLanguage(value, language);
+  }
+  if (copy && typeof copy === "object") {
+    for (const key of ["title", "description"] as const) {
+      const text = inLanguage(copy[key], language);
+      if (text !== undefined) localized[key] = text;
+    }
+  }
+  return localized;
+}
+
+/** The listed tool: write reminder appended, title mirrored, app link attached, schemas in one language. */
+export function advertisedEntityTool(tool: EntityToolAdvertisement, language = "en"): McpToolShape {
   const write = tool.operation === "create" || tool.operation === "update";
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
     description: write ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER}` : tool.description,
-    inputSchema: tool.inputSchema,
-    ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+    inputSchema: schemaInLanguage(tool.inputSchema, language) as Record<string, unknown>,
+    ...(tool.outputSchema
+      ? { outputSchema: schemaInLanguage(tool.outputSchema, language) as Record<string, unknown> }
+      : {}),
     annotations: {
       ...(tool.title !== undefined ? { title: tool.title } : {}),
       ...tool.annotations,

@@ -81,5 +81,5 @@ export function describeTool(
     outputSchema: withholdClassifiedOutput(tool.outputSchema, tool.operation, classified),
     annotations: tool.annotations,
     linksConfigurationApp: entity?.elicitOnCreate !== undefined && publicOriginIsHttps(),
-  });
+  }, locale?.tag ?? "en");
 }

@@ -261,7 +261,10 @@ comes from **`osf_describe { entity, operation? }`**, listed beside the generic
 tools whenever the session can address a generic entity, described with the
 same withholding and collection policy the dedicated tools get, plus the
 refusals the Operation declares (`errors: [{ status, code, description }]`),
-which the listing leaves out for its byte budget. The
+which the listing leaves out for its byte budget. Both the listing and the
+describe answer carry a schema in the session's language: the compiled
+catalogue keeps every language under `x-osf-i18n`, and the wire gets one
+`title`/`description` per property. The
 `osf://schema/entities/{slug}` resource keeps describing the readable field
 model; `osf_describe` is the write contract.
 

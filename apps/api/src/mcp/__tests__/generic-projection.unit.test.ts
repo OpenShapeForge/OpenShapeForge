@@ -92,6 +92,23 @@ describe("the generic osf_* listing", () => {
     expect(listed).not.toHaveProperty("errors");
   });
 
+  it.skipIf(generic.length === 0)("describes and lists a Dutch session in Dutch, one language on the wire", () => {
+    const compiledCreate = catalog.tools.find((tool) => tool.name === "osf_create" && tool.entity === "Address")!;
+    const property = Object.entries(compiledCreate.inputSchema.properties as Record<string, any>)
+      .find(([, schema]) => schema["x-osf-i18n"]?.title?.nl && schema["x-osf-i18n"].title.nl !== schema["x-osf-i18n"].title.en);
+    expect(property).toBeDefined();
+    const [key, compiledSchema] = property!;
+    const described = describeGenericEntity("Address", "create", session(RELATIONS), tables as never, dutch) as any;
+    const answered = described.operations.create.inputSchema.properties[key];
+    expect(answered.title).toBe(compiledSchema["x-osf-i18n"].title.nl);
+    expect(answered).not.toHaveProperty("x-osf-i18n");
+    const inEnglish = describeGenericEntity("Address", "create", session(RELATIONS), tables as never, english) as any;
+    expect(inEnglish.operations.create.inputSchema.properties[key].title).toBe(compiledSchema["x-osf-i18n"].title.en);
+    // The listing is the same shape: no per-language copy, the session's language.
+    const listed = JSON.stringify(crudToolsForSession(session(RELATIONS), tables as never, dutch));
+    expect(listed).not.toContain("x-osf-i18n");
+  });
+
   it.skipIf(generic.length === 0)("refuses an entity the session cannot address, naming only what it can", () => {
     expect(() => describeGenericEntity("Quote", undefined, session(RELATIONS), tables as never, english))
       .toThrow(/"Quote" is not one of the entities .* Address\./);

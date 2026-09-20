@@ -16,7 +16,7 @@ import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
-import { __registerExecutionCompatibilityForTests, catalogDerivedTools } from "../catalog.js";
+import { __registerExecutionCompatibilityForTests, __withDerivedToolEntriesForTests } from "../catalog.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
 import { runtimeHostOperationExecutors } from "../tool-results.js";
 import { isOperationFailure, type OperationResult } from "@openshapeforge/operations";
@@ -24,6 +24,23 @@ import { isOperationFailure, type OperationResult } from "@openshapeforge/operat
 const errorOf = (outcome: OperationResult<unknown>) => (isOperationFailure(outcome) ? outcome.error : undefined);
 
 const AUDIENCE = ["integration_user", "integration_admin"];
+const execution = {
+  bindingsRelation: "capabilityBindings",
+  bindingsEntity: "ServiceCapabilityBinding",
+  bindingsTable: "integration.service_capability_bindings",
+  parentRef: "serviceId",
+  operationRef: "capabilityId",
+  operationEntity: "Capability",
+  operationTable: "integration.capabilities",
+  providerRef: "adapterId",
+  providerEntity: "Adapter",
+  providerTable: "integration.adapters",
+  connectionEntity: "Connection",
+  connectionTable: "integration.connections",
+  connectionProviderRef: "adapterId",
+  connectionValuesField: "values",
+};
+/** A plugin's Service entry: the tools go to the audience, connect and dry run to administrators. */
 const entry = {
   entity: "Service",
   table: "integration.services",
@@ -34,28 +51,28 @@ const entry = {
   versionField: "version",
   connect: { name: "connect_service", description: "Sign in at the provider.", roles: ["integration_admin"] },
   dryRun: { name: "dry_run_service", description: "Compose the requests.", roles: ["integration_admin"] },
-  execution: {
-    bindingsRelation: "capabilityBindings",
-    bindingsEntity: "ServiceCapabilityBinding",
-    bindingsTable: "integration.service_capability_bindings",
-    parentRef: "serviceId",
-    operationRef: "capabilityId",
-    operationEntity: "Capability",
-    operationTable: "integration.capabilities",
-    providerRef: "adapterId",
-    providerEntity: "Adapter",
-    providerTable: "integration.adapters",
-    connectionEntity: "Connection",
-    connectionTable: "integration.connections",
-    connectionProviderRef: "adapterId",
-    connectionValuesField: "values",
-  },
+  execution,
   compatibility: {
     plugin: "osf-integration",
     providerId: "osf-integration",
     connectOperation: "osf-integration.service.connect",
     dryRunOperation: "osf-integration.service.dry-run",
   },
+} as never;
+/**
+ * A second entry whose dry-run helper carries the public name of a plugin
+ * Operation the reference catalogue lists (notebook_import, handler loaded
+ * by the test modules): a call under that name must reach the helper, not
+ * the Operation handler that would only bridge back.
+ */
+const colliding = {
+  ...(entry as object),
+  entity: "OtherService",
+  table: "integration.other_services",
+  roles: ["Organization.All.ReadWrite"],
+  connect: undefined,
+  dryRun: { name: "notebook_import", description: "Compose.", roles: ["Organization.All.ReadWrite"] },
+  compatibility: { plugin: "osf-integration", providerId: "other", dryRunOperation: "notebook.import" },
 } as never;
 const bridge = {
   plugin: "osf-integration",
@@ -74,14 +91,13 @@ const session = (...roles: string[]) =>
     credential: "trusted-context",
   }) as never;
 
-let unregister = () => {};
+const restore: (() => void)[] = [];
 beforeAll(() => {
-  catalogDerivedTools.push(entry);
-  unregister = __registerExecutionCompatibilityForTests(bridge);
+  restore.push(__withDerivedToolEntriesForTests([entry, colliding]));
+  restore.push(__registerExecutionCompatibilityForTests(bridge));
 });
 afterAll(() => {
-  catalogDerivedTools.splice(catalogDerivedTools.indexOf(entry), 1);
-  unregister();
+  for (const undo of restore.splice(0)) undo();
 });
 
 async function withServer<T>(roles: string[], run: (client: Client, server: ReturnType<typeof __buildGeneratedMcpServerForTests>) => Promise<T>): Promise<T> {
@@ -112,17 +128,40 @@ async function withServer<T>(roles: string[], run: (client: Client, server: Retu
 }
 
 describe("execution compatibility helpers", () => {
-  it("lists connect and dry run under their public names for the audience", async () => {
+  it("lists connect and dry run under their public names to the audience that holds their roles", async () => {
     await withServer(["integration_admin"], async (client) => {
       const names = (await client.listTools()).tools.map((tool) => tool.name);
       expect(names).toContain("connect_service");
       expect(names).toContain("dry_run_service");
       expect(names.filter((name) => name === "dry_run_service")).toHaveLength(1);
     });
+    // In the audience, but without the roles of the connect and dry-run
+    // Operations: the tools' user, not the organization's administrator.
+    await withServer(["integration_user"], async (client) => {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names).not.toContain("connect_service");
+      expect(names).not.toContain("dry_run_service");
+      for (const name of ["connect_service", "dry_run_service"]) {
+        const result = await client.callTool({ name, arguments: { tool: "x" } });
+        expect(result.isError).toBe(true);
+        expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(/^NOT_FOUND/);
+      }
+    });
     await withServer(["Relations.All.Read"], async (client) => {
       const names = (await client.listTools()).tools.map((tool) => tool.name);
       expect(names).not.toContain("connect_service");
       expect(names).not.toContain("dry_run_service");
+    });
+  });
+
+  it("dispatches a helper whose public name is also a listed Operation's to the helper", async () => {
+    await withServer(["Organization.All.ReadWrite"], async (client) => {
+      const names = (await client.listTools()).tools.map((tool) => tool.name);
+      expect(names.filter((name) => name === "notebook_import")).toHaveLength(1);
+      const result = await client.callTool({ name: "notebook_import", arguments: {} });
+      // The dry-run helper's own validation, not the notebook handler's answer.
+      expect(result.isError).toBe(true);
+      expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(/^VALIDATION: Argument "tool" is required/);
     });
   });
 

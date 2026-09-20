@@ -291,6 +291,25 @@ export function isDerivedHelperToolName(name: string): boolean {
   );
 }
 
+/**
+ * Test-only: add derived entries the way the compiled catalogue would carry
+ * them, as copies, and hand back the exact removal. The catalogue is a
+ * module-level import, so a test that needs an entry the reference
+ * catalogue lacks registers it here rather than editing the import.
+ */
+export function __withDerivedToolEntriesForTests(
+  entries: readonly DerivedToolsCatalogEntry[],
+): () => void {
+  const added = entries.map((entry) => structuredClone(entry));
+  catalogDerivedTools.push(...added);
+  return () => {
+    for (const entry of added) {
+      const index = catalogDerivedTools.indexOf(entry);
+      if (index >= 0) catalogDerivedTools.splice(index, 1);
+    }
+  };
+}
+
 export const compatibilityOperations = catalog.executionCompatibility ?? [];
 export const compatibilityOperationByKey = new Map(
   compatibilityOperations.map((entry) => [entry.operation, entry]),

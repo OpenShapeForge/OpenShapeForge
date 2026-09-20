@@ -51,6 +51,7 @@ describe("status transitions", () => {
     ]);
     expect((operation.definition.description as { en: string }).en).toContain("status: pending -> triggered");
     expect((operation.definition.description as { en: string }).en).toContain("agreementId.code is set");
+    expect((operation.definition.description as { nl: string }).nl).toContain("agreementId.code ingevuld is");
     expect(operation.interfaces.rest).toEqual({ method: "POST", path: "/api/rest/v1/agreement-milestones/:id/trigger" });
   });
 

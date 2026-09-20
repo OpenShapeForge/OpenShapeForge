@@ -203,7 +203,7 @@ function offerClause(status: string, rule: FieldDefinitionTransitionRule): Local
     const present = "present" in entry && entry.present;
     return {
       en: `${name} is ${present ? "set" : "empty"}`,
-      nl: `${name} ${present ? "gezet" : "leeg"} is`,
+      nl: `${name} ${present ? "ingevuld" : "leeg"} is`,
     };
   });
   return {

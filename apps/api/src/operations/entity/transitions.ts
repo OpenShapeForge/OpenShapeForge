@@ -202,7 +202,7 @@ export function transitionRefusal(
     const named = `${precondition.via}.${precondition.field}`;
     if (!remote) {
       const target = precondition.target.source?.authoringEntityName ?? precondition.target.name;
-      return invalidState(`${binding.rule.key} requires ${named} on a ${target} in this tenant.`);
+      return invalidState(`${binding.rule.key} requires ${named} on the ${target} that ${precondition.via} names in this tenant.`);
     }
     const value = remote.row[precondition.fieldColumn.name];
     if (precondition.present !== undefined && present(value) !== precondition.present) {

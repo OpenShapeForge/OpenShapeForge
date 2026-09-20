@@ -64,7 +64,7 @@ describe("status transition binding", () => {
       }]]);
     expect(transitionRefusal(base, { status: "pending" }, remote(undefined))).toMatchObject({
       code: "INVALID_STATE",
-      message: "trigger requires agreementId.code on a Agreement in this tenant.",
+      message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant.",
     });
     expect(transitionRefusal(base, { status: "pending" }, remote({ code: null }))).toMatchObject({
       message: "trigger requires agreementId.code to be set.",

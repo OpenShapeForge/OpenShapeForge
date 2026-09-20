@@ -247,14 +247,14 @@ describe("status transitions against PostgreSQL", () => {
 
     const missing = await milestone("pending", tenant, randomUUID());
     await expect(transitionOperationHandler(operation)({ id: missing }, context())).rejects.toMatchObject({
-      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on a Agreement in this tenant." },
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant." },
     });
     expect((await row(missing))!.status).toBe("pending");
 
     const foreignAgreement = await agreement(otherTenant);
     const crossTenant = await milestone("pending", tenant, foreignAgreement);
     await expect(transitionOperationHandler(operation)({ id: crossTenant }, context())).rejects.toMatchObject({
-      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on a Agreement in this tenant." },
+      operationError: { code: "INVALID_STATE", message: "trigger requires agreementId.code on the Agreement that agreementId names in this tenant." },
     });
 
     const emptyCode = await agreement(tenant, null);

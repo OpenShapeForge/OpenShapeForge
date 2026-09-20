@@ -27,6 +27,7 @@
 import { HttpError } from "../rest/http-error.js";
 import { requestHeaderMappings } from "./declarative-execution.js";
 import { deriveToolName, type DerivedToolsCatalogEntry } from "./derived-tools.js";
+import { readBindingRows } from "./execution-bindings.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -145,10 +146,10 @@ export async function validateVisibleDefinition(
     }
   }
 
-  const bindingsRaw = row[execution.bindingsField];
-  const bindings = Array.isArray(bindingsRaw) ? (bindingsRaw as JsonRecord[]) : [];
+  const bindings = await readBindingRows(execution, row, readRows);
   if (bindings.length === 0) {
-    problems.push(`the ${execution.bindingsField} collection is empty; nothing would execute.`);
+    const collection = execution.bindingsRelation ?? execution.bindingsField ?? "bindings";
+    problems.push(`the ${collection} collection is empty; nothing would execute.`);
   }
 
   // Provider rows collected across bindings so each connection is judged once.

@@ -10,7 +10,8 @@ import {
   isAuthorizedInternalDerivedRow,
   sessionInAudience,
 } from "./derived-tools.js";
-import { bindingSelected, orderedBindings } from "./declarative-execution.js";
+import { bindingSelected } from "./declarative-execution.js";
+import { loadOrderedBindings } from "./execution-bindings.js";
 import { scopesCovered } from "./entity-oauth.js";
 import { accessTokenNeedsRefresh, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { connectionProblemMessage } from "./connection-guidance.js";
@@ -150,9 +151,12 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               });
           }
         };
-        const selectedBindings = orderedBindings(
-          serviceRow,
-          execution.bindingsField,
+        const selectedBindings = (
+          await loadOrderedBindings(
+            execution,
+            serviceRow,
+            (table, filter) => snapshotRowsByFilter(trx, table, filter),
+          )
         ).filter((binding) => bindingSelected(binding, args));
         for (const binding of selectedBindings) {
           const operationId = binding[execution.operationRef];

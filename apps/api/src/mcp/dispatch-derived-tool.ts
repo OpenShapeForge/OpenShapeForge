@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { deriveToolName, inputSchemaFromStoredFields } from "./derived-tools.js";
-import { bindingSelected, orderedBindings } from "./declarative-execution.js";
+import { bindingSelected } from "./declarative-execution.js";
+import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
 import { type CapturedDerivedExecution, catalogDerivedTools } from "./catalog.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
-import { runtimeRowByFilter } from "./session-connections.js";
+import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { failed } from "./tool-results.js";
 import {
   type CompletedStep,
@@ -141,13 +142,24 @@ export async function derivedToolCall(
           binding: number;
           outcome: ReturnType<typeof unavailableOutcome>;
         }[] = [];
-        const selectedBindings = orderedBindings(
-          serviceRow,
-          execution.bindingsField,
+        const selectedBindings = (
+          await loadOrderedBindings(
+            execution,
+            serviceRow,
+            (table, filter, limit) =>
+              runtimeRowsByFilter(
+                db,
+                session,
+                tables,
+                table,
+                filter,
+                limit ?? 50,
+              ),
+          )
+        ).filter((binding) =>
           // A binding the call's selector input does not choose is not
           // part of this call at all — deliberate routing, not an
           // outage, so it does not surface in `unavailable`.
-        ).filter((binding) =>
           bindingSelected(binding, args as Record<string, unknown>),
         );
         // Which bindings this handle stands for. Two selection modes,

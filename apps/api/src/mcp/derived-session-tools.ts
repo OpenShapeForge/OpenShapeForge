@@ -17,6 +17,7 @@ import {
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
 import { definitionFieldKeys, secretFieldKeys } from "./declarative-execution.js";
+import { loadOrderedBindingsByOwner } from "./execution-bindings.js";
 import { connectionNeedsOf, describeConnectionNeeds, withConnectionNeeds } from "./connection-guidance.js";
 import { type ResolvedLocale } from "./locale.js";
 import {
@@ -26,7 +27,11 @@ import {
   type GeneratedTable,
 } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
-import { connectionToolsFor, providerDisplayName } from "./session-connections.js";
+import {
+  connectionToolsFor,
+  providerDisplayName,
+  runtimeRowsByFilter,
+} from "./session-connections.js";
 
 /**
  * Cap on rows a definition table contributes to the derived-tool projection.
@@ -137,14 +142,14 @@ export async function derivedToolsForSession(
             );
           }
         }
-        const rowById = new Map(rows.map((row) => [String(row.id), row]));
+        const bindingsByOwner = await loadOrderedBindingsByOwner(
+          entry.execution,
+          rows,
+          (table, filter, limit) =>
+            runtimeRowsByFilter(db, session, tables, table, filter, limit ?? 50),
+        );
         entryTools = entryTools.map((tool) => {
-          const bindingsRaw = rowById.get(tool.rowId)?.[
-            entry.execution!.bindingsField
-          ];
-          const bindings = Array.isArray(bindingsRaw)
-            ? (bindingsRaw as Record<string, unknown>[])
-            : [];
+          const bindings = bindingsByOwner.get(tool.rowId) ?? [];
           let mutation = false;
           let destructive = false;
           let resolved = bindings.length > 0;

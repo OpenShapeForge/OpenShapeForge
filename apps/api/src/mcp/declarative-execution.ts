@@ -59,7 +59,13 @@ import {
 import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type ExecutionCatalogEntry = {
-  bindingsField: string;
+  /** JSON collection on the owner row. Absent when `bindingsRelation` is set. */
+  bindingsField?: string;
+  /** Owned hasMany collection on the owner. Absent when `bindingsField` is set. */
+  bindingsRelation?: string;
+  bindingsEntity?: string;
+  bindingsTable?: string;
+  parentRef?: string;
   operationRef: string;
   operationEntity: string;
   operationTable: string;
@@ -1741,11 +1747,7 @@ export function mergeOutputs(
 }
 
 /** Bindings in authored order; a malformed entry fails closed by index. */
-export function orderedBindings(
-  row: JsonRecord,
-  bindingsField: string,
-): JsonRecord[] {
-  const raw = row[bindingsField];
+export function orderedBindingRecords(raw: unknown): JsonRecord[] {
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new HttpError(
       400,
@@ -1780,4 +1782,12 @@ export function orderedBindings(
       return binding;
     })
     .sort((a, b) => (a.order as number) - (b.order as number));
+}
+
+/** Bindings stored as a JSON collection on the owner row. */
+export function orderedBindings(
+  row: JsonRecord,
+  bindingsField: string,
+): JsonRecord[] {
+  return orderedBindingRecords(row[bindingsField]);
 }

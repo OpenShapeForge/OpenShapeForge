@@ -48,7 +48,7 @@ import {
   missingRequiredConnectionValues,
   type ConnectionField,
 } from "./connection-guidance.js";
-import { orderedBindings } from "./declarative-execution.js";
+import { loadOrderedBindings } from "./execution-bindings.js";
 import {
   sessionInAudience,
   type DerivedTool,
@@ -888,7 +888,11 @@ async function personalSignInsFor(
       if (!row) continue;
       let bindings: Record<string, unknown>[];
       try {
-        bindings = orderedBindings(row, execution.bindingsField);
+        bindings = await loadOrderedBindings(
+          execution,
+          row,
+          (table, filter, limit) => env.rowsByFilter(table, filter, limit),
+        );
       } catch {
         continue; // a malformed definition cannot block onboarding
       }

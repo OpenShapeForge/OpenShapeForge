@@ -6,7 +6,8 @@
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
 import { collectElicitedValues } from "./elicitation.js";
-import { mintConfiguration, handoffModelValues } from "./configuration-handoff.js";
+import { mintConfiguration } from "./configuration-handoff.js";
+import { handoffModelValues } from "./configuration-submission.js";
 import {
   providerUrlTemplates,
   secretFieldKeys,

@@ -11,9 +11,10 @@ import {
   listGeneratedEntitiesForTable,
   mergeGeneratedEntityObjectForTable,
 } from "../operations/entity/index.js";
-import { handoffFailureCode } from "./configuration-handoff.js";
+import { handoffFailureCode } from "./configuration-submission.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
-import { exchangeCodeForTokens, redeemState } from "./entity-oauth.js";
+import { redeemState } from "./entity-oauth.js";
+import { exchangeCodeForTokens } from "./entity-oauth-tokens.js";
 import { tablesByName } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { ENTITY_OAUTH_CALLBACK_PATH } from "./handoff-config.js";

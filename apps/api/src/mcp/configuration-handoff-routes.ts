@@ -15,20 +15,24 @@ import {
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
-  configurationFormDefinitions,
   latestConfigurationForSession,
-  parseSubmission,
   peekConfiguration,
+  type PendingConfiguration,
+} from "./configuration-handoff.js";
+import {
   renderConfigurationExpiredPage,
   renderConfigurationFailedPage,
   renderConfigurationForm,
   renderConfigurationSavedPage,
+} from "./browser-pages.js";
+import {
+  configurationFormDefinitions,
+  parseSubmission,
   storeSubmission,
-  type PendingConfiguration,
   findExistingConfiguration,
   handoffFailureCode,
   mergeConfigurationValues,
-} from "./configuration-handoff.js";
+} from "./configuration-submission.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { HttpError } from "../rest/http-error.js";
 import { tablesByName } from "./catalog.js";

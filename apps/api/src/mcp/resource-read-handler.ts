@@ -6,7 +6,7 @@
 import { OperationFailure } from "@openshapeforge/operations";
 import { ErrorCode, McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { entityOperationRef, executeEntityOperation } from "../operations/entity/index.js";
-import { renderConfigurationApp } from "./configuration-handoff.js";
+import { renderConfigurationApp } from "./configuration-app.js";
 import { ARTIFACT_UPLOAD_APP_URI, renderArtifactUploadApp } from "./artifact-upload.js";
 import {
   ORGANIZATION_PROFILE_RESOURCE_URI,

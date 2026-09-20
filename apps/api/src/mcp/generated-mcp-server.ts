@@ -33,7 +33,10 @@
  *
  * This file is the transport: it builds one server per session and registers
  * the HTTP routes. The engine behind it lives beside it, one module per
- * concern, none above four hundred lines:
+ * concern; the modules this split produced are each under four hundred
+ * lines (the older modules beside them — onboarding, update notices,
+ * declarative execution, the control server, the browser pages — were not
+ * part of it):
  *
  *   catalog.ts, catalog-rows.ts,        the compiled catalogue, its rows and
  *   session-projection.ts               what a session is shown of it

@@ -66,6 +66,11 @@ function nullableSchema(schema: JsonObject): JsonObject {
   return { anyOf: [schema, { type: "null" }] };
 }
 
+/** The annotations a form reads from a property node, kept on a wrapper (`anyOf`/`oneOf`) around it. */
+function presentation(schema: JsonObject): JsonObject {
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key === "x-osf-type" || key === "x-osf-reference" || key === "x-osf-i18n"));
+}
+
 /** Persisted record shape returned by every canonical entity read/write. */
 export function entityRecordOutputSchema(
   contract: CompiledEntityContract,
@@ -93,6 +98,8 @@ export function entityRecordOutputSchema(
         ...(column.nullable ? nullableSchema(schema) : schema),
         ...(field?.label && typeof field.label === "object"
           ? { "x-osf-i18n": { title: field.label } } : {}),
+        // The type a reader renders the property through, on the node a reader gets (the nullable wrapper included).
+        ...(field?.osfType ? { "x-osf-type": field.osfType } : {}),
       },
       !column.nullable,
     );
@@ -164,6 +171,7 @@ export function entityRelationshipKeys(
       schema: {
         type: "string",
         format: "uuid",
+        "x-osf-type": relationship.target,
         description:
           `Identifier of the ${targetLabel} this ${entityLabel(contract)} belongs to` +
           (target?.listTool ? `, as returned by \`${target.listTool}\`.` : "."),
@@ -387,10 +395,10 @@ export function entityOperationJsonSchemas(
         ) continue;
         const schema = compiledFieldSchemaWithoutDefinitions(field, referentiedata);
         delete schema.default;
-        filterProperties[field.key] = { oneOf: [schema, exactFilter(schema)] };
+        filterProperties[field.key] = { ...presentation(schema), oneOf: [schema, exactFilter(schema)] };
       }
       for (const relationship of relationships) {
-        filterProperties[relationship.key] = { oneOf: [relationship.schema, exactFilter(relationship.schema)] };
+        filterProperties[relationship.key] = { ...presentation(relationship.schema), oneOf: [relationship.schema, exactFilter(relationship.schema)] };
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
       const sortable = contract.model.fields

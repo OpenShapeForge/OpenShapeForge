@@ -538,14 +538,12 @@ describe("generated MCP server", () => {
       input: { definitionId: randomUUID() },
       idempotencyKey: randomUUID(),
     });
-    // The Operation is keyed and declares an external write, so the runtime
-    // records a running receipt and marks effects admitted BEFORE it invokes
-    // the handler (operations/runtime.ts, execute); the handler's NOT_FOUND
-    // for a definition that never existed therefore surfaces fail-closed as
-    // OPERATION_OUTCOME_UNKNOWN. That is the dispatch this test proves. (It
-    // used to read NOT_FOUND only because the receipt insert failed on an
-    // unseeded platform.tenants row — REFERENCE_NOT_FOUND matched the regex.)
-    expect(toolError(called.body)).toMatch(/OPERATION_OUTCOME_UNKNOWN/);
+    // The Operation is keyed and declares database-only effects, so its
+    // receipt shares the handler's transaction (operations/runtime.ts,
+    // execute) and the handler's own NOT_FOUND for a definition that never
+    // existed is the answer. That the handler's refusal comes back at all is
+    // the dispatch this test proves.
+    expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });
 
   test("carries the authored field schema into the tool input schema", async () => {

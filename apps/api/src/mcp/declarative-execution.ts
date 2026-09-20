@@ -59,13 +59,11 @@ import {
 import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type ExecutionCatalogEntry = {
-  /** JSON collection on the owner row. Absent when `bindingsRelation` is set. */
-  bindingsField?: string;
-  /** Owned hasMany collection on the owner. Absent when `bindingsField` is set. */
-  bindingsRelation?: string;
-  bindingsEntity?: string;
-  bindingsTable?: string;
-  parentRef?: string;
+  /** Owned hasMany collection on the owner. */
+  bindingsRelation: string;
+  bindingsEntity: string;
+  bindingsTable: string;
+  parentRef: string;
   operationRef: string;
   operationEntity: string;
   operationTable: string;

@@ -83,6 +83,11 @@ function normalizeSortDirection(value: unknown): "asc" | "desc" {
   return typeof value === "string" && value.toLowerCase() === "desc" ? "desc" : "asc";
 }
 
+function membershipCondition(columnName: string, values: unknown[]) {
+  // Bound per element so uuid columns compare as uuid, not as text[].
+  return sql`${sql.id("row_source", columnName)} in (${sql.join(values)})`;
+}
+
 function buildFilterConditions(
   table: GeneratedCrudTable,
   session: DbSessionInput,
@@ -100,6 +105,11 @@ function buildFilterConditions(
     }
     // A fixed condition is a runtime-owned predicate, so `null` means the SQL
     // absence (`is null`), unlike a caller filter where it means "no filter".
+    if (Array.isArray(condition.value)) {
+      return condition.value.length === 0
+        ? sql`false`
+        : membershipCondition(condition.column, condition.value);
+    }
     return condition.value === null
       ? sql`${sql.id("row_source", condition.column)} is null`
       : sql`${sql.id("row_source", condition.column)} = ${condition.value}`;
@@ -157,7 +167,21 @@ function buildFilterConditions(
       if (!Array.isArray(value) || value.length === 0) {
         continue;
       }
-      conditions.push(sql`${sql.id("row_source", column.name)} in (${sql.join(value)})`);
+      conditions.push(membershipCondition(column.name, value));
+      continue;
+    }
+
+    const membership = value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "in")
+      ? (value as { in?: unknown }).in : undefined;
+    if (membership !== undefined) {
+      if (Object.keys(value as object).length !== 1) {
+        throw generatedCrudError(`In filter ${key} accepts in only.`, "BAD_USER_INPUT");
+      }
+      if (!Array.isArray(membership) || membership.length === 0) {
+        conditions.push(sql`false`);
+        continue;
+      }
+      conditions.push(membershipCondition(column.name, membership));
       continue;
     }
 

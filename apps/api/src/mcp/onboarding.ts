@@ -48,7 +48,7 @@ import {
   missingRequiredConnectionValues,
   type ConnectionField,
 } from "./connection-guidance.js";
-import { loadOrderedBindings } from "./execution-bindings.js";
+import { MAX_BINDINGS_PER_OWNER, loadOrderedBindings } from "./execution-bindings.js";
 import {
   sessionInAudience,
   type DerivedTool,
@@ -892,7 +892,13 @@ async function personalSignInsFor(
           execution,
           row,
           async (table, filter, options) => ({
-            rows: await env.rowsByFilter(table, filter, options?.limit),
+            // Request one past the cap so a 201-binding owner overflows
+            // instead of looking complete when this reader never pages.
+            rows: await env.rowsByFilter(
+              table,
+              filter,
+              (options?.limit ?? MAX_BINDINGS_PER_OWNER) + 1,
+            ),
             nextCursor: null,
           }),
         );

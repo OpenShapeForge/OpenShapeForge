@@ -153,7 +153,7 @@ export async function validateVisibleDefinition(
     }
   }
 
-  const collection = execution.bindingsRelation ?? execution.bindingsField ?? "bindings";
+  const collection = execution.bindingsRelation;
   const bindingReader: BindingRowReader =
     input.readBindingPages ??
     (async (table, filter) => ({

@@ -2,19 +2,18 @@
 /**
  * Load the ordered binding rows a derived tool will execute.
  *
- * JSON form (`bindingsField`) reads the collection off the owner row.
- * Relation form (`bindingsRelation`) joins the owned collection table under
- * the caller's session (RLS / tenant scope) and orders by `order`.
+ * Bindings live on an owned collection (`bindingsRelation`). The runtime
+ * joins that table under the caller's session (RLS / tenant scope) and
+ * orders by `order`.
  *
  * Relation reads page until the owner is complete. A chain that would exceed
  * `MAX_BINDINGS_PER_OWNER` is refused rather than executed truncated. Batch
- * listing reads each owner on its own budget so one owner's rows cannot
- * starve another.
+ * listing loads the owner-id set in one paged query and groups in memory, so
+ * one owner's rows cannot starve another.
  */
 import { HttpError } from "../rest/http-error.js";
 import {
   orderedBindingRecords,
-  orderedBindings,
   type ExecutionCatalogEntry,
 } from "./declarative-execution.js";
 
@@ -89,6 +88,32 @@ function overflowIfBeyond(
 }
 
 /**
+ * True for Postgres undefined_table (42P01) and, defensively, missing-schema
+ * (3F000). Bun's SQL driver reports the SQLSTATE in `errno`; other drivers
+ * put it in `code`.
+ */
+export function isMissingRelationError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as { code?: unknown; errno?: unknown };
+  const sqlstates = new Set(["42P01", "3F000"]);
+  return (
+    (typeof candidate.errno === "string" && sqlstates.has(candidate.errno)) ||
+    (typeof candidate.code === "string" && sqlstates.has(candidate.code))
+  );
+}
+
+async function readRelationOrEmpty(
+  read: () => Promise<Record<string, unknown>[]>,
+): Promise<Record<string, unknown>[]> {
+  try {
+    return await read();
+  } catch (error) {
+    if (isMissingRelationError(error)) return [];
+    throw error;
+  }
+}
+
+/**
  * Read every relation row matching `filter`, paging by the reader's cursor.
  * Refuses once `max` rows would be exceeded rather than returning a prefix.
  */
@@ -150,19 +175,12 @@ export async function readBindingRows(
   ownerRow: Record<string, unknown>,
   readRows?: BindingRowReader,
 ): Promise<Record<string, unknown>[]> {
-  if (typeof execution.bindingsField === "string" && execution.bindingsField.length > 0) {
-    const raw = ownerRow[execution.bindingsField];
-    return Array.isArray(raw) ? (raw as Record<string, unknown>[]) : [];
-  }
   if (!readRows) return [];
   const ownerId = ownerRow.id;
   if (typeof ownerId !== "string" || ownerId.length === 0) return [];
-  try {
-    return await relationRowsForOwner(execution, ownerRow, readRows);
-  } catch (error) {
-    if (error instanceof HttpError) throw error;
-    return [];
-  }
+  return readRelationOrEmpty(() =>
+    relationRowsForOwner(execution, ownerRow, readRows),
+  );
 }
 
 /** Ordered bindings for one owner row. */
@@ -171,9 +189,6 @@ export async function loadOrderedBindings(
   ownerRow: Record<string, unknown>,
   readRows?: BindingRowReader,
 ): Promise<Record<string, unknown>[]> {
-  if (typeof execution.bindingsField === "string" && execution.bindingsField.length > 0) {
-    return orderedBindings(ownerRow, execution.bindingsField);
-  }
   if (!readRows) {
     throw new HttpError(
       500,
@@ -192,35 +207,46 @@ export async function loadOrderedBindingsByOwner(
   readRows: BindingRowReader,
 ): Promise<Map<string, Record<string, unknown>[]>> {
   const grouped = new Map<string, Record<string, unknown>[]>();
-  if (typeof execution.bindingsField === "string" && execution.bindingsField.length > 0) {
-    for (const row of ownerRows) {
-      const id = typeof row.id === "string" ? row.id : "";
-      if (!id) continue;
-      try {
-        grouped.set(id, orderedBindings(row, execution.bindingsField));
-      } catch {
-        grouped.set(id, []);
-      }
-    }
-    return grouped;
-  }
-  relationContract(execution);
+  const { table, parentRef } = relationContract(execution);
   const ownerIds = ownerRows
     .map((row) => row.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0);
-  // One budget per owner: a shared page would let the first owners consume
-  // the reader's cap and leave later owners looking unbound.
-  await Promise.all(
-    ownerIds.map(async (id) => {
-      try {
-        grouped.set(
-          id,
-          await loadOrderedBindings(execution, { id }, readRows),
-        );
-      } catch {
-        grouped.set(id, []);
+  for (const id of ownerIds) grouped.set(id, []);
+  if (ownerIds.length === 0) return grouped;
+
+  const collected = await readRelationOrEmpty(async () => {
+    const rows: Record<string, unknown>[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    for (;;) {
+      const page = asPage(
+        await readRows(
+          table,
+          { [parentRef]: { in: ownerIds } },
+          { limit: RELATION_PAGE_SIZE, cursor },
+        ),
+      );
+      for (const row of page.rows) {
+        if (!row || typeof row !== "object") continue;
+        const id = typeof row.id === "string" ? row.id : "";
+        if (id) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        const ownerId = row[parentRef];
+        if (typeof ownerId !== "string" || !grouped.has(ownerId)) continue;
+        const bucket = grouped.get(ownerId)!;
+        bucket.push(row);
+        overflowIfBeyond(bucket.length);
+        rows.push(row);
       }
-    }),
-  );
+      if (!page.nextCursor || page.rows.length === 0) return rows;
+      if (page.nextCursor === cursor) throw new BindingOverflowError();
+      cursor = page.nextCursor;
+    }
+  });
+  for (const [id, rows] of grouped) {
+    grouped.set(id, rows.length === 0 ? [] : orderedBindingRecords(rows));
+  }
   return grouped;
 }

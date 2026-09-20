@@ -35,4 +35,22 @@ describe("fixed where conditions", () => {
     expect(compiled.sql).toContain('"row_source"."title" = $');
     expect(compiled.parameters).toEqual(["x"]);
   });
+
+  test("renders an array fixed value and an in-filter as a bound IN list", () => {
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    const fixed = buildFilterConditions(table, session, undefined, [
+      { column: "id", value: ids },
+    ]).compile(runtime.db);
+    expect(fixed.sql).toContain('"row_source"."id" in (');
+    expect(fixed.parameters).toEqual(ids);
+
+    const filtered = buildFilterConditions(table, session, { id: { in: ids } }).compile(
+      runtime.db,
+    );
+    expect(filtered.sql).toContain('"row_source"."id" in (');
+    expect(filtered.parameters).toEqual(ids);
+  });
 });

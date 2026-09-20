@@ -8293,16 +8293,17 @@ export function registerGeneratedMcpServer(
           groups: [],
           scope: "self",
         };
-        const rows = (
-          await listGeneratedEntitiesForTable(db, writeSession, table, {
-            limit: 50,
-            filter: { [pending.connectionProviderRef]: pending.providerRowId },
-          })
-        ).rows.map((row) => serializeRow(table, row));
         const personalScope = pending.connectionScope === "user";
-        const existing = personalScope
-          ? rows.find((row) => row.ownerUserId === pending.userId)
-          : rows.find((row) => !row.ownerUserId);
+        // The owner is part of the query, not of a scan over the first page:
+        // a tenant with more personal connections to one provider than a
+        // page holds would otherwise get a second row for the same person.
+        const existing = (
+          await listGeneratedEntitiesForTable(db, writeSession, table, {
+            limit: 1,
+            filter: { [pending.connectionProviderRef]: pending.providerRowId },
+            fixedWhere: [{ column: "owner_user_id", value: personalScope ? pending.userId : null }],
+          })
+        ).rows.map((row) => serializeRow(table, row))[0];
         if (existing) {
           await mergeGeneratedEntityObjectForTable(
             db,

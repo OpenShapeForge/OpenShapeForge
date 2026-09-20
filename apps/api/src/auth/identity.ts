@@ -323,17 +323,19 @@ async function resolveCredentialSession(
       options.organization !== undefined,
     );
     if (!verifier) {
-      // A bearer credential was presented but no verifier is configured. Fail
-      // closed rather than downgrading to the trusted-context header path.
+      // A bearer credential was presented but no verifier is configured. That
+      // is the deployment's fault, not the caller's: neither downgrade to the
+      // trusted-context header path (downgrade-attackable) nor run as nobody
+      // (a browser whose host forwards its token would silently lose its
+      // session). Say the service is unavailable, and say why.
       console.warn(
         "[auth] Authorization: Bearer header present but no bearer verifier is " +
           "configured (OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI/ISSUER unset). " +
-          "Rejecting the request instead of falling back to trusted-context.",
+          "Refusing the request as unavailable.",
       );
-      if (options.failOnUnavailable) {
-        throw new SessionAuthenticationUnavailableError();
-      }
-      return EMPTY_SESSION;
+      throw new SessionAuthenticationUnavailableError(
+        "Bearer tokens cannot be verified: OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI and _ISSUER are not configured.",
+      );
     }
 
     const match = BEARER_AUTHORIZATION.exec(authorization);

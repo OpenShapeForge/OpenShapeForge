@@ -67,16 +67,17 @@ describe("resolveSessionContext bearer fail-closed", () => {
     expect(trustedOnly.userId).toBe("user-a");
 
     // Now the caller signals bearer auth. With no verifier configured, the
-    // bearer signal must fail closed and NOT downgrade to the (valid) trusted
-    // context — otherwise the bearer signal would be downgrade-attackable.
+    // bearer signal must NOT downgrade to the (valid) trusted context —
+    // otherwise the bearer signal would be downgrade-attackable — and must not
+    // run as nobody either: a browser whose host forwards its token would
+    // silently lose its session. It is the deployment that is unavailable.
     headers.set("authorization", "Bearer some.jwt.token");
-    const session = await resolveSessionContext(headers);
-    expect(session).toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   });
 
-  test("can report an unconfigured bearer verifier without changing the default fallback", async () => {
+  test("reports an unconfigured bearer verifier as unavailable, whether or not the caller asked for that", async () => {
     const headers = new Headers({ authorization: "Bearer some.jwt.token" });
-    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
+    await expect(resolveSessionContext(headers)).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
     await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
       .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
   });

@@ -807,7 +807,7 @@ compose stack):
 | `NODE_ENV` | `production` disables GraphiQL and makes schema drift fatal |
 | `LOG_LEVEL` | fastify log level (`debug` surfaces the drift-ok line) |
 | `DATABASE_URL` | Postgres; without it the API serves `DATABASE_NOT_CONFIGURED` errors |
-| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ bearer ignored) |
+| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ a request presenting a bearer is refused as unavailable, 503 — never downgraded to trusted-context, never run as nobody; the web host forwards the person's token, so set these wherever a web app runs) |
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES` | optional comma-separated exact allowlist for the verified token's `azp`; configured empty rejects every party |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |

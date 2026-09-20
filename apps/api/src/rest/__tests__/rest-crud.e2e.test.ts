@@ -39,7 +39,6 @@ import {
   nextMarker,
   pluginCreateInput,
   redactableColumnFor,
-  referencingRows,
   contractSample,
   tables,
   tablesByName,
@@ -58,6 +57,7 @@ import {
   operationIdFor,
   versionRequired,
 } from "../../graphql/__tests__/e2e/operations.js";
+import { expectedDeleteOutcome, expectFreshRecordOffers, expectWriterRefusal } from "../../graphql/__tests__/e2e/reference-policy.js";
 import { updateGeneratedEntity } from "../../operations/entity/index.js";
 import {
   issueEntityConfirmationChallenge,
@@ -375,10 +375,9 @@ for (const table of restTables) {
       expect(createdRecord.createdAt).toBeTruthy();
       expect(Object.keys(createdRecord).some((key) => key.includes("_"))).toBe(false);
       if (isCanonical(table)) {
-        // A fresh record offers every Operation, except a status transition
-        // whose `from` the initial state is not: that one is listed as
-        // unavailable with INVALID_STATE, which is the offer doing its job.
-        expect(created.body.operations.every((offer: any) => offer.available || offer.error?.code === "INVALID_STATE")).toBe(true);
+        // A fresh record offers every Operation; only a transition whose
+        // `from` excludes the initial state may be listed as INVALID_STATE.
+        expectFreshRecordOffers(table, created.body.operations);
       } else {
         expect(created.body.operations).toBeUndefined();
       }
@@ -553,12 +552,15 @@ for (const table of restTables) {
     // without such rows, or a removal despite them, is a finding.
     test("DELETE removes the row with the v2 envelope, or is refused only while rows that reference it exist", async () => {
       const id = await createRestRow(table, tenantA);
-      const referencing = await referencingRows(table, id, tenantA);
-      if (referencing.length > 0) {
+      // Decided before the first delete call, so a cascade that wrongly took
+      // the companions with it cannot make a refusal look warranted after.
+      const outcome = await expectedDeleteOutcome(table, id, tenantA);
+      if (outcome.refused) {
         const refused = await restDelete(table, tenantA, id);
         expect(refused.status).toBe(409);
         expect(refused.body.error.code).toBe("REFERENCE_IN_USE");
         expect((await rest(tenantA, "GET", `${base}/${id}`)).status).toBe(200);
+        expect(await expectedDeleteOutcome(table, id, tenantA)).toEqual(outcome);
         return;
       }
       {
@@ -931,6 +933,8 @@ for (const table of restTables) {
   // and otherwise owns the value (a document's current version). PATCH
   // refuses it either way, and the schema says so.
   const offeredOnCreate = createOffersField(table, field);
+  // A column an Operation writes is refused naming every writer, on create and update alike.
+  const writers = (immutable.writtenBy ?? []).map((writer) => writer.operation);
 
   describe(`${rest_.basePath} immutable fields`, () => {
     test(`${offeredOnCreate ? `POST accepts ${field}; ` : ""}PATCH rejects ${field} with 400 and the value stands`, async () => {
@@ -942,8 +946,7 @@ for (const table of restTables) {
       if (!offeredOnCreate && isEntityBackedCreate(table)) {
         const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: await valueFor(tenantA) });
         expect(refusedCreate.status).toBe(400);
-        expect(refusedCreate.body.error.code).toBe("BAD_USER_INPUT");
-        expect(refusedCreate.body.error.message).toContain(field);
+        expectWriterRefusal(refusedCreate.body.error, field, writers);
       }
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
@@ -956,8 +959,7 @@ for (const table of restTables) {
       const repointed = await valueFor(tenantA);
       const patched = await rest(tenantA, "PATCH", `${base}/${id}`, { [field]: repointed });
       expect(patched.status).toBe(400);
-      expect(patched.body.error.code).toBe("BAD_USER_INPUT");
-      expect(patched.body.error.message).toContain(field);
+      expectWriterRefusal(patched.body.error, field, writers);
 
       const after = await rest(tenantA, "GET", `${base}/${id}`);
       expect(after.status).toBe(200);

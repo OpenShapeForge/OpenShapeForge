@@ -52,6 +52,70 @@ function tablesOwning(target: string) {
 }
 
 const RELATIONS = ["Relations.All.ReadWrite", "Relations.All.Delete"];
+const FINANCE = ["Finance.All.ReadWrite"];
+
+/** The real tables with Quote's line collection required to hold at least one line. */
+function tablesWithRequiredLines() {
+  const tables = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
+  const quotes = tables.get("erp.quotes")!;
+  tables.set("erp.quotes", {
+    ...quotes,
+    source: {
+      ...quotes.source,
+      graphql: {
+        ...quotes.source!.graphql,
+        relationships: quotes.source!.graphql!.relationships!.map((relationship) =>
+          relationship.fieldKey === "quoteLines"
+            ? { ...relationship, ownership: "owned", cardinality: { min: 1 } }
+            : relationship,
+        ),
+      },
+    },
+  } as never);
+  return tables;
+}
+
+/** The real tables with the line's owner key (quote_id) required and owned. */
+function tablesWithRequiredOwnerKey() {
+  const tables = tablesWithRequiredLines();
+  const lines = tables.get("erp.quote_lines")!;
+  tables.set("erp.quote_lines", {
+    ...lines,
+    columns: lines.columns.map((column) => (column.name === "quote_id" ? { ...column, required: true } : column)),
+  } as never);
+  return tables;
+}
+
+async function withServer<T>(roles: string[], tables: Map<string, unknown>, run: (client: Client) => Promise<T>): Promise<T> {
+  const db = {} as OpenShapeForgeDatabase;
+  const platform = new ModulePlatformRuntime(db);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session: session(...roles),
+    modules: [
+      documentsPluginRuntime as unknown as RuntimeModule,
+      versioningPluginRuntime as unknown as RuntimeModule,
+      { name: "workflow", operationHandlers: { startWebhook: async () => ({ value: undefined }) } },
+    ],
+    modulePlatform: platform,
+    tables: tables as never,
+  });
+  const client = new Client({ name: "availability-test", version: "1" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    return await run(client);
+  } finally {
+    platform.unregisterServer(server);
+    await client.close();
+    await server.close();
+  }
+}
+
+const entityEnum = (tools: { name: string; inputSchema: unknown }[], name: string): string[] | undefined =>
+  (tools.find((tool) => tool.name === name)?.inputSchema as { properties?: { entity?: { enum?: string[] } } } | undefined)
+    ?.properties?.entity?.enum;
 
 describe("one availability rule for listing, describe and call", () => {
   it("resolves neither the generic nor the dedicated delete of an owned child", () => {
@@ -78,36 +142,65 @@ describe("one availability rule for listing, describe and call", () => {
       ["relation_delete", { id: "33333333-3333-4333-8333-333333333333", expectedVersion: "x" }, "Relation"],
       ["osf_delete", { entity: "Address", id: "33333333-3333-4333-8333-333333333333" }, "Address"],
     ] as const) {
-      const db = {} as OpenShapeForgeDatabase;
-      const platform = new ModulePlatformRuntime(db);
-      const server = __buildGeneratedMcpServerForTests({
-        db,
-        session: session(...RELATIONS),
-        modules: [
-          documentsPluginRuntime as unknown as RuntimeModule,
-          versioningPluginRuntime as unknown as RuntimeModule,
-          { name: "workflow", operationHandlers: { startWebhook: async () => ({ value: undefined }) } },
-        ],
-        modulePlatform: platform,
-        tables: tablesOwning(target),
-      });
-      const client = new Client({ name: "availability-test", version: "1" }, { capabilities: {} });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      try {
-        await server.connect(serverTransport);
-        await client.connect(clientTransport);
+      // Finance roles keep other generic entities deletable, so osf_delete
+      // stays listed and its entity enum is what shows Address withheld.
+      await withServer([...RELATIONS, ...FINANCE], tablesOwning(target), async (client) => {
         const { tools } = await client.listTools();
-        expect(tools.map((tool) => tool.name)).not.toContain(name === "relation_delete" ? "relation_delete" : "never");
+        if (name === "relation_delete") {
+          expect(tools.map((tool) => tool.name)).not.toContain("relation_delete");
+        } else {
+          // osf_delete stays listed for the other generic entities; its
+          // entity enum no longer offers Address.
+          const deletable = entityEnum(tools, "osf_delete");
+          expect(deletable).toBeDefined();
+          expect(deletable).not.toContain("Address");
+          expect(entityEnum(tools, "osf_list")).toContain("Address");
+        }
         const result = await client.callTool({ name, arguments: { ...args } });
         expect(result.isError).toBe(true);
         const text = String((result.content as { text?: string }[])[0]?.text);
-        expect(text).toContain("NOT_FOUND");
+        // The dedicated name is unknown; the generic name is known and refuses
+        // the entity by naming the ones it can address — Address not among them.
+        expect(text).toMatch(
+          name === "relation_delete"
+            ? /^NOT_FOUND/
+            : /^BAD_USER_INPUT: "Address" is not one of the entities "osf_delete" can address in this session: Quote, QuoteLine\./,
+        );
         expect(text).not.toContain("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
-      } finally {
-        platform.unregisterServer(server);
-        await client.close();
-        await server.close();
-      }
+      });
     }
+  });
+
+  it("withholds and refuses a create the collection policy would refuse, through the real server", async () => {
+    // Quote's lines must hold at least one line: the owner's generic create
+    // cannot satisfy that atomically, so osf_create no longer offers Quote.
+    await withServer(FINANCE, tablesWithRequiredLines(), async (client) => {
+      const { tools } = await client.listTools();
+      expect(entityEnum(tools, "osf_create")).not.toContain("Quote");
+      expect(entityEnum(tools, "osf_create")).toContain("QuoteLine");
+      expect(entityEnum(tools, "osf_list")).toContain("Quote");
+      const result = await client.callTool({ name: "osf_create", arguments: { entity: "Quote", quoteNumber: "Q-1" } });
+      expect(result.isError).toBe(true);
+      expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(
+        /^BAD_USER_INPUT: "Quote" is not one of the entities "osf_create" can address in this session: QuoteLine\./,
+      );
+    });
+    // The line's owner key is required and managed by the owner: the child's
+    // generic create cannot set it, so osf_create no longer offers QuoteLine.
+    await withServer(FINANCE, tablesWithRequiredOwnerKey(), async (client) => {
+      const { tools } = await client.listTools();
+      // Quote's create is withheld as above too, so osf_create has no entity
+      // left for this session and is not listed at all.
+      expect(entityEnum(tools, "osf_create") ?? []).not.toContain("QuoteLine");
+      expect(entityEnum(tools, "osf_list")).toContain("QuoteLine");
+      const result = await client.callTool({ name: "osf_create", arguments: { entity: "QuoteLine", lineNumber: 1 } });
+      expect(result.isError).toBe(true);
+      expect(String((result.content as { text?: string }[])[0]?.text)).toMatch(/^NOT_FOUND/);
+    });
+    // On the unchanged manifest both creates are offered.
+    await withServer(FINANCE, new Map(getGeneratedCrudTables().map((table) => [table.name, table])), async (client) => {
+      const { tools } = await client.listTools();
+      expect(entityEnum(tools, "osf_create")).toEqual(expect.arrayContaining(["Quote", "QuoteLine"]));
+    });
   });
 });

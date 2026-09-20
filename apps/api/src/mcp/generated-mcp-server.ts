@@ -118,6 +118,7 @@ import {
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
+import type { EntityOperationContract } from "../operations/entity/types.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -1831,11 +1832,39 @@ function entityTitle(
   return (locale && localizedText(entity.labels, locale)) || entity.title;
 }
 
+let canonicalOperationsById: Map<string, EntityOperationContract> | undefined;
+
+/**
+ * The title and description of an entity CRUD tool in the session's language.
+ *
+ * The compiler collapses the canonical operation's `{ en, nl, … }` name and
+ * description into English at build time and appends its own advice ("use get
+ * for one known id", the edit-lease reminder). The canonical operation still
+ * carries every language, so the localized sentence replaces the English one
+ * it was composed from and the advice is kept; a tool without a canonical
+ * operation (legacy v1) or a text the catalogue did not compose that way is
+ * described as compiled.
+ */
 function localizedToolText(
   tool: CatalogTool,
-  _locale: ResolvedLocale | undefined,
+  locale: ResolvedLocale | undefined,
 ): { title: string | undefined; description: string } {
-  return { title: tool.title, description: tool.description };
+  const compiled = { title: tool.title, description: tool.description };
+  if (!locale || !tool.operationId) return compiled;
+  canonicalOperationsById ??= new Map(
+    getEntityOperationContracts().map((operation) => [operation.id, operation]),
+  );
+  const canonical = canonicalOperationsById.get(tool.operationId);
+  if (!canonical) return compiled;
+  const english = localizedText(canonical.description, "en");
+  const localized = localizedText(canonical.description, locale);
+  return {
+    title: localizedText(canonical.name, locale) ?? tool.title,
+    description:
+      english && localized && tool.description.startsWith(english)
+        ? `${localized}${tool.description.slice(english.length)}`
+        : tool.description,
+  };
 }
 
 function describeTool(

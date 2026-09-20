@@ -413,6 +413,31 @@ describe("resolveAuthoringLayers", () => {
     );
   });
 
+  test("an overlay may add osf types but never redefine one", () => {
+    const catalog = (types: Record<string, unknown>) => ({ schemaVersion: 1, kind: "osfTypeCatalog", types });
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    writeYaml(root, "base/catalogs/osf-types.yaml", catalog({
+      currencyCode: { label: { en: "Currency" }, baseType: "string", validation: { pattern: "^[A-Z]{3}$" } },
+    }));
+    writeYaml(root, "overlay/catalogs/osf-types.yaml", catalog({
+      colourCode: { label: { en: "Colour" }, baseType: "string" },
+    }));
+    configureLayers(root, ["base", "overlay"]);
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "catalogs/osf-types.yaml"), "utf8"));
+    expect(Object.keys(merged.types).sort()).toEqual(["colourCode", "currencyCode"]);
+
+    for (const redefinition of [
+      { baseType: "integer" },
+      { validation: { pattern: ".*" } },
+      { render: { input: "Input", display: "TextDisplay" } },
+      { label: { en: "Currency", nl: "Valuta" } },
+    ]) {
+      writeYaml(root, "overlay/catalogs/osf-types.yaml", catalog({ currencyCode: redefinition }));
+      expect(() => resolveAuthoringLayers(root)).toThrow(/redefines osf type currencyCode declared by .*base. Osf-type catalogs are add-only/);
+    }
+  });
+
   test("catalog files merge across layers (groups extend, items merge by value)", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", baseEntity);

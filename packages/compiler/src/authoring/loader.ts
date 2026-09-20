@@ -360,15 +360,26 @@ export function assertPartialProfileHasNoCrud(
 }
 
 /**
- * Load and merge all semantic type catalogs (core + context-specific). Returns
- * the same merged object as before. Collision detection between core and
- * context catalogs is performed at the orchestrator level via
- * `loadOsfTypeCatalogSources` + `checkOsfTypeCatalogCollisions`.
+ * Load and merge all osf-type catalogs (core, then each context). Catalogs
+ * are add-only: a context may add types but never redefine a key an earlier
+ * catalog declared, because that key names the storage, GraphQL and JSON
+ * Schema contract of every field that uses it.
  */
 export function loadOsfTypes(authoringDir: string): Record<string, OsfTypeDefinition> {
   const merged: Record<string, OsfTypeDefinition> = {};
-  for (const { types } of loadOsfTypeCatalogSources(authoringDir)) {
-    Object.assign(merged, types);
+  const ownerByKey = new Map<string, string>();
+  for (const { source, types } of loadOsfTypeCatalogSources(authoringDir)) {
+    for (const [key, definition] of Object.entries(types)) {
+      const owner = ownerByKey.get(key);
+      if (owner !== undefined) {
+        throw new Error(
+          `Osf type ${key} in ${source}/osf-types.yaml redefines the entry from ${owner}; ` +
+            "osf-type catalogs are add-only.",
+        );
+      }
+      ownerByKey.set(key, source);
+      merged[key] = definition;
+    }
   }
   const entities = listEntityFiles(authoringDir).map(({ path }) => loadYaml<CoreEntity>(path));
   const withEntities = deriveEntityOsfTypes(entities.filter((entity) => entity.kind === "coreEntity"), merged);
@@ -385,8 +396,7 @@ export interface OsfTypeCatalogSource {
 
 /**
  * Returns each osf-type catalog file as its own entry, in load order
- * (core first, then each context). Used by the orchestrator to detect when a
- * context catalog silently overwrites a core key.
+ * (core first, then each context).
  */
 export function loadOsfTypeCatalogSources(
   authoringDir: string,

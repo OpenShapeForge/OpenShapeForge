@@ -34,9 +34,12 @@
  * Catalog files (`catalogs/*.yaml`) merge across layers automatically: a
  * later layer's file with the same path strategically merges into the earlier
  * one, so an overlay can add referentiedata groups or transforms without
- * copying the base catalog. For every other path, shipping a plain file that
- * already exists in an earlier layer is an error — replacing wholesale is
- * almost always a mistake; patch instead.
+ * copying the base catalog. The osf-type catalog is add-only: an overlay may
+ * add types but never redefine a key an earlier layer declared, because that
+ * key is the storage, GraphQL and JSON Schema contract of every field using
+ * it. For every other path, shipping a plain file that already exists in an
+ * earlier layer is an error — replacing wholesale is almost always a mistake;
+ * patch instead.
  *
  * With a single layer and no patches the layer directory is used directly
  * (fast path, byte-identical to the pre-layer behavior). Otherwise the merged
@@ -629,6 +632,25 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
 
 type JsonObject = { [key: string]: JsonValue };
 
+/**
+ * An osf type is the storage, GraphQL and JSON Schema contract of every field
+ * that names it, so a later layer may add types but never redefine one —
+ * not its base type, kind, validation, render, nor anything else.
+ */
+function assertOsfTypeCatalogOnlyAdds(base: JsonValue, overlay: JsonValue, origin: string, baseLayer: string): void {
+  if (!isPlainObject(base) || !isPlainObject(overlay)) return;
+  if (base.kind !== "osfTypeCatalog" && overlay.kind !== "osfTypeCatalog") return;
+  const baseTypes = isPlainObject(base.types) ? base.types : {};
+  const overlayTypes = isPlainObject(overlay.types) ? overlay.types : {};
+  const redefined = Object.keys(overlayTypes).filter((key) => Object.hasOwn(baseTypes, key)).sort();
+  if (redefined.length > 0) {
+    throw new Error(
+      `${origin} redefines osf type${redefined.length > 1 ? "s" : ""} ${redefined.join(", ")} ` +
+        `declared by ${baseLayer}. Osf-type catalogs are add-only; change the owning layer instead.`,
+    );
+  }
+}
+
 function stableJson(value: JsonValue | undefined): string {
   if (value === undefined) return "undefined";
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -1108,7 +1130,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   for (const layerDir of layerDirs) {
     for (const relativePath of walkFiles(layerDir)) {
       const sourcePath = join(layerDir, relativePath);
-      const resolvedRelativePath = relativePath;
 
       const parsed = relativePath.endsWith(".yaml")
         ? (YAML.parse(readFileSync(sourcePath, "utf8")) as
@@ -1207,24 +1228,25 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         }
       }
 
-      if (files.has(resolvedRelativePath)) {
+      if (files.has(relativePath)) {
         const isCatalog =
-          resolvedRelativePath.startsWith("catalogs/") && resolvedRelativePath.endsWith(".yaml");
+          relativePath.startsWith("catalogs/") && relativePath.endsWith(".yaml");
         if (isCatalog) {
-          const target = files.get(resolvedRelativePath)!;
+          const target = files.get(relativePath)!;
           const baseDoc = YAML.parse(
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
           const overlayDoc = YAML.parse(readFileSync(sourcePath, "utf8")) as JsonValue;
+          assertOsfTypeCatalogOnlyAdds(baseDoc, overlayDoc, `${layerDir}/${relativePath}`, target.layer);
           const merged = strategicMerge(baseDoc, overlayDoc);
-          const mergedPath = join(buildDir, resolvedRelativePath);
+          const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
-          files.set(resolvedRelativePath, { layer: buildDir, path: resolvedRelativePath });
+          files.set(relativePath, { layer: buildDir, path: relativePath });
           continue;
         }
         throw new Error(
-          `Layer collision on ${resolvedRelativePath}: ${files.get(resolvedRelativePath)!.layer} ` +
+          `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
             "Entities can be modified with kind: entityPatch; the app shell with " +
             "kind: appShellPatch; realm files (authorization*.yaml) with " +
@@ -1261,7 +1283,7 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           entityPathByName.set(entityName, { layer: layerDir, path: relativePath });
         }
       }
-      files.set(resolvedRelativePath, { layer: layerDir, path: relativePath });
+      files.set(relativePath, { layer: layerDir, path: relativePath });
     }
   }
 

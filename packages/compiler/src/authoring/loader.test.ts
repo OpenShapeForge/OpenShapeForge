@@ -129,6 +129,24 @@ describe("loadEntity content validation (integration)", () => {
     expect(resolveEntityFilePath(authoringDir, "relation")).toContain("relation");
     expect(() => loadEntity(authoringDir, "relation")).not.toThrow();
   });
+  it("a context catalog may add osf types but never redefine a core one", () => {
+    const root = mkdtempSync(join(tmpdir(), "entity-catalog-add-only-"));
+    try {
+      mkdirSync(join(root, "catalogs"));
+      mkdirSync(join(root, "contexts/vera"), { recursive: true });
+      const write = (path: string, types: Record<string, unknown>) =>
+        writeFileSync(join(root, path), JSON.stringify({ types }));
+      write("catalogs/osf-types.yaml", { example: { label: { en: "Example" }, baseType: "string" } });
+      write("contexts/vera/osf-types.yaml", { extra: { label: { en: "Extra" }, baseType: "integer" } });
+      expect(Object.keys(loadOsfTypes(root)).sort()).toEqual(["example", "extra"]);
+      write("contexts/vera/osf-types.yaml", { example: { label: { en: "Example" }, baseType: "integer" } });
+      expect(() => loadOsfTypes(root)).toThrow(
+        "Osf type example in contexts/vera/osf-types.yaml redefines the entry from core; osf-type catalogs are add-only.",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("does not share mutable parsed YAML or keep stale source bytes", () => {
     const root = mkdtempSync(join(tmpdir(), "entity-catalog-cache-"));
     try {

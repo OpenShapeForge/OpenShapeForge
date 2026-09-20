@@ -6,7 +6,6 @@ import { describe, expect, it } from "bun:test";
 import {
   BindingOverflowError,
   MAX_BINDINGS_PER_OWNER,
-  isMissingRelationError,
   loadOrderedBindings,
   loadOrderedBindingsByOwner,
   readBindingRows,
@@ -213,13 +212,17 @@ describe("readBindingRows", () => {
     ).toEqual([]);
   });
 
-  it("reads a missing table as empty and propagates other errors", async () => {
-    expect(isMissingRelationError({ code: "42P01" })).toBe(true);
-    expect(
-      await readBindingRows(relationExecution, { id: "svc-1" }, async () => {
+  it("propagates a missing table or schema instead of treating it as empty", async () => {
+    await expect(
+      readBindingRows(relationExecution, { id: "svc-1" }, async () => {
         throw Object.assign(new Error('relation "x" does not exist'), { code: "42P01" });
       }),
-    ).toEqual([]);
+    ).rejects.toMatchObject({ code: "42P01" });
+    await expect(
+      loadOrderedBindingsByOwner(relationExecution, [{ id: "svc-1" }], async () => {
+        throw Object.assign(new Error("schema does not exist"), { code: "3F000" });
+      }),
+    ).rejects.toMatchObject({ code: "3F000" });
     await expect(
       readBindingRows(relationExecution, { id: "svc-1" }, async () => {
         throw Object.assign(new Error("deadlock"), { code: "40P01" });

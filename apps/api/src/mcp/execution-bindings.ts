@@ -88,32 +88,6 @@ function overflowIfBeyond(
 }
 
 /**
- * True for Postgres undefined_table (42P01) and, defensively, missing-schema
- * (3F000). Bun's SQL driver reports the SQLSTATE in `errno`; other drivers
- * put it in `code`.
- */
-export function isMissingRelationError(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const candidate = error as { code?: unknown; errno?: unknown };
-  const sqlstates = new Set(["42P01", "3F000"]);
-  return (
-    (typeof candidate.errno === "string" && sqlstates.has(candidate.errno)) ||
-    (typeof candidate.code === "string" && sqlstates.has(candidate.code))
-  );
-}
-
-async function readRelationOrEmpty(
-  read: () => Promise<Record<string, unknown>[]>,
-): Promise<Record<string, unknown>[]> {
-  try {
-    return await read();
-  } catch (error) {
-    if (isMissingRelationError(error)) return [];
-    throw error;
-  }
-}
-
-/**
  * Read every relation row matching `filter`, paging by the reader's cursor.
  * Refuses once `max` rows would be exceeded rather than returning a prefix.
  */
@@ -178,9 +152,7 @@ export async function readBindingRows(
   if (!readRows) return [];
   const ownerId = ownerRow.id;
   if (typeof ownerId !== "string" || ownerId.length === 0) return [];
-  return readRelationOrEmpty(() =>
-    relationRowsForOwner(execution, ownerRow, readRows),
-  );
+  return relationRowsForOwner(execution, ownerRow, readRows);
 }
 
 /** Ordered bindings for one owner row. */
@@ -214,37 +186,33 @@ export async function loadOrderedBindingsByOwner(
   for (const id of ownerIds) grouped.set(id, []);
   if (ownerIds.length === 0) return grouped;
 
-  const collected = await readRelationOrEmpty(async () => {
-    const rows: Record<string, unknown>[] = [];
-    const seen = new Set<string>();
-    let cursor: string | null = null;
-    for (;;) {
-      const page = asPage(
-        await readRows(
-          table,
-          { [parentRef]: { in: ownerIds } },
-          { limit: RELATION_PAGE_SIZE, cursor },
-        ),
-      );
-      for (const row of page.rows) {
-        if (!row || typeof row !== "object") continue;
-        const id = typeof row.id === "string" ? row.id : "";
-        if (id) {
-          if (seen.has(id)) continue;
-          seen.add(id);
-        }
-        const ownerId = row[parentRef];
-        if (typeof ownerId !== "string" || !grouped.has(ownerId)) continue;
-        const bucket = grouped.get(ownerId)!;
-        bucket.push(row);
-        overflowIfBeyond(bucket.length);
-        rows.push(row);
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (;;) {
+    const page = asPage(
+      await readRows(
+        table,
+        { [parentRef]: { in: ownerIds } },
+        { limit: RELATION_PAGE_SIZE, cursor },
+      ),
+    );
+    for (const row of page.rows) {
+      if (!row || typeof row !== "object") continue;
+      const id = typeof row.id === "string" ? row.id : "";
+      if (id) {
+        if (seen.has(id)) continue;
+        seen.add(id);
       }
-      if (!page.nextCursor || page.rows.length === 0) return rows;
-      if (page.nextCursor === cursor) throw new BindingOverflowError();
-      cursor = page.nextCursor;
+      const ownerId = row[parentRef];
+      if (typeof ownerId !== "string" || !grouped.has(ownerId)) continue;
+      const bucket = grouped.get(ownerId)!;
+      bucket.push(row);
+      overflowIfBeyond(bucket.length);
     }
-  });
+    if (!page.nextCursor || page.rows.length === 0) break;
+    if (page.nextCursor === cursor) throw new BindingOverflowError();
+    cursor = page.nextCursor;
+  }
   for (const [id, rows] of grouped) {
     grouped.set(id, rows.length === 0 ? [] : orderedBindingRecords(rows));
   }

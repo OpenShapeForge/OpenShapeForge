@@ -5,7 +5,7 @@ import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
 import { type CapturedDerivedExecution, catalogDerivedTools } from "./catalog.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
-import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowByFilter } from "./session-connections.js";
 import { failed } from "./tool-results.js";
 import {
   type CompletedStep,
@@ -146,15 +146,7 @@ export async function derivedToolCall(
           await loadOrderedBindings(
             execution,
             serviceRow,
-            (table, filter, limit) =>
-              runtimeRowsByFilter(
-                db,
-                session,
-                tables,
-                table,
-                filter,
-                limit ?? 50,
-              ),
+            runtimeBindingReader(db, session, tables),
           )
         ).filter((binding) =>
           // A binding the call's selector input does not choose is not

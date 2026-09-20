@@ -27,7 +27,7 @@ import {
   catalogTestTools,
   entityForTable,
 } from "./catalog.js";
-import { runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowsByFilter } from "./session-connections.js";
 export function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
@@ -194,5 +194,6 @@ export async function assertPublishableWrite(
       ?.elicitOnCreate?.definitionsField,
     readRows: (rowTable, filter) =>
       runtimeRowsByFilter(db, session, tables, rowTable, filter),
+    readBindingPages: runtimeBindingReader(db, session, tables),
   });
 }

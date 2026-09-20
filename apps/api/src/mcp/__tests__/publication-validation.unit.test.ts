@@ -6,6 +6,7 @@
  * name cannot project; and passes silently when the row is fit to serve.
  */
 import { describe, expect, it } from "bun:test";
+import { MAX_BINDINGS_PER_OWNER } from "../execution-bindings.js";
 import {
   requiredAuthValueKeys,
   validateVisibleDefinition,
@@ -363,6 +364,46 @@ describe("validateVisibleDefinition", () => {
       }),
     });
     expect(unusable).toContain("does not yield a usable tool name");
+  });
+
+  it("refuses a relation collection that exceeds the per-owner maximum", async () => {
+    const relationEntry: DerivedToolsCatalogEntry = {
+      ...ENTRY,
+      execution: {
+        bindingsRelation: "capabilityBindings",
+        bindingsEntity: "Binding",
+        bindingsTable: "core.bindings",
+        parentRef: "serviceId",
+        operationRef: "operationId",
+        operationEntity: "Operation",
+        operationTable: "core.operations",
+        providerRef: "providerId",
+        providerEntity: "Provider",
+        providerTable: "core.providers",
+        connectionEntity: "Connection",
+        connectionTable: "core.connections",
+        connectionProviderRef: "providerId",
+        connectionValuesField: "values",
+      },
+    };
+    const bindings = Array.from({ length: MAX_BINDINGS_PER_OWNER + 1 }, (_, index) => ({
+      id: `b-${index}`,
+      serviceId: "svc-1",
+      order: index + 1,
+      operationId: "op-1",
+    }));
+    const message = await failure({
+      entry: relationEntry,
+      row: { ...ROW, id: "svc-1" },
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.operations": [OPERATION],
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.bindings": bindings,
+      }),
+    });
+    expect(message).toContain(`exceeds ${MAX_BINDINGS_PER_OWNER} bindings`);
   });
 
   it("aggregates every problem into one readable refusal", async () => {

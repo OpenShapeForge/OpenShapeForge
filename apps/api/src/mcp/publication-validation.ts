@@ -27,7 +27,12 @@
 import { HttpError } from "../rest/http-error.js";
 import { requestHeaderMappings } from "./declarative-execution.js";
 import { deriveToolName, type DerivedToolsCatalogEntry } from "./derived-tools.js";
-import { readBindingRows } from "./execution-bindings.js";
+import {
+  BindingOverflowError,
+  MAX_BINDINGS_PER_OWNER,
+  readBindingRows,
+  type BindingRowReader,
+} from "./execution-bindings.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -106,6 +111,8 @@ export type ValidateVisibleDefinitionInput = {
   /** Field on the provider row holding its FieldDefinition collection, if declared. */
   providerDefinitionsField?: string | undefined;
   readRows: PublicationRowReader;
+  /** Paged reader for relation bindings; defaults to `readRows` as one complete page. */
+  readBindingPages?: BindingRowReader;
 };
 
 /**
@@ -146,9 +153,28 @@ export async function validateVisibleDefinition(
     }
   }
 
-  const bindings = await readBindingRows(execution, row, readRows);
-  if (bindings.length === 0) {
-    const collection = execution.bindingsRelation ?? execution.bindingsField ?? "bindings";
+  const collection = execution.bindingsRelation ?? execution.bindingsField ?? "bindings";
+  const bindingReader: BindingRowReader =
+    input.readBindingPages ??
+    (async (table, filter) => ({
+      rows: await readRows(table, filter),
+      nextCursor: null,
+    }));
+  let bindings: JsonRecord[] = [];
+  let overflowed = false;
+  try {
+    bindings = await readBindingRows(execution, row, bindingReader);
+  } catch (error) {
+    if (error instanceof BindingOverflowError) {
+      overflowed = true;
+      problems.push(
+        `the ${collection} collection exceeds ${MAX_BINDINGS_PER_OWNER} bindings.`,
+      );
+    } else {
+      throw error;
+    }
+  }
+  if (bindings.length === 0 && !overflowed) {
     problems.push(`the ${collection} collection is empty; nothing would execute.`);
   }
 

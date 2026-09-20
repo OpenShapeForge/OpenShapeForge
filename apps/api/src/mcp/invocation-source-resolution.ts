@@ -155,7 +155,10 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
           await loadOrderedBindings(
             execution,
             serviceRow,
-            (table, filter) => snapshotRowsByFilter(trx, table, filter),
+            async (table, filter) => ({
+              rows: await snapshotRowsByFilter(trx, table, filter),
+              nextCursor: null,
+            }),
           )
         ).filter((binding) => bindingSelected(binding, args));
         for (const binding of selectedBindings) {

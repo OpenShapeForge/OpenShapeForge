@@ -5,9 +5,12 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  BindingOverflowError,
+  MAX_BINDINGS_PER_OWNER,
   loadOrderedBindings,
   loadOrderedBindingsByOwner,
   readBindingRows,
+  type BindingRowReader,
 } from "../execution-bindings.js";
 import type { ExecutionCatalogEntry } from "../declarative-execution.js";
 
@@ -42,6 +45,55 @@ const relationExecution: ExecutionCatalogEntry = {
   connectionValuesField: "values",
 };
 
+function matching(
+  rows: Record<string, unknown>[],
+  filter: Record<string, unknown>,
+): Record<string, unknown>[] {
+  return rows.filter((row) =>
+    Object.entries(filter).every(([key, value]) => {
+      if (key.endsWith("In") && Array.isArray(value)) {
+        return value.includes(row[key.slice(0, -2)]);
+      }
+      return row[key] === value;
+    }),
+  );
+}
+
+/** Complete array reader: returns every matching row in one shot. */
+function completeReader(rows: Record<string, unknown>[]): BindingRowReader {
+  return async (_table, filter) => matching(rows, filter);
+}
+
+/** Honours limit/cursor so overflow detection cannot be skipped. */
+function pagingReader(rows: Record<string, unknown>[]): BindingRowReader {
+  return async (_table, filter, options) => {
+    const matched = matching(rows, filter);
+    const limit = options?.limit ?? MAX_BINDINGS_PER_OWNER;
+    const offset =
+      typeof options?.cursor === "string" && options.cursor.length > 0
+        ? Number.parseInt(options.cursor, 10)
+        : 0;
+    const start = Number.isInteger(offset) && offset > 0 ? offset : 0;
+    const slice = matched.slice(start, start + limit);
+    return {
+      rows: slice,
+      nextCursor: start + slice.length < matched.length ? String(start + slice.length) : null,
+    };
+  };
+}
+
+function bindingRows(ownerId: string, count: number, start = 1): Record<string, unknown>[] {
+  return Array.from({ length: count }, (_, index) => {
+    const order = start + index;
+    return {
+      id: `${ownerId}-bind-${order}`,
+      serviceId: ownerId,
+      order,
+      capabilityId: `${ownerId}-${order}`,
+    };
+  });
+}
+
 describe("loadOrderedBindings", () => {
   it("reads a JSON collection off the owner row", async () => {
     const bindings = await loadOrderedBindings(jsonExecution, {
@@ -66,9 +118,7 @@ describe("loadOrderedBindings", () => {
       { id: "svc-1" },
       async (table, filter) => {
         seen.push({ table, filter });
-        return rows.filter((row) =>
-          Object.entries(filter).every(([key, value]) => row[key] === value),
-        );
+        return matching(rows, filter);
       },
     );
     expect(seen).toEqual([
@@ -84,6 +134,31 @@ describe("loadOrderedBindings", () => {
     await expect(
       loadOrderedBindings(relationExecution, { id: "svc-1" }, async () => []),
     ).rejects.toThrow(/no bindings/);
+  });
+
+  it("refuses a relation that exceeds the per-owner maximum", async () => {
+    const rows = bindingRows("svc-1", MAX_BINDINGS_PER_OWNER + 1);
+    await expect(
+      loadOrderedBindings(relationExecution, { id: "svc-1" }, completeReader(rows)),
+    ).rejects.toBeInstanceOf(BindingOverflowError);
+    await expect(
+      loadOrderedBindings(relationExecution, { id: "svc-1" }, pagingReader(rows)),
+    ).rejects.toMatchObject({
+      code: "SERVICE_MISCONFIGURED",
+      message: `The service defines more than ${MAX_BINDINGS_PER_OWNER} bindings.`,
+    });
+  });
+
+  it("pages a complete chain that fills more than one reader page", async () => {
+    const rows = bindingRows("svc-1", 150);
+    const bindings = await loadOrderedBindings(
+      relationExecution,
+      { id: "svc-1" },
+      pagingReader(rows),
+    );
+    expect(bindings).toHaveLength(150);
+    expect(bindings[0]?.capabilityId).toBe("svc-1-1");
+    expect(bindings[149]?.capabilityId).toBe("svc-1-150");
   });
 });
 
@@ -104,15 +179,15 @@ describe("loadOrderedBindingsByOwner", () => {
     const relation = await loadOrderedBindingsByOwner(
       relationExecution,
       [{ id: "svc-1" }, { id: "svc-2" }],
-      async (_table, filter) => {
-        const ids = filter.serviceIdIn as string[];
-        expect(ids).toEqual(["svc-1", "svc-2"]);
-        return [
-          { id: "bind-2", serviceId: "svc-1", order: 2, capabilityId: "b" },
-          { id: "bind-1", serviceId: "svc-1", order: 1, capabilityId: "a" },
-          { id: "bind-3", serviceId: "svc-2", order: 1, capabilityId: "c" },
-        ];
-      },
+      async (_table, filter) =>
+        matching(
+          [
+            { id: "bind-2", serviceId: "svc-1", order: 2, capabilityId: "b" },
+            { id: "bind-1", serviceId: "svc-1", order: 1, capabilityId: "a" },
+            { id: "bind-3", serviceId: "svc-2", order: 1, capabilityId: "c" },
+          ],
+          filter,
+        ),
     );
     expect(relation.get("svc-1")?.map((binding) => binding.capabilityId)).toEqual([
       "a",
@@ -122,6 +197,21 @@ describe("loadOrderedBindingsByOwner", () => {
       "c",
     ]);
   });
+
+  it("does not share one page budget across owners", async () => {
+    const perOwner = 150;
+    const rows = [
+      ...bindingRows("svc-1", perOwner),
+      ...bindingRows("svc-2", perOwner),
+    ];
+    const relation = await loadOrderedBindingsByOwner(
+      relationExecution,
+      [{ id: "svc-1" }, { id: "svc-2" }],
+      pagingReader(rows),
+    );
+    expect(relation.get("svc-1")).toHaveLength(perOwner);
+    expect(relation.get("svc-2")).toHaveLength(perOwner);
+  });
 });
 
 describe("readBindingRows", () => {
@@ -130,5 +220,12 @@ describe("readBindingRows", () => {
     expect(
       await readBindingRows(relationExecution, { id: "svc-1" }, async () => []),
     ).toEqual([]);
+  });
+
+  it("propagates overflow instead of returning a truncated prefix", async () => {
+    const rows = bindingRows("svc-1", MAX_BINDINGS_PER_OWNER + 1);
+    await expect(
+      readBindingRows(relationExecution, { id: "svc-1" }, pagingReader(rows)),
+    ).rejects.toBeInstanceOf(BindingOverflowError);
   });
 });

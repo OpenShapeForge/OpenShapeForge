@@ -891,7 +891,10 @@ async function personalSignInsFor(
         bindings = await loadOrderedBindings(
           execution,
           row,
-          (table, filter, limit) => env.rowsByFilter(table, filter, limit),
+          async (table, filter, options) => ({
+            rows: await env.rowsByFilter(table, filter, options?.limit),
+            nextCursor: null,
+          }),
         );
       } catch {
         continue; // a malformed definition cannot block onboarding

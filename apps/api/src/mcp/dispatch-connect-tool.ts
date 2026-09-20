@@ -15,7 +15,7 @@ import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
-import { runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
+import { runtimeBindingReader, runtimeRowByFilter, runtimeRowsByFilter } from "./session-connections.js";
 import { type DirectCallScope } from "./tool-dispatch.js";
 import { failed, ok } from "./tool-results.js";
 export async function connectToolCall(
@@ -95,8 +95,7 @@ export async function connectToolCall(
       for (const binding of await loadOrderedBindings(
         execution,
         definitionRow,
-        (table, filter, limit) =>
-          runtimeRowsByFilter(db, session, tables, table, filter, limit ?? 50),
+        runtimeBindingReader(db, session, tables),
       )) {
         const operationId = binding[execution.operationRef];
         const operationRow =
@@ -204,8 +203,7 @@ export async function connectToolCall(
           for (const binding of await loadOrderedBindings(
             execution,
             row,
-            (table, filter, limit) =>
-              runtimeRowsByFilter(db, session, tables, table, filter, limit ?? 50),
+            runtimeBindingReader(db, session, tables),
           )) {
             const operationId = binding[execution.operationRef];
             const operationRow =

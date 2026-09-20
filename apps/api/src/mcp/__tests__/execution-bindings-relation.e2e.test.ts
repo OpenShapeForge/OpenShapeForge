@@ -12,7 +12,7 @@ import { createDatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { APP_ROLE } from "../../db/migrations/app-role.js";
 import { loadOrderedBindings } from "../execution-bindings.js";
-import { runtimeRowsByFilter } from "../session-connections.js";
+import { runtimeBindingReader } from "../session-connections.js";
 import type { ExecutionCatalogEntry } from "../declarative-execution.js";
 import type { GeneratedTable } from "../catalog.js";
 
@@ -175,15 +175,7 @@ describe("owned collection execution bindings", () => {
               const bindings = await loadOrderedBindings(
                 execution,
                 { id: ownerId },
-                (tableName, filter, limit) =>
-                  runtimeRowsByFilter(
-                    db,
-                    session,
-                    tables,
-                    tableName,
-                    filter,
-                    limit ?? 50,
-                  ),
+                runtimeBindingReader(db, session, tables),
               );
               expect(bindings.map((binding) => binding.capabilityId)).toEqual([
                 "first",

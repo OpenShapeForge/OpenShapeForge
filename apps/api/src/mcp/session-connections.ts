@@ -14,6 +14,7 @@ import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/ind
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { definitionFieldKeys, secretFieldKeys, type ExecutionCatalogEntry } from "./declarative-execution.js";
+import type { BindingRowReader } from "./execution-bindings.js";
 import { decryptSecret, type StoredSecret } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { connectionProblemError, type ConnectionProblem } from "./connection-guidance.js";
@@ -350,6 +351,32 @@ export async function runtimeRowsByFilter(
     { limit, filter },
   );
   return result.rows.map((row) => serializeRow(table, row));
+}
+
+/** Paged tenant-scoped row reader for derived-tool binding joins. */
+export function runtimeBindingReader(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): BindingRowReader {
+  return async (tableName, filter, options) => {
+    const table = tables.get(tableName);
+    if (!table) return { rows: [], nextCursor: null };
+    const result = await listGeneratedEntityStorageRowsForTable(
+      db,
+      session,
+      table,
+      {
+        filter,
+        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+        ...(options?.cursor ? { cursor: options.cursor } : {}),
+      },
+    );
+    return {
+      rows: result.rows.map((row) => serializeRow(table, row)),
+      nextCursor: result.nextCursor,
+    };
+  };
 }
 
 export async function runtimeRowByFilter(

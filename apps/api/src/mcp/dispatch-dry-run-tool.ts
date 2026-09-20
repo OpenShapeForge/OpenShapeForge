@@ -17,6 +17,7 @@ import { DERIVED_TOOLS_ROW_LIMIT } from "./derived-session-tools.js";
 import { requireArguments } from "./entity-tool-guards.js";
 import {
   normalizeConnectionValueRows,
+  runtimeBindingReader,
   runtimeRowByFilter,
   runtimeRowsByFilter,
   urlSafeConnectionValues,
@@ -102,8 +103,7 @@ export async function dryRunToolCall(
       const bindings = await loadOrderedBindings(
         execution,
         definitionRow,
-        (table, filter, limit) =>
-          runtimeRowsByFilter(db, session, tables, table, filter, limit ?? 50),
+        runtimeBindingReader(db, session, tables),
       );
       for (const [index, binding] of bindings.entries()) {
         // Selection is part of what a dry run verifies: show WHICH bindings

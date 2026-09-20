@@ -30,7 +30,7 @@ import { serializeRow } from "./catalog-rows.js";
 import {
   connectionToolsFor,
   providerDisplayName,
-  runtimeRowsByFilter,
+  runtimeBindingReader,
 } from "./session-connections.js";
 
 /**
@@ -145,8 +145,7 @@ export async function derivedToolsForSession(
         const bindingsByOwner = await loadOrderedBindingsByOwner(
           entry.execution,
           rows,
-          (table, filter, limit) =>
-            runtimeRowsByFilter(db, session, tables, table, filter, limit ?? 50),
+          runtimeBindingReader(db, session, tables),
         );
         entryTools = entryTools.map((tool) => {
           const bindings = bindingsByOwner.get(tool.rowId) ?? [];

@@ -11,8 +11,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { createDocumentArtifactAuthorization, type DocumentArtifactSqlExecutor } from "@openshapeforge/documents/artifact-authorization";
-import { CompiledQuery, sql, type Transaction } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
@@ -242,51 +241,6 @@ describe("Document artifact binding migration", () => {
       where id = ${created?.document_version_id}::uuid
     `.execute(privileged.db);
     expect(row.rows[0]).toEqual({ artifact_id: null, artifact_version: null, byte_size: null });
-  });
-
-  test("the Document policy resolves provisional and historical associations through real SQL", async () => {
-    const artifactId = randomUUID();
-    const otherUser = randomUUID();
-    const checked: string[] = [];
-    const policySession = { tenantId, userId, roles: [], groups: [], scope: "tenant" as const, credential: "bearer" as const };
-    const records = { assertAccess: async (_session: unknown, input: { entityName: string }) => {
-      checked.push(input.entityName);
-    } };
-    const policy = createDocumentArtifactAuthorization({ session: policySession, records });
-    const created = await withDbSession(restricted.db, session, async trx => {
-      const ids = await createWithArtifact(trx, "Policy association", artifactId);
-      const executor: DocumentArtifactSqlExecutor = { executeQuery: async query =>
-        ({ rows: (await trx.executeQuery<Record<string, unknown>>(CompiledQuery.raw(query.sql, [...query.parameters]))).rows }) };
-      const input = { action: "bind" as const, artifactId,
-        owner: { entity: "Document" as const, id: ids.documentId } };
-      expect(await policy.resolveDocumentArtifactAccess(executor, input))
-        .toMatchObject({ artifactId, tenantId, documentVersionId: ids.documentVersionId });
-      expect(checked).toEqual([]); // First-create does not imply read/update authority.
-      expect(await policy.resolveDocumentArtifactAccess(executor, { ...input, expectedArtifactVersion: 1 })).toBeUndefined();
-      expect(await policy.resolveDocumentArtifactAccess(executor, { ...input, artifactId: randomUUID() })).toBeUndefined();
-      const wrongActor = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
-      expect(await wrongActor.resolveDocumentArtifactAccess(executor, input)).toBeUndefined();
-      await finalize(trx, ids.documentVersionId, artifactId);
-      expect(await policy.resolveDocumentArtifactAccess(executor, input)).toBeUndefined();
-      await sql`select document_internal.append_version(${ids.documentId}::uuid,
-        ${JSON.stringify({ versionLabel: "2", status: "draft" })}::text::jsonb)`.execute(trx);
-      return ids;
-    });
-    await withDbSession(restricted.db, { ...session, userId: otherUser }, async trx => {
-      const executor: DocumentArtifactSqlExecutor = { executeQuery: async query =>
-        ({ rows: (await trx.executeQuery<Record<string, unknown>>(CompiledQuery.raw(query.sql, [...query.parameters]))).rows }) };
-      const reader = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
-      expect(await reader.resolveDocumentArtifactAccess(executor, {
-        action: "open", artifactId,
-        owner: { entity: "Document", id: created.documentId },
-      })).toMatchObject({ artifactId, tenantId, documentVersionId: created.documentVersionId });
-      expect(checked).toEqual(["Document"]);
-      // A Document that does not hold this artifact in any version resolves nothing.
-      expect(await reader.resolveDocumentArtifactAccess(executor, {
-        action: "open", artifactId, owner: { entity: "Document", id: randomUUID() },
-      })).toBeUndefined();
-      expect(await reader.resolvePhysicalDeleteDecision(executor, randomUUID())).toBeUndefined();
-    });
   });
 
   test("persists only finalized trusted facts and advances the matching head", async () => {

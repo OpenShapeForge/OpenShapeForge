@@ -22,13 +22,16 @@
 - A document file is owned by its **Document**, not its DocumentVersion:
   `Document.create` and `DocumentVersion.create` bind with
   `owner: { entity: "Document", id: documentId }`. A storage contribution that
-  keys its association on the owner stores the Document id from now on. The
-  policy adapter `@openshapeforge/documents/artifact-authorization` is
-  `resolveDocumentArtifactAccess` (was `resolveDocumentVersionArtifactAccess`;
-  the `DocumentVersionArtifactOwner` type is gone), takes
-  `owner: { entity: "Document", id }` and resolves the version row that names
-  the artifact (`documentVersionId` on the result); its old
-  `{ entity: "DocumentVersion", recordId }` input is refused.
+  keys its association on the owner stores the Document id from now on.
+- **No Document-specific policy adapter.** `@openshapeforge/documents/artifact-authorization`
+  is gone: a storage contribution authorizes a read through
+  `platform.records.assertAccess` on whatever record the artifact is bound
+  to, and a bind through the Operation transaction it runs in, the same for
+  every owner.
+- **`platform.jobs.enqueue` joins the artifact transaction.** Inside a
+  contribution's `stage` or `read` (`context.withTransaction`), an enqueue
+  runs in that transaction, so a staged row and the job that collects it at
+  expiry commit together, as they already did inside an Operation transaction.
 - Over REST the download names the owner as `ownerEntity` and `ownerId` query
   parameters instead of `documentVersionId`.
 

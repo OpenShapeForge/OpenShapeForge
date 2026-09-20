@@ -25,20 +25,23 @@ exposes a non-replaceable `platform.artifacts` service to runtime modules.
   owner through `platform.records.assertAccess` — the same oracle every
   module uses, so a capability grant reaches a file exactly when it reaches
   the record — inside the transaction the provider then reads in. The named
-  owner is a claim, not a proof: storage checks the association through its
-  trusted policy adapter (`@openshapeforge/documents/artifact-authorization`
-  for a Document owner: the artifact must be one of the Document's stored
-  versions, and the Document's `get` is asked again) and **returns the
-  record it found the artifact bound to** as `owner` on the result. Core
-  refuses the read unless that equals the owner named, so knowing an
-  artifact id and reaching some other record opens nothing. Calling the
-  port does not grant access to a file. Core also checks the returned
-  identity and byte length, strips provider-specific metadata, and returns
-  the verified descriptor with the bytes.
+  owner is a claim, not a proof: the storage contribution asks the same
+  oracle again and then finds the artifact bound to exactly that record in
+  its own registry, and **returns the record it found the artifact bound
+  to** as `owner` on the result. Core refuses the read unless that equals
+  the owner named, so knowing an artifact id and reaching some other record
+  opens nothing. Calling the port does not grant access to a file. Core also
+  checks the returned identity and byte length, strips provider-specific
+  metadata, and returns the verified descriptor with the bytes.
 - Over REST the owner is two query parameters:
   `GET /api/artifacts/:artifactId/contents?ownerEntity=Document&ownerId=<uuid>`.
-- There is deliberately no physical-delete method. Destructive storage work
-  requires a durable OSF policy decision and a separate worker boundary.
+- There is deliberately no physical-delete method on the port. Destructive
+  storage work is a durable job on `platform.jobs` ([jobs.md](jobs.md)):
+  staging enqueues the storage contribution's collection job for an artifact
+  that is still unlinked at expiry — `platform.jobs.enqueue` joins the
+  staging transaction, so the row and the job commit together — and the
+  canonical Operation that decides a linked file goes enqueues its deletion
+  inside its own transaction. Both run as the person who enqueued them.
 
 A provider selected by compiled YAML must have exactly one matching runtime
 contribution. A missing, disabled, mismatched or duplicate contribution fails

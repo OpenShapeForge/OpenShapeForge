@@ -312,11 +312,13 @@ describe("canonical operation runtime", () => {
     expect(bound.has("control.list-tenants")).toBe(true);
     expect(bound.has("grants.revoke")).toBe(true);
     expect(bound.has("AgreementMilestone.trigger")).toBe(true);
+    expect(bound.has("BillingRun.execute")).toBe(true);
     expect(
       [...bound.values()].every(({ operation }) =>
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "osf-billing" ||
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control" ||
         operation.plugin === "osf-grants" ||

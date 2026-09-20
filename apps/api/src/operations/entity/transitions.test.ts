@@ -18,7 +18,7 @@ describe("status transition binding", () => {
       stamps: [{ field: "triggeredAt", value: "now" }, { field: "triggeredBy", value: "actor", actor: "user" }],
     });
     expect(Object.keys((trigger.inputSchema as { properties: Record<string, unknown> }).properties)).toEqual(["id", "expectedVersion"]);
-    expect(() => transitionBinding({ key: "AgreementMilestone.invoice", target: { entityName: "AgreementMilestone" } })).toThrow("not a status transition");
+    expect(() => transitionBinding({ key: "AgreementMilestone.archive", target: { entityName: "AgreementMilestone" } })).toThrow("not a status transition");
   });
 
   test("binds every transition Operation in the core runtime with an offer policy that no module may replace", () => {

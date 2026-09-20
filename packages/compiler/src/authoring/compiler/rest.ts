@@ -15,7 +15,7 @@ import type { CrudSection, RestConfig, RestOperationKey, RestSection } from "../
 import type { LoadedArtifacts } from "../loader.js";
 import { deriveTableName } from "./helpers.js";
 import { limitCrudOperations } from "./crud.js";
-import { isCoreEntityV2, v2RestConfig } from "../entity-v2.js";
+import { v2RestConfig } from "../entity-v2.js";
 
 export const REST_OPERATION_KEYS: readonly RestOperationKey[] = [
   "list",
@@ -30,17 +30,21 @@ export const REST_OPERATION_KEYS: readonly RestOperationKey[] = [
 // programmatic authoring).
 const REST_BASE_PATH_PATTERN = /^[a-z][a-z0-9-]*$/;
 
+/** The entity's REST exposure, projected from its `interfaces.rest` block. */
 export function buildRest(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): RestSection | undefined {
-  const authored = isCoreEntityV2(coreEntity)
-    ? v2RestConfig(coreEntity)
-    : coreEntity.rest;
-  if (authored === undefined || authored === false) return undefined;
+  return buildRestSection(coreEntity, v2RestConfig(coreEntity), crud);
+}
 
-  const config: RestConfig = authored === true ? {} : authored;
-  if (config.enabled === false) return undefined;
+/** Compile a resolved REST configuration; absent or disabled means no routes (fail closed). */
+export function buildRestSection(
+  coreEntity: LoadedArtifacts["coreEntity"],
+  config: RestConfig | undefined,
+  crud?: CrudSection,
+): RestSection | undefined {
+  if (config === undefined || config.enabled === false) return undefined;
 
   const basePath =
     config.basePath ?? deriveTableName(coreEntity.entity).replace(/_/g, "-");

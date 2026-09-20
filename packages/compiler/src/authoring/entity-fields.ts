@@ -187,10 +187,10 @@ export function normalizeEntityFields(
     // are not entity relationships. Preserve their scalar semantic type;
     // only an EntityName osf type requests relational storage. A nested
     // value cannot claim its own persisted column or relationship metadata.
-    if (entity.schemaVersion === 3 && nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
+    if (nested && semantic?.kind === "entityId" && (field.persisted || field.relationship)) {
       throw new Error(`${path}: inline identifier values cannot declare relational storage.`);
     }
-    if (entity.schemaVersion === 3 && !nested && semantic?.kind === "entityId" && (field.key !== "id" || field.osfType !== identityKey)) {
+    if (!nested && semantic?.kind === "entityId" && (field.key !== "id" || field.osfType !== identityKey)) {
       throw new Error(`${path}: identity aliases identify primary keys; use the entity osfType for a relationship.`);
     }
     const result: Field = { ...field, baseType };
@@ -208,8 +208,8 @@ export function normalizeEntityFields(
     if (cardinality) result.cardinality = cardinality;
     if (cardinalityOf(cardinality, path).required) result.required = true;
     const collection = fieldCardinality(result) === "collection";
-    if (field.entityValue || field.allowedDefinitions) {
-      if (entity.schemaVersion !== 3 || nested) throw new Error(`${path}: entityValue and allowedDefinitions require a top-level schemaVersion 3 field.`);
+    if ((field.entityValue || field.allowedDefinitions) && nested) {
+      throw new Error(`${path}: entityValue and allowedDefinitions require a top-level field.`);
     }
     if (field.entityValue) {
       if (field.osfType !== "entityValue" || baseType !== "object" || collection || field.relationship || inlineShape || item) {
@@ -254,7 +254,6 @@ export function normalizeEntityFields(
       if (field.relationship) throw new Error(`${path}: relationship requires a loaded entity osfType.`);
       return result;
     }
-    if (entity.schemaVersion === 1) throw new Error(`${path}: entity relationship fields require schemaVersion 2 or 3.`);
     if (semantic.entityIdentity === false) throw new Error(`${path}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${path}: entity references must be relational fields, not IDs inside JSON values.`);
     result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
@@ -280,7 +279,6 @@ function providerRelationshipOf(
   const path = `${entity.entity}.${field.key}`;
   const target = semantic.entity!;
   if (nested) throw new Error(`${path}: provider-backed references are top-level fields, not values inside JSON.`);
-  if (entity.schemaVersion !== 3) throw new Error(`${path}: provider-backed references require schemaVersion 3.`);
   if (field.persisted) throw new Error(`${path}: a provider-backed reference has no storage of its own; the ${target} Operations resolve it.`);
   // Normalization runs more than once (loader, then compile): a relationship
   // this function derived earlier is not authored metadata.

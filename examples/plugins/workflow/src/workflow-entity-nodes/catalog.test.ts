@@ -1,42 +1,29 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import type { EntityProfile } from "../../../../../packages/compiler/src/authoring/types.js";
-import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
-import {
-  isWorkflowEntityListDiscoverable,
-  toSyntheticCoreEntity,
-} from "./catalog.js";
+import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
+import { isWorkflowEntityListDiscoverable } from "./catalog.js";
 
-describe("context-full workflow entities", () => {
-  test("preserve the common CRUD policy when converted to a core entity", () => {
-    const profile = {
-      schemaVersion: 1,
-      kind: "entityProfile",
-      entity: "ReadOnlyWidget",
-      title: "Read-only widget",
-      fields: [],
-      crud: { operations: { create: false, update: false, delete: false } },
-    } as unknown as EntityProfile;
+const entity = (actions: readonly string[]): CoreEntity => ({
+  schemaVersion: 3,
+  kind: "coreEntity",
+  module: "core",
+  entity: "Widget",
+  title: "Widget",
+  language: "en",
+  fields: [],
+  operations: Object.fromEntries(actions.map((action) => [action, {
+    name: action, description: action,
+    implementation: { type: "entity", action },
+    effects: { data: "read", external: "none" },
+    reliability: { idempotency: { mode: "natural" } },
+    confirmation: { mode: "none" },
+  }])),
+  interfaces: {},
+} as CoreEntity);
 
-    const entity = toSyntheticCoreEntity("example", profile);
-    expect(resolveCrudOperations(entity.crud)).toEqual({
-      list: true,
-      get: true,
-      create: false,
-      update: false,
-      delete: false,
-    });
-  });
-
-  test("a get-only entity is not advertised through list-query pickers", () => {
-    const entity = toSyntheticCoreEntity("example", {
-      schemaVersion: 1,
-      kind: "entityProfile",
-      entity: "GetOnlyWidget",
-      title: "Get-only widget",
-      fields: [],
-      crud: { operations: { list: false, get: true } },
-    } as unknown as EntityProfile);
-    expect(isWorkflowEntityListDiscoverable(entity)).toBe(false);
+describe("workflow entity discovery", () => {
+  test("an entity without a list Operation is not advertised through list-query pickers", () => {
+    expect(isWorkflowEntityListDiscoverable(entity(["get"]))).toBe(false);
+    expect(isWorkflowEntityListDiscoverable(entity(["list", "get"]))).toBe(true);
   });
 });

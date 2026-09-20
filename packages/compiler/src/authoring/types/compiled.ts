@@ -790,8 +790,6 @@ export interface CompiledEntityContract {
     entity?: RetentionPolicy;
     policies?: Record<string, RetentionPolicy>;
   };
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization: CompiledAuthorization;
   views: Record<string, CompiledViewContext>;
   profiles: Record<string, CompiledProfile>;

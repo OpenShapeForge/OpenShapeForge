@@ -262,13 +262,15 @@ describe("a violation is rejected, with the offending path named", () => {
     expect(
       validator.validate(
         {
-          schemaVersion: 1,
+          schemaVersion: 3,
           kind: "coreEntity",
           module: "core",
           entity: "Widget",
           title: "Widget",
           language: "en",
           fields: [{ key: "name", osfType: "string", required: true }],
+          operations: {},
+          interfaces: {},
         },
         "widget.yaml",
       ),
@@ -402,13 +404,15 @@ describe("schema and compiler agree", () => {
 describe("coreEntity properties the compiler implements", () => {
   function coreEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
-      schemaVersion: 1,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "BillingRun",
       title: "Billing run",
       language: "en",
       fields: [{ key: "idempotencyKey", osfType: "string" }],
+      operations: {},
+      interfaces: {},
       ...overrides,
     };
   }
@@ -424,7 +428,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts strict v2 operation and interface authoring", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list"), get: v2Operation("get") },
       interfaces: {
         rest: {},
@@ -451,7 +455,7 @@ describe("coreEntity properties the compiler implements", () => {
   });
 
   const webViews = (tabs: unknown) => coreEntity({
-    schemaVersion: 2,
+    schemaVersion: 3,
     operations: { list: v2Operation("list"), get: v2Operation("get") },
     interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" }, web: { views: {
       collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
@@ -570,7 +574,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts plugin-backed CRUD without a second authorization policy", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       authorization: {
         roles: {
           read: ["BillingRuns.Read"],
@@ -629,7 +633,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts plugin-backed delete only with its canonical destructive contract", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       authorization: {
         roles: {
           read: ["BillingRuns.Read", "BillingRuns.Delete"],
@@ -693,7 +697,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts action-specific record ACL authoring and plugin enforcement", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [{
         key: "authorization",
         osfType: "object",
@@ -757,7 +761,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("rejects malformed strict v2 Web renderer registry keys", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list") },
       interfaces: {
         web: {
@@ -777,7 +781,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("accepts false as an explicit interface Operation exclusion", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list"), get: v2Operation("get") },
       interfaces: {
         rest: { operations: { get: false } },
@@ -802,7 +806,7 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [
         { key: "adapterId", osfType: "string" },
         { key: "configurationValues", osfType: "object" },
@@ -829,7 +833,7 @@ describe("coreEntity properties the compiler implements", () => {
       }],
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { create },
       interfaces: { rest: {}, graphql: {}, mcp: {} },
     });
@@ -846,7 +850,7 @@ describe("coreEntity properties the compiler implements", () => {
 
   it("rejects an unknown strict v2 MCP tool projection", () => {
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { list: v2Operation("list") },
       interfaces: {
         mcp: { tools: "per-tenant", operations: { list: {} } },
@@ -871,7 +875,7 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { remove: challenged },
       interfaces: { rest: { operations: { remove: {} } } },
     });
@@ -887,7 +891,7 @@ describe("coreEntity properties the compiler implements", () => {
       confirmation: { mode: "acknowledgement" },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { create },
       interfaces: { rest: { operations: { create: {} } } },
     });
@@ -911,7 +915,7 @@ describe("coreEntity properties the compiler implements", () => {
       },
     };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       fields: [
         { key: "updatedAt", osfType: "datetime", readOnly: true },
         { key: "idempotencyKey", osfType: "string" },
@@ -930,26 +934,20 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
-  it("keeps v1 and v2 closed instead of accepting mixed contracts", () => {
-    const v1WithOperations = coreEntity({
-      operations: { list: v2Operation("list") },
-      interfaces: { rest: { operations: { list: {} } } },
-    });
-    expect(() => validator.validate(v1WithOperations, "billing-run.yaml")).toThrow();
-
-    const v2WithLegacyRest = coreEntity({
-      schemaVersion: 2,
-      rest: true,
-      operations: { list: v2Operation("list") },
-      interfaces: { rest: { operations: { list: {} } } },
-    });
-    expect(() => validator.validate(v2WithLegacyRest, "billing-run.yaml")).toThrow();
+  it("admits only schemaVersion 3 and none of the retired top-level keys", () => {
+    for (const schemaVersion of [1, 2]) {
+      expect(() => validator.validate(coreEntity({ schemaVersion }), "billing-run.yaml")).toThrow(/schemaVersion/);
+    }
+    for (const retired of ["crud", "rest", "mcp", "ui", "hooks", "permissions"]) {
+      expect(() => validator.validate(coreEntity({ [retired]: {} }), "billing-run.yaml")).toThrow(new RegExp(retired));
+    }
+    expect(() => validator.validate(coreEntity({ operations: undefined }), "billing-run.yaml")).toThrow(/operations/);
   });
 
   it("rejects operation field projections until the compiler implements them", () => {
     const operation = { ...v2Operation("get"), output: { fields: ["idempotencyKey"] } };
     const document = coreEntity({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operations: { get: operation },
       interfaces: { rest: { operations: { get: {} } } },
     });
@@ -1015,108 +1013,4 @@ describe("coreEntity properties the compiler implements", () => {
     expect(() => validator.validate(document, "label-rule.yaml")).toThrow(/suggestions/);
   });
 
-  it("accepts a read-only common CRUD policy", () => {
-    const document = coreEntity({
-      crud: { operations: { create: false, update: false, delete: false } },
-    });
-    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
-  });
-
-  it("rejects unknown CRUD operations", () => {
-    const document = coreEntity({ crud: { operations: { publish: true } } });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/crud/);
-  });
-
-  it("does not let derived execution rename the authored URL selector", () => {
-    const document = coreEntity({
-      fields: [
-        { key: "bindings", osfType: "object" },
-        { key: "version", osfType: "integer" },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "bindings",
-          descriptionField: "bindings",
-          inputFieldsField: "bindings",
-          versionField: "version",
-          execution: {
-            bindingsField: "bindings",
-            operationRef: "operationId",
-            operationEntity: "Operation",
-            providerRef: "adapterId",
-            providerEntity: "Adapter",
-            connectionEntity: "Connection",
-            connectionProviderRef: "adapterId",
-            connectionValuesField: "values",
-            baseUrlKeyField: "callerChoice",
-          },
-        },
-      },
-    });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
-      /baseUrlKeyField/,
-    );
-  });
-
-  it("accepts the optional derived-tool output definition field", () => {
-    const document = coreEntity({
-      fields: [
-        {
-          key: "inputs",
-          osfType: "fieldDefinition",
-          cardinality: { min: 0, max: "unbounded" },
-        },
-        {
-          key: "outputs",
-          osfType: "fieldDefinition",
-          cardinality: { min: 0, max: "unbounded" },
-        },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "inputs",
-          descriptionField: "inputs",
-          inputFieldsField: "inputs",
-          outputFieldsField: "outputs",
-        },
-      },
-    });
-    expect(validator.validate(document, "billing-run.yaml")).toBe(
-      "core-entity.schema.json",
-    );
-  });
-
-  it("does not let derived execution delegate a header name to caller input", () => {
-    const document = coreEntity({
-      fields: [
-        { key: "bindings", osfType: "object" },
-        { key: "version", osfType: "integer" },
-      ],
-      mcp: {
-        derivedTools: {
-          roles: ["viewer"],
-          keyField: "bindings",
-          descriptionField: "bindings",
-          inputFieldsField: "bindings",
-          versionField: "version",
-          execution: {
-            bindingsField: "bindings",
-            operationRef: "operationId",
-            operationEntity: "Operation",
-            providerRef: "adapterId",
-            providerEntity: "Adapter",
-            connectionEntity: "Connection",
-            connectionProviderRef: "adapterId",
-            connectionValuesField: "values",
-            requestHeaderNameField: "callerChoice",
-          },
-        },
-      },
-    });
-    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
-      /requestHeaderNameField/,
-    );
-  });
 });

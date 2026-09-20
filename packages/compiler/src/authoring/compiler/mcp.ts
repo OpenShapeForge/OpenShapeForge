@@ -30,7 +30,7 @@ import type {
 } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
-import { isCoreEntityV2, v2McpConfig, v2OperationByAction } from "../entity-v2.js";
+import { v2McpConfig, v2OperationByAction } from "../entity-v2.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -74,17 +74,21 @@ export function deriveToolPrefix(entityName: string): string {
     .toLowerCase();
 }
 
+/** The entity's MCP exposure, projected from its `interfaces.mcp` block. */
 export function buildMcp(
   coreEntity: LoadedArtifacts["coreEntity"],
   crud?: CrudSection,
 ): McpSection | undefined {
-  const authored = isCoreEntityV2(coreEntity)
-    ? v2McpConfig(coreEntity)
-    : coreEntity.mcp;
-  if (authored === undefined || authored === false) return undefined;
+  return buildMcpSection(coreEntity, v2McpConfig(coreEntity), crud);
+}
 
-  const config: McpConfig = authored === true ? {} : authored;
-  if (config.enabled === false) return undefined;
+/** Compile a resolved MCP configuration; absent or disabled means no tools (fail closed). */
+export function buildMcpSection(
+  coreEntity: LoadedArtifacts["coreEntity"],
+  config: McpConfig | undefined,
+  crud?: CrudSection,
+): McpSection | undefined {
+  if (config === undefined || config.enabled === false) return undefined;
 
   const toolPrefix = config.toolPrefix ?? deriveToolPrefix(coreEntity.entity);
   if (!MCP_TOOL_PREFIX_PATTERN.test(toolPrefix)) {
@@ -110,20 +114,18 @@ export function buildMcp(
   const operations = crud
     ? limitCrudOperations(requestedOperations, crud)
     : requestedOperations;
-  const operationInstructions = isCoreEntityV2(coreEntity)
-    ? Object.fromEntries(
-        MCP_OPERATION_KEYS.flatMap((action) => {
-          const operationKey = v2OperationByAction(coreEntity)[action]?.[0];
-          const projection = operationKey
-            ? coreEntity.interfaces?.mcp?.operations?.[operationKey]
-            : undefined;
-          const instructions = projection && typeof projection === "object"
-            ? projection.instructions
-            : undefined;
-          return instructions === undefined ? [] : [[action, instructions]];
-        }),
-      )
-    : undefined;
+  const operationInstructions = Object.fromEntries(
+    MCP_OPERATION_KEYS.flatMap((action) => {
+      const operationKey = v2OperationByAction(coreEntity)[action]?.[0];
+      const projection = operationKey
+        ? coreEntity.interfaces?.mcp?.operations?.[operationKey]
+        : undefined;
+      const instructions = projection && typeof projection === "object"
+        ? projection.instructions
+        : undefined;
+      return instructions === undefined ? [] : [[action, instructions]];
+    }),
+  );
 
   const toolOverrides: Partial<
     Record<McpOperationKey, { name?: string; description?: string }>

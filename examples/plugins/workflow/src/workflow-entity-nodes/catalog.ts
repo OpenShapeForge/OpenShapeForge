@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
+import { buildCrud } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
 import { inverseCollectionsFor, resolveBaseType, osfTypeDefinitionOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
 import { withInverseCollections } from "../../../../../packages/compiler/src/authoring/inverse-collections.js";
@@ -132,25 +132,6 @@ export function resolveEntityIdOsfTypeKey(entityName: string, idField?: Field): 
   return declared;
 }
 
-export function toSyntheticCoreEntity(
-  contextName: string,
-  entityProfile: EntityProfile,
-): CoreEntity {
-  return {
-    schemaVersion: entityProfile.schemaVersion,
-    kind: "coreEntity",
-    module: contextName,
-    entity: entityProfile.entity,
-    title: entityProfile.title ?? entityProfile.entity,
-    description: entityProfile.description,
-    language: entityProfile.language,
-    domains: [...(entityProfile.domains ?? [])],
-    fields: entityProfile.fields ?? [],
-    crud: entityProfile.crud,
-    workflow: entityProfile.workflow,
-  };
-}
-
 function listWorkflowNodeContextNames(contextsDir: string): string[] {
   if (!existsSync(contextsDir)) {
     return [];
@@ -223,7 +204,6 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
   const entities: CoreEntity[] = [];
   const osfTypes = loadWorkflowNodeOsfTypes(authoringDir);
   const componentCatalog = loadWorkflowNodeComponentCatalog(authoringDir);
-  const contextsDir = join(authoringDir, "contexts");
   const baseEntity = loadBaseEntity(authoringDir);
 
   // Plugin-extraction adaptation: discover entity YAMLs through the core
@@ -252,32 +232,6 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
       ...contextCompleteEntity,
       fields: expandEntityFieldShapes(withCollections, osfTypes, componentCatalog),
     });
-  }
-
-  if (existsSync(contextsDir)) {
-    for (const contextName of readdirSync(contextsDir).sort()) {
-      const fullDir = join(contextsDir, contextName, "full");
-      if (!existsSync(fullDir)) {
-        continue;
-      }
-
-      for (const entry of readdirSync(fullDir).sort()) {
-        if (!entry.endsWith(".yaml") || entry.startsWith("_")) {
-          continue;
-        }
-
-        const entityProfile = loadYamlFile<EntityProfile>(join(fullDir, entry));
-        const rawEntity = toSyntheticCoreEntity(contextName, entityProfile);
-        const entity = applyBaseEntityToCore(rawEntity, baseEntity, {
-          kind: "contextFull",
-          path: join(fullDir, entry),
-        });
-        entities.push({
-          ...entity,
-          fields: expandEntityFieldShapes(entity.fields, osfTypes, componentCatalog),
-        });
-      }
-    }
   }
 
   return entities;
@@ -309,7 +263,7 @@ export function getWorkflowCoreEntityGraphqlRegistry(
 }
 
 export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
-  return resolveCrudOperations(entity.crud).list;
+  return buildCrud(entity).operations.list;
 }
 
 /**

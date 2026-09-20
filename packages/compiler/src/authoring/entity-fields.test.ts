@@ -121,10 +121,6 @@ describe("one relational field contract", () => {
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", osfType: "referenceItems" }]), types)).toThrow("not IDs inside JSON");
     expect(() => normalizeEntityFields(entity("Article", [{ key: "values", osfType: "recursiveItems" }]), types)).toThrow("cyclic inline");
   });
-  test("accepts canonical relation fields from operation-backed version 2 onward", () => {
-    expect(() => normalizeEntityFields({ ...block, schemaVersion: 1 }, catalog())).toThrow("require schemaVersion 2 or 3");
-    expect(normalizeEntityFields({ ...block, schemaVersion: 2 }, catalog()).fields[0]?.relationship?.target).toBe("Page");
-  });
   test("refuses ownership and field-key inverses on a single reference", () => {
     expect(() => normalizeEntityFields(entity("Block", [{ key: "page", osfType: "Page", relationship: { ownership: "owned" } }]), catalog())).toThrow("single owned");
     const left = entity("Left", [{ key: "right", osfType: "Right", relationship: { inverse: "left" } }]);

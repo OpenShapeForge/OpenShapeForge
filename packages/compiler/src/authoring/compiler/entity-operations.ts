@@ -7,7 +7,7 @@ import type {
   EntityOperationIntent,
 } from "../types.js";
 import type { CoreEntity } from "../types.js";
-import { isCoreEntityV2, v2OperationByAction } from "../entity-v2.js";
+import { v2OperationByAction } from "../entity-v2.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
   "list",
@@ -75,7 +75,7 @@ function compileOperation(
   intent: EntityOperationIntent,
 ): CompiledEntityOperation {
   const action = authorizationAction(intent);
-  const authored = source.coreEntity && isCoreEntityV2(source.coreEntity)
+  const authored = source.coreEntity
     ? v2OperationByAction(source.coreEntity)[intent]
     : undefined;
   const key = authored?.[0] ?? intent;

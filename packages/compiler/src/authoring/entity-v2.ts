@@ -9,10 +9,6 @@ import type {
 } from "./types.js";
 import { fieldCardinality } from "./compiler/helpers.js";
 
-export function isCoreEntityV2(entity: CoreEntity): boolean {
-  return entity.schemaVersion === 2 || entity.schemaVersion === 3;
-}
-
 export function v2OperationEntries(
   entity: CoreEntity,
 ): Array<[string, EntityOperationDefinition]> {
@@ -36,7 +32,7 @@ export function v2OperationByAction(
     if (!action) continue;
     if (result[action]) {
       throw new Error(
-        `[${entity.entity}] schemaVersion 2 currently supports one generated entity operation per action; ` +
+        `[${entity.entity}] one generated entity operation per action; ` +
           `both "${result[action]![0]}" and "${entry[0]}" implement "${action}".`,
       );
     }
@@ -46,7 +42,6 @@ export function v2OperationByAction(
 }
 
 export function v2PluginOperations(entity: CoreEntity) {
-  if (!isCoreEntityV2(entity)) return [];
   return v2OperationEntries(entity).flatMap(([key, definition]) => {
     if (definition.implementation.type !== "collection" && (definition.implementation.type !== "plugin" || definition.implementation.action)) return [];
     const projection = (name: "rest" | "graphql" | "mcp" | "web") => {
@@ -231,14 +226,19 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
   return { routes, presentations };
 }
 
+/** The only authored entity shape: schemaVersion 3, behaviour in operations and interfaces. */
+export const CORE_ENTITY_SCHEMA_VERSION = 3;
+
 export function assertV2Authoring(entity: CoreEntity, origin: string): void {
-  if (!isCoreEntityV2(entity)) return;
+  if (entity.schemaVersion !== CORE_ENTITY_SCHEMA_VERSION) {
+    throw new Error(`${origin} must be schemaVersion ${CORE_ENTITY_SCHEMA_VERSION}; there is no migration path from an older authoring shape.`);
+  }
   if (!entity.operations || (Object.keys(entity.operations).length === 0 &&
-    (entity.schemaVersion !== 3 || (entity.baseEntity === false && !entity.fields.some(field => field.key === "id"))))) {
-    throw new Error(`${origin} schemaVersion 2 must declare at least one operation.`);
+    entity.baseEntity === false && !entity.fields.some(field => field.key === "id"))) {
+    throw new Error(`${origin} must declare at least one operation.`);
   }
   v2OperationByAction(entity);
-  if (!entity.interfaces || (entity.schemaVersion === 2 && !Object.keys(entity.interfaces).length)) {
+  if (!entity.interfaces) {
     throw new Error(`${origin} requires explicit interface declarations.`);
   }
 
@@ -246,7 +246,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   for (const field of entity.fields) {
     if (RESERVED_MUTATION_CONTROL_FIELD_KEYS.has(field.key)) {
       throw new Error(
-        `${origin} schemaVersion 2 field "${field.key}" uses a reserved platform ` +
+        `${origin} field "${field.key}" uses a reserved platform ` +
           "mutation-control name. Rename the entity field so REST and MCP can " +
           "project canonical controls without stripping or reinterpreting entity data.",
       );
@@ -264,9 +264,9 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
     }
     if (operation.implementation.type === "collection") {
       const implementation = operation.implementation;
-      if (entity.schemaVersion !== 3 || !["insert", "move", "update", "remove"].includes(implementation.action) ||
+      if (!["insert", "move", "update", "remove"].includes(implementation.action) ||
         !/^[a-z][A-Za-z0-9]*$/.test(implementation.field) || Object.keys(implementation).some((key) => !["type", "action", "field"].includes(key))) {
-        throw new Error(`${origin} ${operationKey}: collection implementation requires schemaVersion 3, field and action insert|move|update|remove.`);
+        throw new Error(`${origin} ${operationKey}: collection implementation requires field and action insert|move|update|remove.`);
       }
       if (["input", "output", "target", "auth", "tenancy", "errors", "interaction", "prerequisites"].some((key) => Reflect.get(operation, key) !== undefined)) {
         throw new Error(`${origin} ${operationKey}: collection schemas, target, auth and tenancy are compiler-derived; custom controls are unsupported.`);
@@ -711,7 +711,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
     for (const field of fields) {
       if (field.render !== undefined) {
         throw new Error(
-          `${origin} schemaVersion 2 field "${field.key}" declares render. ` +
+          `${origin} field "${field.key}" declares render. ` +
             "Field presentation belongs to an interface or renderer registry.",
         );
       }

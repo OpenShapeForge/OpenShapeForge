@@ -813,41 +813,18 @@ export interface CoreEntity {
     snapshot?: { ownedRelationships?: "recursive" };
   };
   fields: Field[];
-  hooks?: EntityHooks;
-  permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
+  /** Derived by the compiler from `interfaces.web`; never authored. */
   ui?: UIDefinition;
   /**
-   * Common generated-CRUD policy shared by every transport. Absent or `true`
-   * preserves the historical all-operations default; `false` disables the
-   * entity completely. The object form can make an entity read-only or expose
-   * any smaller operation set. REST, MCP, workflow and later layers may narrow
-   * this policy but never widen it.
+   * Canonical Operations: every behaviour of the entity, including generated
+   * CRUD, is one of these. Exposure per transport is declared under
+   * `interfaces`, which may narrow this set but never widen it.
    */
-  crud?: boolean | CrudConfig;
-  /**
-   * Opt-in generated REST exposure for this entity. Absent or `false` means
-   * no REST routes are generated (fail closed, mirroring the generatedCrud
-   * allowlist). `true` enables every operation under a base path derived
-   * from the entity name (plural kebab-case, e.g. `RelationGroup` →
-   * `relation-groups`). The object form allows per-operation flags and a
-   * custom base path; `basePath` is emitted verbatim into route strings and
-   * OpenAPI paths, so the loader restricts it to `^[a-z][a-z0-9-]*$`.
-   */
-  rest?: boolean | RestConfig;
-  /**
-   * Opt-in generated MCP (Model Context Protocol) exposure for this entity.
-   * Absent or `false` means no tools are generated — fail closed, exactly as
-   * `rest` does. `true` emits one tool per operation under a prefix derived
-   * from the entity name (snake_case, e.g. `ContactDetail` →
-   * `contact_detail`). The object form allows per-operation flags, a custom
-   * prefix, and the `generic` tool style for large catalogs.
-   */
-  mcp?: boolean | McpConfig;
-  /** Canonical version-2 operations. Forbidden on schemaVersion 1 by JSON Schema. */
   operations?: Record<string, EntityOperationDefinition>;
-  /** Thin version-2 interface projections. Forbidden on schemaVersion 1 by JSON Schema. */
+  /** Thin interface projections (REST, GraphQL, MCP, web, workflow). */
   interfaces?: EntityInterfacesDefinition;
+  /** Workflow node generation settings; an entityPatch from the workflow plugin adds them. */
   workflow?: {
     nodes?: {
       actions?: {
@@ -948,28 +925,6 @@ export interface EntityProfile {
     };
   };
   ui?: UIDefinition;
-  crud?: boolean | CrudConfig;
-  workflow?: {
-    nodes?: {
-      actions?: Partial<
-        Record<
-          | "create"
-          | "getOne"
-          | "list"
-          | "update"
-          | "delete"
-          | "wait"
-          | "awaitAction",
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            }
-        >
-      >;
-    };
-  };
   storage?: {
     profileTable: string;
   };

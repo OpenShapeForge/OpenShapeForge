@@ -21,9 +21,7 @@
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
  *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
- *     against canonical `menu.yaml` (legacy `appShell.yaml` is normalized to
- *     that path and retained as a read alias for older hosts). This is how a
- *     PLUGIN contributes a sidebar
+ *     against `menu.yaml`. This is how a PLUGIN contributes a sidebar
  *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
@@ -629,44 +627,6 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
   return patch;
 }
 
-function resolvedCrudOperations(document: JsonValue): Record<(typeof CRUD_OPERATION_KEYS)[number], boolean> {
-  const crud = isPlainObject(document) ? document.crud : undefined;
-  if (crud === false) {
-    return Object.fromEntries(CRUD_OPERATION_KEYS.map((operation) => [operation, false])) as Record<
-      (typeof CRUD_OPERATION_KEYS)[number],
-      boolean
-    >;
-  }
-  const config = isPlainObject(crud) ? crud : {};
-  const enabled = config.enabled !== false;
-  const operations = isPlainObject(config.operations) ? config.operations : {};
-  return Object.fromEntries(
-    CRUD_OPERATION_KEYS.map((operation) => [
-      operation,
-      enabled && operations[operation] !== false,
-    ]),
-  ) as Record<(typeof CRUD_OPERATION_KEYS)[number], boolean>;
-}
-
-/**
- * CRUD exposure is a monotonic security policy across layers. An extension may
- * make an entity read-only or hide it, but a later package must not restore an
- * operation its host (or an earlier package) disabled.
- */
-function assertCrudPolicyOnlyNarrows(base: JsonValue, merged: JsonValue, origin: string): void {
-  const before = resolvedCrudOperations(base);
-  const after = resolvedCrudOperations(merged);
-  const widened = CRUD_OPERATION_KEYS.filter(
-    (operation) => before[operation] === false && after[operation] === true,
-  );
-  if (widened.length > 0) {
-    throw new Error(
-      `${origin} widens crud.operations (${widened.join(", ")}) disabled by an earlier layer. ` +
-        "Entity patches may only narrow generated CRUD exposure; change the owning layer instead.",
-    );
-  }
-}
-
 type JsonObject = { [key: string]: JsonValue };
 
 function stableJson(value: JsonValue | undefined): string {
@@ -1084,7 +1044,6 @@ function assertEntitySecurityOnlyNarrows(baseValue: JsonValue, mergedValue: Json
  * other for the result to be the document the generator sees.
  */
 const APP_SHELL_FILENAME = "menu.yaml";
-const LEGACY_APP_SHELL_FILENAME = "appShell.yaml";
 
 function isEntityFile(relativePath: string): boolean {
   return (
@@ -1128,10 +1087,7 @@ export function authoringLayerDirs(repoRoot: string, config?: AuthoringConfig): 
 export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig): string {
   const layerDirs = authoringLayerDirs(repoRoot, config);
 
-  if (
-    layerDirs.length === 1 &&
-    !existsSync(join(layerDirs[0]!, LEGACY_APP_SHELL_FILENAME))
-  ) {
+  if (layerDirs.length === 1) {
     return layerDirs[0]!;
   }
 
@@ -1152,9 +1108,7 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
   for (const layerDir of layerDirs) {
     for (const relativePath of walkFiles(layerDir)) {
       const sourcePath = join(layerDir, relativePath);
-      const resolvedRelativePath = relativePath === LEGACY_APP_SHELL_FILENAME
-        ? APP_SHELL_FILENAME
-        : relativePath;
+      const resolvedRelativePath = relativePath;
 
       const parsed = relativePath.endsWith(".yaml")
         ? (YAML.parse(readFileSync(sourcePath, "utf8")) as
@@ -1178,11 +1132,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           ) as JsonValue;
           const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
           const merged = strategicMerge(baseDoc, patchBody as JsonValue);
-          assertCrudPolicyOnlyNarrows(
-            baseDoc,
-            merged,
-            `entityPatch ${layerDir}/${relativePath}`,
-          );
           assertEntitySecurityOnlyNarrows(
             baseDoc,
             merged,
@@ -1323,11 +1272,6 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
     const target = join(buildDir, relativePath);
     mkdirSync(join(target, ".."), { recursive: true });
     cpSync(join(source.layer, source.path), target);
-  }
-
-  const appShellPath = join(buildDir, APP_SHELL_FILENAME);
-  if (existsSync(appShellPath)) {
-    cpSync(appShellPath, join(buildDir, LEGACY_APP_SHELL_FILENAME));
   }
 
   return buildDir;

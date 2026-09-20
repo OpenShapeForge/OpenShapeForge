@@ -81,7 +81,7 @@ describe("canonical entity operations", () => {
   test("preserves a plugin-backed delete as the canonical entity delete Operation", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -251,7 +251,7 @@ describe("canonical entity operations", () => {
   test("uses v2 operation identity and canonical metadata", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -286,7 +286,7 @@ describe("canonical entity operations", () => {
   test("compiles secure input once on the canonical create Operation", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Connection",
@@ -364,7 +364,7 @@ describe("canonical entity operations", () => {
   test("compiles a create prerequisite once and rejects it on other actions", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "osf-integration",
       entity: "Adapter",
@@ -413,7 +413,7 @@ describe("canonical entity operations", () => {
   test("preserves a server-issued version-bound challenge without interface translation", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -485,7 +485,7 @@ describe("canonical entity operations", () => {
   test("allows bounded challenges for existing update targets only", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -608,7 +608,7 @@ describe("canonical entity operations", () => {
   test("rejects mutation controls on reads and version concurrency on create", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -672,7 +672,7 @@ describe("canonical entity operations", () => {
   test("reserves canonical mutation-control names from v2 entity fields", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -709,7 +709,7 @@ describe("canonical entity operations", () => {
   test("projects v2 GraphQL through canonical Operations and permits explicit exclusions", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -758,7 +758,7 @@ describe("canonical entity operations", () => {
   test("validates version fields and edit-lease dependencies before compilation", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -857,7 +857,7 @@ describe("canonical entity operations", () => {
   test("allows record permission only on a record-scoped plugin Operation with an entity ACL", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",
@@ -939,7 +939,7 @@ describe("canonical entity operations", () => {
   test("reserves keyed idempotency until server-side enforcement exists", () => {
     const source = relationSource();
     source.coreEntity = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       kind: "coreEntity",
       module: "core",
       entity: "Relation",

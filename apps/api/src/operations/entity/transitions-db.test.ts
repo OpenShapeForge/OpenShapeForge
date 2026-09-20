@@ -224,6 +224,23 @@ describe("status transitions against PostgreSQL", () => {
     expect(await offers(triggered)).toMatchObject({ available: false, error: { code: "INVALID_STATE" } });
   });
 
+  test("a list of N rows issues one referenced read per target table", async () => {
+    const ids = [await milestone(), await milestone(), await milestone(), await milestone(), await milestone()];
+    const statements: string[] = [];
+    const decisions = await withDbSession(restricted!.db, session, async (trx) => {
+      const executor = trx.getExecutor();
+      const original = executor.executeQuery.bind(executor);
+      executor.executeQuery = ((query: { sql: string }) => {
+        statements.push(query.sql);
+        return original(query);
+      }) as typeof executor.executeQuery;
+      return transitionAvailabilityHandler(operation)(ids, { db: trx, session: session as never });
+    });
+    expect(ids.every((id) => decisions[id]?.available === true)).toBe(true);
+    const targetReads = statements.filter((sql) => /"agreements"/.test(sql) && !/"agreement_milestones"/.test(sql));
+    expect(targetReads).toHaveLength(1);
+  });
+
   test("a referenced precondition reads the named record in this tenant and refuses a miss, a cross-tenant row, present and in", async () => {
     const passing = await milestone();
     expect(await transitionOperationHandler(operation)({ id: passing }, context())).toMatchObject({ value: { status: "triggered" } });

@@ -290,6 +290,53 @@ async function referencedRecords(
   return found;
 }
 
+/**
+ * Offer path: gather every `via` value across the page and read each target
+ * table once. Execution keeps `referencedRecords` — one locked row per via.
+ */
+async function referencedRecordsByRow(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  binding: TransitionBinding,
+  rows: ReadonlyMap<string, GeneratedEntityRow>,
+): Promise<Map<string, Map<string, TransitionReferencedRow | undefined>>> {
+  const groups = new Map<string, { target: GeneratedCrudTable; vias: TransitionReferencedPrecondition[] }>();
+  for (const precondition of binding.referenced) {
+    const key = `${precondition.target.schema}.${precondition.target.table}`;
+    const group = groups.get(key) ?? { target: precondition.target, vias: [] };
+    group.vias.push(precondition);
+    groups.set(key, group);
+  }
+  const fetched = new Map<string, Map<string, TransitionReferencedRow>>();
+  for (const [key, group] of groups) {
+    const ids = new Set<string>();
+    for (const row of rows.values()) {
+      for (const precondition of group.vias) {
+        const viaValue = row[precondition.viaColumn.name];
+        if (present(viaValue)) ids.add(String(viaValue));
+      }
+    }
+    const inChecks = group.vias.filter((precondition) => precondition.in?.length);
+    fetched.set(key, await fetchReferenced(trx, session, group.target, [...ids], inChecks, false));
+  }
+  const byRow = new Map<string, Map<string, TransitionReferencedRow | undefined>>();
+  for (const [id, row] of rows) {
+    const found = new Map<string, TransitionReferencedRow | undefined>();
+    for (const precondition of binding.referenced) {
+      if (found.has(precondition.via)) continue;
+      const viaValue = row[precondition.viaColumn.name];
+      if (!present(viaValue)) {
+        found.set(precondition.via, undefined);
+        continue;
+      }
+      const key = `${precondition.target.schema}.${precondition.target.table}`;
+      found.set(precondition.via, fetched.get(key)?.get(String(viaValue)));
+    }
+    byRow.set(id, found);
+  }
+  return byRow;
+}
+
 /** Offer policy: a rule is offered only while the row's status is in `from` and its preconditions hold. */
 export function transitionAvailabilityHandler(
   operation: { key: string; target?: { entityName: string } },
@@ -297,6 +344,7 @@ export function transitionAvailabilityHandler(
   const binding = transitionBinding(operation);
   return async (targetIds, context) => {
     const rows = await lockedRows(context.db, context.session, binding.table, targetIds, false);
+    const referencedById = await referencedRecordsByRow(context.db, context.session, binding, rows);
     const decisions: Array<[string, { available: true } | { available: false; error: OperationError }]> = [];
     for (const id of targetIds) {
       const row = rows.get(id);
@@ -304,8 +352,7 @@ export function transitionAvailabilityHandler(
         decisions.push([id, { available: false, error: { code: "NOT_FOUND", message: "Resource not found.", retryable: false } }]);
         continue;
       }
-      const referenced = await referencedRecords(context.db, context.session, binding, row, false);
-      const error = transitionRefusal(binding, row, referenced);
+      const error = transitionRefusal(binding, row, referencedById.get(id) ?? new Map());
       decisions.push([id, error ? { available: false, error } : { available: true }]);
     }
     return Object.fromEntries(decisions);

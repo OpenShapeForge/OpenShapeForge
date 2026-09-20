@@ -46,7 +46,6 @@ import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { createControlRuntime } from "../control/runtime.js";
 import { CONTROL_PLUGIN } from "../control/operations.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
-import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
 import {
   createRuntimeDeclarativeServiceExecutor,
@@ -578,7 +577,6 @@ export function createApiApp(options: {
         },
       });
     }
-    registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),

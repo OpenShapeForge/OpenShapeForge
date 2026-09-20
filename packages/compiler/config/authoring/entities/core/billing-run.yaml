@@ -3,8 +3,10 @@ kind: coreEntity
 module: core
 entity: BillingRun
 title: Billing Run
-description: Durable run-level ledger for one execution of the prolongation engine. Holds request-level idempotency,
-  summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem.
+description: Durable run-level ledger for one execution of the billing engine. Holds request-level idempotency,
+  summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem. A run is
+  written only by the Operation that performs it — BillingRun.execute, the milestone mode, implemented by the core
+  osf-billing module; no interface creates, edits or deletes a run by hand.
 language: en
 displayTemplate: "{{mode}} @ {{billUpToDate}}"
 filterField: idempotencyKey
@@ -24,6 +26,8 @@ indexes:
     unique: true
 fields:
   - key: idempotencyKey
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: string
     required: true
     label:
@@ -41,6 +45,8 @@ fields:
       column: idempotency_key
       storageClass: core
   - key: status
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     required: true
     label:
       en: Status
@@ -57,6 +63,8 @@ fields:
       referentieGroep: BILLINGRUNSTATUS
     osfType: referenceDataCode
   - key: mode
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     required: true
     label:
       en: Mode
@@ -73,6 +81,8 @@ fields:
       referentieGroep: BILLINGRUNMODE
     osfType: referenceDataCode
   - key: billUpToDate
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: date
     required: true
     label:
@@ -85,6 +95,8 @@ fields:
       column: bill_up_to_date
       storageClass: core
   - key: agreementFilter
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: object
     required: false
     label:
@@ -98,6 +110,8 @@ fields:
       column: agreement_filter
       storageClass: core
   - key: dryRun
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: boolean
     required: false
     label:
@@ -111,6 +125,8 @@ fields:
       column: dry_run
       storageClass: core
   - key: maxAgreementsPerWorker
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: false
     label:
@@ -126,6 +142,8 @@ fields:
       column: max_agreements_per_worker
       storageClass: core
   - key: agreementsPlanned
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: false
     label:
@@ -138,6 +156,8 @@ fields:
       column: agreements_planned
       storageClass: core
   - key: agreementsCompleted
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: false
     label:
@@ -147,6 +167,8 @@ fields:
       column: agreements_completed
       storageClass: core
   - key: agreementsFailed
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: false
     label:
@@ -156,6 +178,8 @@ fields:
       column: agreements_failed
       storageClass: core
   - key: invoicesProduced
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: integer
     required: false
     label:
@@ -165,6 +189,8 @@ fields:
       column: invoices_produced
       storageClass: core
   - key: totalAmount
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     required: false
     label:
       en: Total amount
@@ -177,6 +203,8 @@ fields:
       column: total_amount
       storageClass: core
   - key: failures
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: object
     required: false
     label:
@@ -189,6 +217,8 @@ fields:
       column: failures
       storageClass: core
   - key: startedAt
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: datetime
     required: false
     label:
@@ -198,6 +228,8 @@ fields:
       column: started_at
       storageClass: core
   - key: completedAt
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: datetime
     required: false
     label:
@@ -207,6 +239,8 @@ fields:
       column: completed_at
       storageClass: core
   - key: triggeredBy
+    readOnly: true
+    writtenBy: [BillingRun.execute]
     osfType: string
     required: false
     label:
@@ -225,12 +259,9 @@ authorization:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
-    create:
-      - Finance.All.ReadWrite
-    update:
-      - Finance.All.ReadWrite
-    delete:
-      - Finance.All.ReadWrite
+    create: []
+    update: []
+    delete: []
   rowAccess:
     enabled: true
     empty: public
@@ -263,53 +294,90 @@ operations:
         mode: natural
     confirmation:
       mode: none
-  create:
-    name: Create Billing Run
-    description: Create BillingRun records.
-    implementation:
-      type: entity
-      action: create
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  update:
-    name:
-      en: Edit
-      nl: Bewerken
-    description: Update BillingRun records.
-    implementation:
-      type: entity
-      action: update
-    effects:
-      data: write
-      external: none
-    reliability:
-      idempotency:
-        mode: none
-    confirmation:
-      mode: none
-  delete:
-    name: Delete Billing Run
-    description: Delete BillingRun records.
-    implementation:
-      type: entity
-      action: delete
-    effects:
-      data: delete
-      external: none
-    reliability:
-      idempotency:
-        mode: natural
-    confirmation:
-      mode: none
+  # The milestone billing run as a described Operation. One call invoices
+  # every triggered AgreementMilestone of the tenant (or of one agreement):
+  # per milestone one Invoice with one InvoiceLine, numbered from the
+  # tenant's sales InvoiceSequence, one BillingRunItem recording the
+  # decision, and the milestone moved to invoiced through its `invoice`
+  # transition. The whole run is one transaction under the caller's
+  # idempotency key: a replay with the same key returns the first result
+  # through the core receipt, and never invoices twice.
+  execute:
+    name: { en: Run milestone billing, nl: Mijlpaalfacturatie draaien }
+    description:
+      en: Invoices every triggered agreement milestone, optionally of one agreement, in one billing run. Requires an idempotency key; a replay returns the first result.
+      nl: Factureert elke getriggerde overeenkomstmijlpaal, desgewenst van één overeenkomst, in één facturatierun. Vereist een idempotentiesleutel; een herhaling geeft het eerste resultaat terug.
+    implementation: { type: plugin, plugin: osf-billing, handler: executeBillingRun }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [idempotencyKey]
+        properties:
+          idempotencyKey:
+            type: string
+            minLength: 1
+            maxLength: 200
+            x-osf-i18n: { title: { en: Idempotency key, nl: Idempotentiesleutel } }
+          agreementId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Agreement }
+            x-osf-i18n:
+              title: { en: Agreement, nl: Overeenkomst }
+              description: { en: Invoice only the triggered milestones of this agreement., nl: Factureer alleen de getriggerde mijlpalen van deze overeenkomst. }
+          dryRun:
+            type: boolean
+            default: false
+            x-osf-i18n:
+              title: { en: Dry run, nl: Proefrun }
+              description: { en: Plan and count the milestones without producing invoices., nl: Plan en tel de mijlpalen zonder facturen te maken. }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, status, mode, dryRun, agreementsPlanned, agreementsCompleted, invoicesProduced, totalAmount, items]
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Billing run, nl: Facturatierun } } }
+          status: { type: string, x-osf-i18n: { title: { en: Status, nl: Status } } }
+          mode: { type: string, x-osf-i18n: { title: { en: Mode, nl: Modus } } }
+          dryRun: { type: boolean, x-osf-i18n: { title: { en: Dry run, nl: Proefrun } } }
+          agreementsPlanned: { type: integer, x-osf-i18n: { title: { en: Agreements planned, nl: Geplande overeenkomsten } } }
+          agreementsCompleted: { type: integer, x-osf-i18n: { title: { en: Agreements invoiced, nl: Gefactureerde overeenkomsten } } }
+          invoicesProduced: { type: integer, x-osf-i18n: { title: { en: Invoices produced, nl: Geproduceerde facturen } } }
+          totalAmount: { type: number, x-osf-i18n: { title: { en: Total amount, nl: Totaalbedrag } } }
+          items:
+            type: array
+            x-osf-i18n: { title: { en: Items, nl: Regels } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [agreementMilestoneId, agreementId, invoiceId, invoiceNumber, amount]
+              properties:
+                agreementMilestoneId: { type: string, format: uuid, x-osf-i18n: { title: { en: Milestone, nl: Mijlpaal } } }
+                agreementId: { type: string, format: uuid, x-osf-i18n: { title: { en: Agreement, nl: Overeenkomst } } }
+                invoiceId: { type: [string, "null"], format: uuid, x-osf-i18n: { title: { en: Invoice, nl: Factuur } } }
+                invoiceNumber: { type: [integer, "null"], x-osf-i18n: { title: { en: Invoice number, nl: Factuurnummer } } }
+                amount: { type: number, x-osf-i18n: { title: { en: Amount, nl: Bedrag } } }
+    auth: { mode: session, roles: [Finance.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The run input is invalid. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: The caller may not run billing. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
+      - { status: 409, code: ALREADY_EXISTS, description: Another caller already ran billing under this idempotency key. }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      execute: { method: POST, path: /api/rest/v1/billing-runs/execute }
   graphql: {}
+  mcp:
+    tools: generic
   workflow:
     nodes:
       actions:
@@ -347,16 +415,11 @@ interfaces:
           read:
             en: /billing-runs/:id
             nl: /facturatie-runs/:id
-          create:
-            en: /billing-runs/create
-            nl: /facturatie-runs/aanmaken
         title: "{{mode}}"
         subtitle: "{{status}}"
         badges:
           - mode
           - status
-        actions:
-          - update
         layout:
           tabs:
             - id: overview
@@ -400,27 +463,6 @@ interfaces:
                     nl: Mislukkingen
                   fields:
                     - failures
-        modes:
-          create:
-            title:
-              en: Create billing run
-              nl: Facturatie-run aanmaken
-            groups:
-              - title:
-                  en: Run details
-                  nl: Run-gegevens
-                fields:
-                  - status
-                  - mode
-                  - billUpToDate
-                  - dryRun
-                  - maxAgreementsPerWorker
-                  - idempotencyKey
-                  - triggeredBy
-          update:
-            title:
-              en: Edit billing run
-              nl: Facturatie-run bewerken
     fields:
       status:
         render:

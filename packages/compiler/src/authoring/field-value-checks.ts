@@ -59,7 +59,7 @@ export function isPosixSafePattern(pattern: string): boolean {
   return depth === 0;
 }
 
-function constraintName(table: string, column: string, kind: "options" | "pattern"): string {
+function constraintName(table: string, column: string, kind: "options" | "pattern" | "requires"): string {
   const name = `${table}_${column}_${kind}_check`;
   return name.length <= 63 ? name : `${name.slice(0, 50)}_${digestOf(name)}`;
 }
@@ -68,7 +68,7 @@ function checkConstraint(
   schema: string,
   table: string,
   column: string,
-  kind: "options" | "pattern",
+  kind: "options" | "pattern" | "requires",
   expression: string,
 ): TableConstraintDefinition {
   const name = constraintName(table, column, kind);
@@ -81,14 +81,31 @@ function checkConstraint(
   };
 }
 
-/** The static options and safe pattern CHECKs for one table's scalar text columns. */
+/**
+ * The static options and safe pattern CHECKs for one table's scalar text
+ * columns, and the `validation.requires` CHECK for any single column: when
+ * the column holds a value, every column it requires holds one too.
+ */
 export function fieldValueCheckConstraints(
   schema: string,
   table: string,
   columns: ReadonlyArray<{ field: Field | undefined; column: ColumnDefinition }>,
 ): TableConstraintDefinition[] {
   const constraints: TableConstraintDefinition[] = [];
+  const columnOf = new Map(columns.filter((entry) => entry.field).map((entry) => [entry.field!.key, entry]));
   for (const { field, column } of columns) {
+    const requires = field?.validation?.requires;
+    if (field && requires?.length && fieldCardinality(field) === "single") {
+      const required = requires.map((key) => {
+        const target = columnOf.get(key);
+        if (!target || key === field.key || fieldCardinality(target.field!) !== "single") {
+          throw new Error(`Field "${field.key}" of ${schema}.${table} requires "${key}", which is not another persisted single field.`);
+        }
+        return `${ident(target.column.name)} IS NOT NULL`;
+      });
+      constraints.push(checkConstraint(schema, table, column.name, "requires",
+        `${ident(column.name)} IS NULL OR (${required.join(" AND ")})`));
+    }
     if (!field || column.type !== "text" || fieldCardinality(field) !== "single") continue;
     const options = field.options;
     if (options?.type === "static" && options.items && options.items.length > 0) {

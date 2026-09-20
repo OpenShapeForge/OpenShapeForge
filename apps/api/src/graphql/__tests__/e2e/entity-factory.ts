@@ -7,6 +7,7 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { sql } from "kysely";
 import {
   createGeneratedEntity,
   getGeneratedCrudTables,
@@ -19,6 +20,7 @@ import { createDoc, expectOperationData } from "./gql-shapes.js";
 import {
   createdRows,
   getRuntime,
+  getSeedRuntime,
   gql,
   seed,
   type GeneratedTable,
@@ -80,6 +82,29 @@ export function isMutableColumn(
   operation: "create" | "update" = "create",
 ): boolean {
   return isWritableColumn(column, operation) && !isOperationWrittenColumn(column);
+}
+
+/**
+ * The rows that reference `id` through a schema foreign key, as
+ * `table.column` names — what the database's on-delete rules will weigh when
+ * the record is deleted. Read from the database itself, so a sweep learns
+ * what a create actually left behind (a document's first version) rather
+ * than inferring it from the create's contract.
+ */
+export async function referencingRows(table: GeneratedTable, id: string, identity: Identity): Promise<string[]> {
+  const found: string[] = [];
+  for (const candidate of getGeneratedCrudTables()) {
+    for (const [column, target] of foreignKeyTargets(candidate)) {
+      if (target !== table.name) continue;
+      const tenantWhere = candidate.tenantScoped ? sql`and tenant_id = ${identity.tenantId}::uuid` : sql``;
+      const rows = await sql<{ count: string }>`
+        select count(*)::text as count from ${sql.id(candidate.schema, candidate.table)}
+        where ${sql.id(column)}::text = ${id} ${tenantWhere}
+      `.execute(getSeedRuntime().db);
+      if (Number(rows.rows[0]?.count ?? 0) > 0) found.push(`${candidate.name}.${column}`);
+    }
+  }
+  return found;
 }
 
 /** FK column name -> target table name (e.g. relation_group_id -> erp.relation_groups). */
@@ -352,13 +377,17 @@ export async function pluginCreateInput(
 
   const build = async (node: FieldSchema): Promise<Record<string, unknown>> => {
     const input: Record<string, unknown> = {};
+    // A contract that offers alternatives ("a fixed amount, or a basis with a
+    // percentage") states them as an anyOf of required lists; the first
+    // alternative is the one the factory satisfies.
+    const alternative = (node as { anyOf?: Array<{ required?: string[] }> }).anyOf?.[0]?.required ?? [];
     for (const [key, property] of Object.entries(node.properties ?? {})) {
       if (key in pending) {
         input[key] = pending[key];
         delete pending[key];
         continue;
       }
-      const required = node.required?.includes(key) === true;
+      const required = node.required?.includes(key) === true || alternative.includes(key);
       if (property.type === "object" && property.properties) {
         // An optional block (an artifact handle, say) is left out entirely:
         // its own required members only apply once the block is present.

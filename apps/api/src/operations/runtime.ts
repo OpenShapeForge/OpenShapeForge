@@ -76,6 +76,7 @@ import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { nativeEntityTypeListHandler } from "./entity-type-list.js";
 import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
+import { BILLING_PLUGIN, billingOperationHandler } from "./billing/module.js";
 import {
   capabilityGrantRefusal,
   consumeCapabilityGrantInTransaction,
@@ -617,6 +618,14 @@ export function bindOperationHandlers(
     if (operation.plugin === GRANTS_PLUGIN) {
       if (modulesByName.has(GRANTS_PLUGIN)) throw new Error("The core capability grant runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
+      continue;
+    }
+    // Billing is core as well: the milestone run and the milestone create
+    // (operations/billing) bind in every process, entity-authored plugin
+    // Operations included, so the ERP entities carry their own behaviour.
+    if (operation.plugin === BILLING_PLUGIN) {
+      if (modulesByName.has(BILLING_PLUGIN)) throw new Error("The core billing runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: billingOperationHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "entity-type-list") {
@@ -1885,10 +1894,10 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  // The core jobs and transition Operations project in every process, as
-  // their REST and MCP surfaces do: the handlers ship with the runtime, not
-  // with a module.
-  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN]);
+  // The core jobs, transition and billing Operations project in every
+  // process, as their REST and MCP surfaces do: the handlers ship with the
+  // runtime, not with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

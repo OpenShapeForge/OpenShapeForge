@@ -35,4 +35,10 @@ test("diagnoses original metadata and output labels before fallback", () => {
   expect(missingSchemaUiTranslations({ type: "object", properties: { customerName: { type: "string" } } }, "offer.output"))
     .toContain("offer.output.properties.customerName.x-osf-i18n.title");
   expect(missingLocalizedMetadata({ defaultValue: { label: { en: "Customer data" } } })).toEqual([]);
+  // An anyOf branch that restates a required name with a boolean schema names no field to label.
+  expect(missingSchemaUiTranslations({
+    type: "object",
+    properties: { amount: { type: "number", "x-osf-i18n": { title: { en: "Amount", nl: "Bedrag" } } } },
+    anyOf: [{ required: ["amount"], properties: { amount: true } }],
+  }, "milestone.input")).toEqual([]);
 });

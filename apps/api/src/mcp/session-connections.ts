@@ -7,6 +7,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { compareCodeUnits } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/index.js";
@@ -103,7 +104,7 @@ export function capturePersonalOAuthConnections(
       (row): row is Record<string, unknown> & { id: string } =>
         typeof row.id === "string" && row.id.length > 0,
     )
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => compareCodeUnits(left.id, right.id));
   return { tenantSupport: support[0], personal };
 }
 

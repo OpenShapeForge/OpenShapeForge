@@ -3,6 +3,7 @@
  * Authorized invocation sources of derived tools. Split out of
  * server-scope.ts, verbatim.
  */
+import { compareCodeUnits } from "@openshapeforge/operations";
 import { withDbSession } from "../db/session.js";
 import {
   derivedToolsFromRows,
@@ -235,7 +236,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
                   (row): row is Record<string, unknown> & { id: string } =>
                     typeof row.id === "string" && row.id.length > 0,
                 )
-                .sort((left, right) => left.id.localeCompare(right.id));
+                .sort((left, right) => compareCodeUnits(left.id, right.id));
           const requiredScopes = Array.isArray(operationRow.requiredScopes)
             ? operationRow.requiredScopes.filter(
                 (scope): scope is string => typeof scope === "string",

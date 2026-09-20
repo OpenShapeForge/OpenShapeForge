@@ -25,10 +25,26 @@ function sortedLanguages(text: Record<string, string> | undefined): Record<strin
   return Object.fromEntries(Object.entries(text).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)));
 }
 
+/**
+ * English is what every reader falls back to (`whoami` speaks it, the
+ * opening sentence resolves through it), so a label or phrase without it
+ * would be a persona the runtime silently drops. Refused here, naming the
+ * role, beside the schema's own `required: ["en"]`.
+ */
+function requireEnglish(role: string, kind: "label" | "phrase", text: Record<string, string> | undefined): void {
+  if (text && !text.en?.trim()) {
+    throw new Error(
+      `roleLabels.${role}.${kind} has no English text; en is the fallback every reader resolves to.`,
+    );
+  }
+}
+
 export function buildRoleLabels(configs: readonly AuthorizationConfigFile[]): RoleLabelTable {
   const table: RoleLabelTable = {};
   for (const config of configs) {
     for (const [role, entry] of Object.entries(config.roleLabels ?? {})) {
+      requireEnglish(role, "label", entry.label);
+      requireEnglish(role, "phrase", entry.phrase);
       const label = sortedLanguages(entry.label);
       const phrase = sortedLanguages(entry.phrase);
       table[role] = { ...(label ? { label } : {}), ...(phrase ? { phrase } : {}) };

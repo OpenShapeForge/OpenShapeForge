@@ -9,8 +9,8 @@
   "$defs": {
     "localizedText": {
       "type": "object",
-      "description": "One text per language, keyed by base language tag.",
-      "minProperties": 1,
+      "description": "One text per language, keyed by base language tag. English is the fallback every reader resolves to, so it is required.",
+      "required": ["en"],
       "propertyNames": { "pattern": "^[a-z]{2,3}$" },
       "additionalProperties": { "type": "string", "minLength": 1 }
     },

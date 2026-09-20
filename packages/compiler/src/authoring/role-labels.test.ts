@@ -51,6 +51,22 @@ describe("role labels", () => {
     expect(buildRoleLabels([unlabelled])).toEqual({});
   });
 
+  test("refuses a label or phrase without English, in the build and in a patch", () => {
+    expect(() =>
+      buildRoleLabels([{ ...base, roleLabels: { auditor: { label: { nl: "Auditor" } } } } as unknown as AuthorizationConfigFile]),
+    ).toThrow(/roleLabels\.auditor\.label has no English text/);
+    expect(() =>
+      buildRoleLabels([{ ...base, roleLabels: { auditor: { phrase: { en: "  " } } } } as unknown as AuthorizationConfigFile]),
+    ).toThrow(/roleLabels\.auditor\.phrase has no English text/);
+    expect(() =>
+      applyAuthorizationPatch(
+        base as never,
+        { kind: "authorizationPatch", roleLabels: { auditor: { label: { nl: "Auditor" } } } } as never,
+        { strategicMerge, origin: "host/authorization.yaml" },
+      ),
+    ).toThrow(/host\/authorization\.yaml/);
+  });
+
   test("a host adds and refines labels through an authorizationPatch, and an unusable one is refused", () => {
     const merged = applyAuthorizationPatch(
       base as never,

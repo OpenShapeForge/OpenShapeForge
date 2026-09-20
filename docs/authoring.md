@@ -483,7 +483,9 @@ A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
 name and display only: `label` (title case) marks a persona — the composite a
 membership row records, shown as `whoami.role` — and `phrase` (lower case) is
 the wording inside a sentence: "is an organization administrator", "may manage
-clients and other relations". The MCP session reads them from the compiled
+clients and other relations". Both are per-language maps and `en` is required:
+English is what every reader falls back to, and a label without it fails the
+build rather than dropping the persona at run time. The MCP session reads them from the compiled
 `generated/compiler/role-labels.json`; the engine has no vocabulary of its own,
 so a host labels its roles here or they are described from their shape
 (`<Area>.All.ReadWrite` → "manage <area>") or left unsaid. Patching a realm no earlier layer defines is an error (a new

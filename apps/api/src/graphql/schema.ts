@@ -318,13 +318,29 @@ function objectResolvers() {
 
 /**
  * A Decimal input: the JSON number a form sends, or a decimal string. Either
- * reaches the entity runtime as the number its input schema validates; the
- * exactness a stored value keeps is the database's, on the way out.
+ * reaches the entity runtime as the number its input schema validates. A
+ * string is accepted only when that number prints it back unchanged, so a
+ * value the double cannot hold ("9007199254740993", "0.10000000000000001")
+ * is refused at the edge instead of arriving rounded.
  */
-function parseDecimalValue(value: unknown): number {
+export function parseDecimalValue(value: unknown): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && DECIMAL.test(value)) return Number(value);
+  if (typeof value === "string" && DECIMAL.test(value)) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && decimalText(parsed) === canonicalDecimal(value)) return parsed;
+    throw new GraphQLError(`Decimal "${value}" cannot be carried exactly as a number; send fewer digits.`);
+  }
   throw new GraphQLError("Decimal expects a finite number or a decimal string.");
+}
+
+/** `value` without redundant leading zeros, trailing fraction zeros or a lone "-0". */
+function canonicalDecimal(value: string): string {
+  const [sign, digits] = value.startsWith("-") ? ["-", value.slice(1)] : ["", value];
+  const [integer, fraction = ""] = digits.split(".");
+  const trimmedInteger = integer!.replace(/^0+(?=\d)/, "");
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  const text = trimmedFraction ? `${trimmedInteger}.${trimmedFraction}` : trimmedInteger;
+  return text === "0" ? "0" : `${sign}${text}`;
 }
 
 const DECIMAL = new RegExp(DECIMAL_PATTERN);

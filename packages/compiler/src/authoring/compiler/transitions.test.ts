@@ -243,6 +243,39 @@ describe("status transitions", () => {
     expect(withIn({ field: "code", in: ["missing"] }, grouped, snapshot)).toThrow(
       "is not one of the referentiedata group AGREEMENTKIND",
     );
+
+    const retarget = (patch: { baseType?: string; validation?: { format?: string; min?: number; max?: number }; columnType?: string }) => ({
+      ...agreement,
+      model: {
+        ...agreement.model,
+        fields: agreement.model.fields.map((field) =>
+          field.key === "code"
+            ? { ...field, ...(patch.baseType ? { baseType: patch.baseType as typeof field.baseType } : {}), ...(patch.validation ? { validation: patch.validation } : {}) }
+            : field,
+        ),
+      },
+      storage: {
+        ...agreement.storage,
+        columns: agreement.storage.columns.map((column) =>
+          column.field === "code" && patch.columnType ? { ...column, type: patch.columnType } : column,
+        ),
+      },
+    });
+    expect(withIn({ field: "code", in: ["2026-03-01T09:30:00.000Z"] }, retarget({ baseType: "datetime", columnType: "timestamptz" }))).not.toThrow();
+    expect(withIn({ field: "code", in: ["not-a-datetime"] }, retarget({ baseType: "datetime", columnType: "timestamptz" }))).toThrow(
+      'in value "not-a-datetime" is not a datetime',
+    );
+    expect(withIn({ field: "code", in: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"] }, retarget({ validation: { format: "uuid" }, columnType: "uuid" }))).not.toThrow();
+    expect(withIn({ field: "code", in: ["not-a-uuid"] }, retarget({ validation: { format: "uuid" }, columnType: "uuid" }))).toThrow(
+      'in value "not-a-uuid" is not a uuid',
+    );
+    expect(withIn({ field: "code", in: [10] }, retarget({ baseType: "integer", columnType: "integer" }))).not.toThrow();
+    expect(withIn({ field: "code", in: [2_147_483_648] }, retarget({ baseType: "integer", columnType: "integer" }))).toThrow(
+      "in value 2147483648 is out of range for integer",
+    );
+    expect(withIn({ field: "code", in: [11] }, retarget({ baseType: "integer", columnType: "integer", validation: { max: 10 } }))).toThrow(
+      "in value 11 is out of range",
+    );
   });
 
   test("an entity without transitions is returned untouched", () => {

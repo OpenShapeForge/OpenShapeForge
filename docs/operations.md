@@ -168,5 +168,72 @@ richer checks belong in an authored plugin Operation.
 `AgreementMilestone.status` is the first core state machine: `trigger` moves
 `pending` to `triggered` and stamps `triggeredAt` with the transaction time
 and `triggeredBy` with the actor; `cancel` moves `pending` or `triggered` to
-`cancelled`. `invoiced` is still written by the milestone billing run until
-that run is a described Operation.
+`cancelled`; `invoice` moves `triggered` to `invoiced` and writes
+`producedInvoiceId`, under the finance role. Nothing leaves `invoiced`, so a
+milestone is invoiced at most once by construction.
+
+## Billing
+
+The milestone billing run is the first core behaviour that is neither a
+CRUD intent nor a transition: `BillingRun.execute`, authored on the
+BillingRun entity and implemented by the core `osf-billing` runtime
+(`apps/api/src/operations/billing`), which binds in every process like the
+transition, jobs and grants handlers. The YAML is the whole contract:
+
+```yaml
+operations:
+  execute:
+    name: { en: Run milestone billing, nl: Mijlpaalfacturatie draaien }
+    implementation: { type: plugin, plugin: osf-billing, handler: executeBillingRun }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [idempotencyKey]
+        properties:
+          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          agreementId: { type: string, format: uuid, x-osf-reference: { entity: Agreement } }
+          dryRun: { type: boolean, default: false }
+    auth: { mode: session, roles: [Finance.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    errors:
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: The agreement does not exist in this tenant. }
+      - { status: 409, code: ALREADY_EXISTS, description: Another caller already ran billing under this idempotency key. }
+interfaces:
+  rest:
+    operations:
+      execute: { method: POST, path: /api/rest/v1/billing-runs/execute }
+```
+
+What one call does, in one transaction: create the BillingRun (the record
+of the run), lock every AgreementMilestone at `triggered` — of the tenant,
+or of the one agreement named — and for each of them allocate a number from
+the tenant's sales InvoiceSequence for the fiscal year, create one Invoice
+with one InvoiceLine, create a BillingRunItem recording the decision, and
+move the milestone through `AgreementMilestone.invoice`. The rows go
+through the generic entity create, so declared validation, the tenant
+column and the `created` journal events are the ones a hand-made record
+gets; the milestone goes through the transition handler, so the status
+column has no other writer.
+
+Idempotency is the core receipt, keyed on the caller's `Idempotency-Key`:
+a replay by the same actor returns the first result without running again,
+a different input under the same key is `IDEMPOTENCY_KEY_REUSED`, and a
+different actor reusing the key is refused as `ALREADY_EXISTS` by name
+rather than as a database error. Numbering relies on the unique index over
+InvoiceSequence `(tenantId, kind, fiscalYearCode)`: one `insert ... on
+conflict ... do update` seeds a fiscal year at 1 or increments it, so two
+runs racing on the first number of a year serialise on the row instead of
+both taking 1. `dryRun` plans and counts, records the run, and invoices
+nothing.
+
+`AgreementMilestone.create` is authored the same way (`implementation:
+{ type: plugin, plugin: osf-billing, handler: createAgreementMilestone,
+action: create }`): the one create rule the generic path does not know —
+with `percentOfBasis` the amount is computed from `basisAmount` once and
+frozen, otherwise a positive `amount` is required — lives in the module,
+and the Operation is projected as the entity's ordinary create on REST,
+MCP and GraphQL.

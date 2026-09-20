@@ -159,6 +159,12 @@ describe("compiler plugins", () => {
     expect(registry.osfTypes.relationId!.optionSource).toEqual({ type: "entity", source: "Relation", valueField: "id" });
     // TenantSetting has no list Operation: nothing to enumerate, so no source.
     expect(registry.osfTypes.tenantSettingId!.optionSource).toBeUndefined();
+    // The web's GraphQL registry lists only entities whose list Operation is
+    // projected to GraphQL; ContactDetail and PaymentDetail withhold it.
+    const graphqlRegistry = all.find((artifact: { path: string }) => artifact.path === "apps/web/src/generated/compiler/core-entity-graphql-registry.ts")!.contents;
+    expect(graphqlRegistry).toContain('"relation": {');
+    expect(graphqlRegistry).not.toContain('"contact-detail"');
+    expect(graphqlRegistry).not.toContain('"payment-detail"');
   }, FULL_CORPUS_TIMEOUT_MS);
 
   test("plugin context exposes compiled entity contracts", async () => {

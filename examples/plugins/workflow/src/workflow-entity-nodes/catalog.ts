@@ -4,6 +4,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { buildCrud } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
+import { resolveFieldOptions } from "../../../../../packages/compiler/src/authoring/compiler/model.js";
+import { graphqlOperationActions } from "../../../../../packages/compiler/src/authoring/entity-model.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
 import { inverseCollectionsFor, resolveBaseType, osfTypeDefinitionOf } from "../../../../../packages/compiler/src/authoring/entity-fields.js";
 import { withInverseCollections } from "../../../../../packages/compiler/src/authoring/inverse-collections.js";
@@ -58,13 +60,15 @@ function expandSemanticFieldShape(
   const item = field.item ?? osfType?.item;
   const hasStructuredShape = Boolean(children || item);
   const expanded = withBaseType(cloneField(field), osfTypes);
+  // Choices resolve exactly as the model compiler resolves them: the field's
+  // options, a reference group, the type's options, the select component's
+  // render prop folded in, and the alias's optionSource last.
+  const options = resolveFieldOptions(expanded, osfType);
+  if (options) expanded.options = options;
   // An alias whose entity has no list Operation has nothing to pick from.
   const isEntityId = osfType?.kind === "entityId" && osfType.optionSource !== undefined;
 
   if (isEntityId) {
-    if (!expanded.options) {
-      expanded.options = { ...osfType.optionSource! };
-    }
     expanded.render = {
       component: "OptionVariablePicker",
       props: {
@@ -260,8 +264,14 @@ export function getWorkflowCoreEntityGraphqlRegistry(
   return registry;
 }
 
+/**
+ * The registry maps to GraphQL list queries, so an entity belongs in it only
+ * when its list Operation is projected to GraphQL — not merely implemented.
+ * A list withheld from GraphQL (`interfaces.graphql` absent, or the
+ * Operation excluded there) has no query to build.
+ */
 export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
-  return buildCrud(entity).operations.list;
+  return buildCrud(entity).operations.list && graphqlOperationActions(entity).list;
 }
 
 /**
@@ -285,11 +295,10 @@ function enrichFieldWithEntityIdRemoteOptions(
 ): Field {
   const cloned = withBaseType(cloneField(field), osfTypes);
   const osfType = osfTypeDefinitionOf(cloned.osfType, osfTypes);
+  const options = resolveFieldOptions(cloned, osfType);
+  if (options) cloned.options = options;
 
   if (osfType?.kind === "entityId" && osfType.optionSource) {
-    if (!cloned.options) {
-      cloned.options = { ...osfType.optionSource };
-    }
     cloned.render = {
       component: "OptionVariablePicker",
       props: {

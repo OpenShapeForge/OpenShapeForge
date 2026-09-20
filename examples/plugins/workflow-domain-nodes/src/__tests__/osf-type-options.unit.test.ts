@@ -148,3 +148,20 @@ describe("entity-ID enrichment", () => {
     expect(JSON.stringify(fields)).toBe(before);
   });
 });
+
+describe("referentiedata on workflow-node fields", () => {
+  test("a select's render prop names the group in options, through the shared resolver", () => {
+    // billing.runProlongation.mode authors only `render.props.referentieGroep`;
+    // the picker and the runtime validate against `options`, so it must arrive there.
+    const [mode, agreeing] = enrichFieldsWithEntityIdOptions([
+      { key: "mode", osfType: "plainText", render: { component: "ReferenceSelect", props: { referentieGroep: "BILLINGRUNMODE", clearable: false } } },
+      { key: "kind", osfType: "plainText", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "KIND" } } },
+    ] as unknown as Field[], osfTypes) as any[];
+    expect(mode.options).toEqual({ type: "referentiedata", referentieGroep: "BILLINGRUNMODE" });
+    expect(mode.render.props).toEqual({ referentieGroep: "BILLINGRUNMODE", clearable: false });
+    expect(agreeing.options).toEqual({ type: "referentiedata", referentieGroep: "KIND" });
+    expect(() => enrichFieldsWithEntityIdOptions([
+      { key: "kind", osfType: "plainText", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "OTHER" } } },
+    ] as unknown as Field[], osfTypes)).toThrow("kind: render.props.referentieGroep OTHER contradicts options.referentieGroep KIND.");
+  });
+});

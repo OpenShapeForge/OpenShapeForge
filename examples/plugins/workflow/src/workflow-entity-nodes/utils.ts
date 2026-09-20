@@ -126,14 +126,6 @@ export function toRendererEntitySuggestionField(field: Field): Field {
 
   if (field.validation) result.validation = cloneField(field).validation;
   if (field.options) result.options = cloneField(field).options;
-  if (field.render?.props?.referentieGroep) {
-    result.render = {
-      component: field.render.component,
-      props: {
-        referentieGroep: field.render.props.referentieGroep,
-      },
-    };
-  }
   if (field.hints?.sourceHint) {
     result.hints = { sourceHint: field.hints.sourceHint };
   }
@@ -164,10 +156,8 @@ export function validateWorkflowFieldReferentieGroepen(
   },
 ) {
   const referentieGroep =
-    field.render?.component === "ReferenceSelect"
-    && typeof field.render.props?.referentieGroep === "string"
-    && field.render.props.referentieGroep.trim().length > 0
-      ? field.render.props.referentieGroep.trim()
+    field.options?.type === "referentiedata" && typeof field.options.referentieGroep === "string"
+      ? field.options.referentieGroep.trim() || null
       : null;
 
   if (referentieGroep && getReferentieItemsForGroep(referentieGroep).length === 0) {

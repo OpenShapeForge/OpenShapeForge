@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
 import { isWorkflowEntityListDiscoverable } from "./catalog.js";
 
-const entity = (actions: readonly string[]): CoreEntity => ({
+const entity = (actions: readonly string[], interfaces: CoreEntity["interfaces"] = { graphql: {} }): CoreEntity => ({
   schemaVersion: 3,
   kind: "coreEntity",
   module: "core",
@@ -18,12 +18,20 @@ const entity = (actions: readonly string[]): CoreEntity => ({
     reliability: { idempotency: { mode: "natural" } },
     confirmation: { mode: "none" },
   }])),
-  interfaces: {},
+  interfaces,
 } as CoreEntity);
 
 describe("workflow entity discovery", () => {
   test("an entity without a list Operation is not advertised through list-query pickers", () => {
     expect(isWorkflowEntityListDiscoverable(entity(["get"]))).toBe(false);
     expect(isWorkflowEntityListDiscoverable(entity(["list", "get"]))).toBe(true);
+  });
+
+  test("a list Operation withheld from GraphQL has no list query to build, so the entity is not in the registry", () => {
+    // ContactDetail and PaymentDetail implement list but project it to REST
+    // and MCP only: a query against `contactDetails` would hit an absent field.
+    expect(isWorkflowEntityListDiscoverable(entity(["list", "get"], { rest: {}, mcp: {} }))).toBe(false);
+    expect(isWorkflowEntityListDiscoverable(entity(["list", "get"], { graphql: { operations: { list: false } } }))).toBe(false);
+    expect(isWorkflowEntityListDiscoverable(entity(["list", "get"], { graphql: { operations: { list: {} } } }))).toBe(true);
   });
 });

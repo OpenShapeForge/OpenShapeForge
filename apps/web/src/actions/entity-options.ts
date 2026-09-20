@@ -8,6 +8,7 @@
  */
 "use server";
 
+import { renderTemplate, templateSelection } from "@openshapeforge/operations";
 import { executeGraphqlRequest } from "@/lib/server/graphql-client";
 import { entityRecordListing } from "@/features/renderer/runtime/entity-option-source";
 
@@ -17,31 +18,6 @@ export type EntityOption = {
 };
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9]*$/;
-
-/** The record fields a display template reads, so the list query asks for exactly those. */
-function templateFields(template: string): string[] {
-  const fields = new Set<string>(["id"]);
-  for (const match of template.matchAll(/\{\{(.+?)\}\}/g)) {
-    for (const candidate of match[1]!.split("||")) {
-      const key = candidate.trim().split(".")[0]!;
-      if (IDENTIFIER.test(key)) fields.add(key);
-    }
-  }
-  return [...fields];
-}
-
-function renderTemplate(template: string, record: Record<string, unknown>): string {
-  const rendered = template
-    .replace(/\{\{(.+?)\}\}/g, (_, expression: string) => {
-      for (const candidate of expression.split("||").map((part: string) => part.trim())) {
-        const value = record[candidate];
-        if (value != null && value !== "") return String(value);
-      }
-      return "";
-    })
-    .trim();
-  return rendered || String(record.id ?? "");
-}
 
 export async function listEntityOptions(input: {
   entity: string;
@@ -55,7 +31,8 @@ export async function listEntityOptions(input: {
   const listing = entityRecordListing(input.entity);
   if (!listing || !IDENTIFIER.test(listing.plural) || !IDENTIFIER.test(listing.filterType) || !IDENTIFIER.test(listing.filterField)) return [];
   const valueField = input.valueField && IDENTIFIER.test(input.valueField) ? input.valueField : "id";
-  const fields = [...new Set([...templateFields(listing.displayTemplate), valueField])].join(" ");
+  // The selection follows the template: a nested path (`ledgerAccount.code`) selects the nested object.
+  const fields = templateSelection(listing.displayTemplate, [valueField]);
   const search = input.search?.trim();
   const id = input.id?.trim();
   const filter: Record<string, unknown> = id

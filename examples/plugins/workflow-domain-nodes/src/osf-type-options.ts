@@ -18,6 +18,7 @@
  * another plugin's file layout on top of the table they already share.
  */
 import { resolveBaseType, osfTypeDefinitionOf } from "../../../../packages/compiler/src/authoring/entity-fields.js";
+import { resolveFieldOptions } from "../../../../packages/compiler/src/authoring/compiler/model.js";
 import { loadOsfTypes as loadCompilerOsfTypes } from "../../../../packages/compiler/src/authoring/loader.js";
 import type {
   Field,
@@ -49,11 +50,12 @@ function enrichField(field: Field, osfTypes: Map<string, OsfTypeDefinition>): Fi
   if (!baseType) throw new Error(`Domain workflow-node field "${enriched.key}": unknown osfType ${enriched.osfType}.`);
   enriched.baseType = baseType;
   const osfType = osfTypeDefinitionOf(enriched.osfType, catalog);
+  // Choices resolve exactly as the model compiler resolves them (a select's
+  // render.props.referentieGroep is folded into options; a contradiction is refused).
+  const options = resolveFieldOptions(enriched, osfType);
+  if (options) enriched.options = options;
 
   if (osfType?.kind === "entityId" && osfType.optionSource) {
-    if (!enriched.options) {
-      enriched.options = { ...osfType.optionSource };
-    }
     enriched.render = {
       component: "OptionVariablePicker",
       props: { valueMode: "insertText" },

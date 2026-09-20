@@ -63,3 +63,4 @@ export {
   stringRule,
   typedEnumValues,
 } from "./field-schema.js";
+export { renderTemplate, templatePaths, templateSelection } from "./display-template.js";

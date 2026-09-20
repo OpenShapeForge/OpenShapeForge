@@ -11,7 +11,7 @@
  * (for read-only mode). Also resolves field-level validation rules from
  * semantic type definitions.
  *
- * @input  Field definition with valueType, osfType, readOnly, and optional render override
+ * @input  Field definition with osfType (or a compiled baseType), readOnly, and optional render override
  * @output ResolvedFieldRender: { component, props, source }
  */
 import type {
@@ -24,15 +24,31 @@ import {
   type CompilerFieldTypeKey,
 } from "@/generated/compiler/component-defaults";
 import { COMPILER_OSF_TYPES } from "@/generated/compiler/osf-types";
+import { resolveFieldBaseType, type OperationFieldSchemaRegistry } from "@openshapeforge/operations";
 
 type RendererAwareField = {
-  valueType?: string;
+  key?: string;
+  /** Compiled fields carry the base type; an authored field resolves it from `osfType`. */
+  baseType?: string;
   cardinality?: string | { min?: number; max?: number | "unbounded" };
   osfType?: string;
   readOnly?: boolean;
   render?: Partial<FieldRender> | null;
   validation?: FieldValidation;
 };
+
+/**
+ * The base type behind a field, the way the projector resolves it: the
+ * compiled `baseType`, else `osfType` through the generated catalog. A field
+ * without an osfType has no base and no default component; an unknown osfType
+ * is an error, never a text box.
+ */
+function rendererBaseType(field: RendererAwareField): string | undefined {
+  if (field.baseType) return field.baseType;
+  const osfType = getOsfTypeKey(field);
+  if (!osfType) return undefined;
+  return resolveFieldBaseType({ key: field.key ?? osfType, osfType }, COMPILER_OSF_TYPES as OperationFieldSchemaRegistry["osfTypes"]);
+}
 
 function isRendererCollectionField(field: RendererAwareField): boolean {
   if (field.cardinality === "collection") return true;
@@ -93,7 +109,7 @@ export function getFieldOsfTypeDefinition(field: RendererAwareField) {
 }
 
 function getDefaultFieldTypeRender(field: RendererAwareField) {
-  const key = isRendererCollectionField(field) ? "collection" : field.valueType;
+  const key = isRendererCollectionField(field) ? "collection" : rendererBaseType(field);
 
   if (!key) {
     return undefined;

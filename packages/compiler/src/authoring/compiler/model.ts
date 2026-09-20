@@ -116,7 +116,7 @@ export function resolveModelFields(
  * not name a different group than the field's own options.
  */
 export function resolveFieldOptions(
-  field: Pick<Field, "key" | "options" | "reference" | "render">,
+  field: Pick<Field, "key" | "options" | "render"> & { reference?: { kind?: string; group?: string } },
   semType?: OsfTypeDefinition,
 ): FieldOptions | undefined {
   const resolved = resolveOptions(field, semType) as FieldOptions | undefined;

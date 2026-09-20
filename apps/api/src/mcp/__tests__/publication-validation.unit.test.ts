@@ -436,7 +436,7 @@ describe("validateVisibleDefinition", () => {
     const input = {
       entry: ENTRY,
       row: ROW,
-      reservedNames: new Set(),
+      reservedNames: new Set<string>(),
       readRows: readerFor({
         "core.operations": [OPERATION],
         "core.providers": [PROVIDER],

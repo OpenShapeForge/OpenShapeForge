@@ -23,7 +23,6 @@ import {
   contractSample,
   createInput,
   createRow,
-  referencingRows,
   eligibleTablesByName,
   fieldName,
   foreignKeyTargets,
@@ -46,6 +45,7 @@ import {
   updateDoc,
   updateRecord,
 } from "./e2e/gql-shapes.js";
+import { expectedDeleteOutcome } from "./e2e/reference-policy.js";
 import {
   createOffersField,
   isEntityBackedCreate,
@@ -190,8 +190,10 @@ for (const table of tables) {
     // A refusal without such rows, or a removal despite them, is a finding.
     test("delete removes the row, or is refused only while rows that reference it exist", async () => {
       const id = await createRow(table, tenantA);
-      const referencing = await referencingRows(table, id, tenantA);
-      if (referencing.length === 0) {
+      // Decided before the first delete call, so a cascade that wrongly took
+      // the companions with it cannot make a refusal look warranted after.
+      const outcome = await expectedDeleteOutcome(table, id, tenantA);
+      if (!outcome.refused) {
         await expectDeleted(tenantA, table, id);
         expect(await fetchRecord(tenantA, table, id)).toBeNull();
         untrackRow(id);
@@ -200,6 +202,7 @@ for (const table of tables) {
       const refused = await deleteRecord(tenantA, table, id);
       expectOperationError(table, refused, graphql.deleteMutationName, "REFERENCE_IN_USE");
       expect((await fetchRecord(tenantA, table, id))?.id).toBe(id);
+      expect(await expectedDeleteOutcome(table, id, tenantA)).toEqual(outcome);
     });
 
     if (leaseRequired(table, "delete")) {
@@ -260,7 +263,11 @@ for (const table of tables) {
             input: { ...(await createInput(table, tenantA)), [immutableField]: await valueFor() },
           });
           expect(refusedCreate.data ?? null).toBeNull();
-          expect(JSON.stringify(refusedCreate.errors)).toContain(immutableField);
+          // The GraphQL input type omits the field, so the schema refuses it
+          // before dispatch — by name, as the update below is refused.
+          expect(JSON.stringify(refusedCreate.errors)).toContain(
+            `Field \\"${immutableField}\\" is not defined by type \\"Create${typeName}Input\\"`,
+          );
         }
         const id = offeredOnCreate
           ? await createRow(table, tenantA, { [immutableField]: await valueFor() })

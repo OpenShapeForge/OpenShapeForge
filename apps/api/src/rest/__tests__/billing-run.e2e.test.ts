@@ -76,10 +76,12 @@ describe("the milestone billing run on REST", () => {
     const invalid = await call(contracts, "POST", milestones, { agreementId, description: "Nothing" });
     expect(invalid.status).toBe(422);
     expect(invalid.body.error).toMatchObject({ code: "VALIDATION", violations: expect.arrayContaining([expect.objectContaining({ field: "amount" })]) });
-    // The status is not part of the create's closed input: it is written by the transitions only.
+    // The status is written by the transitions only: the write policy refuses it
+    // by name before the create's own contract is consulted, on every interface.
     const forged = await call(contracts, "POST", milestones, { agreementId, description: "Forged", amount: 1, status: "triggered" });
-    expect(forged.status).toBe(422);
-    expect(forged.body.error.code).toBe("VALIDATION");
+    expect(forged.status).toBe(400);
+    expect(forged.body.error).toMatchObject({ code: "BAD_USER_INPUT" });
+    expect(forged.body.error.message).toContain("AgreementMilestone.trigger");
   });
 
   test("the run invoices the triggered milestones only, replays under its key, and is finance-only", async () => {

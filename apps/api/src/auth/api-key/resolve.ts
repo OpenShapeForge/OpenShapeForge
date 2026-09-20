@@ -134,6 +134,8 @@ export async function resolveApiKeySession(
   return {
     tenantId: identity.tenantId,
     userId: identity.userId,
+    issuer: deps.issuer,
+    userDisplayName: key.displayName,
     roles,
     oauthScopes: identity.scopes ?? [],
     groups: identity.groups,

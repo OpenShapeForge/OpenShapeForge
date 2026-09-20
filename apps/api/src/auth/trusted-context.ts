@@ -61,6 +61,13 @@ export type TrustedSessionContext = {
   loginSessionBinding?: string;
   /** Verified tenant-local Relation label; display only, never authorization. */
   userDisplayName?: string | null;
+  /**
+   * The issuer of the identity behind `userId`: the token's `iss` on the
+   * bearer and API-key paths, the realm this deployment trusts for a
+   * trusted-context bundle. With `userId` (the subject) it names one
+   * platform.identities row, which is how the session finds its Relation.
+   */
+  issuer?: string;
   /** Display language from verified identity claims; never a permission or client input. */
   locale?: string;
   roles: string[];
@@ -131,9 +138,14 @@ export function readTrustedSessionContext(
   options: AppOptions = {},
 ): TrustedSessionContext {
   const base = readTrustedContext(headers, resolveOptions(options));
+  // A trusted-context bundle is what the web tier hands on after verifying a
+  // token of the realm this deployment trusts; that realm is the identity's
+  // issuer. Without one configured no identity can be named, and no link read.
+  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
   return {
     tenantId: base.tenantId,
     userId: base.userId,
+    ...(issuer ? { issuer } : {}),
     roles: base.roles,
     groups: base.groups ?? [],
     relationGroupIds: [],

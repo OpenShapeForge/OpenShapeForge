@@ -11,6 +11,7 @@ import { looksLikeApiKey } from "./api-key/format.js";
 import {
   NotInvitedError,
   identityClaimsFromToken,
+  ensureServiceIdentityLink,
   readSessionLink,
   resolveIdentityLink,
   type IdentityClaims,
@@ -228,19 +229,29 @@ function sessionIdentityRoles(identity: AuthIdentity): string[] {
  * kind — a transition's `actor` stamp, a document's author, whatever acts as
  * a Relation asks that one function and nothing else.
  */
-async function withSessionRelation(
+export async function withSessionRelation(
   session: TrustedSessionContext,
   options: ResolveSessionOptions,
 ): Promise<TrustedSessionContext> {
   if (session.credential !== "trusted-context" && session.credential !== "api-key") return session;
-  if (!options.db || !session.tenantId || !session.userId) return session;
-  const relation = await readSessionLink(options.db, {
+  if (!options.db || !session.tenantId || !session.userId || !session.issuer) return session;
+  const link = {
     tenantId: session.tenantId,
     userId: session.userId,
     roles: [...session.roles],
     groups: [...session.groups],
     scope: session.scope,
-  });
+  };
+  const identity = { issuer: session.issuer, subject: session.userId };
+  // A service account never signs in interactively, so nothing else would
+  // ever create its identity row: its first API-key session does, exactly
+  // as a person's first bearer session does, minus the admission question —
+  // and an administrator links it to a Relation with link_identity like any
+  // other identity. A trusted-context session names a person whose bearer
+  // login already made the row; it only reads.
+  const relation = session.credential === "api-key"
+    ? await ensureServiceIdentityLink(options.db, link, identity, session.userDisplayName ?? session.userId)
+    : await readSessionLink(options.db, link, identity);
   return {
     ...session,
     relation,
@@ -471,6 +482,7 @@ async function resolveCredentialSession(
       return {
         tenantId,
         userId: identity.userId,
+        ...(typeof claims.iss === "string" ? { issuer: claims.iss } : {}),
         ...(loginSessionBinding ? { loginSessionBinding } : {}),
         userDisplayName: relation?.displayName ?? null,
         ...(typeof claims.locale === "string" && claims.locale.trim() ? { locale: claims.locale.trim() } : {}),

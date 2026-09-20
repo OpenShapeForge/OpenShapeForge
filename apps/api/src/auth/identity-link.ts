@@ -63,13 +63,20 @@
  * role is user-wide, and a grant made by organization A's administrator
  * would have applied in organization B too.
  *
- * Trusted-context and API key sessions carry no e-mail and are not people
- * signing in, so they never link; the accessor answers null for them.
+ * Every session kind links through the same row. A trusted-context session
+ * names a person whose bearer login already made the identity row: it reads
+ * the link by its issuer (the realm this deployment trusts) and its user id,
+ * which is the identity subject. An API-key session is a service account
+ * that never signs in interactively: its first session records its own
+ * identity row and an empty pending link (`ensureServiceIdentityLink`), so
+ * an administrator's `link_identity` can make the integration act as a
+ * Relation like anyone else. `sessionRelation()` is the one accessor for
+ * all of them, and answers null until a link is made.
  */
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
-import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { UUID_PATTERN, withDbSession, type DbSessionInput } from "../db/session.js";
 import { HttpError } from "../rest/http-error.js";
 import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
 // This module and ./employee-invitations.ts import each other: an invitation
@@ -83,7 +90,7 @@ import { SessionAuthenticationUnavailableError } from "./session-unavailable.js"
 import {
   insertLinkRow,
   readLinkRow,
-  readLinkRowBySubject,
+  readLinkRowByIdentity,
   relationsWithEmail,
   toState,
   upsertIdentity,
@@ -244,50 +251,115 @@ function cacheKey(issuer: string, subject: string, tenantId: string): string {
 }
 
 export function invalidateIdentityLink(issuer: string, subject: string, tenantId: string): void {
-  linkCache.delete(cacheKey(issuer, subject, tenantId));
-  subjectLinkCache.delete(`${tenantId}\n${subject}`);
+  const key = cacheKey(issuer, subject, tenantId);
+  linkCache.delete(key);
+  sessionLinkCache.delete(key);
+  bumpGeneration(key);
 }
 
 /** Test-only. */
 export function __resetIdentityLinkForTests(): void {
   linkCache.clear();
   inFlight.clear();
-  subjectLinkCache.clear();
+  sessionLinkCache.clear();
+  sessionLinkGeneration.clear();
 }
 
-const subjectLinkCache = new Map<string, { state: IdentityLinkState | null; expiresAtMs: number }>();
-const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// The session-side cache, keyed like the claims-side one on (issuer, subject,
+// tenant). An invalidation may land while a read is in flight; the read then
+// stores only if the generation it started under is still current, so a
+// stale state cannot be written over the invalidation.
+const sessionLinkCache = new Map<string, { state: IdentityLinkState | null; expiresAtMs: number }>();
+const sessionLinkGeneration = new Map<string, number>();
 
-/**
- * The link state of the identity whose subject is this session's user id —
- * for a session that carries no token claims (trusted-context, an API key):
- * the same row the bearer path resolves, read under the session's own
- * policies, never created. Null when no linked or pending row exists. A
- * failure to read it is a 503, as on the bearer path: a session that
- * silently acts as nobody would refuse every stamp it should have carried.
- */
-export async function readSessionLink(
-  db: OpenShapeForgeDatabase,
-  session: SessionInput,
+function generationOf(key: string): number {
+  return sessionLinkGeneration.get(key) ?? 0;
+}
+
+function bumpGeneration(key: string): void {
+  sessionLinkGeneration.set(key, generationOf(key) + 1);
+}
+
+async function cachedSessionLink(
+  key: string,
+  read: () => Promise<IdentityLinkState | null>,
+  what: string,
 ): Promise<IdentityLinkState | null> {
-  // A tenant or user that is not a uuid can hold no link (the tables key on
-  // uuids); such a session is refused later, by whatever it touches, not here.
-  if (!UUID_SHAPE.test(session.tenantId) || !UUID_SHAPE.test(session.userId)) return null;
-  const key = `${session.tenantId}\n${session.userId}`;
-  const cached = subjectLinkCache.get(key);
+  const cached = sessionLinkCache.get(key);
   if (cached && cached.expiresAtMs > Date.now()) return cached.state;
+  const generation = generationOf(key);
   try {
-    const row = await withDbSession(db, session, (trx) => readLinkRowBySubject(trx, session.userId, session.tenantId));
-    const state = row ? toState(row, { issuer: row.issuer, subject: row.subject }) : null;
-    subjectLinkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
+    const state = await read();
+    if (generationOf(key) === generation) {
+      sessionLinkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
+    }
     return state;
   } catch (error) {
     console.warn(
-      "[auth] Reading the session's identity ↔ Relation link failed; refusing the session (503):",
+      `[auth] ${what} failed; refusing the session (503):`,
       error instanceof Error ? error.message : String(error),
     );
     throw new SessionAuthenticationUnavailableError("The identity link could not be read; try again.");
   }
+}
+
+/** A tenant or user that is not a uuid can hold no link: the tables key on uuids. */
+function canHoldLink(session: SessionInput): boolean {
+  return UUID_PATTERN.test(session.tenantId) && UUID_PATTERN.test(session.userId);
+}
+
+/**
+ * The link state of the identity (issuer, subject) names — for a session
+ * that carries no token claims (trusted-context): the same row the bearer
+ * path resolves, read under the session's own policies, never created. Null
+ * when no linked or pending row exists. A failure to read it is a 503, as
+ * on the bearer path: a session that silently acts as nobody would refuse
+ * every stamp it should have carried.
+ */
+export async function readSessionLink(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  identity: { issuer: string; subject: string },
+): Promise<IdentityLinkState | null> {
+  if (!canHoldLink(session)) return null;
+  return cachedSessionLink(cacheKey(identity.issuer, identity.subject, session.tenantId), async () => {
+    const row = await withDbSession(db, session, (trx) => readLinkRowByIdentity(trx, identity, session.tenantId));
+    return row ? toState(row, identity) : null;
+  }, "Reading the session's identity ↔ Relation link");
+}
+
+/**
+ * The link state of a service account (an API key's session): its identity
+ * row and an empty pending link are made on first use — under its own
+ * session, which is the one the identities policy lets write that subject —
+ * exactly as a person's first bearer session does, without the admission
+ * question a person faces: a service account is admitted by the key an
+ * administrator issued. The pending row is what `link_identity` finds when
+ * an administrator makes the integration act as a Relation.
+ */
+export async function ensureServiceIdentityLink(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  identity: { issuer: string; subject: string },
+  displayName: string,
+): Promise<IdentityLinkState | null> {
+  if (!canHoldLink(session)) return null;
+  return cachedSessionLink(cacheKey(identity.issuer, identity.subject, session.tenantId), () =>
+    withDbSession(db, session, async (trx) => {
+      const identityId = await upsertIdentity(trx, { ...identity, name: displayName }, displayName);
+      const existing = await readLinkRow(trx, identityId, session.tenantId);
+      if (existing) return toState(existing, identity);
+      const inserted = await insertLinkRow(trx, {
+        identityId,
+        tenantId: session.tenantId,
+        status: "pending_confirmation",
+        relationId: null,
+        candidateRelationId: null,
+        linkedBy: null,
+      });
+      const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
+      return row ? toState(row, identity) : null;
+    }), "Recording the service account's identity");
 }
 
 // ---------------------------------------------------------------------------

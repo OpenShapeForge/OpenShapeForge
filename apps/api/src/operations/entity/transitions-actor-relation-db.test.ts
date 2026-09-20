@@ -14,8 +14,12 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
-import { resolveSessionContext } from "../../auth/identity.js";
-import { __resetIdentityLinkForTests, sessionRelation } from "../../auth/identity-link.js";
+import { resolveApiKeySession } from "../../auth/api-key/resolve.js";
+import { mintApiKey } from "../../auth/api-key/format.js";
+import { resolveSessionContext, withSessionRelation } from "../../auth/identity.js";
+import { __resetIdentityLinkForTests, invalidateIdentityLink, sessionRelation } from "../../auth/identity-link.js";
+import { createGraphqlContext } from "../../graphql/context.js";
+import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../../db/migrations/app-role.js";
@@ -27,6 +31,9 @@ import { getGeneratedCrudTables } from "./catalog.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const SECRET = "transitions-actor-relation-test-secret";
+/** The realm this deployment trusts: what a trusted-context session's identity is issued by. */
+const ISSUER = "https://issuer.test/realms/test";
+const OTHER_ISSUER = "https://other.test/realms/other";
 const scratchName = `actor_relation_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 const ROLES = ["Agreements.All.Read", "Agreements.All.ReadWrite"];
 
@@ -35,6 +42,7 @@ let admin: SQL, privileged: DatabaseRuntime, restricted: DatabaseRuntime;
 // this file installs is put back afterwards, or the suites after it would
 // sign with one secret and be verified against another.
 const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 
 function scratchUrl(role?: { username: string; password: string }): string {
   const url = new URL(ADMIN_URL);
@@ -78,13 +86,50 @@ async function relation(tenantId: string): Promise<string> {
   return id;
 }
 
-/** An identity whose subject is the user id, linked to a Relation in `tenantId`. */
-async function linkedUser(tenantId: string, relationId: string): Promise<string> {
-  const userId = randomUUID();
+/** An identity of `issuer` whose subject is the user id, linked to a Relation in `tenantId`. */
+async function linkedUser(tenantId: string, relationId: string, issuer = ISSUER, userId = randomUUID()): Promise<string> {
   const identity = randomUUID();
-  await sql`insert into platform.identities (id, issuer, subject, display_name) values (${identity}::uuid, 'https://issuer.test/realms/test', ${userId}, 'Linked person')`.execute(privileged.db);
+  await sql`insert into platform.identities (id, issuer, subject, display_name) values (${identity}::uuid, ${issuer}, ${userId}, 'Linked person')`.execute(privileged.db);
   await sql`insert into platform.identity_relations (identity_id, tenant_id, relation_id, status, linked_at, linked_by) values (${identity}::uuid, ${tenantId}::uuid, ${relationId}::uuid, 'linked', now(), 'test')`.execute(privileged.db);
   return userId;
+}
+
+/** What an administrator's link_identity leaves behind for an existing (pending) identity row. */
+async function linkExisting(issuer: string, subject: string, tenantId: string, relationId: string): Promise<void> {
+  await sql`update platform.identity_relations ir set relation_id = ${relationId}::uuid, status = 'linked', linked_at = now(), linked_by = 'admin'
+    from platform.identities i where i.id = ir.identity_id and i.issuer = ${issuer} and i.subject = ${subject} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db);
+  invalidateIdentityLink(issuer, subject, tenantId);
+}
+
+const keyring: SecretKeyring = { activeKeyId: "k1", keys: new Map([["k1", Buffer.alloc(32, 7)]]) };
+
+/**
+ * An active integration with one key, as provisioning leaves it, and the
+ * API-key resolver with the realm stubbed: the token exchange answers a
+ * token, the verifier answers the service account (its subject is the
+ * Keycloak user id) with the integration's roles. What is real is the
+ * database: the key rows, the identity rows and the link.
+ */
+async function apiKeySession(tenantId: string, serviceAccountUserId: string) {
+  const integrationId = randomUUID();
+  const minted = mintApiKey();
+  const secret = encryptSecret(keyring, integrationId, "clientSecret", "client-secret");
+  await sql`insert into platform.api_key_integrations
+      (id, tenant_id, display_name, keycloak_client_id, status, granted_roles, client_secret_ciphertext, client_secret_key_id, client_secret_algorithm, created_by)
+    values (${integrationId}::uuid, ${tenantId}::uuid, 'Billing robot', ${`osf-int-${integrationId}`}, 'active', cast(${ROLES} as jsonb),
+      ${secret.ciphertext}, ${secret.keyId}, ${secret.algorithm}, ${randomUUID()}::uuid)`.execute(privileged.db);
+  await sql`insert into platform.api_keys (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
+    values (${randomUUID()}::uuid, ${tenantId}::uuid, ${integrationId}::uuid, ${minted.lookupId}, ${minted.secretHash}, 'key', ${randomUUID()}::uuid)`.execute(privileged.db);
+  const session = await resolveApiKeySession({
+    db: restricted.db,
+    keyring,
+    issuer: ISSUER,
+    verifyToken: async () => ({ tenantId, userId: serviceAccountUserId, roles: ROLES, groups: [] }),
+    resolveScope: () => "tenant",
+    fetch: (async () => new Response(JSON.stringify({ access_token: `token-${integrationId}`, expires_in: 60 }), { status: 200 })) as unknown as typeof fetch,
+  }, minted.token);
+  if (!session) throw new Error("the API key did not resolve");
+  return withSessionRelation(session, { db: restricted.db });
 }
 
 /** A milestone on an agreement of the session's tenant: the trigger rule's precondition reads the agreement's code. */
@@ -100,6 +145,7 @@ const fails = (promise: unknown, code: string) => expect(Promise.resolve(promise
 describe("actor: relation stamps under a trusted-context session", () => {
   beforeAll(async () => {
     process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = SECRET;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
     admin = new SQL(ADMIN_URL, { max: 1 });
     await admin.unsafe(`create database "${scratchName}"`);
     privileged = createDatabaseRuntime({ databaseUrl: scratchUrl(), maxConnections: 2 });
@@ -113,6 +159,8 @@ describe("actor: relation stamps under a trusted-context session", () => {
   afterAll(async () => {
     if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
     else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+    if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
     __resetIdentityLinkForTests();
     await restricted?.close();
     await privileged?.close();
@@ -154,5 +202,74 @@ describe("actor: relation stamps under a trusted-context session", () => {
     await fails(executeTransition(restricted.db, session, relationStampedBinding(), { id }), "FORBIDDEN");
     // The same person's session in the tenant that holds the link acts as that Relation.
     expect(sessionRelation(await trustedSession(elsewhere, userId))?.relationId).toBeString();
+  }, 60_000);
+
+  test("identities are named by issuer and subject: the same subject under another issuer is another identity", async () => {
+    const tenantId = await tenant();
+    const subject = randomUUID();
+    const ours = await relation(tenantId);
+    const theirs = await relation(tenantId);
+    await linkedUser(tenantId, theirs, OTHER_ISSUER, subject);
+    // Only the other realm knows this subject: the session, issued by ours, is not linked.
+    expect(sessionRelation(await trustedSession(tenantId, subject))).toBeNull();
+    await linkedUser(tenantId, ours, ISSUER, subject);
+    invalidateIdentityLink(ISSUER, subject, tenantId);
+    expect(sessionRelation(await trustedSession(tenantId, subject))?.relationId).toBe(ours);
+  }, 60_000);
+
+  test("an API-key session records its service account's identity on first use and acts as the Relation an administrator links it to", async () => {
+    const tenantId = await tenant();
+    const serviceAccount = randomUUID();
+    const first = await apiKeySession(tenantId, serviceAccount);
+    expect(first).toMatchObject({ credential: "api-key", issuer: ISSUER, userId: serviceAccount, userDisplayName: "Billing robot" });
+    // Not linked yet — but the identity and an empty pending link now exist for link_identity to find.
+    expect(sessionRelation(first)).toBeNull();
+    const rows = (await sql<{ display_name: string; status: string; relation_id: string | null }>`
+      select i.display_name, ir.status, ir.relation_id::text as relation_id from platform.identities i
+      join platform.identity_relations ir on ir.identity_id = i.id
+      where i.issuer = ${ISSUER} and i.subject = ${serviceAccount} and ir.tenant_id = ${tenantId}::uuid`.execute(privileged.db)).rows;
+    expect(rows).toEqual([{ display_name: "Billing robot", status: "pending_confirmation", relation_id: null }]);
+    const id = await milestone(first);
+    await fails(executeTransition(restricted.db, first, relationStampedBinding(), { id }), "FORBIDDEN");
+
+    const relationId = await relation(tenantId);
+    await linkExisting(ISSUER, serviceAccount, tenantId, relationId);
+    const linked = await apiKeySession(tenantId, serviceAccount);
+    expect(sessionRelation(linked)).toEqual({ relationId, displayName: "Reviewer" });
+    const result = await executeTransition(restricted.db, linked, relationStampedBinding(), { id });
+    expect(result).toMatchObject({ status: "triggered", triggeredBy: relationId });
+  }, 60_000);
+
+  test("the GraphQL context carries the session's Relation, so a transition run through GraphQL stamps it", async () => {
+    const tenantId = await tenant();
+    const relationId = await relation(tenantId);
+    const userId = await linkedUser(tenantId, relationId);
+    const headers = new Headers();
+    applyTrustedContextHeaders(headers, { tenantId, userId, roles: ROLES }, { secret: SECRET });
+    const context = await createGraphqlContext(headers, { db: restricted.db });
+    expect(sessionRelation(context.session)).toEqual({ relationId, displayName: "Reviewer" });
+    expect(context.session).toMatchObject({ credential: "trusted-context", issuer: ISSUER, scope: "self" });
+    // The session a GraphQL resolver hands the transition runtime is this one.
+    const id = await milestone(context.session as Awaited<ReturnType<typeof trustedSession>>);
+    const result = await executeTransition(restricted.db, context.session, relationStampedBinding(), { id });
+    expect(result).toMatchObject({ status: "triggered", triggeredBy: relationId });
+  }, 60_000);
+
+  test("an invalidation during a read wins: the read's result is not stored over it", async () => {
+    const tenantId = await tenant();
+    const relationId = await relation(tenantId);
+    const userId = await linkedUser(tenantId, relationId);
+    // First read fills the cache; an invalidation then bumps the generation.
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(relationId);
+    const other = await relation(tenantId);
+    const inFlight = (async () => {
+      // A read that began before the invalidation and finishes after it.
+      const started = trustedSession(tenantId, userId);
+      await linkExisting(ISSUER, userId, tenantId, other);
+      return started;
+    })();
+    await inFlight;
+    // Whatever the racing read saw, the next read reflects the link as it is now.
+    expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(other);
   }, 60_000);
 });

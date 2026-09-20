@@ -32,6 +32,8 @@ export type ResolvedApiKey = {
   /** null means "whatever the integration's service account holds". */
   roleSubset: string[] | null;
   keycloakClientId: string;
+  /** The integration's name: what its service account's identity is called. */
+  displayName: string;
   clientSecret: StoredSecret;
 };
 
@@ -59,6 +61,7 @@ type KeyRow = {
 
 type IntegrationRow = {
   keycloak_client_id: string;
+  display_name: string;
   status: string;
   client_secret_ciphertext: string | null;
   client_secret_key_id: string | null;
@@ -137,7 +140,7 @@ export async function resolveApiKey(
 
   const integration = await withCredentialResolutionSession(db, row.tenant_id, async (trx) => {
     const result = await sql<IntegrationRow>`
-      select keycloak_client_id, status,
+      select keycloak_client_id, display_name, status,
              client_secret_ciphertext, client_secret_key_id, client_secret_algorithm
         from platform.api_key_integrations
        where id = ${row.integration_id}
@@ -166,6 +169,7 @@ export async function resolveApiKey(
       integrationId: row.integration_id,
       roleSubset: parseRoleSubset(row.role_subset),
       keycloakClientId: integration.keycloak_client_id,
+      displayName: integration.display_name,
       clientSecret: {
         ciphertext: integration.client_secret_ciphertext,
         keyId: integration.client_secret_key_id,

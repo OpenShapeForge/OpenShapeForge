@@ -80,20 +80,22 @@ export async function readLinkRow(
 }
 
 /**
- * The link row for the identity whose subject is this session's user id, in
- * this tenant — the same row `readLinkRow` reads, found from the side a
- * session without token claims has: `app.user_id` IS the identity subject
- * (the identities visibility policy says so), whatever credential proved it.
+ * The link row for the identity (issuer, subject) names, in this tenant —
+ * the same row `readLinkRow` reads, found from the side a session without
+ * token claims has: its issuer and its user id, which IS the identity
+ * subject (the identities visibility policy says so). Identities are unique
+ * on the pair, never on the subject alone: two realms may hand out the
+ * same subject.
  */
-export async function readLinkRowBySubject(
+export async function readLinkRowByIdentity(
   trx: Transaction<DB>,
-  subject: string,
+  identity: { issuer: string; subject: string },
   tenantId: string,
 ): Promise<LinkRow | null> {
-  const identity = await sql<{ id: string }>`
-    select id from platform.identities where subject = ${subject}
+  const found = await sql<{ id: string }>`
+    select id from platform.identities where issuer = ${identity.issuer} and subject = ${identity.subject}
   `.execute(trx);
-  const identityId = identity.rows[0]?.id;
+  const identityId = found.rows[0]?.id;
   return identityId ? readLinkRow(trx, identityId, tenantId) : null;
 }
 

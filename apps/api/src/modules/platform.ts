@@ -293,6 +293,22 @@ export class ModulePlatformRuntime {
     session: TrustedSessionContext;
     trx: Transaction<DB>;
   }>();
+
+  /**
+   * The one transaction a call is inside, if any: the Operation's, or else
+   * the one an artifact stage or read opened. Every platform service that
+   * writes — module database work, the outbox, entity events, the record
+   * oracle — joins it, so a provider staging a file and scheduling its
+   * collection, or an Operation nested in that stage, commits with the
+   * row or not at all. A different session inside it is a bug, not a case.
+   */
+  #activeTransaction(session: TrustedSessionContext, what: string): Transaction<DB> | undefined {
+    const active = this.#operationTransactionStorage.getStore() ??
+      this.#recordAccessTransactionStorage.getStore();
+    if (!active) return undefined;
+    if (active.session !== session) throw new Error(`${what} belongs to another session.`);
+    return active.trx;
+  }
   #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
@@ -315,13 +331,8 @@ export class ModulePlatformRuntime {
         return active?.session === session ? active.trx : undefined;
       },
       withSession: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Record authorization transaction belongs to another session.");
-          return work(active.trx);
-        }
-        return withDbSession(this.#db, session, work);
+        const active = this.#activeTransaction(session, "Record authorization transaction");
+        return active ? work(active) : withDbSession(this.#db, session, work);
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
@@ -337,12 +348,8 @@ export class ModulePlatformRuntime {
       // the session was found to reach is the record the bytes are read
       // against. `currentTransaction` (bind) stays on the Operation one alone.
       withTransaction: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore() ??
-          this.#recordAccessTransactionStorage.getStore();
-        if (active) {
-          if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
-          return work(active.trx);
-        }
+        const active = this.#activeTransaction(session, "Artifact transaction");
+        if (active) return work(active);
         return withDbSession(this.#db, session, async (trx) =>
           this.#recordAccessTransactionStorage.run({ session, trx }, () => work(trx))
         );
@@ -367,22 +374,16 @@ export class ModulePlatformRuntime {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module database work requires a live verified session.");
           }
-          const active = this.#operationTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) {
-              throw new Error("Module database transaction belongs to another session.");
-            }
-            return fn(active.trx);
-          }
-          return withDbSession(this.#db, session, fn);
+          const active = this.#activeTransaction(session, "Module database transaction");
+          return active ? fn(active) : withDbSession(this.#db, session, fn);
         },
       },
       jobs: {
-        // The outbox: inside the active Operation transaction when there is
-        // one, so the job commits exactly when the handler's own writes do —
-        // or inside the transaction an artifact call opened, so a storage
-        // provider that stages a file and schedules its collection commits
-        // the row and the job together.
+        // The outbox: inside the active transaction when there is one — the
+        // Operation's, so the job commits exactly when the handler's own
+        // writes do, or an artifact stage's, so a provider that stages a
+        // file and schedules its collection commits the row and the job
+        // together.
         enqueue: (session, input) => {
           if (!this.#acceptsScopedSession(session)) {
             throw new Error("Job enqueue requires a live verified session.");
@@ -400,12 +401,8 @@ export class ModulePlatformRuntime {
             relationGroupIds: session.relationGroupIds ?? [],
             scope: session.scope,
           };
-          const active = this.#operationTransactionStorage.getStore() ??
-            this.#recordAccessTransactionStorage.getStore();
-          if (active) {
-            if (active.session !== session) throw new Error("Job enqueue belongs to another session.");
-            return enqueueJob(active.trx, { ...input, tenantId, actorId, actorSession });
-          }
+          const active = this.#activeTransaction(session, "Job enqueue");
+          if (active) return enqueueJob(active, { ...input, tenantId, actorId, actorSession });
           return withDbSession(this.#db, session, (trx) =>
             enqueueJob(trx, { ...input, tenantId, actorId, actorSession }),
           );
@@ -423,10 +420,9 @@ export class ModulePlatformRuntime {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
-          const active = this.#operationTransactionStorage.getStore();
+          const active = this.#activeTransaction(session, "Module event");
           if (active) {
-            if (active.session !== session) throw new Error("Module event belongs to another session.");
-            await appendScopedEntityEventInTransaction(active.trx, { ...event, payload: event.payload as Json });
+            await appendScopedEntityEventInTransaction(active, { ...event, payload: event.payload as Json });
             return;
           }
           await appendEntityEvent(this.#db, session, {
@@ -1030,7 +1026,9 @@ export class ModulePlatformRuntime {
   /**
    * Keep canonical mutation guards and every plugin database write in one
    * transaction. A handler's platform.db.withSession call reuses this exact
-   * transaction and cannot substitute another session.
+   * transaction and cannot substitute another session. An Operation invoked
+   * inside an artifact stage or read runs its guards on that transaction
+   * rather than opening a second one next to it.
    */
   async withOperationTransaction<T>(
     session: TrustedSessionContext,
@@ -1039,12 +1037,16 @@ export class ModulePlatformRuntime {
     if (!this.#acceptsScopedSession(session)) {
       throw new Error("Module Operation transaction requires a live verified session.");
     }
-    const active = this.#operationTransactionStorage.getStore();
-    if (active) {
-      if (active.session !== session) {
+    const operation = this.#operationTransactionStorage.getStore();
+    if (operation) {
+      if (operation.session !== session) {
         throw new Error("Module Operation transaction belongs to another session.");
       }
-      return work(active.trx);
+      return work(operation.trx);
+    }
+    const artifact = this.#activeTransaction(session, "Module Operation transaction");
+    if (artifact) {
+      return this.#operationTransactionStorage.run({ session, trx: artifact }, () => work(artifact));
     }
     return withDbSession(this.#db, session, async (trx) =>
       this.#operationTransactionStorage.run({ session, trx }, () => work(trx))

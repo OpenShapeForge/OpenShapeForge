@@ -4,9 +4,9 @@
  *
  * Storage's own registry is deliberately outside this public package. These
  * tests prove the public half of the shared transaction: a provisional opaque
- * id is visible to the storage authorizer, but neither it nor the advanced
- * Document pointer can commit until trusted descriptor facts finalize the
- * exact expected artifact version.
+ * id is written on the version row inside the Operation transaction, but
+ * neither it nor the advanced Document pointer can commit until trusted
+ * descriptor facts finalize the exact expected artifact version.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";

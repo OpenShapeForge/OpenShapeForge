@@ -1580,7 +1580,12 @@ export function buildMcpCatalog(
    * by an assistant, unlike the discovery/test/record dispatch bridges named
    * by internalCompatibilityName above — so they keep the Operation's own
    * projected mcp tool name (e.g. connect_service) instead of an
-   * osf_internal_* name that never reaches an assistant's tool list.
+   * osf_internal_* name that never reaches an assistant's tool list. They
+   * are still execution compatibility: the plugin's canonical Operation is
+   * implemented by the core tool of that name, so the Operation runtime
+   * (osf_execute_operation, the plugin's own handler) must find the bridge
+   * under the Operation key or it answers that the host Operation is
+   * unavailable.
    */
   const publicCompatibilityName = (
     plugin: string,
@@ -1593,7 +1598,24 @@ export function buildMcpCatalog(
           `must enable its own mcp transport to be assistant-callable.`,
       );
     }
-    return operation.transports.mcp.name;
+    const name = operation.transports.mcp.name;
+    const existing = compatibilityNames.get(operation.key);
+    if (existing !== undefined) {
+      if (existing !== name) {
+        throw new Error(
+          `Execution compatibility name collision for canonical Operation "${operation.key}".`,
+        );
+      }
+      return name;
+    }
+    compatibilityNames.set(operation.key, name);
+    executionCompatibilityOperations.push({
+      plugin,
+      operation: operation.key,
+      toolName: name,
+      auth: operation.auth,
+    });
+    return name;
   };
   const compatibilityEntity = (plugin: string, entityName: string) => {
     const found = inputs.find(

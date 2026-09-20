@@ -283,6 +283,18 @@ export const compatibilityToolNames = new Set(
   compatibilityOperations.map((entry) => entry.toolName),
 );
 
+/** Test-only: register one execution compatibility bridge the way the catalogue would carry it. */
+export function __registerExecutionCompatibilityForTests(
+  entry: NonNullable<Catalog["executionCompatibility"]>[number],
+): () => void {
+  compatibilityOperationByKey.set(entry.operation, entry);
+  compatibilityToolNames.add(entry.toolName);
+  return () => {
+    compatibilityOperationByKey.delete(entry.operation);
+    compatibilityToolNames.delete(entry.toolName);
+  };
+}
+
 
 export function hasMcpSurface(
   modules: readonly RuntimeModule[],

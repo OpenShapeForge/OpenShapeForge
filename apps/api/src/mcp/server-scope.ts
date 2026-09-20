@@ -20,6 +20,7 @@ import {
   catalogResources,
   generatedOperationToolProjection,
   hasDynamicModuleToolProjection,
+  catalogDerivedTools,
   projectedDerivedTools,
   tablesByName,
 } from "./catalog.js";
@@ -114,7 +115,7 @@ function createServerScopePrologue(input: {
     // knows; without a public origin it says that, instead of failing.
     instructions: buildServerInstructions({
       opening,
-      hasConnectors: projectedDerivedTools.some((entry) => entry.connect),
+      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),
       guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)

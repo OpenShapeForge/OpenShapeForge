@@ -2,7 +2,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AuthoredDerivedExecution } from "./derived-execution.js";
 import { buildMcpCatalog } from "./generate-mcp.js";
-import type { PluginExecutionCompatibility } from "./plugins.js";
+import type { CompiledPluginOperation, PluginExecutionCompatibility } from "./plugins.js";
 import {
   catalogInputs,
   executionBase,
@@ -134,6 +134,52 @@ describe("buildMcpCatalog execution compatibility", () => {
     expect(() =>
       buildMcpCatalog(catalogInputs(serviceOwner()), "test", {}, [], withAudience([]), undefined, [], new Set()),
     ).toThrow(/declares an empty audience/);
+  });
+
+  it("registers the connect and dry-run Operations as bridges under their public tool names", () => {
+    // The plugin's canonical Operation is implemented by the core tool of
+    // the same public name: the listing offers connect_service and
+    // dry_run_service to the audience, and the Operation runtime finds the
+    // bridge under the Operation key — not an osf_internal_* name.
+    const helper = (key: string, name: string): CompiledPluginOperation => ({
+      key,
+      id: key,
+      intent: "invoke",
+      plugin: "demo",
+      title: name,
+      description: `${name}.`,
+      handler: name,
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      outputSchema: { type: "object", properties: {}, additionalProperties: false },
+      errors: [],
+      auth: { mode: "session", roles: ["integration_admin"] },
+      tenancy: { mode: "required" },
+      idempotency: { mode: "none" },
+      effects: { data: "read", external: "read" },
+      transports: {
+        rest: { method: "POST", path: `/api/demo/${name}`, response: { status: 200, kind: "json" } },
+        mcp: { enabled: true, name },
+        graphql: { enabled: false, reason: "Not exposed in this fixture." },
+        typescript: { enabled: false, reason: "Not exposed in this fixture." },
+      },
+    });
+    const contribution = compatibility({ ...executionBase, bindingsRelation: "capabilityBindings" });
+    contribution.records![0]!.connectOperation = "demo.service.connect";
+    contribution.records![0]!.dryRunOperation = "demo.service.dry-run";
+    const catalog = buildMcpCatalog(
+      catalogInputs(serviceOwner()),
+      "test",
+      {},
+      [helper("demo.service.connect", "connect_service"), helper("demo.service.dry-run", "dry_run_service")],
+      [{ plugin: "demo", contribution }],
+    );
+    expect(catalog.derivedTools[0]?.connect?.name).toBe("connect_service");
+    expect(catalog.derivedTools[0]?.dryRun?.name).toBe("dry_run_service");
+    expect(catalog.executionCompatibility).toEqual(expect.arrayContaining([
+      expect.objectContaining({ plugin: "demo", operation: "demo.service.connect", toolName: "connect_service" }),
+      expect.objectContaining({ plugin: "demo", operation: "demo.service.dry-run", toolName: "dry_run_service" }),
+    ]));
+    expect(catalog.executionCompatibility.filter((entry) => entry.operation === "demo.service.dry-run")).toHaveLength(1);
   });
 
   it("refuses leftover bindingsField on execution compatibility", () => {

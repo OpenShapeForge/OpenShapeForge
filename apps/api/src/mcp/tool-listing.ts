@@ -31,6 +31,7 @@ import { searchableOperationTools } from "./operation-search.js";
 import {
   type ProjectedRuntimeOperationTool,
   catalog,
+  catalogDerivedTools,
   projectedDerivedTools,
 } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
@@ -78,6 +79,27 @@ export function createToolListing(scope: ServerScope) {
       )
     : [];
 
+  /**
+   * The derived-tool helpers (connect, preferences, dry run) are assistant-
+   * callable under their public names for every derived entry — the ones a
+   * plugin registers through execution compatibility too, whose Service
+   * rows the Operation runtime projects but whose helpers only this listing
+   * can offer. In the dedicated projection a plugin's own Operation tool of
+   * the same name is listed instead and dispatches to the same handler.
+   */
+  const dedicatedOperationListed = (key: string | undefined) =>
+    operationToolProjection.mode === "dedicated" && key !== undefined && operations.has(key);
+  const helperEntries = catalogDerivedTools.map((entry) => {
+    if (!entry.compatibility) return entry;
+    return {
+      ...entry,
+      ...(dedicatedOperationListed(entry.compatibility.connectOperation) ? { connect: undefined } : {}),
+      ...(dedicatedOperationListed(entry.compatibility.dryRunOperation) ? { dryRun: undefined } : {}),
+      ...(dedicatedOperationListed(entry.compatibility.setPreferenceOperation)
+        ? { personalization: undefined }
+        : {}),
+    };
+  });
   const listedTools = async (): Promise<ListedTool[]> => {
     const runtimeOperationTools = await runtimeProviderToolsForSession();
     const coreTools = [
@@ -92,12 +114,12 @@ export function createToolListing(scope: ServerScope) {
         : []),
       ...crudToolsForSession(session, tables, locale),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
-      ...projectedDerivedTools
+      ...helperEntries
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
         )
         .map((entry) => connectHelperTool(entry.connect!.name, entry.connect!.description)),
-      ...projectedDerivedTools
+      ...helperEntries
         .filter(
           (entry) =>
             entry.personalization && sessionInAudience(entry, session.roles),
@@ -105,7 +127,7 @@ export function createToolListing(scope: ServerScope) {
         .map((entry) =>
           personalizationHelperTool(entry.personalization!.set.name, entry.personalization!.set.description),
         ),
-      ...projectedDerivedTools
+      ...helperEntries
         .filter(
           (entry) =>
             entry.dryRun &&

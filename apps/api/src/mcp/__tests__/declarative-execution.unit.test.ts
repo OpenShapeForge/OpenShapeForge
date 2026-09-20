@@ -1896,7 +1896,7 @@ describe("executeBindingStep", () => {
       connectionValues: {},
       serviceInputs: {},
       secretScope: "unused",
-      fetchImpl: (async () => Response.json({ id: "one", title: "Title one" })) as typeof fetch,
+      fetchImpl: (async () => Response.json({ id: "one", title: "Title one" })) as unknown as typeof fetch,
     });
     expect(outputs).toEqual({ records: { id: "one", title: "Title one" } });
   });

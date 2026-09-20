@@ -275,6 +275,8 @@ function fieldSchema(
         })
       : constrainedType(field);
   const title = localizedText(field.label);
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  schema["x-osf-type"] = field.osfType;
   if (field.relationship?.entity) {
     schema["x-osf-reference"] = { entity: field.relationship.entity };
   }

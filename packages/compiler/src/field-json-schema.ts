@@ -497,6 +497,8 @@ function addCompiledFieldMetadata(
   if (title) {
     schema.title = title;
   }
+  // The type a form renders the property through; the JSON type beside it is what validates.
+  if (field.osfType) schema["x-osf-type"] = field.osfType;
   if (enumeration) {
     schema.enum = typedEnumValues(enumeration.values, sourceBaseType(field));
   }

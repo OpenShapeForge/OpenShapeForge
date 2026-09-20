@@ -81,7 +81,7 @@ test("real authored template collection Operations compile the direct-edit varia
   expect(operations.filter((operation) => operation.implementation).map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVariant.removeBlock", "TemplateVariant.updateBlock"]);
   const schema = operations.find((operation) => operation.id === "Template.insertVariant")!.inputSchema;
   const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
-  for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control"]) ajv.addKeyword({ keyword, valid: true });
+  for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control", "x-osf-type"]) ajv.addKeyword({ keyword, valid: true });
   const validate = ajv.compile(schema);
   const base = { id: "10000000-0000-4000-8000-000000000001", expectedVersion: "2026-09-14T10:00:00Z" };
   for (const values of [{ channel: "document", locale: "nl" }, { channel: "email", locale: "en" }, { channel: "whatsapp", locale: "nl-NL" }]) expect(validate({ ...base, values })).toBe(true);

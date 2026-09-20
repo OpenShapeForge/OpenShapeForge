@@ -6,7 +6,7 @@ test("entity semantic types retain their inferred target in parameter schemas", 
   const schema = operationFieldObjectSchema([{ key: "record", osfType: "ExampleRecord", required: true }], {
     osfTypes: { ExampleRecord: { kind: "entity", entity: "ExampleRecord", valueType: "string", validation: { format: "uuid" } } },
   });
-  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" } } } });
+  expect(schema).toMatchObject({ required: ["record"], properties: { record: { type: "string", format: "uuid", "x-osf-reference": { entity: "ExampleRecord" }, "x-osf-type": "ExampleRecord" } } });
 });
 
 test("cardinality bounds with max one preserve a scalar value", () => {

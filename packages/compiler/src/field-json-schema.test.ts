@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
-import { operationReferenceKeyword } from "@openshapeforge/operations";
+import { operationReferenceKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import type { CompiledField } from "./authoring/types.js";
 import {
   compiledFieldSchema,
@@ -110,6 +110,16 @@ describe("compiled field JSON Schema projection", () => {
     // A constraint the runtime does not evaluate stays refused.
     expect(compile({ type: "string", "x-osf-reference": { entity: "Relation", constraints: { relationType: { in: ["organization"] } } } })).toThrow(/x-osf-reference/);
   });
+  it("names the OSF type behind every property, and the runtime keyword accepts what it emits", () => {
+    // A form renders a property through the renderer registered for its type
+    // (#521); the JSON type beside it stays the only thing validated.
+    expect(compiledFieldSchema(field({ key: "customer", osfType: "Relation", relationship: { kind: "belongsTo", target: "Relation" } }))["x-osf-type"]).toBe("Relation");
+    expect(compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" }))["x-osf-type"]).toBe("currency");
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addKeyword(operationTypeKeyword);
+    expect(() => ajv.compile({ type: "object", properties: { amount: compiledFieldSchema(field({ key: "amount", osfType: "currency", baseType: "number" })) } })).not.toThrow();
+    expect(() => ajv.compile({ type: "number", "x-osf-type": "not a type" })).toThrow(/x-osf-type/);
+  });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
       $ref: "https://example.test/schema#/$defs/value",
@@ -165,6 +175,7 @@ describe("compiled field JSON Schema projection", () => {
         "Allowed values: active (Active), closed (Closed).",
       default: "active",
       "x-osf-i18n": { title: { en: "status" }, description: { en: "Lifecycle status." }, enum: { active: { en: "Active", nl: "Actief" }, closed: { en: "Closed", nl: "Gesloten" } } },
+      "x-osf-type": "string",
     });
   });
 
@@ -237,8 +248,8 @@ describe("compiled field JSON Schema projection", () => {
 
     expect(schema.items).toEqual({
       allOf: [
-        { type: "string", maxLength: 8, enum: ["primary", "backup"] },
-        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } } },
+        { type: "string", maxLength: 8, enum: ["primary", "backup"], "x-osf-type": "string" },
+        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string" },
       ],
     });
     expect(schema.description).toContain("Allowed values: primary (Primary), backup (Backup).");
@@ -362,7 +373,7 @@ describe("compiled field JSON Schema projection", () => {
     const properties = schema.properties as Record<string, Record<string, unknown>>;
 
     expect(properties.definition?.$ref).toBe("#/$defs/fieldDefinition");
-    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
+    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition" });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
   });

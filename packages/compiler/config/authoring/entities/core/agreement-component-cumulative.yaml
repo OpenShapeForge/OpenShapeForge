@@ -387,11 +387,3 @@ interfaces:
             title:
               en: Edit component cumulative
               nl: Component cumulatief bewerken
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

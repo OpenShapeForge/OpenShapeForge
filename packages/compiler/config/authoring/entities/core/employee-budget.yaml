@@ -344,11 +344,3 @@ interfaces:
         render:
           component: DatePicker
           props: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

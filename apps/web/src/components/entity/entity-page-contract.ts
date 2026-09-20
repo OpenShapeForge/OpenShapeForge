@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { ReactNode } from "react";
-import type { VisibilityConfig } from "@/compiler/field-contract";
+import type { VisibilityConfig } from "@/generated/compiler/field-contract";
 import { evaluateVisibility } from "@/features/entity-actions/lib/evaluate-visibility";
 
 /**

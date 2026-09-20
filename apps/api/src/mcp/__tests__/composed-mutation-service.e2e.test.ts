@@ -392,12 +392,12 @@ describe("composed mutation Service on the native provider", () => {
           },
         };
 
-        // The shipped catalog binds a canonical workflow operation; the
+        // The shipped catalog binds a canonical notebook operation; the
         // server refuses to build without its module, so stub it.
-        const workflowModule: RuntimeModule = {
-          name: "workflow",
+        const notebookModule: RuntimeModule = {
+          name: "notebook",
           operationHandlers: {
-            startWebhook: async () => ({ value: { status: "accepted" } }),
+            importNotebook: async () => ({ value: { status: "accepted" } }),
           },
         };
 
@@ -415,7 +415,7 @@ describe("composed mutation Service on the native provider", () => {
           modules: [
             documentsPluginRuntime as unknown as RuntimeModule,
             versioningPluginRuntime as unknown as RuntimeModule,
-            workflowModule,
+            notebookModule,
             module,
           ],
           modulePlatform: platform,

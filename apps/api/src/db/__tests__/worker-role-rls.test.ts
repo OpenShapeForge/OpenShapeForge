@@ -2,12 +2,12 @@
 /**
  * The worker axis, proved against a real database (#218, #223).
  *
- * A workflow worker claims commands across every tenant. It used to do that by
- * setting `app.bypass_rls`, which is a single boolean honoured by all 20
- * tenant-scoped policies in the manifest — so a worker that needed 3 tables was
- * granted read AND write on every tenant's `erp.relations` too. #218 replaced
- * that with `workerAccess`, which puts a worker disjunct in the queue tables'
- * policies and nowhere else.
+ * A background worker claims queued jobs across every tenant. It used to do
+ * that by setting `app.bypass_rls`, which is a single boolean honoured by
+ * every tenant-scoped policy in the manifest — so a worker that needed one
+ * table was granted read AND write on every tenant's `erp.relations` too.
+ * #218 replaced that with `workerAccess`, which puts a worker disjunct in the
+ * queue table's policy and nowhere else.
  *
  * #218 stated its own limit: `app.current_worker_role()` reads a GUC, and
  * anything holding a connection can set a GUC, so the policy authenticated
@@ -19,7 +19,7 @@
  * role, `openshapeforge_worker`, and the disjunct now reads
  *
  *   (current_user = 'openshapeforge_worker'
- *    AND app.current_worker_role() = 'workflow-worker')
+ *    AND app.current_worker_role() = 'job-worker')
  *
  * so the GUC only says WHICH worker and the connected role says whether it is
  * one at all. The two roles are what the two halves of this file connect as,
@@ -30,8 +30,11 @@
  *   - as `openshapeforge_app`, setting `app.worker_role` by hand: the queue
  *     counts 0. Before #223 that returned 2, by design.
  *
- * Every visibility assertion is a RAW `count(*)` with no app-layer WHERE, so
- * the numbers themselves are the proof.
+ * The axis is exercised on the core job queue (`platform.jobs`, docs/jobs.md)
+ * and the tenant-scoped `platform.entity_events` a worker reads inside a
+ * tenant (workerDml, a grant without a policy widening). Every visibility
+ * assertion is a RAW `count(*)` with no app-layer WHERE, so the numbers
+ * themselves are the proof.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db/__tests__/worker-role-rls.test.ts 2>&1
@@ -41,7 +44,7 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { createDatabaseRuntime, type OpenShapeForgeDatabase } from "../connection.js";
+import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import {
@@ -49,6 +52,8 @@ import {
   WORKER_ROLE,
   workerGrantedTables,
 } from "../migrations/worker-role.js";
+import { claimJobs } from "../../jobs/store.js";
+import { JOB_WORKER_ROLE, withJobWorkerSession } from "../../jobs/worker.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -57,29 +62,8 @@ const ADMIN_URL =
 const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 90_000;
 
-/** The role name the queue policies name, and the workers present. */
-const WORKER_GUC_ROLE = "workflow-worker";
-
-/**
- * `apps/api/tsconfig.json` roots its program at `src`, so the worker cannot be
- * statically imported from here. The plugin loader has the same constraint and
- * answers it the same way — resolve the specifier at run time. Mirrors
- * `graphql/__tests__/workflow-engine.e2e.test.ts`.
- */
-const WORKFLOW_RUNTIME_DIR = new URL(
-  "../../../../../examples/plugins/workflow/runtime/",
-  import.meta.url,
-).href;
-
-type ClaimedCommand = { id: string; tenantId: string; commandType: string };
-
-type ControlCommandWorkerModule = {
-  processWorkflowControlCommandBatch: (
-    db: OpenShapeForgeDatabase,
-    dispatcher: { dispatch: (command: ClaimedCommand) => Promise<void> },
-    options?: { workerId?: string; batchSize?: number },
-  ) => Promise<{ processed: number }>;
-};
+/** The role name the queue policy names, and the worker presents. */
+const WORKER_GUC_ROLE = JOB_WORKER_ROLE;
 
 function scratchAdminUrl(name: string): string {
   const url = new URL(ADMIN_URL);
@@ -146,10 +130,10 @@ type Fixture = {
 };
 
 /**
- * Two tenants, each with a pending control command; tenant A additionally gets a
- * schedule, a schedule fire, a workflow instance and an `erp.relations` row.
- * Seeded as the privileged role, which is a superuser and therefore bypasses
- * every policy — so the fixture itself proves nothing and constrains nothing.
+ * Two tenants, each with a queued job; tenant A additionally gets an entity
+ * event and an `erp.relations` row. Seeded as the privileged role, which is a
+ * superuser and therefore bypasses every policy — so the fixture itself
+ * proves nothing and constrains nothing.
  */
 async function seed(db: Kysely<DB>): Promise<Fixture> {
   const fixture: Fixture = {
@@ -160,39 +144,20 @@ async function seed(db: Kysely<DB>): Promise<Fixture> {
 
   await db.connection().execute(async (conn) => {
     for (const tenant of [fixture.tenantA, fixture.tenantB]) {
+      const slug = `probe-${tenant.slice(0, 8)}`;
       await sql`
-        insert into workflow.control_commands (tenant_id, command_type, payload)
-        values (${tenant}::uuid, ${"workflow.instance.start"}, '{}'::jsonb)
+        insert into platform.tenants (id, slug, name, status)
+        values (${tenant}::uuid, ${slug}, ${slug}, 'active')
+      `.execute(conn);
+      await sql`
+        insert into platform.jobs (tenant_id, kind, actor_id, payload)
+        values (${tenant}::uuid, ${"probe.job"}, ${randomUUID()}::uuid, '{}'::jsonb)
       `.execute(conn);
     }
 
-    const definition = await sql<{ id: string }>`
-      insert into workflow.definitions (tenant_id, name)
-      values (${fixture.tenantA}::uuid, ${"probe"})
-      returning id::text
-    `.execute(conn);
-    const definitionId = definition.rows[0]!.id;
-
-    const schedule = await sql<{ id: string }>`
-      insert into workflow.schedules (tenant_id, definition_id, cron, timezone)
-      values (${fixture.tenantA}::uuid, ${definitionId}::uuid, ${"0 * * * *"}, ${"UTC"})
-      returning id::text
-    `.execute(conn);
-
     await sql`
-      insert into workflow.schedule_fires (
-        tenant_id, schedule_id, definition_id, trigger_node_id,
-        scheduled_at, occurrence, idempotency_key
-      )
-      values (
-        ${fixture.tenantA}::uuid, ${schedule.rows[0]!.id}::uuid, ${definitionId}::uuid,
-        ${"trigger-1"}, now(), 1, ${`probe-${randomUUID()}`}
-      )
-    `.execute(conn);
-
-    await sql`
-      insert into workflow.instances (tenant_id, definition_id)
-      values (${fixture.tenantA}::uuid, ${definitionId}::uuid)
+      insert into platform.entity_events (tenant_id, aggregate_type, aggregate_id, event_type)
+      values (${fixture.tenantA}::uuid, ${"Relation"}, ${randomUUID()}, ${"created"})
     `.execute(conn);
 
     await sql`
@@ -214,10 +179,6 @@ describe("worker-role RLS axis", () => {
           return seed(db);
         });
 
-        const worker = (await import(
-          `${WORKFLOW_RUNTIME_DIR}control-command-worker.ts`
-        )) as ControlCommandWorkerModule;
-
         await withDb(scratchWorkerUrl(name), async (db) => {
           // (a) The worker role must NOT be a superuser, or none of this means
           // anything: a superuser is exempt from RLS entirely.
@@ -227,21 +188,18 @@ describe("worker-role RLS axis", () => {
           expect(identity.rows[0]?.is_superuser).toBe("off");
           expect(identity.rows[0]?.who).toBe(WORKER_ROLE);
 
-          // (b) The REAL worker code path — applyWorkerSession sets
-          // app.worker_role and nothing else — claims both tenants' commands.
-          const claimed: ClaimedCommand[] = [];
-          const result = await worker.processWorkflowControlCommandBatch(
-            db,
-            { dispatch: async (command) => void claimed.push(command) },
-            { workerId: "worker-role-rls-test", batchSize: 10 },
+          // (b) The REAL worker code path — withJobWorkerSession sets
+          // app.worker_role and nothing else — claims both tenants' jobs.
+          const claimed = await withJobWorkerSession(db, (trx) =>
+            claimJobs(trx, { limit: 10, leaseSeconds: 30 }),
           );
 
-          expect(result.processed).toBe(2);
-          expect([...new Set(claimed.map((command) => command.tenantId))].sort()).toEqual(
+          expect(claimed.length).toBe(2);
+          expect([...new Set(claimed.map((job) => job.tenantId))].sort()).toEqual(
             [fixture.tenantA, fixture.tenantB].sort(),
           );
 
-          // (c) The widening is exactly the explicitly granted tables that
+          // (c) The widening is exactly the explicitly granted table that
           // declared it. Same GUC, RAW counts, no tenant set.
           await db.connection().execute(async (conn) => {
             await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
@@ -254,15 +212,12 @@ describe("worker-role RLS axis", () => {
             };
 
             // Declared workerAccess → visible across tenants.
-            expect(await count("workflow.control_commands")).toBe(2);
-            expect(await count("workflow.schedules")).toBe(1);
-            expect(await count("workflow.schedule_fires")).toBe(1);
+            expect(await count("platform.jobs")).toBe(2);
 
             // Explicit workerDml → granted but tenant-scoped, hence invisible
             // until the tenant is set. Business tables such as erp.relations
             // are not granted at all and are asserted in the grant test below.
-            expect(await count("workflow.instances")).toBe(0);
-            expect(await count("workflow.definitions")).toBe(0);
+            expect(await count("platform.entity_events")).toBe(0);
           });
         });
       });
@@ -298,13 +253,9 @@ describe("worker-role RLS axis", () => {
             await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
             await sql`select set_config('app.tenant_id', '', false)`.execute(conn);
 
-            // Every table #218 widened, enumerated. The GUC says the right
-            // thing; the connection does not.
-            expect(await count("workflow.control_commands")).toBe(0);
-            expect(await count("workflow.schedules")).toBe(0);
-            expect(await count("workflow.schedule_fires")).toBe(0);
-            expect(await count("workflow.waits")).toBe(0);
-            expect(await count("workflow.collection_waits")).toBe(0);
+            // The table #218 widened. The GUC says the right thing; the
+            // connection does not.
+            expect(await count("platform.jobs")).toBe(0);
 
             // The GUC still reads back as set, so this is the policy refusing
             // the claim rather than the GUC failing to take.
@@ -387,7 +338,7 @@ describe("worker-role RLS axis", () => {
           await db.connection().execute(async (conn) => {
             const commands = async () => {
               const rows = await sql<{ n: number }>`
-                select count(*)::int as n from workflow.control_commands
+                select count(*)::int as n from platform.jobs
               `.execute(conn);
               return rows.rows[0]?.n ?? -1;
             };
@@ -418,26 +369,18 @@ describe("worker-role RLS axis", () => {
   );
 
   test(
-    "the schedule worker's two-step session: the queue without a tenant, the definition with one",
+    "the worker's two-step session: the queue without a tenant, the tenant's rows with one",
     async () => {
       // The riskiest half of dropping the bypass, and the one that would fail
-      // silently. `applyWorkflowScheduleSession` sets the worker role for the
-      // cross-tenant claim, then sets `app.tenant_id` from the claimed row
-      // before reading the definition it fires. `workflow.definitions` and
-      // `workflow.definition_versions` deliberately do NOT declare workerAccess,
-      // so if that second step were wrong the definition would simply read as
-      // absent — and the worker would deactivate a perfectly good schedule as
-      // `definition_not_schedulable` rather than raise anything.
+      // silently. A worker sets the worker role for the cross-tenant claim,
+      // then sets `app.tenant_id` from the claimed job before running its
+      // handler inside that tenant. `platform.entity_events` deliberately does
+      // NOT declare workerAccess, so if that second step were wrong the rows
+      // would simply read as absent rather than raise anything.
       //
       // Since #223 it also proves the other half of the grant: the worker role
-      // is granted `workflow.definitions` (it declares `workerDml`), so the
+      // is granted `platform.entity_events` (it declares `workerDml`), so the
       // tenant-scoped read succeeds rather than failing with permission denied.
-      //
-      // Asserted at the session level rather than by running the worker: the
-      // schedule worker cannot complete a fire today for an unrelated reason
-      // (it writes `schedule_fires.version_id` / `.command_id`, neither of which
-      // the table declares — tracked separately). The GUC sequence below is
-      // exactly what that worker applies.
       await withScratchDb(async (name) => {
         const fixture = await withDb(scratchAdminUrl(name), async (db) => {
           await db.connection().execute((conn) => runMigrationChain(conn));
@@ -456,20 +399,19 @@ describe("worker-role RLS axis", () => {
             // Step 1 — the claim. Worker role, no tenant.
             await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
             await sql`select set_config('app.tenant_id', '', false)`.execute(conn);
-            expect(await count("workflow.schedules")).toBe(1);
-            // The definition the schedule points at is NOT reachable yet, which
-            // is the policy being narrow rather than an accident.
-            expect(await count("workflow.definitions")).toBe(0);
+            expect(await count("platform.jobs")).toBe(2);
+            // The tenant's rows are NOT reachable yet, which is the policy
+            // being narrow rather than an accident.
+            expect(await count("platform.entity_events")).toBe(0);
 
-            // Step 2 — the fire. Same worker role, tenant now known.
+            // Step 2 — the run. Same worker role, tenant now known.
             await sql`select set_config('app.tenant_id', ${fixture.tenantA}, false)`.execute(conn);
-            expect(await count("workflow.definitions")).toBe(1);
-            expect(await count("workflow.schedule_fires")).toBe(1);
+            expect(await count("platform.entity_events")).toBe(1);
 
             // ...and it is the tenant predicate doing that work, not the worker
-            // role: another tenant's definitions stay invisible throughout.
+            // role: another tenant's rows stay invisible throughout.
             await sql`select set_config('app.tenant_id', ${fixture.tenantB}, false)`.execute(conn);
-            expect(await count("workflow.definitions")).toBe(0);
+            expect(await count("platform.entity_events")).toBe(0);
           });
         });
       });
@@ -502,22 +444,11 @@ describe("worker-role RLS axis", () => {
               }
             };
 
-            // Granted: only the queue, run tables and catalogs that explicitly
-            // declare worker access. Business Operations use the canonical API
-            // under a fresh service identity, not this restricted DB role.
+            // Granted: only the queue and the tables that explicitly declare
+            // worker access. Business Operations use the canonical API under a
+            // fresh service identity, not this restricted DB role.
             for (const table of [
-              "workflow.control_commands",
-              "workflow.schedules",
-              "workflow.schedule_fires",
-              "workflow.waits",
-              "workflow.collection_waits",
-              "workflow.instances",
-              "workflow.node_states",
-              "workflow.definitions",
-              "workflow.definition_versions",
-              "workflow.definition_locks",
-              "platform.workflow_node_catalog_entries",
-              "platform.entity_trigger_registry",
+              "platform.jobs",
               "platform.entity_events",
               "platform.org_unit_closure",
             ]) {
@@ -537,7 +468,6 @@ describe("worker-role RLS axis", () => {
               "platform.api_key_integrations",
               "platform.tenants",
               "platform.entity_page_configs",
-              "platform.entity_field_suggestions",
               "platform.org_unit",
               "platform.system_bypass_audit",
               "erp.relations",
@@ -578,7 +508,7 @@ describe("worker-role RLS axis", () => {
   );
 
   test(
-    "only the declared queue and wait tables carry the worker disjunct",
+    "only the declared queue table carries the worker disjunct",
     async () => {
       await withScratchDb(async (name) => {
         await withDb(scratchAdminUrl(name), async (db) => {
@@ -598,24 +528,14 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            // The whole list, enumerated. Core's job queue (docs/jobs.md),
-            // three queue tables the command and schedule workers claim from,
-            // and the two wait tables the collection-wait sweeps scan (#221) —
-            // that scan is their claim.
-            expect(policies.rows.map((row) => row.qualified)).toEqual([
-              "platform.jobs",
-              "workflow.collection_waits",
-              "workflow.control_commands",
-              "workflow.schedule_fires",
-              "workflow.schedules",
-              "workflow.waits",
-            ]);
+            // The whole list, enumerated: core's job queue (docs/jobs.md).
+            expect(policies.rows.map((row) => row.qualified)).toEqual(["platform.jobs"]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.
             for (const row of policies.rows) {
               for (const predicate of [row.qual, row.withcheck]) {
-                expect(predicate).toContain(row.qualified === "platform.jobs" ? "job-worker" : WORKER_GUC_ROLE);
+                expect(predicate).toContain(WORKER_GUC_ROLE);
                 expect(predicate).toContain(`CURRENT_USER = '${WORKER_ROLE}'`);
                 expect(predicate).not.toMatch(
                   /\(current_worker_role\(\) = '[^']*'::text\)(?!\))/i,
@@ -623,21 +543,18 @@ describe("worker-role RLS axis", () => {
               }
             }
 
-            // Run data stays off the axis — the queue/work split the whole
-            // design rests on. A worker reaches an instance only from a session
-            // scoped to its tenant, which is why the stalled-wait counter in
-            // `runtime/collection-waits.ts` resolves tenants first rather than
-            // joining `instances` in one cross-tenant sweep.
+            // Tenant data a worker reads inside a tenant stays off the axis —
+            // the queue/work split the whole design rests on. A worker reaches
+            // it only from a session scoped to the claimed job's tenant.
             const runData = await sql<{ qualified: string; qual: string }>`
               select
                 schemaname || '.' || tablename as qualified,
                 coalesce(qual, '') as qual
               from pg_policies
-              where schemaname = 'workflow'
-                and tablename in ('instances', 'node_states')
+              where schemaname = 'platform' and tablename = 'entity_events'
             `.execute(conn);
 
-            expect(runData.rows.length).toBe(2);
+            expect(runData.rows.length).toBe(1);
             for (const row of runData.rows) {
               expect(row.qual).not.toContain("current_worker_role");
             }

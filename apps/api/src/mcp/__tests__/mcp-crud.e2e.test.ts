@@ -70,7 +70,7 @@ import {
   toolError,
   toolNameFor,
   toolPayload,
-  workflowOperator,
+  notebookWriter,
   type CrudOperation,
 } from "./e2e/mcp-sweep.js";
 
@@ -177,7 +177,7 @@ describe("generated MCP server", () => {
   });
 
   test("binds, authorizes and dispatches a canonical operation tool", async () => {
-    const listed = await rpc(workflowOperator, "tools/list");
+    const listed = await rpc(notebookWriter, "tools/list");
     expect(listed.status).toBe(200);
     const tools = listed.body.result.tools as { name: string; inputSchema: unknown }[];
     expect(tools).toContainEqual(expect.objectContaining({
@@ -185,27 +185,25 @@ describe("generated MCP server", () => {
       inputSchema: expect.objectContaining({ type: "object" }),
     }));
 
-    const searched = await callTool(workflowOperator, "osf_search_operations", {
-      query: "webhook",
+    const searched = await callTool(notebookWriter, "osf_search_operations", {
+      query: "import a notebook",
       limit: 20,
     });
     expect(toolEnvelope(searched.body)).toMatchObject({
-      operations: [{ operation: { id: "workflow.instance.webhook-start" } }],
+      operations: [{ operation: { id: "notebook.import" } }],
     });
 
-    const called = await callTool(workflowOperator, "osf_execute_operation", {
-      operationId: "workflow.instance.webhook-start",
-      input: { definitionId: randomUUID() },
+    const called = await callTool(notebookWriter, "osf_execute_operation", {
+      operationId: "notebook.import",
+      input: { notebookId: randomUUID() },
       idempotencyKey: randomUUID(),
     });
-    // The Operation is keyed and declares an external write, so the runtime
-    // records a running receipt and marks effects admitted BEFORE it invokes
-    // the handler (operations/runtime.ts, execute); the handler's NOT_FOUND
-    // for a definition that never existed therefore surfaces fail-closed as
-    // OPERATION_OUTCOME_UNKNOWN. That is the dispatch this test proves. (It
-    // used to read NOT_FOUND only because the receipt insert failed on an
-    // unseeded platform.tenants row — REFERENCE_NOT_FOUND matched the regex.)
-    expect(toolError(called.body)).toMatch(/OPERATION_OUTCOME_UNKNOWN/);
+    // The Operation is keyed with no external effect, so the runtime records
+    // its receipt and lets the handler's own declared NOT_FOUND for a notebook
+    // that never existed surface as the tool error. That the handler was
+    // reached at all, through search and the generic executor, is the
+    // dispatch this test proves.
+    expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });
 
   test("carries the authored field schema into the tool input schema", async () => {

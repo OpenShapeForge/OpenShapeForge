@@ -680,7 +680,6 @@ export interface EntityWebViewDefinition {
 }
 
 export interface EntityInterfacesDefinition {
-  workflow?: CoreEntity["workflow"];
   rest?: {
     basePath?: string;
     operations?: Record<
@@ -826,68 +825,8 @@ export interface CoreEntity {
    * `interfaces`, which may narrow this set but never widen it.
    */
   operations?: Record<string, EntityOperationDefinition>;
-  /** Thin interface projections (REST, GraphQL, MCP, web, workflow). */
+  /** Thin interface projections (REST, GraphQL, MCP, web). */
   interfaces?: EntityInterfacesDefinition;
-  /** Workflow node generation settings; an entityPatch from the workflow plugin adds them. */
-  workflow?: {
-    nodes?: {
-      actions?: {
-        create?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        getOne?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        list?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-              defaultSort?: {
-                field: string;
-                direction: "asc" | "desc";
-              };
-            };
-        update?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        delete?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        wait?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-        awaitAction?:
-          | boolean
-          | {
-              enabled?: boolean;
-              readableFields?: string[];
-              writableFields?: string[];
-            };
-      };
-    };
-  };
 }
 
 export interface ThirdPartyApiEndpoint {

@@ -226,8 +226,8 @@ In `authoring.config.yaml`:
 ```yaml
 plugins:
   - ./examples/plugins/entity-docs.ts       # local module (relative/absolute path)
-  - ./examples/plugins/workflow/index.ts    # local package-style plugin
-  # - "@openshapeforge/plugin-workflow"         # or a workspace/npm package specifier
+  - ./examples/plugins/notebook/index.ts    # local package-style plugin
+  # - "@openshapeforge/plugin-notebook"         # or a workspace/npm package specifier
 ```
 
 Path specifiers must exist; bare specifiers resolve via `Bun.resolveSync`.
@@ -277,7 +277,7 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   "<column>"], targetColumns: ["tenant_id", "id"] }`. A global table names
   its own tenant column in `localColumns` instead. The emitter refuses the
   single-column form and provisions the `(tenant_id, id)` unique key on the
-  target; the workflow plugin's `tenantBound()` helper shows the shape.
+  target.
 - A contributed table must declare **`workerDml: true`** if a worker touches it
   at all, even inside a single tenant's session. A worker connects as its own
   PostgreSQL role, and that role gets an enumerated grant rather than the app
@@ -370,9 +370,9 @@ the core enjoys:
 - **Orphan**: every existing file under an owned `root` (or listed `file`)
   that a fresh generation would **not** emit fails the check — so deleted
   outputs cannot rot on disk.
-- Declare roots that don't exist yet if you will emit into them later (the
-  workflow plugin declares its `apps/web/**` roots up front); missing roots
-  are simply skipped.
+- Declare roots that don't exist yet if you will emit into them later (a
+  plugin with web-side artifacts declares its `apps/web/**` roots up front);
+  missing roots are simply skipped.
 
 Artifact **path collisions** across core + all plugins are rejected globally
 (`collectAllArtifacts` throws if two artifacts share a path).
@@ -455,9 +455,6 @@ Seven properties are worth knowing:
   with `derivedTools.outputFieldsField`; core then removes secret-classified
   fields before exposing the allowlist to module refiners.
 
-`restRoutes` is declared but unimplemented by the shipped workflow module,
-which stays that way until the webhook trigger lands rather than being stubbed.
-
 `jobHandlers` is how a module takes part in the core job queue: an Operation
 handler enqueues (`platform.jobs.enqueue`) inside its own transaction, and the
 core `job-worker` runs the handler registered for that kind later, under a
@@ -474,12 +471,12 @@ server it always did. Any other value is looked up among the worker roles the
 loaded modules contribute:
 
 ```sh
-OPENSHAPEFORGE_ROLE=workflow-worker bun apps/api/src/index.ts
+OPENSHAPEFORGE_ROLE=job-worker bun apps/api/src/index.ts
 ```
 
 ```ts
 workers: {
-  "workflow-worker": {
+  "my-worker": {
     start({ db, log }) {
       return startTheLoop(db);          // -> { stop(): Promise<void> }
     },
@@ -516,9 +513,9 @@ Where the API role degrades, the worker role fails closed:
 - **A role name claimed by two modules is refused at boot**, exactly as a
   colliding GraphQL field is.
 
-`init` runs before any worker starts — the workflow module hydrates its node
-catalog there, and a worker that claimed commands first would fail every one of
-them with `NO_BRIDGE`, spending the retry bound on a configuration problem.
+`init` runs before any worker starts — a module that hydrates a catalog there
+would otherwise have its worker claim commands it cannot resolve, spending the
+retry bound on a configuration problem.
 
 `stop()` must settle **after** the in-flight tick. `SIGTERM` (what a container
 runtime sends) drains before exiting; a `stop()` that returned early would
@@ -545,112 +542,10 @@ no Ingress and no probes, because a worker serves no traffic. See
 The output, `docs/entities.generated.md`, is the always-current entity
 reference for this repo (gitignored; recreate with `bun run generate`).
 
-## Shipped example 2: `workflow`
+## Shipped example 2: `notebook`
 
-`examples/plugins/workflow/` — a package-style plugin that exercises every
-extension point at once. It packages the workflow node-catalog machinery
-**as a standalone plugin** rather than as a built-in compiler feature: the
-generators live in the plugin and run behind the web-gated UI path, so the
-compiler core stays focused on the data layer.
-
-**Contributed platform tables** (`contributePlatformTables`) — three global,
-tenant-agnostic catalog tables (`tenantScoped: false`, `domainInternal:
-true`, so no RLS and no generated CRUD/GraphQL surface):
-
-| Table | Contents |
-| --- | --- |
-| `platform.workflow_node_catalog_entries` | one row per workflow node type (standard + entity catalogs), keyed by `catalog_checksum` |
-| `platform.entity_trigger_registry` | one row per workflow-triggerable entity + its designer filter fields |
-| `platform.entity_field_suggestions` | per-entity `Field[]` suggestion arrays for condition/variable pickers |
-
-`db:migrate` fills them from the generated seed documents (see below). The
-node-catalog table is shared by two seeds discriminated on `catalog`, so each is
-authoritative over its own slice only — the mechanics live in
-`apps/api/src/db/migrations/catalog-seed.ts`.
-
-It also contributes the tenant-scoped `workflow.*` data and execution tables.
-Five of those — `control_commands`, `schedules`, `schedule_fires`, `waits`,
-`collection_waits` — declare `workerAccess: "workflow-worker"`, the queue a
-worker claims across tenants; the rest get the plain tenant-isolation policy
-and declare `workerDml: true` so the worker role can reach them one tenant at a
-time. See [api.md](api.md#the-worker-axis).
-
-**Contributed worker role** (`workers`) — `workflow-worker`, one process
-draining `workflow.control_commands`. It connects as the `openshapeforge_worker`
-database role, so it needs its own connection string and will not start on the
-API's:
-
-```sh
-OPENSHAPEFORGE_ROLE=workflow-worker \
-OPENSHAPEFORGE_WORKER_DATABASE_URL=postgres://openshapeforge_worker:openshapeforge_worker@localhost:5434/openshapeforge_dev \
-  bun apps/api/src/index.ts
-```
-
-Whether it dispatches in-process or through a durable-execution service is the
-deployment's choice and is logged once at boot; correctness does not depend on
-the answer, because idempotency comes from the command row's conditional
-consume rather than from whoever dispatches.
-
-**Restored authoring layer** — `examples/plugins/workflow/authoring/` is
-picked up as a layer automatically and ships:
-
-- `workflow-nodes/**` — the node-config YAMLs the generators compile into
-  the `standard` catalog: `flow/`, `triggers/`, `integrations/` and
-  `orchestrator/`, fifteen node types in all. The packs that describe
-  capabilities this repo does not provide — `ai/`, `messaging/`, `billing/`,
-  case handling — moved to the `workflow-domain-nodes` plugin, which seeds
-  them into the same table under `catalog='domain'`.
-- `entities/core/relation.yaml` with `kind: entityPatch` — the **Relation
-  entityPatch**: it strategically merges a `workflow.nodes.actions` block
-  (create/getOne/list/update/delete: true) back onto the base Relation
-  entity, opting it into entity workflow-node generation. This is the
-  worked demonstration of plugin + authoring-layer + entityPatch
-  composition.
-
-**Generated artifacts** — `generate({ authoringDir, webPresent })` runs the
-extracted generators against the *resolved* authoring dir and maps their
-old repo paths to service paths:
-
-- **api-side (always emitted)**, under `apps/api/src/generated/workflow/`:
-  `node-catalog.ts` (types + the checksum that keys the runtime cache/seed —
-  the catalog *data* lives in the Postgres tables above),
-  `entity-workflow-nodes.generated.json` (one entry per entity action node,
-  e.g. `entity.core.relation.create`), and the four seed documents
-  `db:migrate` loads into the three tables above: `node-catalog.seed.json`
-  (`catalog='standard'`), `entity-catalog.seed.json` (`catalog='entity'`),
-  `entity-trigger-registry.seed.json` and `entity-field-suggestions.seed.json`.
-  The last three are produced by the entity-node generator, which names them
-  under web paths; the plugin maps them API-side because `apps/api` owns the
-  tables — the same split the core applies to the page-config catalog. A host
-  repo that deletes `apps/web` keeps its node catalogs.
-- **web-side (only when `apps/web` exists)**: the workflow contract, designer
-  registries, and renderer seeds under `apps/web/src/generated/workflow/`,
-  `apps/web/src/features/renderer/generated/`, and
-  `apps/web/src/features/workflow/lib/nodes/generated/` — mirroring the
-  core's web gating.
-- The `compiler/` and `generated/compiler/` prefixes carry the web client's
-  copies of the field contract. Despite the workflow-named generator these
-  are the *renderer's* core type surface — `@/generated/compiler/field-contract`
-  alone has ~87 importers across `features/renderer` and `components/entity` —
-  so both are mapped into `apps/web/src/`, with byte-identical content.
-- Any other unmapped prefix is dropped entirely, matching the core's
-  greenfield-safe behaviour.
-
-`ownedPaths.roots` declares the api root **and** all three web roots, so the
-stale/orphan gates cover the web side; they deactivate along with generation
-if a host repo removes `apps/web`.
-
-**Runtime half** — `examples/plugins/workflow/runtime.ts` contributes one seed
-step, `workflowCatalogs`, which loads the four generated documents into the three
-tables above. That is the whole reason the runtime contract exists here: before
-it, `apps/api` carried a hardcoded path to a plugin's generated output, and a
-repo that dropped the workflow plugin had to edit the migration chain to stop
-seeding. `db:migrate` reports the result under the seed's name.
-
-## Shipped example 3: `notebook`
-
-`examples/plugins/notebook/` — a plugin that is nothing but an authoring
-layer: no generators, no platform tables, no runtime half. Its two entities,
+`examples/plugins/notebook/` — a plugin that is an authoring layer plus one
+canonical plugin Operation: no generators and no platform tables. Its two entities,
 `Notebook` and `NotebookVersion`, are declared in module `notebook`, so their
 tables are `notebook.notebooks` and `notebook.notebook_versions` rather than
 anything under `erp`, and `Notebook` declares the generic
@@ -665,3 +560,14 @@ head); the API serves that through `platform.schemas.versioning`, and
 `"Notebook"`. `apps/api/src/graphql/__tests__/plugin-versioning.e2e.test.ts`
 creates a notebook, publishes it twice and reads the versions back through the
 generated GraphQL surface.
+
+`notebook.import` is the plugin Operation: a keyed command (`Idempotency-Key`
+on REST, `idempotencyKey` everywhere else) with a REST path parameter, an MCP
+tool and a GraphQL mutation, declared through the compiler contract's
+`operations` and bound to the handler in `runtime.ts`, which replaces a draft
+notebook's body inside the caller's tenant session. It is the one module-level
+plugin Operation this repository composes, so the operations runtime and the
+transport tests exercise every plugin-Operation path through it: binding
+(`bindOperationHandlers` refuses a catalog Operation without a loaded module),
+contract validation, idempotency keys and session authorization
+(`apps/api/src/operations/runtime.test.ts`).

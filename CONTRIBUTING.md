@@ -39,7 +39,7 @@ flagged as drift by `check:generated`.
 ```sh
 bun run check:generated         # artifacts fresh + deterministic (double-run), no orphans
 bun run check:authoring-local   # authoring catalog compiles deterministically
-bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
+bun run check:ts-nocheck        # compiler @ts-nocheck baseline does not grow
 bun run check:notices:linux     # THIRD-PARTY-NOTICES matches the deps, as CI runs it
 bun run typecheck:compiler
 bun run typecheck:api
@@ -51,11 +51,6 @@ bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/
 
 Run `bun run test:perf` as well when touching the API hot path (resolvers, the CRUD
 engine, RLS/session plumbing); it needs k6 and a running API.
-
-Run `bun run test:browser` when touching `apps/web`. It drives the assembled screen
-in a real Chromium and needs a running stack — the compose services plus both app
-processes — because it signs in through the Keycloak login page. Setup is in
-[docs/testing.md](docs/testing.md#the-browser-suite-for-appsweb).
 
 If you add, remove, or bump a dependency, run `bun run notices:linux` and commit the
 updated `THIRD-PARTY-NOTICES.md` — the notices gate fails the PR otherwise.
@@ -111,8 +106,8 @@ ownedPaths? }` (see `packages/compiler/src/plugins.ts`) and is registered under
 
 Plugins must be **deterministic**: `check:generated` runs the whole pipeline twice,
 plugins included, and fails on any byte drift. Study the two examples under
-`examples/plugins/`: `entity-docs.ts` (minimal single-file plugin) and `workflow/`
-(platform tables + own authoring layer + api-side artifacts).
+`examples/plugins/`: `entity-docs.ts` (minimal single-file plugin) and `notebook/`
+(own authoring layer + a plugin Operation with a runtime half).
 
 ## Schema-migration rules
 

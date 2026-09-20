@@ -255,11 +255,3 @@ interfaces:
             title:
               en: Edit invoice collection item
               nl: Factuurincasso-regel bewerken
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

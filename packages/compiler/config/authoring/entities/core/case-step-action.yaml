@@ -141,17 +141,6 @@ fields:
       type: referentiedata
       referentieGroep: CASESTEPACTIONSTATUS
     osfType: referenceDataCode
-  - key: workflowDefinitionId
-    required: false
-    osfType: workflowDefinitionId
-    label:
-      en: Workflow definition
-      nl: Workflowdefinitie
-    validation:
-      format: uuid
-    persisted:
-      column: workflow_definition_id
-      storageClass: core
   - key: workflowInstanceId
     osfType: string
     required: false

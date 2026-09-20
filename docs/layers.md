@@ -16,7 +16,7 @@ layers:
   # - "@openshapeforge/context-care"         # package whose root has an authoring/ dir
 plugins:
   - ./examples/plugins/entity-docs.ts
-  - ./examples/plugins/workflow/index.ts
+  - ./examples/plugins/notebook/index.ts
 restApi:
   title: Example Product API
   version: "1"
@@ -50,8 +50,8 @@ restApi:
 - `plugins` registers compiler plugins ([plugins.md](plugins.md)). A plugin
   that ships its own `authoring/` directory contributes it as an extra layer
   **appended after all configured layers**, in plugin registration order.
-  (That is why this repo, with one configured layer, still materializes
-  `.authoring-build/` — the workflow plugin's layer makes it two.)
+  (That is why this repo materializes `.authoring-build/`: the notebook
+  plugin's layer joins the configured ones.)
 - `restApi` is optional host-owned developer onboarding for the generated
   OpenAPI document and Swagger UI. `title` and Markdown `description` are
   required; `version` defaults to `1`. `externalDocs`, when present, requires

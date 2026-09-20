@@ -110,14 +110,14 @@ and runs migrations as a **pre-install/pre-upgrade Job**. It can also deploy a
 The image is one entry point with several roles: `OPENSHAPEFORGE_ROLE` picks
 which one `apps/api/src/index.ts` starts. `api` is the default and is the HTTP
 server. Any other value names a background worker role contributed by a runtime
-module — the workflow plugin contributes `workflow-worker`, the process that
-drains `workflow.control_commands`, fires due `workflow.schedules` and resumes
-due timer waits. Without it those queues fill and nothing reads them.
+module — core contributes `job-worker`, the process that drains
+`platform.jobs`, the queue every module enqueues into. Without it the queue
+fills and nothing reads it.
 
 ```sh
 helm upgrade --install openshapeforge deploy/helm/openshapeforge-api \
   --set workers.enabled=true            # off by default
-  # --set workers.role=workflow-worker  # the default; a value, not a literal
+  # --set workers.role=job-worker       # the default; a value, not a literal
   # --set workers.replicaCount=2        # the default
 ```
 
@@ -173,10 +173,9 @@ rules, because it has no port to admit anyone to.
 
 A durable-execution service is configured through `workers.extraEnv`, not
 through a chart-specific setting, for the same reason the role name is a value:
-`OPENSHAPEFORGE_WORKFLOW_RESTATE_*` belongs to the workflow plugin, and the
-chart should not know a plugin's variable names any better than it knows its
-role names. Absent it, the worker uses its in-process dispatcher, which is the
-default and correct on its own.
+the variables belong to the plugin whose worker reads them, and the chart
+should not know a plugin's variable names any better than it knows its role
+names.
 
 ### Keycloak subchart (optional, off by default)
 

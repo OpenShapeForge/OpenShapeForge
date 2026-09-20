@@ -486,9 +486,11 @@ tenant-scoped ones, business data included.
 So a table may instead name the worker role permitted to reach it across
 tenants:
 
-```ts
-{ schema: "workflow", name: "control_commands", tenantScoped: true,
-  workerAccess: "workflow-worker", /* … */ }
+```yaml
+- schema: platform
+  name: jobs
+  tenantScoped: true
+  workerAccess: job-worker
 ```
 
 which emits one extra disjunct in **that table's** policy and nowhere else:
@@ -496,7 +498,7 @@ which emits one extra disjunct in **that table's** policy and nowhere else:
 ```sql
 USING (app.bypass_rls()
        OR (current_user = 'openshapeforge_worker'
-           AND app.current_worker_role() = 'workflow-worker')
+           AND app.current_worker_role() = 'job-worker')
        OR (tenant_id = app.current_tenant()))
 ```
 
@@ -509,19 +511,18 @@ question the database can answer.
   session cannot assume it: no membership is granted, so `SET ROLE
   openshapeforge_worker` from the app role is refused by PostgreSQL.
 - `app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
-  sets on its own transaction (`applyWorkerSession` in the workflow plugin's
-  `control-command-worker.ts`). It says *which* worker, so two plugins' workers
-  sharing one login role keep separate queues.
+  sets on its own transaction (`withJobWorkerSession` in
+  `apps/api/src/jobs/worker.ts`). It says *which* worker, so two plugins'
+  workers sharing one login role keep separate queues.
 
 Nothing is bypassed, so nothing is audited — the break-glass trail stays
 readable rather than being buried under a poll loop's heartbeat.
 
-Six tables declare it today: `workflow.control_commands`,
-`workflow.schedules`, `workflow.schedule_fires`, `workflow.waits` and
-`workflow.collection_waits` for the `workflow-worker`, and core's own
-`platform.jobs` for the `job-worker` ([jobs.md](jobs.md)). Notably *not*
-`workflow.instances` or `workflow.node_states` — those are reached only after
-a command is claimed, from a session scoped to that command's tenant.
+One table declares it in this repository: core's own `platform.jobs` for the
+`job-worker` ([jobs.md](jobs.md)); a plugin with a queue of its own declares
+it on that queue and on nothing else. Notably *not* the rows a job touches —
+`platform.entity_events`, for one — which are reached only after a job is
+claimed, from a session scoped to that job's tenant.
 
 Two properties worth being explicit about:
 
@@ -535,7 +536,7 @@ Two properties worth being explicit about:
   a code boundary. Both processes connected as the same role, so PostgreSQL
   could not tell them apart. The role comparison is what changed that. The
   verification is a raw count: connected as `openshapeforge_app` with
-  `app.worker_role = 'workflow-worker'` set by hand, `workflow.control_commands`
+  `app.worker_role = 'job-worker'` set by hand, `platform.jobs`
   counts **0** (`db/__tests__/worker-role-rls.test.ts`).
 
 ### The worker's grants
@@ -548,8 +549,7 @@ manifest instead (`db/migrations/worker-role.ts`):
 | source | what it covers |
 | --- | --- |
 | `workerAccess` | the queue a worker claims across tenants |
-| `workerDml: true` | everything reached inside one tenant's session — run tables, node catalog, trigger registry |
-| `generatedCrudEligible` | the business entities, because one or more generated `entity.<slug>.<action>` nodes may exist for them |
+| `workerDml: true` | everything reached inside one tenant's session — the entity journal, a plugin's run tables and catalogs |
 
 `workerDml` is the second declaration, a boolean rather than a role name: the
 grant is made to the single worker LOGIN role, and it is legal on a **global**
@@ -558,8 +558,8 @@ table, where there is no policy at all and the grant is the only gate.
 What that leaves out is the point. The worker holds nothing in the platform
 control plane — `platform.connector_secrets`, `platform.api_keys`,
 `platform.api_key_integrations`, `platform.tenants`,
-`platform.entity_page_configs`, `platform.org_unit`,
-`platform.entity_field_suggestions` and the connector installation tables. It
+`platform.entity_page_configs`, `platform.org_unit` and the connector
+installation tables. It
 also gets **no `ALTER DEFAULT PRIVILEGES`**: that is what makes the app role's
 sweep future-proof, and giving the worker the same would auto-grant it every
 table generated from that day on. A new table reaches the worker by declaring

@@ -148,14 +148,6 @@ fields:
 operations: {}
 interfaces:
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
   web:
     views:
       collection:

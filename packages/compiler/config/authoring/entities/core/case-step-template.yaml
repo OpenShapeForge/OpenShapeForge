@@ -364,22 +364,6 @@ fields:
               label:
                 en: Form definition
                 nl: Formulierdefinitie
-        - key: workflow
-          osfType: object
-          required: false
-          label:
-            en: Workflow
-            nl: Workflow
-          children:
-            - key: workflowDefinitionId
-              required: false
-              osfType: workflowDefinitionId
-              label:
-                en: Workflow definition
-                nl: Workflowdefinitie
-              options:
-                type: remote
-                remoteUrl: /api/workflow/designer/published-workflows/options?category=process
   - key: templateId
     label:
       en: Case template
@@ -481,15 +465,6 @@ operations:
 interfaces:
   rest: {}
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true
-        wait: true
   web:
     fields:
       description:
@@ -589,11 +564,3 @@ interfaces:
       actions.action.taskTemplate.formDefinition:
         render:
           component: JsonFieldEditor
-      actions.action.workflow.workflowDefinitionId:
-        render:
-          component: OptionVariablePicker
-          props:
-            clearable: true
-            expectedOsfType: workflowDefinitionId
-            selectionSync: publishedWorkflow
-            optionSectionLabel: Procesworkflows

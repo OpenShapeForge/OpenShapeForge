@@ -2,11 +2,12 @@
 /**
  * Seeds reaching the migration chain through the runtime module contract.
  *
- * The seed logic itself is covered by workflow-catalogs-seed.test.ts; what this
- * proves is the wiring — that a module registered by the compiler is resolved
- * at boot, that its seed runs as part of the chain, and that a chain run with
- * no modules seeds nothing. Without the last one the contract would be
- * indistinguishable from the hardcoded call it replaced.
+ * What this proves is the wiring — that a module seed handed to the chain
+ * runs after the core seeds, in registration order, with the chain's
+ * services, and that a chain run with no modules seeds nothing. Without the
+ * last one the contract would be indistinguishable from a hardcoded call.
+ * This repository composes no plugin that ships a seed, so the seed here is
+ * synthetic: what a host's plugin would contribute.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db 2>&1
@@ -16,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import type { Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { loadRuntimeModules } from "../../modules/registry.js";
+import type { ModuleSeed } from "../../modules/contract.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 
@@ -60,53 +61,29 @@ async function withDb<T>(url: string, fn: (db: Kysely<DB>) => Promise<T>): Promi
 
 describe("module-contributed seeds", () => {
   test(
-    "a registered module's seed runs as part of the chain",
+    "module seeds run as part of the chain, in order, with its services",
     async () => {
-      const modules = await loadRuntimeModules();
-      expect(modules.failures).toEqual([]);
-
-      const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
-      // Two plugins contribute a seed each: the workflow plugin's standard and
-      // entity catalogs, and the domain node packs split out of it. Order
-      // follows `authoring.config.yaml`, and the chain applies them in it.
-      expect(moduleSeeds.map((seed) => seed.name)).toEqual([
-        "workflowCatalogs",
-        "workflowDomainNodeCatalog",
-      ]);
+      const order: string[] = [];
+      const seed = (name: string, rows: number): ModuleSeed => ({
+        name,
+        apply: async (db, services) => {
+          order.push(name);
+          expect(typeof services?.schemas.fields.object).toBe("function");
+          // The chain's own seeds ran first: the seed sees a migrated schema.
+          await db.selectFrom("platform.entity_page_configs").select("entity_slug").limit(1).execute();
+          return { present: true, skipped: false, rows };
+        },
+      });
+      const moduleSeeds = [seed("first", 3), seed("second", 1)];
 
       await withScratchDb(async (url) => {
         const result = await withDb(url, (db) =>
           db.connection().execute((conn) => runMigrationChain(conn, { moduleSeeds })),
         );
-
-        for (const name of ["workflowCatalogs", "workflowDomainNodeCatalog"]) {
-          const seed = result.moduleSeeds[name];
-          expect(seed).toBeDefined();
-          expect(seed?.present).toBe(true);
-          expect(seed?.skipped).toBe(false);
-          expect(seed?.rows).toBeGreaterThan(0);
-        }
-
-        await withDb(url, async (db) => {
-          // Both seeds write `platform.workflow_node_catalog_entries`, each
-          // authoritative over its own `catalog` slice via a scoped delete. The
-          // count per slice is what proves they coexist: a seed whose delete
-          // was not scoped would leave its own rows and nothing else, and a
-          // total-only assertion cannot tell that apart from a healthy table.
-          const bySlice = await db
-            .selectFrom("platform.workflow_node_catalog_entries")
-            .select(({ fn }) => ["catalog", fn.countAll<string>().as("total")])
-            .groupBy("catalog")
-            .orderBy("catalog")
-            .execute();
-
-          expect(
-            bySlice.map((row) => [row.catalog, Number(row.total) > 0]),
-          ).toEqual([
-            ["domain", true],
-            ["entity", true],
-            ["standard", true],
-          ]);
+        expect(order).toEqual(["first", "second"]);
+        expect(result.moduleSeeds).toEqual({
+          first: { present: true, skipped: false, rows: 3 },
+          second: { present: true, skipped: false, rows: 1 },
         });
       });
     },
@@ -121,16 +98,6 @@ describe("module-contributed seeds", () => {
           db.connection().execute((conn) => runMigrationChain(conn)),
         );
         expect(result.moduleSeeds).toEqual({});
-
-        await withDb(url, async (db) => {
-          const counted = await db
-            .selectFrom("platform.workflow_node_catalog_entries")
-            .select(({ fn }) => fn.countAll<string>().as("total"))
-            .executeTakeFirst();
-          // The table exists — the plugin contributes it at compile time — and
-          // stays empty, which is the whole distinction between the two halves.
-          expect(Number(counted?.total ?? 0)).toBe(0);
-        });
       });
     },
     TEST_TIMEOUT,

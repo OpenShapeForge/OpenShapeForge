@@ -290,11 +290,3 @@ interfaces:
             title:
               en: Edit space
               nl: Ruimte bewerken
-  workflow:
-    nodes:
-      actions:
-        create: true
-        getOne: true
-        list: true
-        update: true
-        delete: true

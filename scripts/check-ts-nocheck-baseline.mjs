@@ -5,11 +5,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 export const DEFAULT_BASELINE_PATH = "config/ts-nocheck-baseline.json";
-export const DEFAULT_SCAN_ROOTS = [
-  "packages/compiler/src",
-  "examples/plugins/workflow/src",
-  "examples/plugins/workflow-domain-nodes/src",
-];
+export const DEFAULT_SCAN_ROOTS = ["packages/compiler/src"];
 
 const TS_NOCHECK_DIRECTIVE = /^\s*\/\/\s*@ts-nocheck\b/m;
 

@@ -136,9 +136,8 @@ layer:
   renderer serves the previous layout.
 - The `check:generated` web-shard coverage checks (entity-manifest and action
   shard counts must equal `expectedGeneratedCrudEntityCount`).
-- Plugins receive `webPresent: true` — the workflow example plugin then also
-  emits its web-side artifacts (field contract, designer registries, renderer
-  seeds) under the `apps/web/**` roots it declares in `ownedPaths`.
+- Plugins receive `webPresent: true`, so a plugin with web-side artifacts
+  emits them under the `apps/web/**` roots it declares in `ownedPaths`.
 
 A host repo that wants the data layer and API only can **delete `apps/web`**;
 the compiler stops emitting UI artifacts with no compiler changes, and the
@@ -172,7 +171,7 @@ repo bundling this package needs to do the same.
   there is no Node fallback.
 - **Generated CRUD is the set of implemented Operations.** The compiled
   `crud.operations` section is derived from the entity's `operations` and is
-  the upper bound for GraphQL, REST, MCP and workflow; each `interfaces.*`
+  the upper bound for GraphQL, REST and MCP; each `interfaces.*`
   block may withhold an Operation from its transport, never add one. Stock
   generated entity pages require all five intents; smaller sets use a
   purpose-built UI declared under `interfaces.web`.
@@ -180,11 +179,11 @@ repo bundling this package needs to do the same.
   (`schemaByModule: { core: "erp" }`) that host repos cannot override
   through configuration; other module names fall back to their snake_cased
   module name as the schema.
-- **The example plugins are not portable.** Both live under
-  `examples/plugins/` and the workflow plugin deep-imports compiler
-  internals by relative path (`../../../../packages/compiler/src/…`); they
-  demonstrate the contract but would need packaging work before a host repo
-  could register them from node_modules.
+- **The example plugins are not portable.** They live under
+  `examples/plugins/` and reach into the compiler and the API by relative
+  path (`../../../packages/compiler/src/…`); they demonstrate the contract
+  but would need packaging work before a host repo could register them from
+  node_modules.
 - **Relationships only resolve inside the compile.** A single reference may
   only target an entity present in the host's resolved authoring tree; one
   that is absent fails the build. An inverse collection whose referencing

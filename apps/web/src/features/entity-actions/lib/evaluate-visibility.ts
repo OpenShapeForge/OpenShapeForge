@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { VisibilityConfig } from "@/compiler/field-contract";
+import type { VisibilityConfig } from "@/generated/compiler/field-contract";
 
 /**
  * Evaluate a condition set against the current entity state.

@@ -117,10 +117,6 @@
             "role": "Relations.Bsn.Read"
           },
           {
-            "client": "erp-provider",
-            "role": "workflow-admin"
-          },
-          {
             "client": "openshapeforge-audit",
             "role": "Audit.Logs.All"
           },

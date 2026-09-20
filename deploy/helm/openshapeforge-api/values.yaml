@@ -7,7 +7,7 @@
 #   - the API connects to Postgres as a RESTRICTED (NOSUPERUSER NOBYPASSRLS)
 #     role via database.url, so FORCE ROW LEVEL SECURITY is enforced;
 #   - a WORKER connects as a SECOND restricted role via database.workerUrl.
-#     The workflow queue policies compare current_user against that role, so a
+#     The queue policies compare current_user against that role, so a
 #     worker process must not be given the API's credentials — and never falls
 #     back to them (apps/api/src/roles/worker.ts refuses);
 #   - a pre-upgrade Job provisions roles through database.adminUrl (or the
@@ -67,7 +67,7 @@ database:
   #
   #   postgres://openshapeforge_worker:<pw>@<host>:5432/openshapeforge
   #
-  # The workflow queue policies read
+  # The queue policies read
   #   current_user = 'openshapeforge_worker'
   #   AND app.current_worker_role() = '<role>'
   # so the connected role is what authorizes the cross-tenant claim. Giving a
@@ -325,9 +325,9 @@ extraEnv: []
 # One image, several roles: `OPENSHAPEFORGE_ROLE` picks which one
 # `apps/api/src/index.ts` starts. `api` is the default and is the HTTP server
 # every template above deploys; any other value names a background worker role
-# contributed by a runtime module. The workflow plugin contributes
-# `workflow-worker` — the process that drains `workflow.control_commands`,
-# fires due schedules and resumes due timer waits.
+# contributed by a runtime module. Core contributes `job-worker` — the process
+# that drains `platform.jobs`, the queue every module enqueues into; a plugin
+# with a queue of its own contributes a role of its own.
 #
 # It is a separate Deployment rather than a thread inside the API because a poll
 # loop and a request path have unrelated failure modes and unrelated scaling
@@ -346,15 +346,14 @@ workers:
   enabled: false
 
   # Which role to start. A value rather than a literal in the template, for the
-  # same reason `apps/api` names no worker role: roles are CONTRIBUTED by
-  # runtime modules, and a repo that drops the workflow plugin loses
-  # `workflow-worker` with it. The default names the only role the shipped
-  # plugin set contributes, which makes it a convenience, not a coupling.
+  # same reason `apps/api` names no plugin worker role: roles are CONTRIBUTED
+  # by runtime modules, and a repo that drops a plugin loses its role with it.
+  # The default names core's own job worker, which every deployment has.
   #
   # Empty — or `api` — fails the render rather than being defaulted: index.ts
   # reads `OPENSHAPEFORGE_ROLE?.trim() || "api"`, so either would start a
   # second copy of the HTTP server here, with no Service in front of it.
-  role: workflow-worker
+  role: job-worker
 
   # Two, and the chart says so rather than leaving it to whoever installs it.
   #
@@ -408,27 +407,22 @@ workers:
   # abandoned command per replica, left `processing` until the visibility
   # timeout reclaims it.
   #
-  # 150 = 120 + 30, both halves grounded in the worker's own code:
+  # 150 = 120 + 30, both halves grounded in the core job worker's own code:
   #
-  #   - 120s is where waiting stops buying anything:
-  #     `DEFAULT_PROCESSING_TIMEOUT_MS` in
-  #     `examples/plugins/workflow/runtime/control-command-worker.ts`, past
-  #     which a claim is reclaimable by another replica anyway. The longest a
-  #     single dispatch can take is bounded at the same 120s by
-  #     `DEFAULT_RESTATE_TIMEOUT_MS`, the `AbortSignal.timeout` on a post to a
-  #     durable-execution ingress — so one dispatch fits inside the window in
-  #     which finishing it is still worth more than handing it over.
-  #   - 30s covers what `stop()` drains BEFORE the command worker: the schedule
-  #     sweep and the timer sweep, each awaiting its own in-flight tick, plus
-  #     the 25ms granularity they poll at and closing the connection pool.
+  #   - 120s is where waiting stops buying anything: `DEFAULT_LEASE_SECONDS`
+  #     in `apps/api/src/jobs/worker.ts`, past which a claimed job is
+  #     reclaimable by another replica anyway — so one job fits inside the
+  #     window in which finishing it is still worth more than handing it over.
+  #   - 30s covers what `stop()` drains around the job in hand: the sweep of
+  #     done jobs, the poll granularity and closing the connection pool. A
+  #     plugin worker with more to drain sizes this for its own loop.
   #
-  # A full batch (`DEFAULT_BATCH_SIZE` = 10) of dispatches each taking the full
-  # 120s would exceed this, and deliberately so: by then the first command has
-  # outlived its own visibility timeout and another replica may take it, so
-  # waiting is strictly worse than exiting. With the default in-process
-  # dispatcher a tick is bounded by Postgres and 30-60s is usually plenty; the
-  # default is sized for the durable-execution path because the chart cannot see
-  # which dispatcher the worker chose.
+  # A full batch (`DEFAULT_BATCH_SIZE` = 10) of jobs each taking the full 120s
+  # would exceed this, and deliberately so: by then the first job has outlived
+  # its own lease and another replica may take it, so waiting is strictly
+  # worse than exiting. A tick bounded by Postgres alone drains well inside
+  # 30-60s; the default is sized for a handler that reaches out to an external
+  # service, because the chart cannot see what a job kind does.
   terminationGracePeriodSeconds: 150
 
   # Same shape as the API's, and for the same reason no CPU limit is set: the
@@ -454,8 +448,8 @@ workers:
   # three tables, so if the database IS the bottleneck, scaling out makes it
   # slower while CPU stays flat and the autoscaler keeps going.
   #
-  # The signal that matters is queue depth — pending rows in
-  # `workflow.control_commands` — which needs a metrics adapter (Prometheus
+  # The signal that matters is queue depth — queued rows in
+  # `platform.jobs` — which needs a metrics adapter (Prometheus
   # plus KEDA, or an external-metrics API) that this chart neither deploys nor
   # can assume. Fixed replicas until then.
 
@@ -464,19 +458,10 @@ workers:
   # run different roles, and silently giving the worker the API's overrides is
   # how a request-path setting ends up changing a queue drain.
   #
-  # This is where a durable-execution service is configured, if there is one.
-  # Both halves are required, and the contract token exists so an ingress URL
-  # arriving from a shared environment cannot move workflows onto a service
-  # nobody chose:
-  #
-  #   extraEnv:
-  #     - name: OPENSHAPEFORGE_WORKFLOW_RESTATE_CONTRACT
-  #       value: workflow-command-v1
-  #     - name: OPENSHAPEFORGE_WORKFLOW_RESTATE_INGRESS_URL
-  #       value: http://restate.restate.svc:8080
-  #
-  # Absent both, the worker uses its in-process dispatcher, which is the
-  # default and is correct on its own — durable execution is the upgrade.
+  # This is where a plugin worker's own settings go — a durable-execution
+  # ingress, for one — under the variable names that plugin documents. The
+  # chart names none of them, for the same reason the role is a value: it
+  # should not know a plugin's variables any better than its role names.
   extraEnv: []
 
   podAnnotations: {}

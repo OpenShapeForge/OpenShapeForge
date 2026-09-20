@@ -729,22 +729,6 @@
         "checksumField": "checksum"
       }
     },
-    "workflowDefinitionId": {
-      "label": {
-        "en": "Workflow definition ID",
-        "nl": "Workflow-definitie-ID"
-      },
-      "pluralLabel": {
-        "en": "Workflow definition IDs",
-        "nl": "Workflow-definitie-IDs"
-      },
-      "baseType": "string",
-      "icon": "Workflow",
-      "render": {
-        "display": "WorkflowDefinitionReferenceDisplay",
-        "input": "Input"
-      }
-    },
     "postalCode": {
       "label": {
         "en": "Postal code",
@@ -11139,22 +11123,6 @@
           "osfType": "referenceDataCode"
         },
         {
-          "key": "workflowDefinitionId",
-          "required": false,
-          "osfType": "workflowDefinitionId",
-          "label": {
-            "en": "Workflow definition",
-            "nl": "Workflowdefinitie"
-          },
-          "validation": {
-            "format": "uuid"
-          },
-          "persisted": {
-            "column": "workflow_definition_id",
-            "storageClass": "core"
-          }
-        },
-        {
           "key": "workflowInstanceId",
           "osfType": "string",
           "required": false,
@@ -11778,30 +11746,6 @@
                     "label": {
                       "en": "Form definition",
                       "nl": "Formulierdefinitie"
-                    }
-                  }
-                ]
-              },
-              {
-                "key": "workflow",
-                "osfType": "object",
-                "required": false,
-                "label": {
-                  "en": "Workflow",
-                  "nl": "Workflow"
-                },
-                "children": [
-                  {
-                    "key": "workflowDefinitionId",
-                    "required": false,
-                    "osfType": "workflowDefinitionId",
-                    "label": {
-                      "en": "Workflow definition",
-                      "nl": "Workflowdefinitie"
-                    },
-                    "options": {
-                      "type": "remote",
-                      "remoteUrl": "/api/workflow/designer/published-workflows/options?category=process"
                     }
                   }
                 ]

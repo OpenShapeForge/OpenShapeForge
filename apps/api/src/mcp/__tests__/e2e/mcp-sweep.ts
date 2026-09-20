@@ -278,10 +278,10 @@ export const mcpTables = tables.filter((table) => table.source?.mcp);
 export const mcpCreateTables = eligibleTables.filter(
   (table) => table.source?.mcp?.operations.create,
 );
-export const workflowOperator: Identity = {
+export const notebookWriter: Identity = {
   tenantId: tenantA.tenantId,
   userId: randomUUID(),
-  roles: ["workflow-admin"],
+  roles: ["Organization.All.ReadWrite"],
 };
 
 export async function callTool(

@@ -183,14 +183,6 @@ operations:
       mode: none
 interfaces:
   graphql: {}
-  workflow:
-    nodes:
-      actions:
-        create: false
-        getOne: false
-        list: false
-        update: false
-        delete: false
   web:
     views:
       collection:

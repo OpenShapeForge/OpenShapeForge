@@ -6,7 +6,7 @@
  * and the bus-event payloads defined in the entity-actions spec.
  */
 
-import type { Field, VisibilityConfig } from "@/compiler/field-contract";
+import type { Field, VisibilityConfig } from "@/generated/compiler/field-contract";
 
 export interface LocalizedLabel {
   nl?: string;

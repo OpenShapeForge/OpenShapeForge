@@ -33,24 +33,20 @@ describe("runtime module registry", () => {
       },
     });
 
-    // Four plugins ship a runtime half. Order follows
+    // Three plugins ship a runtime half. Order follows
     // `authoring.config.yaml`, which the seed order depends on.
     expect(result.failures).toEqual([]);
     expect(result.loaded.map((module) => module.name)).toEqual([
       "core-versioning",
       "documents",
-      "workflow",
-      "workflow-domain-nodes",
+      "notebook",
     ]);
     // Repo-root-relative specifiers are resolved to absolute paths, not left
     // for the process cwd to interpret.
-    expect(seen).toHaveLength(4);
+    expect(seen).toHaveLength(3);
     expect(seen[0]).toBe("@openshapeforge/versioning/runtime");
     expect(seen[1]).toBe("@openshapeforge/documents/runtime");
-    expect(seen[2]).toMatch(/^\/.*examples\/plugins\/workflow\/runtime\.ts$/);
-    expect(seen[3]).toMatch(
-      /^\/.*examples\/plugins\/workflow-domain-nodes\/runtime\.ts$/,
-    );
+    expect(seen[2]).toMatch(/^\/.*examples\/plugins\/notebook\/runtime\.ts$/);
   });
 
   test("an import that throws is recorded, not propagated", async () => {
@@ -63,7 +59,7 @@ describe("runtime module registry", () => {
     // Fail-soft is per module: all registered runtime halves throw here, and
     // all are recorded rather than the first one aborting the load.
     expect(result.loaded).toEqual([]);
-    expect(result.failures).toHaveLength(4);
+    expect(result.failures).toHaveLength(3);
     for (const failure of result.failures) {
       expect(failure.reason).toBe("module_missing");
       expect(failure.message).toContain("boom");

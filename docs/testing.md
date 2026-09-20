@@ -16,13 +16,12 @@ bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postg
 bun run test:e2e:report         # same suite + HTML report
 bun run --cwd apps/api test:migrations   # migrator vs throwaway scratch DBs
 bun run test:perf               # k6 load suite (needs k6 + a running API)
-bun run test:browser            # apps/web in a real browser (needs a running stack)
 bun run scan:dependencies       # OSV-Scanner scan of the root bun.lock
 ```
 
 **`check:ts-nocheck`** (`scripts/check-ts-nocheck-baseline.mjs`) is an
-incremental safety gate for compiler and workflow-plugin typecheck coverage.
-The checked-in `config/ts-nocheck-baseline.json` records the current 56
+incremental safety gate for compiler typecheck coverage.
+The checked-in `config/ts-nocheck-baseline.json` records the current
 directives; adding a directive or leaving a cleaned-up entry in the baseline
 fails the gate. This does not claim that the existing compiler type errors are
 resolved. Each future cleanup should remove the directive and its baseline
@@ -243,102 +242,3 @@ against throwaway scratch databases created and dropped on the compose
 Postgres (admin URL `SCRATCH_ADMIN_DATABASE_URL`, defaulting to the compose
 superuser); the live `openshapeforge_dev` database is never touched. See
 [migrations.md](migrations.md).
-
-## The browser suite for `apps/web`
-
-`bun run test:browser` (Playwright, `apps/web/playwright.config.ts`) drives a
-real Chromium against a **running** stack. It is the only suite here that needs
-one, and the reason is the reason it exists: both defects it was written for are
-invisible without a browser and a framework.
-
-- **The editor settles** — loads a definition and asserts the page stops calling
-  its own server. A server action whose effect depended on a prop rebuilt on
-  every server render re-ran because it had run, at roughly seven requests a
-  second, indefinitely. The detector needs no foresight: a page that never
-  settles fails any assertion at all.
-- **A palette drag reaches the canvas** — holds a drag open over the surface and
-  asserts the preview card appears, then drops and asserts the node lands. The
-  mid-drag half is the one that matters: the broken handler called
-  `preventDefault()` before bailing, so the *drop* still worked and only
-  everything during the drag was lost.
-- **Smoke** — list, create, open, place a node, save, and come back through the
-  list to a canvas rebuilt from the stored graph.
-- **Publish** — a graph with an unwired output handle saves and cannot be
-  published, with the panel naming the node; a runnable one publishes and the
-  version it minted is what the list reports. `disabled` on that button is four
-  conditions OR-ed together, so the spec rules the other three out before
-  asserting the fourth — otherwise it would pass while the save was still in
-  flight and prove nothing about the graph.
-
-Together those cover **create, edit, save, publish** — the designer journey
-[#240](https://github.com/OpenShapeForge/OpenShapeForge/issues/240) §6 names as
-S7's verification gate, minus **run**: the instance console (§6 S5) is not in
-the tree, so there is no screen to drive. That leg lands with it.
-
-### Why `apps/web` still has no test runner
-
-This is the decision issue
-[#262](https://github.com/OpenShapeForge/OpenShapeForge/issues/262) asked for,
-and it is settled: **a browser suite, not a unit/DOM runner in `apps/web`.**
-Recorded here rather than only on the issue because the issue closes and the
-constraint does not.
-
-A simulated DOM cannot replace this suite. `dataTransfer.getData()` during
-`dragover` returns the payload under happy-dom, does not exist under jsdom, and
-returns `""` in every real browser — so the component test somebody would
-plausibly have written for `onCanvasDragOver` **passes against the broken
-handler**. Both defects the suite was written for shipped past `typecheck:web`,
-`build:web` and every unit and API e2e suite in the repo; only a browser and a
-real framework see them. A DOM simulation is an excellent regression lock and a
-near-worthless detector for this class, and its fidelity has already been wrong
-once on the exact browser API this designer depends on.
-
-**It does not move the line.** Decisions still live in
-`examples/plugins/workflow/web/`, where `bun test examples` reaches them. This
-suite drives the assembled screen through a browser; it cannot call a function,
-so it is not an argument for putting logic in `apps/web`. The rule in
-[AGENTS.md](../AGENTS.md) — *decisions live in the plugin's web half; `apps/web`
-holds assembly* — stands on that, and on a reason that survives any runner: a
-decision in the plugin is covered by a runner every consumer of that plugin
-already has, while a decision in `apps/web` would be covered only by a
-simulation. The line in practice:
-
-| Question | Where it is tested |
-| --- | --- |
-| Does this graph publish? Which issues block what? | `bun test examples` — the plugin's `web/` half |
-| Is the Publish button wired to that answer, refreshed by a save, and explained beside it? | `bun run test:browser` |
-
-A unit runner in `apps/web` is therefore not forbidden forever — but it would be
-a regression lock over code that is already pure, never a substitute for this
-gate, and it does not satisfy S7's verification. Adding one means +22 packages
-and a `THIRD-PARTY-NOTICES` regeneration, so it needs something concrete to lock
-that neither column above already reaches.
-
-### Running it
-
-```sh
-docker compose -f docker-compose.local.yml up -d   # Postgres, Redis, Keycloak
-bun run generate
-bun run db:provision-roles                         # once per Postgres volume
-bun run db:migrate
-bun run dev:api                                    # or apps/api start, on :3001
-bun run build:web && bun run --cwd apps/web start  # on :3000
-bun run --cwd apps/web exec playwright install chromium   # once
-bun run test:browser
-```
-
-The web app must be served from an origin the dev realm's gateway client accepts
-— `http://localhost:3000` or `http://localhost:3001`, per
-`packages/compiler/config/authoring/authorization.yaml`. Sign-in is the real
-authorization-code flow through the Keycloak login page, because the web session
-is written into Redis by the NextAuth callback and nothing outside that callback
-can produce one. Credentials follow the same convention as the GraphQL e2e
-harness: `E2E_USER_PASSWORD_<USERNAME>`, falling back to the committed literal
-in `test/fixtures/authoring/development-identities`. `E2E_WEB_URL` points the
-suite somewhere other than `:3000`.
-
-CI runs it as its own workflow (`.github/workflows/web-e2e.yml`) rather than
-inside `gates`, which has no Postgres. It runs on pull requests to `main` and on
-pushes to `main`, and its job name — `Browser e2e (apps/web)` — is a required
-status check in `scripts/github/protect-main.ruleset.json`, which
-`check:required-checks` keeps in step with the workflow.

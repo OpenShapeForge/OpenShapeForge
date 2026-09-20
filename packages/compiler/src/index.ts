@@ -9,12 +9,20 @@ import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
 } from "./authoring/generate-ui-artifacts.js";
-import { generateAuthoringKeycloakArtifacts } from "./authoring/generate-keycloak-artifacts.js";
+import {
+  generateAuthoringKeycloakArtifacts,
+  loadAuthorizationConfigs,
+} from "./authoring/generate-keycloak-artifacts.js";
 import {
   buildRoleComposites,
   renderRoleComposites,
   ROLE_COMPOSITES_PATH,
 } from "./authoring/role-composites.js";
+import {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+} from "./authoring/identity-contract.js";
 import {
   activeManifestSource,
   loadActivePlatformCompile,
@@ -156,6 +164,12 @@ export {
   renderSettingsPolicy,
   SETTINGS_POLICY_PATH,
 } from "./settings.js";
+export {
+  buildIdentityContract,
+  IDENTITY_CONTRACT_PATH,
+  renderIdentityContract,
+  type IdentityContract,
+} from "./authoring/identity-contract.js";
 export {
   buildRoleComposites,
   renderRoleComposites,
@@ -523,6 +537,17 @@ export async function collectAllArtifacts(
       {
         path: ROLE_COMPOSITES_PATH,
         contents: renderRoleComposites(buildRoleComposites(keycloakArtifacts)),
+      },
+      // Who a login is, in entity terms, so the auth layer names entities and
+      // fields through the contract instead of tables and columns by hand.
+      {
+        path: IDENTITY_CONTRACT_PATH,
+        contents: renderIdentityContract(
+          buildIdentityContract(
+            loadAuthorizationConfigs(authoringDir),
+            entities.map((entity) => entity.contract),
+          ),
+        ),
       },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),

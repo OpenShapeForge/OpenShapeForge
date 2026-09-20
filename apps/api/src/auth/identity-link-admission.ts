@@ -35,6 +35,12 @@ import {
   type PendingInvitationMatch,
 } from "./employee-invitations.js";
 import {
+  actingPartyTable,
+  IDENTITY_CONTRACT,
+  loginContactTable,
+  personTable,
+} from "./identity-contract.js";
+import {
   displayNameFromClaims,
   invalidateIdentityLink,
   NotInvitedError,
@@ -168,36 +174,38 @@ async function createPersonRelation(
   claims: IdentityClaims,
   displayName: string,
 ): Promise<string> {
+  const { actingParty, person, loginContact } = IDENTITY_CONTRACT;
   const tables = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
-  const relations = tables.get("erp.relations");
+  const relations = tables.get(actingPartyTable());
   if (!relations) {
     throw new SessionAuthenticationUnavailableError(
-      "This deployment has no Relation entity; identities cannot be admitted.",
+      `This deployment has no ${actingParty.entity} entity; identities cannot be admitted.`,
     );
   }
   const relation = await createGeneratedEntityForTable(db, session, relations, {
-    displayName,
-    relationType: "person",
-    status: "active",
+    [actingParty.nameField]: displayName,
+    [actingParty.typeField]: actingParty.personType,
+    [actingParty.statusField]: actingParty.activeStatus,
   });
   const relationId = String(relation.id);
 
-  const persons = tables.get("erp.natural_persons");
+  const persons = tables.get(personTable());
   const personName = personNameFromClaims(claims);
   if (persons && personName) {
     await createGeneratedEntityForTable(db, session, persons, {
-      ...personName,
-      relationId,
+      [person.firstNameField]: personName.firstName,
+      [person.lastNameField]: personName.lastName,
+      [person.relationField]: relationId,
     });
   }
-  const contactDetails = tables.get("erp.contact_details");
+  const contactDetails = tables.get(loginContactTable());
   if (contactDetails && claims.email) {
     await createGeneratedEntityForTable(db, session, contactDetails, {
-      relationId,
-      type: "email",
-      value: claims.email,
-      isPrimary: true,
-      status: "active",
+      [loginContact.relationField]: relationId,
+      [loginContact.typeField]: loginContact.emailType,
+      [loginContact.valueField]: claims.email,
+      [loginContact.primaryField]: true,
+      [loginContact.statusField]: loginContact.activeStatus,
     });
   }
   return relationId;

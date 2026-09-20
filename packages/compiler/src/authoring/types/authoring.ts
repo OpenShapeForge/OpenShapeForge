@@ -1244,6 +1244,40 @@ export interface AuthorizationConfigFile {
 
   /** v2 dev test users. */
   users?: AuthorizationUser[];
+
+  /**
+   * Who a login is, in entity terms: the party it acts as, the person record
+   * beside it, where its e-mail lives and which role administers the
+   * organization. Declared once per deployment; emitted as identity.json.
+   */
+  identity?: {
+    administratorRole: string;
+    memberRoles: string[];
+    actingParty: {
+      entity: string;
+      nameField: string;
+      typeField: string;
+      personType: string;
+      statusField: string;
+      activeStatus: string;
+    };
+    person: {
+      entity: string;
+      relationField: string;
+      firstNameField: string;
+      lastNameField: string;
+    };
+    loginContact: {
+      entity: string;
+      relationField: string;
+      typeField: string;
+      emailType: string;
+      valueField: string;
+      primaryField: string;
+      statusField: string;
+      activeStatus: string;
+    };
+  };
 }
 
 export interface TransformDefinition {

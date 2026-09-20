@@ -318,6 +318,56 @@
       "items": { "$ref": "#/$defs/authorizationGroupNode" }
     },
 
+    "identity": {
+      "type": "object",
+      "description": "Who a login is, in entity terms: the party it acts as, the person record beside it, where its e-mail lives and which role administers the organization. Emitted as identity.json for the API.",
+      "additionalProperties": false,
+      "required": ["administratorRole", "memberRoles", "actingParty", "person", "loginContact"],
+      "properties": {
+        "administratorRole": { "type": "string", "minLength": 1 },
+        "memberRoles": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "actingParty": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entity", "nameField", "typeField", "personType", "statusField", "activeStatus"],
+          "properties": {
+            "entity": { "type": "string", "minLength": 1 },
+            "nameField": { "type": "string", "minLength": 1 },
+            "typeField": { "type": "string", "minLength": 1 },
+            "personType": { "type": "string", "minLength": 1 },
+            "statusField": { "type": "string", "minLength": 1 },
+            "activeStatus": { "type": "string", "minLength": 1 }
+          }
+        },
+        "person": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entity", "relationField", "firstNameField", "lastNameField"],
+          "properties": {
+            "entity": { "type": "string", "minLength": 1 },
+            "relationField": { "type": "string", "minLength": 1 },
+            "firstNameField": { "type": "string", "minLength": 1 },
+            "lastNameField": { "type": "string", "minLength": 1 }
+          }
+        },
+        "loginContact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entity", "relationField", "typeField", "emailType", "valueField", "primaryField", "statusField", "activeStatus"],
+          "properties": {
+            "entity": { "type": "string", "minLength": 1 },
+            "relationField": { "type": "string", "minLength": 1 },
+            "typeField": { "type": "string", "minLength": 1 },
+            "emailType": { "type": "string", "minLength": 1 },
+            "valueField": { "type": "string", "minLength": 1 },
+            "primaryField": { "type": "string", "minLength": 1 },
+            "statusField": { "type": "string", "minLength": 1 },
+            "activeStatus": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+
     "users": {
       "type": "array",
       "description": "Dev test users. Password is plain-text; suitable only for development realms.",

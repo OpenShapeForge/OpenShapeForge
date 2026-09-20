@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
 
@@ -113,7 +114,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       if tg_op = 'INSERT' and coalesce(array_length(new.roles, 1), 0) = 0 then
         return new;
       end if;
-      if app.bypass_rls() or 'Organization.All.ReadWrite' = any (
+      if app.bypass_rls() or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
         string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
       ) then
         return new;
@@ -140,7 +141,7 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
           tenant_id = app.current_tenant()
           and (
             app.identity_subject(identity_id) = current_setting('app.user_id', true)
-            or 'Organization.All.ReadWrite' = any (
+            or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any (
               string_to_array(coalesce(current_setting('app.roles', true), ''), ',')
             )
           )

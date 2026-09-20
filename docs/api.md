@@ -61,8 +61,8 @@ Engine semantics (`src/graphql/generated-crud.ts`):
 - **Sort** — single field + direction; unknown fields fall back to the
   primary key; direction defaults to `asc`.
 - **Cursor pagination** — `first` is clamped to 1..200 (default 50);
-  `after` is a base64url-encoded offset cursor. Connections return
-  `pageInfo { hasNextPage, endCursor }` and `totalCount`.
+  `after` is a base64url-encoded offset cursor. A list answers
+  `data { items { data operations } nextCursor totalCount }`.
 - **`totalCount` is opt-in and costs a second pass.** It is a real `count(*)`
   under the same filter, so it cannot stop at `first`, and a text filter
   compiles to an unanchored `ilike '%value%'` that no b-tree index answers. On

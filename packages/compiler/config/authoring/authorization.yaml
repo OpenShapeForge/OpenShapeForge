@@ -523,4 +523,35 @@ clientRoles:
     - Messaging.Conversation.Assign
     - Messaging.Conversation.Reassign
 
+# Who a login is, in entity terms. The auth layer links a login to the party
+# it acts as, creates that party on a first visit, finds candidates by e-mail
+# and gates who may do any of that; the entities, fields, values and role it
+# uses for that are declared here, once, and reach the API as identity.json.
+# The compiler refuses an entity or field this block names that no compiled
+# entity has.
+identity:
+  administratorRole: Organization.All.ReadWrite
+  memberRoles: [General.All.Read]
+  actingParty:
+    entity: Relation
+    nameField: displayName
+    typeField: relationType
+    personType: person
+    statusField: status
+    activeStatus: active
+  person:
+    entity: NaturalPerson
+    relationField: relationId
+    firstNameField: firstName
+    lastNameField: lastName
+  loginContact:
+    entity: ContactDetail
+    relationField: relationId
+    typeField: type
+    emailType: email
+    valueField: value
+    primaryField: isPrimary
+    statusField: status
+    activeStatus: active
+
 # Demo Keycloak groups (organizational). Paths must match `users[].groups`.

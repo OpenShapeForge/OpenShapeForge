@@ -21,6 +21,8 @@ import {
 import type { PendingConfiguration } from "../configuration-handoff.js";
 
 const HOST = "Kern";
+const PRODUCT = "Atlas";
+process.env.OPENSHAPEFORGE_PRODUCT_NAME = PRODUCT;
 
 function expectBrandedDocument(html: string): void {
   expect(html.startsWith("<!doctype html><html lang=\"en\">")).toBe(true);
@@ -28,7 +30,7 @@ function expectBrandedDocument(html: string): void {
   expect(html).toContain('name="viewport"');
   expect(html).toMatch(/<title>[^<]+<\/title>/);
   expect(html).toContain("<h1>");
-  expect(html).toContain("Hubble");
+  expect(html).toContain(PRODUCT);
   expect(html).toContain("Powered by OpenShapeForge");
   expect(html).toContain("prefers-color-scheme:dark");
   expect(html).not.toContain("<script");
@@ -47,12 +49,12 @@ describe("escapeHtml", () => {
 });
 
 describe("hostDisplayName", () => {
-  it("prefers OSF_INTEGRATION_HOST_NAME and falls back to Hubble", () => {
+  it("prefers OSF_INTEGRATION_HOST_NAME, then the configured product name, then the default", () => {
     expect(hostDisplayName({ OSF_INTEGRATION_HOST_NAME: "  Kern " })).toBe(
       "Kern",
     );
-    expect(hostDisplayName({ OSF_INTEGRATION_HOST_NAME: "" })).toBe("Hubble");
-    expect(hostDisplayName({})).toBe("Hubble");
+    expect(hostDisplayName({ OSF_INTEGRATION_HOST_NAME: "", OPENSHAPEFORGE_PRODUCT_NAME: "Atlas" })).toBe("Atlas");
+    expect(hostDisplayName({})).toBe("OpenShapeForge");
   });
 });
 
@@ -80,14 +82,14 @@ describe("renderBrowserPage", () => {
   });
 
   it("shows the host name next to the product name only when they differ", () => {
-    const hubble = renderBrowserPage({
+    const product = renderBrowserPage({
       title: "t",
       heading: "h",
       lead: "l",
-      hostName: "Hubble",
+      hostName: PRODUCT,
     });
-    expect(hubble).toContain("<strong>Hubble</strong>");
-    expect(hubble.match(/Hubble/g)?.length).toBe(2); // title + brand line
+    expect(product).toContain(`<strong>${PRODUCT}</strong>`);
+    expect(product.match(new RegExp(PRODUCT, "g"))?.length).toBe(2); // title + brand line
     const kern = renderBrowserPage({
       title: "t",
       heading: "h",
@@ -95,7 +97,7 @@ describe("renderBrowserPage", () => {
       hostName: HOST,
     });
     expect(kern).toContain("<strong>Kern</strong>");
-    expect(kern).toContain("<span>Hubble</span>");
+    expect(kern).toContain(`<span>${PRODUCT}</span>`);
   });
 
   it("marks the tone with an icon and label; neutral pages carry none", () => {

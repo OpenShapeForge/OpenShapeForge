@@ -14,6 +14,7 @@
  * so the phrases carry `nl` beside `en`. Anything else falls back to English.
  */
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { productName } from "../config/product-name.js";
 
 /** The languages a phrase is authored in. */
 export type PhraseLanguage = "en" | "nl";
@@ -152,15 +153,22 @@ export function joinPhrases(phrases: readonly string[], language: PhraseLanguage
   return `${phrases.slice(0, -1).join(", ")} ${conjunction} ${phrases[phrases.length - 1]}`;
 }
 
-/** Friendly names for the OAuth clients a token can be issued to (`azp`). */
-export const CLIENT_NAMES: Readonly<Record<string, string>> = {
-  codex: "Codex",
-  "openshapeforge-inspector": "MCP Inspector",
-  "openshapeforge-gateway": "Hubble",
-  // The control realm's clients (platform administrator MCP, control/platform-tools.ts).
-  "codex-platform": "Codex",
-  "openshapeforge-admin-gateway": "Hubble control plane",
-};
+/**
+ * Friendly names for the OAuth clients a token can be issued to (`azp`). The
+ * product's own gateways carry the deployment's product name
+ * (OPENSHAPEFORGE_PRODUCT_NAME), read per call.
+ */
+export function clientNames(): Readonly<Record<string, string>> {
+  const product = productName();
+  return {
+    codex: "Codex",
+    "openshapeforge-inspector": "MCP Inspector",
+    "openshapeforge-gateway": product,
+    // The control realm's clients (platform administrator MCP, control/platform-tools.ts).
+    "codex-platform": "Codex",
+    "openshapeforge-admin-gateway": `${product} control plane`,
+  };
+}
 
 /**
  * Only the two fields it actually reads, so a caller that has a credential but
@@ -178,7 +186,7 @@ export function signedInViaLabel(identity: {
       return "API key";
     case "bearer":
       return identity.authorizedParty
-        ? (CLIENT_NAMES[identity.authorizedParty] ?? identity.authorizedParty)
+        ? (clientNames()[identity.authorizedParty] ?? identity.authorizedParty)
         : "Unknown client";
     default:
       return "Unknown";

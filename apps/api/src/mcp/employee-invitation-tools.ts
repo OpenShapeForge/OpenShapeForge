@@ -7,7 +7,7 @@
  *   invite_employee    — invite an e-mail address into this organization with
  *                        a pre-selected role, ready to apply once they sign in.
  *   list_invitations   — the tenant's still-pending invitations.
- *   revoke_invitation  — cancel a pending invitation (Hubble-side; see
+ *   revoke_invitation  — cancel a pending invitation (platform-side; see
  *                        auth/employee-invitations.ts for why Keycloak itself
  *                        has nothing to cancel).
  *
@@ -88,7 +88,7 @@ const REVOKE_INVITATION: Tool = {
     "Cancel a pending invitation for an e-mail address so its pre-selected role is no " +
     "longer applied when they sign in. Keycloak itself keeps no record of an unaccepted " +
     "invitation, so this cannot un-send an e-mail already delivered — it only withdraws " +
-    "the role Hubble was going to apply.",
+    "the role the invitation was going to apply.",
   inputSchema: {
     type: "object",
     properties: {

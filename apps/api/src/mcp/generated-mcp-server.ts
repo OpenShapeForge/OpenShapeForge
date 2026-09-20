@@ -161,6 +161,7 @@ import {
   renderArtifactUploadPage,
 } from "./artifact-upload.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
+import { productName } from "../config/product-name.js";
 import {
   callEditLeaseTool,
   editLeaseOperationIdsForSession,
@@ -4442,7 +4443,7 @@ function buildServer(
             name: ARTIFACT_UPLOAD_TOOL_NAME,
             title: "Upload document file",
             description:
-              "Open a private file picker so the person can upload document bytes directly to Hubble. Use the returned artifactId in the requested create operation.",
+              `Open a private file picker so the person can upload document bytes directly to ${productName()}. Use the returned artifactId in the requested create operation.`,
             inputSchema: { type: "object", properties: {}, additionalProperties: false },
             annotations: {
               readOnlyHint: false,

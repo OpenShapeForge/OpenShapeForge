@@ -13,7 +13,7 @@ export const preferenceDefinitionsTable: TableDefinition = {
   name: "preference_definitions",
   tenantScoped: false,
   domainInternal: true,
-  generatedCrud: false,
+  generatedCrudEligible: false,
   columns: [
     { name: "namespace", type: "text", primaryKey: true },
     { name: "key", type: "text", primaryKey: true },

@@ -103,7 +103,7 @@ function table(
     tenantScoped: true,
     domainInternal: false,
     generatedCrudEligible: true,
-    generatedCrud: true,
+    generatedCrudEligible: true,
     primaryKey: "id",
     columns,
   };

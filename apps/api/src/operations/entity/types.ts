@@ -83,8 +83,7 @@ export type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
+  generatedCrudEligible: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   /** Compiler- and plugin-owned table constraints, as the manifest carries them. */

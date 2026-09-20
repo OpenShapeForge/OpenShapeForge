@@ -153,7 +153,7 @@ const manifest: PlatformSchemaManifest = {
       schema: "erp",
       name: "relations",
       tenantScoped: true,
-      generatedCrud: true,
+      generatedCrudEligible: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true },
         { name: "tenant_id", type: "uuid", required: true },
@@ -404,11 +404,10 @@ describe("rich generated REST OpenAPI", () => {
     expect(JSON.stringify(rendered)).not.toContain("clientSecret");
   });
 
-  it("emits only allowed routes for a partial policy hidden from legacy runtimes", () => {
+  it("emits only allowed routes for a partial policy", () => {
     const partial = structuredClone(manifest);
     const table = partial.tables[0]!;
     table.generatedCrudEligible = true;
-    table.generatedCrud = false;
     table.source!.rest!.operations = {
       list: true,
       get: true,

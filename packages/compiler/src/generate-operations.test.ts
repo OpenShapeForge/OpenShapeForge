@@ -1118,7 +1118,7 @@ describe("first-class plugin operations", () => {
         schema: "public",
         name: "legacy_quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           rest: {
@@ -1206,7 +1206,7 @@ describe("first-class plugin operations", () => {
         schema: "demo",
         name: "quotes",
         tenantScoped: true,
-        generatedCrud: true,
+        generatedCrudEligible: true,
         columns: [{ name: "id", type: "uuid", primaryKey: true }],
         source: {
           graphql: {

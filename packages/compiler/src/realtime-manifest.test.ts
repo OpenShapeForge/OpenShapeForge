@@ -5,7 +5,7 @@ import type { PlatformSchemaManifest } from "./schema.js";
 
 test("realtime tombstones use the same compiled RLS predicate and only policy columns", () => {
   const input: PlatformSchemaManifest = { version: 1, tables: [{
-    schema: "erp", name: "messages", tenantScoped: true, generatedCrud: true,
+    schema: "erp", name: "messages", tenantScoped: true, generatedCrudEligible: true,
     columns: [
       { name: "id", type: "uuid", primaryKey: true },
       { name: "tenant_id", type: "uuid" },

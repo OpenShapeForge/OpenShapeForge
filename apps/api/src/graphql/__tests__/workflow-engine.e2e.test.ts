@@ -90,7 +90,7 @@
  * `e2e/harness.ts` drives the shared development database and cleans up through
  * generated CRUD, which these tables do not have — `workflow.instances`,
  * `workflow.node_states` and `workflow.control_commands` are all declared
- * `domainInternal` / `generatedCrud: false`. A run also has to be counted
+ * `domainInternal` / `generatedCrudEligible: false`. A run also has to be counted
  * exactly: the assertions below read whole node-state sets, which a shared
  * database makes meaningless. So this follows the scratch-database pattern of
  * the other workflow files — create a throwaway database through the admin URL,

@@ -5,7 +5,7 @@ import type { GeneratedCrudTable } from "./types.js";
 
 const columns = (keys: string[]) => keys.map((name) => ({ name, type: "uuid", primaryKey: name === "id", required: false, generated: null }));
 const parent: GeneratedCrudTable = {
-  name: "erp.pages", schema: "erp", table: "pages", tenantScoped: true, domainInternal: false, generatedCrud: true, primaryKey: "id",
+  name: "erp.pages", schema: "erp", table: "pages", tenantScoped: true, domainInternal: false, generatedCrudEligible: true, primaryKey: "id",
   columns: columns(["id", "tenant_id"]),
   source: { authoringVersion: 3, graphql: {
     typeName: "Page", singleQueryName: "page", listQueryName: "pages", createMutationName: "createPage", updateMutationName: "updatePage", deleteMutationName: "deletePage",

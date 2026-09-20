@@ -719,20 +719,6 @@ ${dbFields}
 `;
 }
 
-function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
-  const crud = table.source?.crud;
-  if (crud === undefined) return true;
-
-  const operations = crud.operations;
-  return (
-    operations?.list === true &&
-    operations.get === true &&
-    operations.create === true &&
-    operations.update === true &&
-    operations.delete === true
-  );
-}
-
 /**
  * How a caller reaches an operation that writes a `writtenBy` column.
  *
@@ -845,14 +831,6 @@ function renderManifestJson(
       },
     } : {}),
     generatedCrudEligible: isGeneratedCrudEligible(table),
-    // Legacy all-or-nothing marker. Partial policies deliberately keep this
-    // false so an older runtime hides them; current runtimes read the explicit
-    // eligibility marker and per-operation source.crud block above.
-    generatedCrud:
-      isGeneratedCrudEligible(table) &&
-      isLegacyFullCrudCompatible(table) &&
-      table.generatedCrud === true &&
-      table.domainInternal !== true,
     // The single column generated CRUD addresses a row by; null for a
     // composite key, which no CRUD-eligible table carries.
     primaryKey: singlePrimaryKey(table)?.name ?? null,

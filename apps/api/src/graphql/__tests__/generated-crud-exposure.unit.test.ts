@@ -55,21 +55,19 @@ describe("generated GraphQL CRUD exposure", () => {
       delete: false,
     });
     table.generatedCrudEligible = true;
-    table.generatedCrud = false;
     expect(isGeneratedCrudTableEligible(table)).toBe(true);
     expect(isGeneratedCrudOperationEnabled(table, "list")).toBe(true);
     expect(isGeneratedCrudOperationEnabled(table, "create")).toBe(false);
   });
 
-  test("current runtimes preserve explicit legacy full-CRUD manifests", () => {
-    const legacy = {
+  test("an eligible table without a per-operation policy serves nothing", () => {
+    const unpoliced = {
       ...base,
-      generatedCrud: true,
-      generatedCrudEligible: undefined,
+      generatedCrudEligible: true,
       source: { ...base.source, crud: undefined },
     } as unknown as GeneratedTable;
-    expect(isGeneratedCrudTableEligible(legacy)).toBe(true);
-    expect(isGeneratedCrudOperationEnabled(legacy, "delete")).toBe(true);
+    expect(isGeneratedCrudTableEligible(unpoliced)).toBe(true);
+    expect(isGeneratedCrudOperationEnabled(unpoliced, "delete")).toBe(false);
   });
 
   test("a read-only entity emits queries but no mutations", () => {

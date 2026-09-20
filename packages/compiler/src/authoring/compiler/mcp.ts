@@ -6,7 +6,7 @@
  * Pipeline position: called by the main compiler alongside buildRest. The
  * section is carried on the compiled contract and bridged into
  * TableDefinition.source.mcp by the backend manifest, which is where the
- * fail-closed interaction with generatedCrud is enforced.
+ * fail-closed interaction with generatedCrudEligible is enforced.
  *
  * This module decides only WHICH tools exist. Their input schemas — the part
  * that carries the authored labels, validation, and enumerations — are built

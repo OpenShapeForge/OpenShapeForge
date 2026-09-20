@@ -3,7 +3,7 @@
  * The write path for workflow definitions.
  *
  * `workflow.definitions` and `workflow.definition_versions` are declared
- * `generatedCrud: false`, and this module is the reason. The generic entity
+ * `generatedCrudEligible: false`, and this module is the reason. The generic entity
  * engine writes columns; a definition is not a row you write but an identity
  * whose graph accumulates immutable versions, and several invariants have to
  * hold across the pair of tables at once — none of which a per-column mutation

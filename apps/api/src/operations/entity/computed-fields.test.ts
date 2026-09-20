@@ -9,7 +9,7 @@ const relationTable: GeneratedCrudTable = {
   table: "relations",
   tenantScoped: true,
   domainInternal: false,
-  generatedCrud: true,
+  generatedCrudEligible: true,
   primaryKey: "id",
   columns: [
     { name: "display_name", sourceField: "displayName", type: "text", required: true, primaryKey: false, generated: null },

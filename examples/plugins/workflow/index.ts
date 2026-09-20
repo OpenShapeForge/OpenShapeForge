@@ -196,7 +196,7 @@ function workflowPlatformTables(): TableDefinition[] {
       name: "workflow_node_catalog_entries",
       tenantScoped: false,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // A worker's boot reads it: `init` calls `hydrateNodeCatalog`, and a
       // worker that skipped that would claim commands and fail every one with
       // NO_BRIDGE. Global, so no policy gates it — the grant is the only gate,
@@ -230,7 +230,7 @@ function workflowPlatformTables(): TableDefinition[] {
       name: "entity_trigger_registry",
       tenantScoped: false,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // Read while a claimed command runs: an entity trigger resolves which
       // definitions a row change may start.
       workerDml: true,
@@ -262,7 +262,7 @@ function workflowPlatformTables(): TableDefinition[] {
       name: "entity_field_suggestions",
       tenantScoped: false,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // Deliberately NO workerDml. This one is read by the designer's GraphQL
       // surface and written by a seed; nothing on a worker's path names it, so
       // the worker role is not granted it. The narrow grant is only worth
@@ -322,7 +322,7 @@ function workflowDataTables(): TableDefinition[] {
       name: "definitions",
       tenantScoped: true,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // A schedule fire and a start command both read the definition they are
       // firing, from a session scoped to that row's tenant.
       workerDml: true,
@@ -370,7 +370,7 @@ function workflowDataTables(): TableDefinition[] {
       name: "definition_versions",
       tenantScoped: true,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // The graph a run executes. Pinned at start and re-read on every resume.
       workerDml: true,
       columns: [
@@ -412,7 +412,7 @@ function workflowDataTables(): TableDefinition[] {
       name: "instances",
       tenantScoped: true,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // The run itself: written by the worker that claimed the command, inside
       // that command's tenant. No workerAccess — see the note above.
       workerDml: true,
@@ -474,7 +474,7 @@ function workflowDataTables(): TableDefinition[] {
       name: "node_states",
       tenantScoped: true,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // Read during a run, not only after it — placeholders resolve out of
       // shared_output — so the worker needs it on both sides.
       workerDml: true,
@@ -524,7 +524,7 @@ function workflowDataTables(): TableDefinition[] {
       name: "definition_locks",
       tenantScoped: true,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       // An edit lock is checked wherever a definition is read for execution.
       workerDml: true,
       columns: [
@@ -612,7 +612,7 @@ function workflowExecutionTables(): TableDefinition[] {
       // Claimed across tenants by the control-command worker.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -691,7 +691,7 @@ function workflowExecutionTables(): TableDefinition[] {
       // itself; the resuming they lead to runs in the wait's own tenant.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -755,7 +755,7 @@ function workflowExecutionTables(): TableDefinition[] {
       // session scoped to the wait's own tenant.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -802,7 +802,7 @@ function workflowExecutionTables(): TableDefinition[] {
       // Scanned across tenants by the schedule worker for due rows.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -857,7 +857,7 @@ function workflowExecutionTables(): TableDefinition[] {
       // known well enough to open a tenant-scoped session on it.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
-      generatedCrud: false,
+      generatedCrudEligible: false,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },

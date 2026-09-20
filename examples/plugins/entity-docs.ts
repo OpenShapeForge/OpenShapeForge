@@ -30,9 +30,7 @@ const plugin: CompilerPlugin = {
       const graphql = source.graphql!;
       const operationEnabled = (
         operation: "list" | "get" | "create" | "update" | "delete",
-      ) => source.crud === undefined
-        ? table.generatedCrud === true
-        : source.crud.operations[operation] === true;
+      ) => source.crud?.operations[operation] === true;
       // In-memory tables carry schema and name separately; render qualified.
       lines.push(`## ${graphql.typeName} (\`${table.schema}.${table.name}\`)`);
       const label = source.labels?.en;

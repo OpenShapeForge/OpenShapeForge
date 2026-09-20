@@ -37,7 +37,7 @@ const table = {
   table: "templates",
   tenantScoped: true,
   domainInternal: false,
-  generatedCrud: true,
+  generatedCrudEligible: true,
   primaryKey: "id",
   columns: [key, name],
 } satisfies GeneratedCrudTable;

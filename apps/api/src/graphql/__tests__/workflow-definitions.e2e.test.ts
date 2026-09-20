@@ -3,7 +3,7 @@
  * The workflow definition lifecycle, driven over the assembled GraphQL schema.
  *
  * `workflow.definitions` and `workflow.definition_versions` are declared
- * `domainInternal` / `generatedCrud: false`, so nothing the generic entity
+ * `domainInternal` / `generatedCrudEligible: false`, so nothing the generic entity
  * engine enforces applies to them. Every property below lives in the module's
  * resolvers instead of in a column, which means the only place it can be
  * observed is the schema those resolvers are spliced into. That is why this

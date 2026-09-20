@@ -402,7 +402,6 @@ describe("generated REST exposure (source.rest bridge)", () => {
     const table = tableByName(manifest, "crud_read_onlies");
     const expected = { list: true, get: true, create: false, update: false, delete: false };
     expect(table?.generatedCrudEligible).toBe(true);
-    expect(table?.generatedCrud).toBe(false);
     expect(table?.source?.crud?.operations).toEqual(expected);
     expect(table?.source?.rest?.operations).toEqual(expected);
     expect(table?.source?.mcp?.operations).toEqual(expected);

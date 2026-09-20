@@ -225,9 +225,9 @@ This field is part of compiled entity contract version 2. Consumers that
 validate compiled contracts must upgrade before accepting version 2. The
 version bump makes this wire-contract change detectable; it is not by itself
 a runtime barrier for plugin code that does not validate supported contract
-versions. Generated manifests therefore also encode partial policies with
-`generatedCrudEligible: true` and the legacy `generatedCrud: false`, so an old
-runtime hides the entity instead of exposing full CRUD.
+versions. A generated manifest marks the entity `generatedCrudEligible: true`
+and carries the partial policy in `source.crud.operations`; a runtime serves
+exactly the operations that policy enables.
 
 `crud` is the transport-independent upper bound for GraphQL, REST, MCP and
 generated workflow nodes. Existing entities that

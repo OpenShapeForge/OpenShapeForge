@@ -14,7 +14,7 @@ const table = {
   schema: "example",
   table: "examples",
   tenantScoped: true,
-  generatedCrud: true,
+  generatedCrudEligible: true,
   domainInternal: false,
   primaryKey: "id",
   columns: [

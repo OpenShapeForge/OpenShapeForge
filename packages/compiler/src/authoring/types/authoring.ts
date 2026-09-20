@@ -818,7 +818,7 @@ export interface CoreEntity {
   crud?: boolean | CrudConfig;
   /**
    * Opt-in generated REST exposure for this entity. Absent or `false` means
-   * no REST routes are generated (fail closed, mirroring the generatedCrud
+   * no REST routes are generated (fail closed, mirroring the generated-CRUD
    * allowlist). `true` enables every operation under a base path derived
    * from the entity name (plural kebab-case, e.g. `RelationGroup` →
    * `relation-groups`). The object form allows per-operation flags and a

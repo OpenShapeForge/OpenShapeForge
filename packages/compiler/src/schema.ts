@@ -346,8 +346,6 @@ export type TableSourceDefinition = {
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
-  /** Present for strict entity authoring; absence means legacy v1. */
-  authoringVersion?: 2 | 3;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   versioning?: {
     strategy: "publishedSnapshot";

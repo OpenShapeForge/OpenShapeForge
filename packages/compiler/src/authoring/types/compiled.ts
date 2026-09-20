@@ -713,7 +713,8 @@ export interface CompiledEntityContract {
   /** Status state machines declared on fields; absent when the entity has none. */
   transitions?: CompiledTransitionField[];
   workerAccess?: string;
-  authoringVersion: 2 | 3;
+  /** The one authored entity shape (entity-model.ts); kept on the contract for readers that check it. */
+  authoringVersion: 3;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {

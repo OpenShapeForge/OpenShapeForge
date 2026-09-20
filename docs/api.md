@@ -31,25 +31,29 @@ SQL. Per entity `Thing` it can emit:
 - `type Thing` — one field per column (snake_case → camelCase via
   `sourceField`), plus relationship fields and `<rel>Aggregate:
   AggregateResult!` (`{ count }`).
-- `ThingConnection` / `ThingEdge` / `PageInfo`, `ThingFilter`, `ThingSort`,
-  `CreateThingInput`, `UpdateThingInput`.
-- Queries `thing(id: ID!)` and `things(filter, sort, first, after)` when `get`
-  and `list` are enabled.
-- Mutations `createThing(input)`, `updateThing(input)` (input carries `id`),
-  `deleteThing(id): Boolean!`.
+- `ThingFilter`, `ThingSort`, `CreateThingInput`, `UpdateThingInput`
+  (`id` plus the writable values) and `DeleteThingInput` (`id` plus the
+  mutation controls).
+- Queries `thing(id: ID!): ThingOperationResult` and `things(filter, sort,
+  first, after): ThingCollectionOperationResult` when `get` and `list` are
+  enabled.
+- Mutations `createThing(input)` and `updateThing(input)`, each answering
+  `ThingOperationResult`, and `deleteThing(input): ThingDeleteOperationResult`.
 
-Those direct return shapes remain the legacy v1 contract. A strict-v2 entity
-declaring `interfaces.graphql` projects its canonical Operations instead:
-queries and mutations return the same `{ data, operations }` or `{ error }`
-result boundary as REST, MCP and Web. Record results therefore carry the
-currently available, identity-specific Operation offers. Version, edit-lease,
+Every query and mutation answers the one canonical result envelope shared
+with REST, MCP and Web: `{ data, operations }` on success, `{ error }` on a
+refusal, where `data` is the record (`get`, `create`, `update`), the page
+`{ items: [{ data, operations }], nextCursor, totalCount }` (`list`) or
+`{ deleted: true }` (`delete`), and `operations` lists the Operation offers
+the current identity holds on that record. Version, edit-lease,
 acknowledgement and confirmation-challenge values use the same canonical
-control names in generated GraphQL inputs. The resolver dispatches through
-`executeEntityOperation`; GraphQL does not implement a parallel write path.
+control names in the GraphQL inputs as everywhere else. The resolver
+dispatches through `executeEntityOperation`; GraphQL does not implement a
+parallel write path.
 
-For every strict-v2 interface, presence means “project every canonical
-Operation declared by this entity.” Its optional `operations` map contains
-only interface-specific instructions or `false` exclusions; there is no
+An `interfaces.graphql` block on an entity means "project every canonical
+Operation declared by this entity"; its optional `operations` map contains
+only interface-specific instructions or `false` exclusions — there is no
 `operations: all` authoring value.
 
 Engine semantics (`src/graphql/generated-crud.ts`):
@@ -172,12 +176,12 @@ REST-specific semantics:
 ## The generated MCP surface
 
 A third transport over the same CRUD core, for language models and agents.
-Entities opt in with an `mcp:` block (strict-v2:
-`interfaces.mcp`); the compiler emits a tool catalog whose JSON
-Schemas are built from the authored field definitions (validation bounds,
-enumerations, labels), and `POST /api/mcp` serves it over Streamable HTTP.
-Strict-v2 may set `interfaces.mcp.tools` to `generic` to use the five shared
-`osf_*` CRUD tools; omission keeps the dedicated per-operation default.
+Entities opt in with an `interfaces.mcp` block; the compiler emits a tool
+catalog whose JSON Schemas are built from the authored field definitions
+(validation bounds, enumerations, labels), and `POST /api/mcp` serves it over
+Streamable HTTP. An entity may set `interfaces.mcp.tools` to `generic` to use
+the five shared `osf_*` CRUD tools; omission keeps the dedicated
+per-operation default.
 
 It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,

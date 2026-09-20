@@ -203,7 +203,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   });
 
   return {
-    authoringVersion: coreEntity.schemaVersion,
+    authoringVersion: 3,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {

@@ -69,7 +69,6 @@ describe("schema-3 field relationship storage", () => {
     const manifest = compileRelations();
     const owner = source(manifest);
     const referenced = target(manifest);
-    expect(owner.source?.authoringVersion).toBe(3);
     expect(owner.columns.find((column) => column.name === "owner_id")).toMatchObject({
       type: "uuid",
       references: {
@@ -98,13 +97,11 @@ describe("schema-3 field relationship storage", () => {
     expect(sql(manifest)).toContain(`REFERENCES "directory"."${target(manifest).name}"`);
   });
 
-  it("lowers the same tenant-bound key for a schema-2 referencing entity, across modules", () => {
-    // A plugin entity still on schemaVersion 2 references a base entity in
-    // another module. There is one relationship path: the composite key and
-    // the register entry, exactly as for a schema-3 entity.
+  it("lowers the same tenant-bound key for a referencing entity in another module", () => {
+    // A plugin entity references a base entity in another module. There is
+    // one relationship path: the composite key and the register entry.
     const manifest = compileRelations((contract) => {
       if (contract.entity.name === sourceName) {
-        Object.assign(contract, { authoringVersion: 2 });
         contract.entity.module = "plugin";
       }
     });

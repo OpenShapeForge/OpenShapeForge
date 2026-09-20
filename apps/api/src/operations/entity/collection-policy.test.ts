@@ -7,7 +7,7 @@ const columns = (keys: string[]) => keys.map((name) => ({ name, type: "uuid", pr
 const parent: GeneratedCrudTable = {
   name: "erp.pages", schema: "erp", table: "pages", tenantScoped: true, domainInternal: false, generatedCrudEligible: true, primaryKey: "id",
   columns: columns(["id", "tenant_id"]),
-  source: { authoringVersion: 3, graphql: {
+  source: { graphql: {
     typeName: "Page", singleQueryName: "page", listQueryName: "pages", createMutationName: "createPage", updateMutationName: "updatePage", deleteMutationName: "deletePage",
     relationships: [{ name: "blocks", fieldKey: "blocks", target: "Block", type: "[Block!]!", resolve: "hasMany", kind: "hasMany", ownership: "owned", foreignKey: "page_id", sortable: true, positionColumn: "page_id_position", cardinality: { min: 1, max: 5 } }],
   } },
@@ -15,7 +15,7 @@ const parent: GeneratedCrudTable = {
 const child: GeneratedCrudTable = {
   ...parent, name: "erp.blocks", table: "blocks",
   columns: [...columns(["id", "tenant_id"]), { ...columns(["page_id"])[0]!, sourceField: "page" }, { ...columns(["page_id_position"])[0]!, type: "integer", required: true }],
-  source: { authoringVersion: 3, graphql: { ...parent.source!.graphql!, typeName: "Block", relationships: [] } },
+  source: { graphql: { ...parent.source!.graphql!, typeName: "Block", relationships: [] } },
 };
 
 describe("unsupported collection mutation boundary", () => {
@@ -50,9 +50,9 @@ describe("unsupported collection mutation boundary", () => {
     expect(result).toEqual({ type: "object", properties: { values: { type: "object", properties: { title: { type: "string" } }, required: ["title"], additionalProperties: false } } });
     expect(schema.properties.values.properties.blocks).toBeDefined();
   });
-  test("legacy scalar updates remain unchanged", () => {
-    const legacy = { ...parent, source: { authoringVersion: 2 as const } };
-    expect(collectionMutationError(legacy, "create", [legacy], { title: "Example" })).toBeUndefined();
+  test("scalar updates on an entity without collections pass untouched", () => {
+    const plain = { ...parent, source: {} };
+    expect(collectionMutationError(plain, "create", [plain], { title: "Example" })).toBeUndefined();
     const schema = { type: "object" };
     expect(withoutCollectionInputs(schema, new Set())).toBe(schema);
   });

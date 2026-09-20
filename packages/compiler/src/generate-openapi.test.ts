@@ -62,7 +62,7 @@ function field(
 }
 
 const contract = {
-  authoringVersion: 2,
+  authoringVersion: 3,
   entity: {
     name: "Relation",
     title: "Relation",

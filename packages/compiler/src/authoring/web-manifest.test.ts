@@ -483,7 +483,7 @@ describe("web manifest projection", () => {
 
   test("projects the web interface independently of REST exposure", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
-    relation.contract.authoringVersion = 2;
+    relation.contract.authoringVersion = 3;
     relation.contract.interfaces = {
       web: { operations: { list: true, get: true, create: true, update: true, delete: true } },
     };
@@ -506,7 +506,7 @@ describe("web manifest projection", () => {
 
   test("projects a canonical create prerequisite without Web-owned policy", () => {
     const adapter = entity("Adapter", "adapter", [field("name")], coreView());
-    adapter.contract.authoringVersion = 2;
+    adapter.contract.authoringVersion = 3;
     adapter.contract.interfaces = {
       web: { operations: { list: true, get: true, create: true, update: true, delete: true } },
     };
@@ -532,7 +532,7 @@ describe("web manifest projection", () => {
       field("id", { required: true, readOnly: true }),
       field("displayName"),
     ], coreView());
-    relation.contract.authoringVersion = 2;
+    relation.contract.authoringVersion = 3;
     relation.contract.interfaces = {
       web: { operations: { list: true, get: true, delete: true } },
     };
@@ -607,7 +607,7 @@ describe("web manifest projection", () => {
       field("adapterId"),
       field("configurationValues", { baseType: "object" }),
     ], view);
-    connection.contract.authoringVersion = 2;
+    connection.contract.authoringVersion = 3;
     connection.contract.interfaces = {
       web: {
         operations: {
@@ -645,7 +645,7 @@ describe("web manifest projection", () => {
       field("id", { required: true, readOnly: true }),
       field("updatedAt", { baseType: "datetime", readOnly: true }),
     ], view);
-    deal.contract.authoringVersion = 2;
+    deal.contract.authoringVersion = 3;
     deal.contract.interfaces = {
       web: {
         operations: { list: true, get: true },
@@ -746,7 +746,7 @@ describe("web manifest projection", () => {
       field("id", { required: true, readOnly: true }),
       field("updatedAt", { baseType: "datetime", readOnly: true }),
     ], coreView());
-    deal.contract.authoringVersion = 2;
+    deal.contract.authoringVersion = 3;
     deal.contract.interfaces = { web: { operations: { list: true, get: true } } };
     const definition = (key: string, extra: Record<string, unknown>) => ({
       id: `example.deal.${key}`,

@@ -239,7 +239,7 @@ and audit; both can inspect shared platform state. See
 ## Tool surface
 
 Two catalog styles, chosen per entity with either legacy `mcp.tools` or
-strict-v2 `interfaces.mcp.tools`:
+`interfaces.mcp.tools`:
 
 - **`dedicated`** (default) — one tool per enabled operation:
   `relation_list`, `relation_get`, `relation_create`, `relation_update`,

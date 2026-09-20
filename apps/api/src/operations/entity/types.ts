@@ -108,8 +108,6 @@ export type GeneratedCrudTable = {
       }>;
     }>;
     authoringEntityName?: string;
-    /** Present only for strict v2 entity authoring; absence means legacy v1. */
-    authoringVersion?: 2 | 3;
     versioning?: {
       strategy: "publishedSnapshot";
       versionEntity: string;

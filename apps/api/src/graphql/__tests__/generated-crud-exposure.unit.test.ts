@@ -252,9 +252,6 @@ describe("generated GraphQL CRUD exposure", () => {
       update: true,
       delete: true,
     });
-    const { authoringVersion: _authoringVersion, ...unversionedSource } = table.source!;
-    table.source = unversionedSource;
-
     expect(renderGeneratedQueryFields(table)[0]).toContain(": RelationOperationResult");
     expect(renderGeneratedMutationFields(table)).toContain(
       "      deleteRelation(input: DeleteRelationInput!): RelationDeleteOperationResult",

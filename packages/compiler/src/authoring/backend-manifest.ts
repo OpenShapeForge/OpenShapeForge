@@ -1402,9 +1402,6 @@ export function compileAuthoringBackendManifest(
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
-        ...([2, 3].includes(candidate.contract.authoringVersion)
-          ? { authoringVersion: candidate.contract.authoringVersion as 2 | 3 }
-          : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
         ...(() => {
